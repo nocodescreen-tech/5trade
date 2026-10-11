@@ -1012,9 +1012,25 @@ function Analyzer({ onDone }) {
 
 /* ══════════════ RÉSULTAT ══════════════ */
 
-function Result({ result }) {
+function Result({ result, onToJournal }) {
   const [open, setOpen] = useState(false);
   const { analysis, recommendations: rec } = result;
+
+  // On ne devine jamais un prix : le plan est textuel (zone/déclencheur).
+  // On reporte paire, sens, stratégies et le plan en notes ; le trader saisit
+  // ses vrais niveaux dans le journal.
+  const toJournal = () => onToJournal && onToJournal({
+    pair: analysis.pair,
+    direction: rec.action === 'SELL' ? 'SELL' : 'BUY',
+    strategyIds: (rec.strategiesUsed || []).map(s => s.id).filter(Boolean),
+    originAnalysisId: analysis.analysisId || null,
+    notes: [
+      `Plan ${rec.action} (${rec.confidence})`,
+      rec.reason,
+      rec.entry && rec.entry.zone ? `Zone : ${rec.entry.zone}` : null,
+      rec.entry && rec.entry.trigger ? `Déclencheur : ${rec.entry.trigger}` : null
+    ].filter(Boolean).join('\n')
+  });
 
   const KV = ({ k, v }) => (
     <div style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'6px 0',
@@ -1042,6 +1058,12 @@ function Result({ result }) {
                 <span className="badge" style={{ background:'rgba(148,163,184,.12)', color:'var(--muted)' }}>
                   <i className="fas fa-image"></i>{analysis.imagesAnalyzed}
                 </span>
+                {onToJournal && (
+                  <button className="btn sm" onClick={toJournal}
+                    title="Reporter ce plan dans le journal de trades">
+                    <i className="fas fa-receipt"></i>Enregistrer ce trade
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1341,9 +1363,34 @@ function AddKnowledge({ refresh }) {
 
 function Strategies({ strategies, onDelete }) {
   const [q, setQ] = useState('');
-  const list = useMemo(() => strategies.filter(s =>
-    !q || `${s.title} ${s.content} ${(s.tags||[]).join(' ')}`.toLowerCase().includes(q.toLowerCase())
-  ), [strategies, q]);
+  const [remote, setRemote] = useState(null);   // résultats du moteur plein-texte
+  const [searching, setSearching] = useState(false);
+
+  // Recherche serveur (accents, pondération titre/tags/contenu, extrait).
+  // En dessous de 2 caractères on affiche la liste complète.
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 2) { setRemote(null); setSearching(false); return; }
+    let alive = true;
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const r = await api('/search?q=' + encodeURIComponent(query));
+        const d = await r.json();
+        if (alive) setRemote(r.ok ? d.results : []);
+      } catch { if (alive) setRemote([]); }
+      finally { if (alive) setSearching(false); }
+    }, 250);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [q]);
+
+  const list = useMemo(() => {
+    if (!remote) return strategies;
+    const byId = new Map(strategies.map(s => [s.id, s]));
+    return remote
+      .map(r => { const s = byId.get(r.id); return s ? { ...s, _excerpt: r.excerpt, _score: r.score } : null; })
+      .filter(Boolean);
+  }, [strategies, remote]);
 
   return (
     <div>
@@ -1353,17 +1400,30 @@ function Strategies({ strategies, onDelete }) {
           <h2 style={{ fontSize:18, fontWeight:800, display:'flex', alignItems:'center', gap:10 }}>
             <i className="fas fa-book" style={{ color:'#60a5fa' }}></i>
             Base de connaissance
-            <span className="badge" style={{ background:'rgba(37,99,235,.14)', color:'#8fb4ff' }}>{strategies.length}</span>
+            <span className="badge" style={{ background:'rgba(37,99,235,.14)', color:'#8fb4ff' }}>
+              {remote ? `${list.length} / ${strategies.length}` : strategies.length}
+            </span>
           </h2>
-          <input className="fld" style={{ maxWidth:280, margin:0 }} placeholder="Rechercher…"
-            value={q} onChange={e=>setQ(e.target.value)} />
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            {searching && <Spinner size={14} />}
+            {remote && !searching && (
+              <span style={{ fontSize:11.5, color:'var(--muted)' }}>
+                <i className="fas fa-magnifying-glass" style={{ marginRight:5 }}></i>plein-texte
+              </span>
+            )}
+            <input className="fld" style={{ maxWidth:280, margin:0 }}
+              placeholder="Rechercher (accents ignorés)…"
+              value={q} onChange={e=>setQ(e.target.value)} />
+          </div>
         </div>
       </Reveal>
 
       {list.length === 0 && (
         <div className="panel" style={{ padding:34, textAlign:'center', color:'var(--muted)', fontSize:13.5 }}>
           <i className="fas fa-inbox" style={{ fontSize:26, color:'var(--dim)', display:'block', marginBottom:10 }}></i>
-          Aucune stratégie pour l'instant — utilisez l'onglet « Ajouter ».
+          {remote
+            ? <>Aucune stratégie ne correspond à « {q.trim()} » — tous les termes doivent être présents.</>
+            : <>Aucune stratégie pour l'instant — utilisez l'onglet « Ajouter ».</>}
         </div>
       )}
 
@@ -1379,7 +1439,9 @@ function Strategies({ strategies, onDelete }) {
                   </span>
                 </div>
                 <p style={{ fontSize:12.5, color:'var(--muted)', lineHeight:1.6, margin:'9px 0 11px', flex:1 }}>
-                  {(s.structured?.summary || s.content || '').slice(0,190)}…
+                  {s._excerpt
+                    ? s._excerpt
+                    : `${(s.structured?.summary || s.content || '').slice(0,190)}…`}
                 </p>
                 <div style={{ marginBottom:11 }}>
                   {(s.tags||[]).slice(0,6).map((t,k)=> <span key={k} className="tag">{t}</span>)}
@@ -1475,7 +1537,7 @@ function ResultBadge({ result, status }) {
     <i className={`fas ${s.icon}`}></i>{s.label}</span>;
 }
 
-function Journal() {
+function Journal({ prefill, onPrefillUsed, strategies = [] }) {
   const [trades, setTrades] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1483,6 +1545,25 @@ function Journal() {
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ pair:'', direction:'BUY', entry:'', sl:'', tp:'', size:'', notes:'' });
   const [closing, setClosing] = useState({});
+  const [picked, setPicked] = useState([]);            // stratégies liées au trade
+  const [originId, setOriginId] = useState(null);      // analyse d'origine
+  const [filter, setFilter] = useState({ q:'', result:'all' });
+
+  // Report d'un plan d'analyse vers le journal (bouton « Enregistrer ce trade »)
+  useEffect(() => {
+    if (!prefill) return;
+    setForm(f => ({
+      ...f,
+      pair: prefill.pair || f.pair,
+      direction: prefill.direction || f.direction,
+      notes: prefill.notes || f.notes
+    }));
+    setPicked(prefill.strategyIds || []);
+    setOriginId(prefill.originAnalysisId || null);
+    setFilter({ q:'', result:'all' });
+    setErr('');
+    if (onPrefillUsed) onPrefillUsed();
+  }, [prefill]);
 
   const load = async () => {
     try {
@@ -1500,11 +1581,13 @@ function Journal() {
     setBusy(true); setErr('');
     try {
       const r = await api('/trades', {
-        method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(form)
+        method:'POST', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ ...form, strategyIds: picked, originAnalysisId: originId })
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Création refusée');
       setForm({ pair:'', direction:'BUY', entry:'', sl:'', tp:'', size:'', notes:'' });
+      setPicked([]); setOriginId(null);
       await load();
     } catch (e) { setErr(e.message); }
     finally { setBusy(false); }
@@ -1532,8 +1615,20 @@ function Journal() {
 
   const n2 = v => (v === null || v === undefined ? '—' : Number(v).toFixed(2));
   const n6 = v => (v === null || v === undefined ? '—' : Number(v).toFixed(v % 1 === 0 ? 0 : 4));
-  const open = trades.filter(t => t.status === 'open');
-  const closed = trades.filter(t => t.status === 'closed');
+
+  // Filtre local : recherche par paire/notes + résultat
+  const matches = t => {
+    const q = filter.q.trim().toLowerCase();
+    if (q && !`${t.pair} ${t.notes || ''}`.toLowerCase().includes(q)) return false;
+    if (filter.result === 'all') return true;
+    if (filter.result === 'open') return t.status === 'open';
+    return t.status === 'closed' && t.result === filter.result;
+  };
+  const open = trades.filter(t => t.status === 'open' && matches(t));
+  const closed = trades.filter(t => t.status === 'closed' && matches(t));
+  const filtered = filter.q.trim() !== '' || filter.result !== 'all';
+
+  const stratTitle = id => (strategies.find(s => s.id === id) || {}).title || id;
 
   if (loading) return <div className="panel" style={{ padding:22 }}><Skeleton h={120} /></div>;
 
@@ -1560,6 +1655,34 @@ function Journal() {
           )}
         </div>
       )}
+
+      <div className="panel" style={{ padding:'12px 14px', marginBottom:16, display:'flex',
+        gap:10, alignItems:'center', flexWrap:'wrap' }}>
+        <i className="fas fa-filter" style={{ color:'var(--muted)' }}></i>
+        <input className="fld" style={{ flex:'1 1 190px', minWidth:150 }}
+          placeholder="Filtrer par paire ou note…"
+          value={filter.q} onChange={e=>setFilter({ ...filter, q:e.target.value })} />
+        <select className="fld" style={{ width:150 }} value={filter.result}
+          onChange={e=>setFilter({ ...filter, result:e.target.value })}>
+          <option value="all">Tous</option>
+          <option value="open">En cours</option>
+          <option value="win">Gains</option>
+          <option value="loss">Pertes</option>
+          <option value="breakeven">Neutres</option>
+        </select>
+        {filtered && <span style={{ fontSize:12.5, color:'var(--muted)' }}>
+          {open.length + closed.length} / {trades.length}
+        </span>}
+        <span style={{ flex:'1 1 auto' }}></span>
+        <a className="btn ghost sm" href="/api/trades/export?format=csv" download
+          title="Télécharger le journal complet en CSV (Excel)">
+          <i className="fas fa-file-csv"></i>CSV
+        </a>
+        <a className="btn ghost sm" href="/api/trades/export?format=json" download
+          title="Télécharger le journal complet en JSON">
+          <i className="fas fa-file-code"></i>JSON
+        </a>
+      </div>
 
       {err && (
         <div className="panel" style={{ padding:'12px 16px', marginBottom:16,
@@ -1603,6 +1726,38 @@ function Journal() {
         <label style={{ display:'grid', gap:5, fontSize:12, color:'var(--muted)', marginTop:12 }}>Notes
           <textarea className="fld" rows="2" value={form.notes} placeholder="Contexte, raison du trade…"
             onChange={e=>setForm({...form, notes:e.target.value})} /></label>
+
+        {strategies.length > 0 && (
+          <div style={{ marginTop:12 }}>
+            <label style={{ fontSize:12, color:'var(--muted)' }}>
+              Stratégies appliquées
+              <span style={{ color:'var(--dim)' }}> — alimente « Réussite par stratégie »</span>
+            </label>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginTop:7,
+              maxHeight:118, overflowY:'auto' }}>
+              {strategies.map(s => {
+                const on = picked.includes(s.id);
+                return (
+                  <button key={s.id} type="button" className="tag"
+                    onClick={()=>setPicked(p => on ? p.filter(x => x !== s.id) : [...p, s.id])}
+                    style={on
+                      ? { background:'rgba(37,99,235,.24)', borderColor:'rgba(37,99,235,.65)', color:'#fff' }
+                      : { cursor:'pointer' }}
+                    title={s.title + (s.type ? ` (${s.type})` : '')}>
+                    {on && <i className="fas fa-check" style={{ marginRight:5 }}></i>}
+                    {String(s.title || '').slice(0, 38)}
+                  </button>
+                );
+              })}
+            </div>
+            {originId && (
+              <p style={{ margin:'8px 0 0', fontSize:12, color:'var(--muted)' }}>
+                <i className="fas fa-link" style={{ marginRight:6 }}></i>
+                Lié à l'analyse d'origine
+              </p>
+            )}
+          </div>
+        )}
         {(() => {
           const e0 = parseFloat(String(form.entry).replace(',','.'));
           const s0 = parseFloat(String(form.sl).replace(',','.'));
@@ -1653,6 +1808,12 @@ function Journal() {
                     </button>
                   </div>
                 </div>
+                {t.strategyIds && t.strategyIds.length > 0 && (
+                  <p style={{ margin:'8px 0 0', fontSize:12, color:'var(--muted)' }}>
+                    <i className="fas fa-book" style={{ marginRight:6 }}></i>
+                    {t.strategyIds.map(stratTitle).join(', ')}
+                  </p>
+                )}
                 {t.notes && <p style={{ margin:'8px 0 0', fontSize:12.5, color:'var(--muted)' }}>{t.notes}</p>}
               </div>
             ))}
@@ -1685,7 +1846,15 @@ function Journal() {
               <tbody>
                 {closed.map(t => (
                   <tr key={t.id} style={{ borderTop:'1px solid var(--border)' }}>
-                    <td style={{ padding:'9px 10px', color:'#fff', fontWeight:600 }}>{t.pair}</td>
+                    <td style={{ padding:'9px 10px' }}>
+                      <div style={{ color:'#fff', fontWeight:600 }}>{t.pair}</div>
+                      {t.strategyIds && t.strategyIds.length > 0 && (
+                        <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>
+                          <i className="fas fa-book" style={{ marginRight:4 }}></i>
+                          {t.strategyIds.map(stratTitle).join(', ').slice(0, 44)}
+                        </div>
+                      )}
+                    </td>
                     <td style={{ padding:'9px 10px', color:'var(--muted)' }}>{t.direction}</td>
                     <td style={{ padding:'9px 10px', textAlign:'right' }}>{n6(t.entry)}</td>
                     <td style={{ padding:'9px 10px', textAlign:'right' }}>{n6(t.exit)}</td>
@@ -1763,6 +1932,15 @@ function Dashboard({ user, onLogout }) {
   const del = async (id) => {
     await api(`/knowledge/${id}`, { method:'DELETE' });
     load();
+  };
+
+  // Report d'un plan d'analyse vers le journal : on bascule d'onglet et on
+  // transmet le contexte. `_t` force un nouvel objet pour que l'effet du
+  // Journal se redéclenche même si on clique deux fois sur le même plan.
+  const [prefill, setPrefill] = useState(null);
+  const sendToJournal = (data) => {
+    setPrefill({ ...data, _t: Date.now() });
+    setTab('journal');
   };
 
   const NAV = [
@@ -1848,12 +2026,12 @@ function Dashboard({ user, onLogout }) {
               <StatTile icon="fa-clock-rotate-left" label="Analyses" value={history.length} color="#34d399" delay={140} />
             </div>
             <Analyzer onDone={setResult} />
-            {result && <Result result={result} />}
+            {result && <Result result={result} onToJournal={sendToJournal} />}
           </>)}
 
           {tab === 'add' && <AddKnowledge refresh={load} />}
           {tab === 'strategies' && <Strategies strategies={strategies} onDelete={del} />}
-          {tab === 'journal' && <Journal />}
+          {tab === 'journal' && <Journal prefill={prefill} onPrefillUsed={()=>setPrefill(null)} strategies={strategies} />}
           {tab === 'history' && <History history={history} />}
         </>)}
       </main>

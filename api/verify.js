@@ -76,7 +76,7 @@ function tinyPng(W = 64, H = 40) {
 (async () => {
   // ── 1. Syntaxe ──
   section('[1] Syntaxe');
-  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'bootstrap-db.js']) {
+  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'bootstrap-db.js']) {
     try {
       require('child_process').execFileSync(process.execPath, ['--check', path.join(__dirname, f)]);
       ok(f, true);
@@ -255,6 +255,47 @@ function tinyPng(W = 64, H = 40) {
   ok('stats : 2 clôturés / 1 en cours', st.closed === 2 && st.open === 1);
   ok('stats : regroupement par paire', st.byPair.length === 1 && st.byPair[0].trades === 2);
   ok('stats : rrAvg', st.rrAvg === 0.5, String(st.rrAvg));
+
+  // ── 8. Recherche plein-texte + export ──
+  section('[8] Recherche plein-texte & export');
+  const S = require('./search');
+  const X = require('./export');
+
+  const docs = [
+    { id: 'a', title: 'Volatilité et liquidité', content: 'Le balayage de liquidité sur un marché volatil.', tags: ['sweep'], type: 'strategy', source: 'manual' },
+    { id: 'b', title: 'Order blocks', content: 'OB et FVG comme zones de réaction.', tags: [], type: 'concept', source: 'manual' },
+    { id: 'c', title: 'Gestion du risque', content: 'Taille de position et stop loss. La liquidité compte aussi.', tags: ['risque'], type: 'concept', source: 'manual' }
+  ];
+
+  ok('accents : « volatilite » trouve « Volatilité »', S.search(docs, 'volatilite').some(r => r.id === 'a'));
+  ok('accents : « liquidité » (accentué) trouve aussi', S.search(docs, 'liquidité').some(r => r.id === 'a'));
+  ok('casse ignorée : « ORDER BLOCKS »', S.search(docs, 'ORDER BLOCKS').some(r => r.id === 'b'));
+  ok('AND strict : « volatilite risque » (docs séparés) → 0',
+    S.search(docs, 'volatilite risque').length === 0);
+  ok('AND : « ob fvg » trouve le doc qui a les deux', S.search(docs, 'ob fvg').some(r => r.id === 'b'));
+  ok('tolérance préfixe : « volatil »', S.search(docs, 'volatil').some(r => r.id === 'a'));
+  ok('requête vide → aucun résultat', S.search(docs, '   ').length === 0);
+  ok('terme d\'une lettre ignoré', S.search(docs, 'a').length === 0);
+  const ranked = S.search(docs, 'liquidite');
+  ok('pondération : le titre passe devant le contenu',
+    ranked.length >= 2 && ranked[0].id === 'a', ranked.map(r => `${r.id}:${r.score}`).join(' '));
+  ok('extrait fourni et pertinent', !!ranked[0].excerpt && /liquidit/i.test(ranked[0].excerpt),
+    JSON.stringify((ranked[0].excerpt || '').slice(0, 50)));
+
+  const tricky = {
+    id: 't1', pair: 'XAUUSD', direction: 'BUY', status: 'closed', result: 'win',
+    entry: 4700, exit: 4720, rr: 2, pnl: 20, strategyIds: ['a', 'b'],
+    notes: 'Entrée sur OB, sortie "propre",\nplusieurs lignes'
+  };
+  const csv = X.toCsv([tricky]);
+  const lines = csv.split('\r\n');
+  ok('CSV : en-tête présent', lines[0].startsWith('id,ouvert_le,'));
+  ok('CSV : fins de ligne CRLF', csv.includes('\r\n'));
+  ok('CSV : note multi-lignes entre guillemets', /"[^"]*plusieurs lignes"/.test(csv));
+  ok('CSV : guillemets internes doublés', csv.includes('""propre""'));
+  ok('CSV : stratégies jointes par |', csv.includes('a|b'));
+  ok('CSV : 2 lignes pour 1 trade', lines.filter(Boolean).length === 2);
+  ok('CSV : liste vide → en-tête seul', X.toCsv([]).trim().split('\r\n').length === 1);
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués`);
   process.exit(fail ? 1 : 0);

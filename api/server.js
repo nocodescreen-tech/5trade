@@ -173,6 +173,12 @@ const vision = require('./vision');
 // ─── Journal de trades — logique dans trades.js ───
 const Trades = require('./trades');
 
+// ─── Recherche plein-texte dans la base de connaissance ───
+const Search = require('./search');
+
+// ─── Export du journal (CSV / JSON) ───
+const Export = require('./export');
+
 /** Miroir distant d'un artefact de la base : S3 → ImageKit → local */
 async function mirrorRemote(relPath, buffer, contentType) {
   const clean = String(relPath).replace(/\\/g, '/');
@@ -1203,8 +1209,9 @@ Réponds en texte structuré, dense et exploitable.`;
       candidatesFound: matched.length
     };
 
+    const historyId = newId('hist_');
     await appendHistory({
-      id: newId('hist_'),
+      id: historyId,
       pair,
       timeframes,
       action: plan.action,
@@ -1213,6 +1220,8 @@ Réponds en texte structuré, dense et exploitable.`;
       strategiesUsed: recommendations.strategiesUsed,
       timestamp: analysis.analysisDate
     });
+    // Référence stable : permet de rattacher un trade à l'analyse qui l'a produit
+    analysis.analysisId = historyId;
 
     res.json({ success: true, analysis, recommendations });
   } catch (error) {
@@ -1377,6 +1386,42 @@ app.delete('/api/trades/:id', requireAuth, async (req, res) => {
   try {
     await DB.removeTradeRecord(req.params.id);
     res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Téléchargement du journal (le navigateur envoie le cookie HttpOnly)
+app.get('/api/trades/export', requireAuth, async (req, res) => {
+  try {
+    const format = String(req.query.format || 'csv').toLowerCase();
+    const list = await DB.listTrades();
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    if (format === 'json') {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="5trade-journal-${stamp}.json"`);
+      return res.send(JSON.stringify(list, null, 2));
+    }
+    if (format !== 'csv') {
+      return res.status(400).json({ error: '« format » doit être csv ou json' });
+    }
+    // BOM : Excel/LibreOffice reconnaissent l'UTF-8
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="5trade-journal-${stamp}.csv"`);
+    res.send('\uFEFF' + Export.toCsv(list));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────
+// RECHERCHE PLEIN-TEXTE (base de connaissance)
+// ─────────────────────────────────────────────────────────────
+app.get('/api/search', requireAuth, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.status(400).json({ error: 'Paramètre « q » requis' });
+    const limit = Math.min(parseInt(req.query.limit || '50', 10) || 50, 200);
+    const all = await loadAllStrategies();
+    const results = Search.search(all, q, { limit });
+    res.json({ success: true, query: q, count: results.length, results });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
