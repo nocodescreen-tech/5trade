@@ -122,6 +122,13 @@
   .dot-live{width:8px;height:8px;border-radius:50%;background:var(--ok);position:relative}
   .dot-live::after{content:'';position:absolute;inset:0;border-radius:50%;background:var(--ok);animation:ping 1.8s cubic-bezier(0,0,.2,1) infinite}
   @keyframes ping{0%{transform:scale(1);opacity:.7}75%,100%{transform:scale(3.2);opacity:0}}
+  /* Signal confirmé : le panneau attire l'oeil, brièvement et une seule fois
+     (une alerte permanente deviendrait du bruit -> on l'ignore à la longue). */
+  @keyframes signalPulse{
+    0%{box-shadow:0 0 0 0 rgba(245,158,11,.45)}
+    70%{box-shadow:0 0 0 14px rgba(245,158,11,0)}
+    100%{box-shadow:0 0 0 0 rgba(245,158,11,0)}
+  }
 
   /* ── Progression ── */
   .bar{height:3px;background:rgba(27,36,51,.9);border-radius:9px;overflow:hidden}
@@ -1521,8 +1528,10 @@ function History({ history }) {
 
 /* ══════════════ MARCHÉ EN DIRECT ══════════════ */
 
-/** Graphique en chandeliers + niveaux calculés, sur un canvas (aucune lib). */
-function drawCandles(canvas, candles, levels) {
+/** Graphique en chandeliers net + niveaux calculés (canvas, aucune lib). */
+function drawCandles(canvas, candles, levels, opts) {
+  const o = opts || {};
+  const visible = o.count || 90;
   const dpr = window.devicePixelRatio || 1;
   const W = canvas.clientWidth || 820;
   const H = canvas.clientHeight || 320;
@@ -1533,57 +1542,109 @@ function drawCandles(canvas, candles, levels) {
   g.clearRect(0, 0, W, H);
   if (!candles || !candles.length) return;
 
-  const view = candles.slice(-120);
-  const padL = 8, padR = 64, padT = 14, padB = 24;
+  // Marge droite élargie : l'axe des prix doit se lire sans plisser les yeux.
+  const padL = 10, padR = 86, padT = 16, padB = 26;
+  const view = candles.slice(-visible);
   const hi = Math.max(...view.map(c => c.h));
   const lo = Math.min(...view.map(c => c.l));
-  const span = (hi - lo) || 1;
-  const y = p => padT + ((hi - p) / span) * (H - padT - padB);
-  const cw = (W - padL - padR) / view.length;
+  const span = (hi - lo) || Math.max(hi * 0.001, 1e-6);
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const y = p => padT + ((hi - p) / span) * plotH;
+  const step = plotW / view.length;
+  const bw = Math.max(3, step * 0.72);            // corps large et net
 
-  // Grille + graduations de prix
-  g.font = '10px ui-sans-serif, system-ui';
+  // Fond
+  g.fillStyle = 'rgba(7,10,17,.9)';
+  g.fillRect(0, 0, W, H);
+
+  // Grille + axe des prix (5 repères lisibles)
+  g.font = '11px ui-sans-serif, system-ui, sans-serif';
   g.textBaseline = 'middle';
-  for (let i = 0; i <= 4; i++) {
-    const p = lo + span * i / 4, yy = y(p);
-    g.strokeStyle = 'rgba(148,163,184,.15)';
+  for (let i = 0; i <= 5; i++) {
+    const p = lo + span * i / 5, yy = y(p);
+    g.strokeStyle = 'rgba(148,163,184,.13)';
     g.beginPath(); g.moveTo(padL, yy); g.lineTo(W - padR, yy); g.stroke();
-    g.fillStyle = 'rgba(148,163,184,.8)';
-    g.fillText(p >= 1000 ? p.toFixed(2) : p.toFixed(5), W - padR + 6, yy);
+    const label = p >= 1000 ? p.toFixed(2) : p.toFixed(5);
+    const tw = g.measureText(label).width;
+    g.fillStyle = 'rgba(9,13,20,.92)';
+    g.fillRect(W - padR + 4, yy - 8, tw + 10, 16);
+    g.fillStyle = 'rgba(203,213,225,.95)';
+    g.fillText(label, W - padR + 9, yy);
   }
 
-  // Zones (FVG / order blocks) en fond
+  // Zones (order blocks / FVG) en fond
   for (const l of levels || []) {
     if (l.zone && l.zone.length === 2 && Number.isFinite(l.zone[0]) && Number.isFinite(l.zone[1])) {
       const y1 = y(l.zone[1]), y2 = y(l.zone[0]);
-      g.fillStyle = l.side === 'support' ? 'rgba(16,185,129,.14)' : 'rgba(239,68,68,.14)';
-      g.fillRect(padL, Math.min(y1, y2), W - padL - padR, Math.max(1, Math.abs(y2 - y1)));
+      g.fillStyle = l.side === 'support' ? 'rgba(16,185,129,.16)' : 'rgba(239,68,68,.16)';
+      g.fillRect(padL, Math.min(y1, y2), plotW, Math.max(1, Math.abs(y2 - y1)));
     }
   }
 
-  // Chandeliers
+  // Chandeliers : corps pleins + mèches nettes
+  g.lineWidth = 1.5;
   view.forEach((c, i) => {
-    const x = padL + i * cw + cw / 2;
+    const x = padL + i * step + step / 2;
     const up = c.c >= c.o;
-    const col = up ? '#10b981' : '#ef4444';
-    g.strokeStyle = col; g.fillStyle = col;
-    g.beginPath(); g.moveTo(x, y(c.h)); g.lineTo(x, y(c.l)); g.stroke();
-    const top = y(Math.max(c.o, c.c)), bot = y(Math.min(c.o, c.c));
-    const bw = Math.max(2, cw * 0.64);
-    g.fillRect(x - bw / 2, top, bw, Math.max(1, bot - top));
+    const col = up ? '#22d38a' : '#f2545b';
+    const top = y(Math.max(c.o, c.c));
+    const bot = y(Math.min(c.o, c.c));
+    g.strokeStyle = col;
+    g.beginPath();
+    g.moveTo(Math.round(x) + 0.5, y(c.h));
+    g.lineTo(Math.round(x) + 0.5, y(c.l));
+    g.stroke();
+    g.fillStyle = col;
+    // Un doji garde 2 px de haut : sinon la bougie est invisible.
+    g.fillRect(x - bw / 2, top, bw, Math.max(2, bot - top));
+    if (!up) {                                   // contour : baissière plus lisible
+      g.strokeStyle = 'rgba(0,0,0,.35)';
+      g.lineWidth = 1;
+      g.strokeRect(x - bw / 2 + 0.5, top + 0.5, bw - 1, Math.max(2, bot - top) - 1);
+      g.lineWidth = 1.5;
+    }
   });
 
   // Niveaux ponctuels (swings, liquidité, OTE)
   for (const l of levels || []) {
     if (Number.isFinite(l.price)) {
       const yy = y(l.price);
-      g.strokeStyle = l.side === 'support' ? 'rgba(16,185,129,.5)'
-        : l.side === 'resistance' ? 'rgba(239,68,68,.5)'
-        : l.side === 'liquidité' ? 'rgba(245,158,11,.45)' : 'rgba(96,165,250,.5)';
-      g.setLineDash([4, 4]);
+      g.strokeStyle = l.side === 'support' ? 'rgba(34,211,138,.55)'
+        : l.side === 'resistance' ? 'rgba(242,84,91,.55)'
+        : l.side === 'liquidité' ? 'rgba(245,158,11,.5)' : 'rgba(96,165,250,.55)';
+      g.setLineDash([5, 4]);
       g.beginPath(); g.moveTo(padL, yy); g.lineTo(W - padR, yy); g.stroke();
       g.setLineDash([]);
     }
+  }
+
+  // Dernier prix : repère immédiat (on voit tout de suite où on est)
+  const lastC = view[view.length - 1];
+  if (lastC) {
+    const yy = y(lastC.c);
+    g.strokeStyle = 'rgba(255,255,255,.75)';
+    g.setLineDash([2, 3]);
+    g.beginPath(); g.moveTo(padL, yy); g.lineTo(W - padR, yy); g.stroke();
+    g.setLineDash([]);
+    const label = lastC.c >= 1000 ? lastC.c.toFixed(2) : lastC.c.toFixed(5);
+    const tw = g.measureText(label).width;
+    g.fillStyle = '#e2e8f0';
+    g.fillRect(W - padR + 4, yy - 9, tw + 12, 18);
+    g.fillStyle = '#0b0f16';
+    g.font = 'bold 11px ui-sans-serif, system-ui, sans-serif';
+    g.fillText(label, W - padR + 10, yy);
+  }
+
+  // Heure de la première et de la dernière bougie (on sait ce qu'on regarde)
+  g.font = '10px ui-sans-serif, system-ui, sans-serif';
+  g.fillStyle = 'rgba(148,163,184,.75)';
+  const fmtT = t => new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  g.textBaseline = 'bottom';
+  if (view[0]) g.fillText(fmtT(view[0].t), padL, H - 6);
+  if (lastC) {
+    const s = fmtT(lastC.t);
+    g.fillText(s, W - padR - g.measureText(s).width, H - 6);
   }
 }
 
@@ -1598,6 +1659,12 @@ function LiveMarket() {
   const [live, setLive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [ticks, setTicks] = useState(0);          // preuve visible que ça bouge
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [signal, setSignal] = useState(null);      // verdict en direct
+  const [alerts, setAlerts] = useState([]);        // derniers signaux reçus
+  const [big, setBig] = useState(false);           // graphique agrandi
+  const [offline, setOffline] = useState(false);   // données servies du cache
   const canvasRef = useRef(null);
 
   useEffect(() => {
@@ -1620,8 +1687,10 @@ function LiveMarket() {
       const r = await (await api(`/market/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&count=240`)).json();
       if (!r.success) throw new Error(r.error || 'chargement impossible');
       setCandles(r.candles);
+      setOffline(!!r.offline);
       const st = await (await api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}`)).json();
       if (st.success) setReport(st.report);
+      if (st.offline) setOffline(true);
     } catch (e) { setErr(e.message); }
   }, [symbol, tf]);
 
@@ -1642,15 +1711,48 @@ function LiveMarket() {
           if (c.t > last.t) return [...prev, c].slice(-400);
           return prev;
         });
+        setTicks(t => t + 1);
+        setLastUpdate(Date.now());
       } catch {}
     });
     es.addEventListener('error', () => setLive(false));
     return () => es.close();
   }, [symbol, tf]);
 
+  // Signaux en direct : le serveur n'émet que sur CHANGEMENT de verdict,
+  // donc un signal reçu = un vrai changement, pas du bruit.
   useEffect(() => {
-    if (canvasRef.current) drawCandles(canvasRef.current, candles, report ? report.levels : []);
-  }, [candles, report]);
+    setSignal(null);
+    const es = new EventSource(`/api/signals/stream?symbol=${encodeURIComponent(symbol)}&tf=${tf}`);
+    es.addEventListener('signal', ev => {
+      try {
+        const v = JSON.parse(ev.data);
+        setSignal(v);
+        if (v.status === 'confirme') {
+          // Alerte sonore légère impossible sans interaction : on marque visuellement.
+          setAlerts(prev => [{ ...v, receivedAt: Date.now() }, ...prev].slice(0, 8));
+        }
+      } catch {}
+    });
+    return () => es.close();
+  }, [symbol, tf]);
+
+  useEffect(() => {
+    if (canvasRef.current) {
+      drawCandles(canvasRef.current, candles, report ? report.levels : [], { count: big ? 150 : 90 });
+    }
+  }, [candles, report, big]);
+
+  // Le canvas ne se redessine pas quand la fenêtre change de taille : on écoute.
+  useEffect(() => {
+    const redraw = () => {
+      if (canvasRef.current) {
+        drawCandles(canvasRef.current, candles, report ? report.levels : [], { count: big ? 150 : 90 });
+      }
+    };
+    window.addEventListener('resize', redraw);
+    return () => window.removeEventListener('resize', redraw);
+  }, [candles, report, big]);
 
   const analyser = async () => {
     setBusy(true); setErr('');
@@ -1687,16 +1789,128 @@ function LiveMarket() {
           color: live ? '#34d399' : '#f59e0b' }}>
           <span className="dot-live"></span>{live ? 'direct' : 'connexion…'}
         </span>
+        {lastUpdate && (
+          <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--muted)' }}>
+            <i className="fas fa-arrows-rotate" style={{ marginRight:5 }}></i>
+            {ticks} maj · {new Date(lastUpdate).toLocaleTimeString('fr-FR')}
+          </span>
+        )}
         {status && <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--muted)' }}>
           <i className="fas fa-server"></i>{status.label}
         </span>}
+        {offline && (
+          <span className="badge" style={{ background:'rgba(245,158,11,.15)', color:'#fbbf24' }}
+            title="Réseau indisponible : les bougies proviennent du cache local. L'analyse reste utilisable.">
+            <i className="fas fa-plug-circle-xmark" style={{ marginRight:5 }}></i>hors ligne (cache)
+          </span>
+        )}
         <span style={{ flex:'1 1 auto' }}></span>
+        <button className="btn ghost sm" onClick={()=>setBig(b => !b)}
+          title={big ? 'Réduire le graphique' : 'Agrandir le graphique'}>
+          <i className={`fas ${big ? 'fa-compress' : 'fa-expand'}`}></i>{big ? 'Réduire' : 'Agrandir'}
+        </button>
         <button className="btn ghost sm" onClick={load} title="Recharger l'historique">
           <i className="fas fa-rotate"></i>
         </button>
         <button className="btn" onClick={analyser} disabled={busy}>
           {busy ? <Spinner/> : <><i className="fas fa-bolt"></i>Analyser maintenant</>}
         </button>
+      </div>
+
+      {/* ── Signal en direct : quelle stratégie s'applique, achat ou vente ── */}
+      <div className="panel" style={{
+        padding:'14px 18px', marginBottom:16,
+        borderColor: signal && signal.status === 'confirme'
+          ? (signal.direction === 'BUY' ? 'rgba(34,211,138,.55)' : 'rgba(242,84,91,.55)') : undefined,
+        animation: signal && signal.status === 'confirme' ? 'signalPulse 1.6s ease-out 2' : undefined
+      }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+          <i className="fas fa-bolt" style={{ color:'#f59e0b' }}></i>
+          <b style={{ fontSize:14, color:'#fff' }}>Signal en direct</b>
+          {!signal && <span style={{ fontSize:13, color:'var(--muted)' }}>en attente du premier verdict…</span>}
+          {signal && (<>
+            <span className="badge" style={{
+              background: signal.status === 'confirme'
+                ? (signal.direction === 'BUY' ? 'rgba(34,211,138,.18)' : 'rgba(242,84,91,.18)')
+                : 'rgba(148,163,184,.12)',
+              color: signal.status === 'confirme'
+                ? (signal.direction === 'BUY' ? '#34d399' : '#f87171') : 'var(--muted)'
+            }}>
+              {signal.direction === 'BUY' ? 'ACHAT' : signal.direction === 'SELL' ? 'VENTE' : 'NEUTRE'}
+              {signal.status === 'confirme' ? ' CONFIRMÉ' : signal.status === 'surveiller' ? ' à surveiller' : ''}
+            </span>
+            <span style={{ fontSize:12.5, color:'var(--muted)' }}>
+              {signal.confirmations} règle(s) · force {(signal.strength * 100).toFixed(0)} %
+              {signal.trend ? ` · tendance ${signal.trend}` : ''}
+            </span>
+            <span style={{ flex:'1 1 auto' }}></span>
+            <span style={{ fontSize:11.5, color:'var(--dim)' }}>
+              bougie clôturée {signal.at ? new Date(signal.at).toLocaleTimeString('fr-FR') : ''}
+            </span>
+          </>)}
+        </div>
+
+        {signal && signal.rules && signal.rules.length > 0 && (
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginTop:10 }}>
+            {signal.rules.map((r, i) => (
+              <span key={i} className="tag" title={r.detail} style={{
+                background: r.direction === 'BUY' ? 'rgba(34,211,138,.12)' : 'rgba(242,84,91,.12)',
+                borderColor: r.direction === 'BUY' ? 'rgba(34,211,138,.4)' : 'rgba(242,84,91,.4)',
+                color: r.direction === 'BUY' ? '#6ee7b7' : '#fca5a5'
+              }}>
+                {r.rule} · {r.name}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {signal && signal.status !== 'neutre' && signal.levels && (
+          <div style={{ display:'flex', gap:18, flexWrap:'wrap', marginTop:12, fontSize:13 }}>
+            <span><span style={{ color:'var(--muted)' }}>Entrée </span><b>{fmt(signal.levels.entry)}</b></span>
+            <span><span style={{ color:'var(--muted)' }}>Invalidation </span>
+              <b style={{ color:'#f87171' }}>{fmt(signal.levels.stop)}</b></span>
+            <span><span style={{ color:'var(--muted)' }}>Objectif 1 </span>
+              <b style={{ color:'#34d399' }}>{fmt(signal.levels.target1)}</b></span>
+            <span><span style={{ color:'var(--muted)' }}>Objectif 2 </span>
+              <b style={{ color:'#34d399' }}>{fmt(signal.levels.target2)}</b></span>
+          </div>
+        )}
+
+        {signal && signal.strategies && signal.strategies.length > 0 && (
+          <div style={{ marginTop:12 }}>
+            <div style={{ fontSize:12, color:'var(--muted)', marginBottom:6 }}>
+              <i className="fas fa-book" style={{ marginRight:6 }}></i>Stratégies de ta base qui s'appliquent
+            </div>
+            <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+              {signal.strategies.map(s => (
+                <span key={s.id} className="tag" title={`${s.type} · pertinence ${s.relevanceScore}`}>
+                  {s.title.slice(0, 46)}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {alerts.length > 0 && (
+          <details style={{ marginTop:12 }}>
+            <summary style={{ fontSize:12, color:'var(--muted)', cursor:'pointer' }}>
+              Signaux confirmés reçus depuis l'ouverture ({alerts.length})
+            </summary>
+            <div style={{ marginTop:8, display:'grid', gap:6 }}>
+              {alerts.map((a, i) => (
+                <div key={i} style={{ display:'flex', justifyContent:'space-between', gap:10, fontSize:12.5 }}>
+                  <span style={{ color: a.direction === 'BUY' ? '#6ee7b7' : '#fca5a5' }}>
+                    {a.direction === 'BUY' ? 'ACHAT' : 'VENTE'} · force {(a.strength * 100).toFixed(0)} %
+                    · {(a.rules || []).map(r => r.name).join(' + ')}
+                  </span>
+                  <span style={{ color:'var(--dim)' }}>
+                    {new Date(a.receivedAt).toLocaleTimeString('fr-FR')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
       </div>
 
       {err && (
@@ -1725,8 +1939,8 @@ function LiveMarket() {
             {report ? `${report.candles} bougies · ATR ${report.atr14}` : ''}
           </span>
         </div>
-        <canvas ref={canvasRef} style={{ width:'100%', height:320, display:'block',
-          borderRadius:10, background:'rgba(7,10,17,.6)' }} />
+        <canvas ref={canvasRef} style={{ width:'100%', height: big ? 620 : 430, display:'block',
+          borderRadius:10, background:'rgba(7,10,17,.9)' }} />
         <p style={{ margin:'8px 0 0', fontSize:11.5, color:'var(--dim)' }}>
           Chandeliers réels ({meta.symbols.find(s=>s.symbol===symbol)?.label || symbol} {tf}).
           Zones vertes = support/OB/FVG haussier, rouges = résistance/OB/FVG baissier, pointillés orange = liquidité.

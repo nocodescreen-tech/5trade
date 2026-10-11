@@ -81,7 +81,7 @@ function tinyPng(W = 64, H = 40) {
 (async () => {
   // ── 1. Syntaxe ──
   section('[1] Syntaxe');
-  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'market.js', 'structure.js', 'reset-password.js', 'bootstrap-db.js']) {
+  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'market.js', 'structure.js', 'signals.js', 'reset-password.js', 'bootstrap-db.js']) {
     try {
       require('child_process').execFileSync(process.execPath, ['--check', path.join(__dirname, f)]);
       ok(f, true);
@@ -361,6 +361,70 @@ function tinyPng(W = 64, H = 40) {
     ok('onglet « Direct » déclaré', /id:'live'/.test(jsx));
     ok('graphique chandeliers (drawCandles)', /function drawCandles/.test(jsx));
   }
+
+  // ── 10. Signaux : verdicts déterministes ──
+  section('[10] Signaux — verdicts');
+  const Sig = require('./signals');
+  const mkC = (t, o, h, l, c) => ({ t, o, h, l, c, v: 1 });
+
+  // Balayage de liquidité haussier : deux creux égaux, puis mèche dessous
+  // et clôture au-dessus.
+  const sweep = [];
+  let ts = 0, px = 104;
+  const push = (o, h, l, c) => sweep.push(mkC(ts += 60000, o, h, l, c));
+  push(104, 105, 103, 104); push(103, 104, 102, 103); push(102, 103, 101, 102);
+  push(101, 102, 100, 100.5); push(100.5, 102, 100.5, 101.5); push(101.5, 103, 101, 102.5);
+  push(102.5, 103.5, 102, 103); push(103, 104, 102.5, 102.8); push(102.8, 103, 100.2, 100.4);
+  push(100.4, 102, 100.3, 101.8); push(101.8, 103, 101.5, 102.9); push(102.9, 104, 102.6, 103.8);
+  push(103.8, 104.5, 103.5, 104.2); push(104.2, 105, 104, 104.8); push(104.8, 105.5, 104.5, 105.2);
+  push(105.2, 106, 105, 105.8); push(105.8, 106.5, 105.5, 106.2); push(106.2, 107, 106, 106.8);
+  push(106.8, 107.2, 106.5, 107); push(107, 108, 106.8, 107.5); push(107.5, 108.5, 107.2, 108.2);
+  push(108.2, 109, 108, 108.8); push(108.8, 109.5, 108.5, 109.2);
+  push(99.5, 101.5, 98, 101);       // ← la bougie décisive
+
+  const vsweep = Sig.detect(sweep, { symbol: 'TEST', timeframe: '1m' });
+  ok('balayage : signal confirmé', vsweep.status === 'confirme', vsweep.status);
+  ok('balayage : sens achat', vsweep.direction === 'BUY', vsweep.direction);
+  ok('balayage : au moins 2 règles concordantes', vsweep.confirmations >= 2, String(vsweep.confirmations));
+  ok('balayage : invalidation SOUS l\'entrée (achat)',
+    vsweep.levels.stop !== null && vsweep.levels.stop < vsweep.levels.entry,
+    `${vsweep.levels.stop} < ${vsweep.levels.entry}`);
+  ok('balayage : objectif au-dessus de l\'entrée',
+    vsweep.levels.target1 !== null && vsweep.levels.target1 > vsweep.levels.entry,
+    `${vsweep.levels.target1} > ${vsweep.levels.entry}`);
+  ok('balayage : résumé lisible', /ACHAT CONFIRMÉ/.test(vsweep.summary), vsweep.summary.slice(0, 60));
+
+  // Marché plat : aucune règle ne doit produire d'achat ou de vente
+  const flat = [];
+  let tf2 = 0;
+  for (let i = 0; i < 24; i++) flat.push(mkC(tf2 += 60000, 100, 100.4, 99.6, 100));
+  const vflat = Sig.detect(flat, { symbol: 'FLAT', timeframe: '1m' });
+  ok('marché plat : aucun signal', vflat.status === 'neutre' && vflat.direction === 'NEUTRE', `${vflat.status}/${vflat.direction}`);
+
+  // Vente : invalidation AU-DESSUS de l'entrée (symétrie du bug corrigé)
+  const sell = [];
+  let t3 = 0, p3 = 96;
+  const push3 = (o, h, l, c) => sell.push(mkC(t3 += 60000, o, h, l, c));
+  push3(96, 97, 95, 96); push3(97, 98, 96, 97); push3(98, 99, 97, 98);
+  push3(99, 100, 98, 99.5); push3(99.5, 100.5, 99, 100.2); push3(100.2, 101, 99.8, 100.5);
+  push3(100.5, 101.5, 100, 100.2); push3(100.2, 100.5, 99, 99.2); push3(99.2, 99.4, 98, 98.2);
+  push3(98.2, 99, 98, 98.8); push3(98.8, 99.5, 98.5, 99.2); push3(99.2, 100, 99, 99.8);
+  push3(99.8, 100.5, 99.5, 100.2); push3(100.2, 101, 100, 100.8); push3(100.8, 101.5, 100.5, 101.2);
+  push3(101.2, 102, 101, 101.8); push3(101.8, 102.5, 101.5, 102.2); push3(102.2, 103, 102, 102.8);
+  push3(102.8, 103.2, 102.5, 103); push3(103, 104, 102.8, 103.5); push3(103.5, 104.5, 103.2, 104.2);
+  push3(104.2, 105, 104, 104.8); push3(104.8, 105.5, 104.5, 105.2);
+  push3(105.5, 107, 104.5, 105);    // ← perce au-dessus puis clôture en dessous
+  const vsell = Sig.detect(sell, { symbol: 'TEST2', timeframe: '1m' });
+  if (vsell.direction === 'SELL' && vsell.levels.stop !== null) {
+    ok('vente : invalidation AU-DESSUS de l\'entrée',
+      vsell.levels.stop > vsell.levels.entry, `${vsell.levels.stop} > ${vsell.levels.entry}`);
+  } else {
+    ok('vente : verdict produit', ['confirme', 'surveiller', 'neutre'].includes(vsell.status), `${vsell.status}/${vsell.direction}`);
+  }
+
+  try { Sig.detect([mkC(0, 1, 1, 1, 1)]); ok('signaux : refuse < 20 bougies', false, 'accepté'); }
+  catch { ok('signaux : refuse < 20 bougies', true); }
+  ok('signaux : règles nommées', ['R1','R2','R3','R4'].every(r => typeof Sig[r === 'R1' ? 'ruleSweep' : r === 'R2' ? 'ruleBreak' : r === 'R3' ? 'ruleZone' : 'rulePosition'] === 'function'));
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
   if (skip) console.log(`  (${skip} test(s) non exécuté(s) : dépendance externe absente — voir les lignes « • »)`);

@@ -185,6 +185,40 @@ const Market = require('./market');
 // ─── Analyse de structure sur données exactes ───
 const Structure = require('./structure');
 
+// ─── Signaux (stratégie appliquée + confirmation achat/vente) ───
+const Signals = require('./signals');
+
+// Données de marché mises en cache sur disque : l'analyse doit rester
+// possible même sans réseau (et après un redémarrage).
+try {
+  const cached = Market.loadCache();
+  if (cached) console.log(`   Marché     : ${cached} série(s) rechargée(s) du cache hors ligne`);
+} catch { /* pas de cache : on partira du réseau */ }
+
+// ─── Robustesse : un incident réseau ne doit pas tuer le serveur ───
+// Un flux de marché qui se coupe (ou un client SSE qui part trop tôt) ne doit
+// jamais faire tomber l'API. Comme le serveur tourne sans superviseur, on
+// absorbe UNIQUEMENT les erreurs d'origine réseau ; tout le reste est fatal,
+// pour ne surtout pas masquer un vrai bug.
+process.on('uncaughtException', (err) => {
+  const msg = (err && err.message) || String(err);
+  if (/websocket|socket|ECONNRESET|EPIPE|aborted/i.test(msg)) {
+    console.error('   Marché     : incident réseau absorbé —', msg);
+    return;
+  }
+  console.error('[ERREUR FATALE]', msg);
+  console.error(err && err.stack ? err.stack : '');
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  const msg = (err && err.message) || String(err);
+  if (/websocket|socket|ECONNRESET|EPIPE|aborted/i.test(msg)) {
+    console.error('   Marché     : incident réseau absorbé —', msg);
+    return;
+  }
+  console.error('[PROMESSE REJETÉE]', msg);
+});
+
 /** Miroir distant d'un artefact de la base : S3 → ImageKit → local */
 async function mirrorRemote(relPath, buffer, contentType) {
   const clean = String(relPath).replace(/\\/g, '/');
@@ -1467,10 +1501,15 @@ app.get('/api/market/structure', requireAuth, async (req, res) => {
     const tf = String(req.query.tf || '5m').trim();
     const count = Math.min(parseInt(req.query.count || '300', 10) || 300, 1000);
     if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
-    const { candles, provider, source } = await Market.getCandles(symbol, tf, count);
+    const { candles, provider, source, offline } = await Market.getCandles(symbol, tf, count);
     const report = Structure.analyze(candles, { symbol, timeframe: tf });
-    res.json({ success: true, symbol, timeframe: tf, provider, source, report });
+    res.json({ success: true, symbol, timeframe: tf, provider, source, offline: !!offline, report });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Séries disponibles hors ligne (issue de secours quand le réseau tombe)
+app.get('/api/market/cache', requireAuth, (req, res) => {
+  res.json({ success: true, ...Market.cacheInfo() });
 });
 
 // Suivi temps réel (Server-Sent Events) — la bougie en cours arrive en continu
@@ -1508,7 +1547,7 @@ app.post('/api/market/analyze', requireAuth, async (req, res) => {
     const maxStrategies = parseInt(req.body.maxStrategies || '3', 10);
     if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
 
-    const { candles, provider, source } = await Market.getCandles(symbol, tf, 300);
+    const { candles, provider, source, offline } = await Market.getCandles(symbol, tf, 300);
     const report = Structure.analyze(candles, { symbol, timeframe: tf });
 
     const all = await loadAllStrategies();
@@ -1557,6 +1596,93 @@ app.post('/api/market/analyze', requireAuth, async (req, res) => {
 
     res.json({ success: true, analysis, recommendations });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────
+// SIGNAUX — verdict exploitable + alertes en direct
+// ─────────────────────────────────────────────────────────────
+
+/** Stratégies de la base qui correspondent au signal (pour dire « laquelle s'applique »). */
+async function strategiesForSignal(verdict) {
+  try {
+    const all = await loadAllStrategies();
+    const query = [
+      verdict.direction === 'BUY' ? 'achat haussier' : verdict.direction === 'SELL' ? 'vente baissier' : '',
+      (verdict.rules || []).map(r => r.name).join(' '),
+      verdict.context && verdict.context.position ? verdict.context.position : ''
+    ].join(' ');
+    const matched = searchKnowledgeBase(all, { pair: verdict.symbol, timeframes: [verdict.timeframe], visionAnalysis: query });
+    return matched.slice(0, 4).map(s => ({ id: s.id, title: s.title, type: s.type, relevanceScore: s.relevanceScore }));
+  } catch { return []; }
+}
+
+// Verdict ponctuel sur la dernière bougie clôturée
+app.get('/api/signals', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').trim();
+    const tf = String(req.query.tf || '5m').trim();
+    if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+    const { candles, provider, offline } = await Market.getCandles(symbol, tf, 300);
+    const closed = candles.filter(c => c.closed !== false);
+    const verdict = Signals.detect(closed, { symbol, timeframe: tf });
+    verdict.strategies = await strategiesForSignal(verdict);
+    res.json({ success: true, provider, offline: !!offline, dataPoints: closed.length, verdict });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Alertes en direct : évalue à chaque bougie CLÔTURÉE et n'émet que sur changement
+app.get('/api/signals/stream', requireAuth, (req, res) => {
+  const symbol = String(req.query.symbol || '').trim();
+  const tf = String(req.query.tf || '5m').trim();
+  if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+  if (!Market.TF_MS[tf]) return res.status(400).json({ error: `Timeframe inconnu : ${tf}` });
+
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  if (res.flushHeaders) res.flushHeaders();
+
+  let lastKey = null;
+  let closed = true;
+  let evaluate = async () => {
+    try {
+      const { candles } = await Market.getCandles(symbol, tf, 300);
+      // On n'analyse QUE des bougies terminées : sinon le verdict clignote
+      // à chaque tick et ne veut rien dire.
+      const done = candles.filter(c => c.closed !== false);
+      if (done.length < 20) return;
+      const verdict = Signals.detect(done, { symbol, timeframe: tf });
+      const key = [verdict.status, verdict.direction, (verdict.rules || []).map(r => r.rule).sort().join(',')].join('|');
+      if (key !== lastKey) {
+        lastKey = key;
+        verdict.strategies = await strategiesForSignal(verdict);
+        verdict.at_price = candles[candles.length - 1].c;
+        if (closed) res.write(`event: signal\ndata: ${JSON.stringify(verdict)}\n\n`);
+      }
+    } catch { /* bougie incomplète ou réseau : on retentera */ }
+  };
+
+  evaluate();
+  res.write(`event: hello\ndata: ${JSON.stringify({ symbol, tf, provider: Market.activeProvider() })}\n\n`);
+
+  let stop = () => {};
+  try {
+    stop = Market.watch(symbol, tf, (candle) => { if (candle.closed) evaluate(); });
+  } catch (e) {
+    res.write(`event: error\ndata: ${JSON.stringify({ error: e.message })}\n\n`);
+    return res.end();
+  }
+  // Filet : même sans clôture détectée (marché calme, fournisseur sans WS),
+  // on réévalue régulièrement.
+  const poll = setInterval(evaluate, Math.max(20000, Math.floor((Market.TF_MS[tf] || 60000) / 2)));
+  const keepAlive = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 20000);
+
+  req.on('close', () => {
+    closed = false;
+    clearInterval(poll);
+    clearInterval(keepAlive);
+    try { stop(); } catch {}
+  });
 });
 
 // ─────────────────────────────────────────────────────────────

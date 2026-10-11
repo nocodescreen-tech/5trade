@@ -21,6 +21,13 @@
  * donc aucun tick n'est perdu ni mal agrégé.
  */
 const WebSocket = require('ws');
+const fs = require('fs');
+const path = require('path');
+
+// Cache disque : permet d'analyser même sans réseau (le buffer mémoire seul
+// disparaît à chaque redémarrage du serveur).
+const CACHE_FILE = path.join(__dirname, '..', 'data', 'market-cache.json');
+const CACHE_KEEP = 400;
 
 const TF_MS = {
   '1m': 60e3, '5m': 300e3, '15m': 900e3, '30m': 1800e3,
@@ -87,11 +94,11 @@ const deriv = {
     { symbol: 'frxXAUUSD', label: 'Or / USD (XAUUSD)', kind: 'metal' },
     { symbol: 'frxEURUSD', label: 'EUR / USD', kind: 'forex' }
   ],
-  _wsUrl: 'wss://ws.derivws.com/websockets/v3?app_id=1089',
+  url() { return `wss://ws.derivws.com/websockets/v3?app_id=${process.env.DERIV_APP_ID || 1089}`; },
   async candles(symbol, tf, count) {
     // L'API Deriv v3 est WebSocket-only : on demande l'historique par WS.
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(this._wsUrl);
+      const ws = new WebSocket(this.url());
       const to = setTimeout(() => { try { ws.terminate(); } catch {} reject(new Error('Deriv : délai dépassé')); }, 12000);
       ws.on('open', () => ws.send(JSON.stringify({
         ticks_history: symbol, adjust_start_time: 1, count,
@@ -110,8 +117,16 @@ const deriv = {
       ws.on('error', e => { clearTimeout(to); reject(new Error('Deriv : ' + e.message)); });
     });
   },
-  streamUrl(symbols) { return this._wsUrl; },
+  streamUrl() { return this.url(); },
   onOpen(ws, symbols, tf) {
+    // Si un token en LECTURE SEULE est fourni, on s'authentifie pour pouvoir
+    // lire le compte (solde, positions). Le token se crée soi-même dans le
+    // tableau de bord Deriv en cochant UNIQUEMENT « Read » : jamais le mot de
+    // passe, et aucune capacité d'ordre ni de retrait.
+    const token = process.env.DERIV_API_TOKEN;
+    if (token) {
+      ws.send(JSON.stringify({ authorize: token }));
+    }
     for (const s of symbols) {
       ws.send(JSON.stringify({ ticks_history: s, adjust_start_time: 1, count: 1, end: 'latest', style: 'candles', granularity: Math.round(TF_MS[tf] / 1000), subscribe: 1 }));
     }
@@ -187,9 +202,48 @@ let ws = null, wsProvider = null, wsSymbols = [], wsTf = null, pingTimer = null;
 
 const keyOf = (p, s, tf) => `${p}|${s}|${tf}`;
 
+// ─── Cache disque (mode hors ligne) ───
+function loadCache() {
+  try {
+    if (!fs.existsSync(CACHE_FILE)) return 0;
+    const data = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+    let n = 0;
+    for (const [k, v] of Object.entries(data)) {
+      if (Array.isArray(v) && v.length) { buffers.set(k, v); n++; }
+    }
+    return n;
+  } catch { return 0; }
+}
+
+let cacheTimer = null;
+/** Écriture différée : on ne touche pas au disque à chaque tick. */
+function saveCacheSoon() {
+  if (cacheTimer) return;
+  cacheTimer = setTimeout(() => {
+    cacheTimer = null;
+    try {
+      fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
+      const out = {};
+      for (const [k, v] of buffers) out[k] = v.slice(-CACHE_KEEP);
+      fs.writeFileSync(CACHE_FILE, JSON.stringify(out));
+    } catch { /* disque indisponible : ce n'est qu'un cache */ }
+  }, 5000);
+}
+
+/** Nombre de séries disponibles hors ligne (pour l'interface). */
+function cacheInfo() {
+  const series = [];
+  for (const [k, v] of buffers) {
+    const [provider, symbol, tf] = k.split('|');
+    if (v.length) series.push({ provider, symbol, tf, candles: v.length, last: v[v.length - 1].t });
+  }
+  return { cached: series.length, series: series.sort((a, b) => b.last - a.last).slice(0, 20) };
+}
+
 /**
  * Bougies exactes (REST pour l'historique, buffer live si disponible).
- * @returns {Promise<{candles:Array, provider:string, source:string}>}
+ * Si le réseau échoue, on sert le cache : l'analyse reste possible hors ligne.
+ * @returns {Promise<{candles:Array, provider:string, source:string, offline?:boolean}>}
  */
 async function getCandles(symbol, tf, count = 300) {
   if (!TF_MS[tf]) throw new Error(`Timeframe inconnu : ${tf} (attendu ${TIMEFRAMES.join(', ')})`);
@@ -200,21 +254,36 @@ async function getCandles(symbol, tf, count = 300) {
   if (buf && buf.length >= Math.min(count, 500)) {
     return { candles: buf.slice(-count), provider: p.id, source: 'live' };
   }
-  const candles = await p.candles(symbol, tf, count);
-  buffers.set(k, candles);
-  return { candles, provider: p.id, source: 'rest' };
+  try {
+    const candles = await p.candles(symbol, tf, count);
+    buffers.set(k, candles);
+    saveCacheSoon();
+    return { candles, provider: p.id, source: 'rest' };
+  } catch (e) {
+    // HORS LIGNE : on sert ce qu'on a en mémoire, sinon sur disque.
+    if (!buf || !buf.length) loadCache();
+    const fallback = buffers.get(k);
+    if (fallback && fallback.length) {
+      return {
+        candles: fallback.slice(-count), provider: p.id, source: 'cache',
+        offline: true, error: e.message
+      };
+    }
+    throw e;   // rien en cache : l'erreur est légitime
+  }
 }
 
 /** Applique une bougie live au buffer (remplace la dernière si même ouverture). */
 function applyCandle(providerId, symbol, tf, candle) {
   const k = keyOf(providerId, symbol, tf);
   let buf = buffers.get(k);
-  if (!buf || !buf.length) { buffers.set(k, [candle]); return; }
+  if (!buf || !buf.length) { buffers.set(k, [candle]); saveCacheSoon(); return; }
   const last = buf[buf.length - 1];
   if (last.t === candle.t) buf[buf.length - 1] = candle;
   else if (candle.t > last.t) {
     if (buf.length > 3000) buf.shift();
     buf.push(candle);
+    saveCacheSoon();
   }
 }
 
@@ -288,11 +357,19 @@ function reopenStream(p, symbols, tf) {
 
 function closeStream() {
   if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
-  if (ws) {
-    try { ws.removeAllListeners(); ws.close(); } catch {}
-    ws = null;
-    console.log('   Marché     : flux temps réel libéré (plus aucun abonné)');
-  }
+  const sock = ws;
+  ws = null;                       // plus aucune référence active
+  if (!sock) return;
+  // PIÈGE (bug vécu) : un socket encore en cours de connexion ne peut pas être
+  // « close ». close() émet alors une erreur 'WebSocket was closed before the
+  // connection was established' et, si plus aucun écouteur 'error' n'est
+  // attaché, cette erreur devient non gérée et TUE le process Node.
+  // → on coupe net avec terminate(), et on ne retire jamais les écouteurs.
+  try {
+    if (sock.readyState === 0 /* CONNECTING */) sock.terminate();
+    else sock.close();
+  } catch { /* socket déjà mort : rien à faire */ }
+  console.log('   Marché     : flux temps réel libéré');
 }
 
 /** Fournisseur sans WebSocket : on rafraîchit par polling REST. */
@@ -331,5 +408,6 @@ module.exports = {
   TIMEFRAMES, TF_MS,
   listSymbols, getCandles, watch, probe, providerStatus,
   activeProvider: () => activeProvider().id,
-  closeStream
+  closeStream,
+  loadCache, cacheInfo
 };
