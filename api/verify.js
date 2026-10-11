@@ -20,10 +20,15 @@ const ROOT = path.join(__dirname, '..');
 const ENV = path.join(ROOT, '.env');
 const API = 'http://localhost:3001';
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skip = 0;
 const ok = (name, cond, extra = '') => {
   (cond ? pass++ : fail++);
   console.log(`  ${cond ? '✓' : '✗'} ${name}${extra ? ' — ' + extra : ''}`);
+};
+/** Test NON EXÉCUTÉ (dépendance externe absente) : ni vert ni rouge. */
+const skipped = (name, why = '') => {
+  skip++;
+  console.log(`  ${'•'} ${name}${why ? ' — ' + why : ''}`);
 };
 const section = t => console.log(`\n${t}`);
 
@@ -98,8 +103,8 @@ function tinyPng(W = 64, H = 40) {
     .match(/^DATABASE_URL=(.+)$/m)?.[1]?.trim();
 
   if (!prodUrl) {
-    section('[2] PostgreSQL — IGNORÉ');
-    console.log('  • DATABASE_URL absent du .env (repli JSON actif)');
+    section('[2] Persistance PostgreSQL — non testé');
+    skipped('persistance PostgreSQL', 'DATABASE_URL absent du .env (repli JSON actif)');
   } else {
     const scratch = `5trade_verify_${Date.now()}`;
     const adminUrl = prodUrl.replace(/\/[^/]*$/, '/postgres');
@@ -175,14 +180,14 @@ function tinyPng(W = 64, H = 40) {
       body: JSON.stringify({ username: 'rene', code: '000000', purpose: 'login' })
     })).status >= 400);
   } catch (e) {
-    console.log('  • serveur non démarré → HTTP ignoré (' + e.message + ')');
+    skipped('endpoints HTTP', `serveur arrêté (${e.message}) — lancez node server.js puis relancez`);
   }
 
   // ── 5. Stockage S3 (Cloudflare R2) : aller-retour réel, nettoyé ──
   section('[5] Stockage S3 (Cloudflare R2)');
   const S3 = require('./s3');
   if (!S3.s3Ready()) {
-    console.log('  • clés S3 absentes du .env → ignoré');
+    skipped('stockage S3', 'clés absentes du .env');
   } else {
     const key = '5trade/_verify.json';
     const body = Buffer.from(JSON.stringify({ v: 1, t: Date.now() }));
@@ -215,17 +220,27 @@ function tinyPng(W = 64, H = 40) {
   if (!vision.visionReady()) {
     ok('clé vision présente', false, `manquante pour ${vinfo.provider}`);
   } else {
-    try {
-      const png = tinyPng();
-      console.log(`  • image de test : PNG ${png.length} octets généré à la volée`);
-      const txt = await vision.analyzeImages(
-        [{ mimeType: 'image/png', base64: png.toString('base64') }],
-        'Décris cette image en une phrase courte (couleurs, forme).'
-      );
-      ok('appel vision → texte non vide', !!txt && txt.length > 3, JSON.stringify(txt.slice(0, 70)));
-    } catch (e) {
-      ok('appel vision', false, e.message);
+    const png = tinyPng();
+    console.log(`  • image de test — PNG ${png.length} octets généré à la volée`);
+    // Une indisponibilité passagère du service (503) n'est pas un bug du code :
+    // on retente une fois, et si ça persiste on marque « non testé » — pas rouge.
+    let txt = null, lastErr = null;
+    for (let essai = 1; essai <= 2 && !txt; essai++) {
+      try {
+        txt = await vision.analyzeImages(
+          [{ mimeType: 'image/png', base64: png.toString('base64') }],
+          'Décris cette image en une phrase courte (couleurs, forme).'
+        );
+      } catch (e) {
+        lastErr = e.message;
+        if (essai === 1 && /50\d|UNAVAILABLE/.test(e.message)) {
+          await new Promise(r => setTimeout(r, 2500));
+        }
+      }
     }
+    if (txt) ok('appel vision → texte non vide', txt.length > 3, JSON.stringify(txt.slice(0, 70)));
+    else if (/50\d|UNAVAILABLE/.test(lastErr || '')) skipped('appel vision', 'service indisponible (503) — réessayez plus tard');
+    else ok('appel vision', false, lastErr);
   }
 
   // ── 7. Journal de trades : logique métier ──
@@ -325,7 +340,7 @@ function tinyPng(W = 64, H = 40) {
     } catch { /* réseau indisponible : on saute le contrôle */ }
   }
   if (!fs.existsSync(babelFile)) {
-    console.log('  • babel.min.js indisponible → contrôle JSX ignoré');
+    skipped('compilation JSX', 'babel.min.js indisponible');
   } else {
     const sandbox = { self: {}, window: {}, console: { log(){}, warn(){}, error(){} }, setTimeout, clearTimeout };
     sandbox.global = sandbox;
@@ -347,6 +362,7 @@ function tinyPng(W = 64, H = 40) {
     ok('graphique chandeliers (drawCandles)', /function drawCandles/.test(jsx));
   }
 
-  console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués`);
+  console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
+  if (skip) console.log(`  (${skip} test(s) non exécuté(s) : dépendance externe absente — voir les lignes « • »)`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('ERREUR:', e.message); process.exit(2); });
