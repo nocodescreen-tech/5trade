@@ -232,6 +232,10 @@ function saveCacheSoon() {
 
 /** Nombre de séries disponibles hors ligne (pour l'interface). */
 function cacheInfo() {
+  // Auto-suffisant : si rien n'est en mémoire (serveur fraîchement démarré),
+  // on lit le disque d'abord — sinon l'interface annoncerait « 0 série »
+  // alors que le cache existe.
+  if (!buffers.size) loadCache();
   const series = [];
   for (const [k, v] of buffers) {
     const [provider, symbol, tf] = k.split('|');
