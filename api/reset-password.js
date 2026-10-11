@@ -1,27 +1,29 @@
 #!/usr/bin/env node
 /**
- * 5trade — réinitialisation du mot de passe du compte unique.
+ * 5trade — définit / réinitialise le mot de passe du compte unique.
  *
  * Usage :
- *   node reset-password.js                    → définit le mot de passe par défaut (5Trade2026)
- *   node reset-password.js MonMotDePasse2026  → définit le mot de passe choisi
+ *   node reset-password.js                       → mot de passe par défaut (5Trade2026)
+ *   node reset-password.js MonMotDePasse2026     → mot de passe choisi
  *   node reset-password.js --username rene --password MonMotDePasse2026
  *
- * Le mot de passe doit contenir au moins 8 caractères, une majuscule, une minuscule et un chiffre.
+ * Le mot de passe doit contenir au moins 8 caractères, une majuscule,
+ * une minuscule et un chiffre.
+ *
+ * IMPORTANT : passe par api/db.js. Le compte vit en PostgreSQL quand
+ * DATABASE_URL est défini (repli JSON sinon) — écrire directement dans
+ * data/account.json n'aurait aucun effet, l'application ne lit plus ce fichier.
  */
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
+const path = require('path');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 require('dotenv').config();
 
-const ACCOUNT_FILE = path.join(__dirname, '..', 'data', 'account.json');
-const OTP_FILE = path.join(__dirname, '..', 'data', 'otp.json');
-const SESSIONS_FILE = path.join(__dirname, '..', 'data', 'sessions.json');
+const DB = require('./db');
 
 const args = process.argv.slice(2);
-const getFlag = (name) => {
+const getFlag = name => {
   const i = args.indexOf(`--${name}`);
   return i > -1 ? args[i + 1] : null;
 };
@@ -40,34 +42,43 @@ if (issues.length) {
   process.exit(1);
 }
 
-const salt = crypto.randomBytes(16).toString('hex');
-const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+(async () => {
+  await DB.init();
 
-let account = {};
-try { account = JSON.parse(fs.readFileSync(ACCOUNT_FILE, 'utf-8')); } catch {}
+  const previous = (await DB.getAccount()) || {};
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
 
-account = {
-  id: 'owner',
-  username,
-  email: account.email || process.env.OWNER_EMAIL || 'no.codescreen@gmail.com',
-  handle: account.handle || '@Nocodescreen667',
-  role: 'owner',
-  verified: true,
-  salt,
-  hash,
-  createdAt: account.createdAt || new Date().toISOString(),
-  passwordChangedAt: new Date().toISOString()
-};
+  const account = {
+    id: 'owner',
+    username,
+    email: previous.email || process.env.OWNER_EMAIL || 'no.codescreen@gmail.com',
+    handle: previous.handle || '@Nocodescreen667',
+    role: 'owner',
+    verified: true,
+    salt,
+    hash,
+    createdAt: previous.createdAt || new Date().toISOString(),
+    passwordChangedAt: new Date().toISOString()
+  };
 
-fs.mkdirSync(path.dirname(ACCOUNT_FILE), { recursive: true });
-fs.writeFileSync(ACCOUNT_FILE, JSON.stringify(account, null, 2));
+  await DB.saveAccount(account);
 
-// Purge des codes OTP et sessions en cours (l'ancien mot de passe ne doit plus rien ouvrir)
-try { fs.unlinkSync(OTP_FILE); } catch {}
-try { fs.unlinkSync(SESSIONS_FILE); } catch {}
+  // L'ancien mot de passe ne doit plus rien ouvrir : on purge les codes OTP
+  // et les sessions. (Les sessions en mémoire du serveur tombent au redémarrage.)
+  await DB.saveOtp({});
+  await DB.saveSessions({});
 
-console.log('✓ Mot de passe mis à jour');
-console.log(`  utilisateur : ${account.username}`);
-console.log(`  email       : ${account.email}`);
-console.log(`  mot de passe: ${password}`);
-console.log('  (codes OTP et sessions précédentes purgés — reconnectez-vous)');
+  console.log('✓ Mot de passe mis à jour');
+  console.log(`  stockage    : ${DB.isPg() ? 'PostgreSQL' : 'fichiers JSON (data/)'}`);
+  console.log(`  utilisateur : ${account.username}`);
+  console.log(`  email       : ${account.email}`);
+  console.log(`  mot de passe: ${password}`);
+  console.log('  (codes OTP et sessions purgés — reconnectez-vous ; redémarrez le serveur)');
+
+  if (DB.isPg && typeof DB.close === 'function') await DB.close();
+  process.exit(0);
+})().catch(e => {
+  console.error('✗ Échec :', e.message);
+  process.exit(1);
+});

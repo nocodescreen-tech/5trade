@@ -36,8 +36,8 @@ const KNOWLEDGE_BASE_DIR = path.join(ROOT, 'knowledge-base');
 const DOCUMENTS_DIR = path.join(KNOWLEDGE_BASE_DIR, 'documents');
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 const DATA_DIR = path.join(ROOT, 'data');
-const ACCOUNT_FILE = path.join(DATA_DIR, 'account.json');
-const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
+// Le compte et l'historique vivent désormais en base (api/db.js) :
+// plus de lecture/écriture directe de fichiers ici.
 
 // ─────────────────────────────────────────────────────────────
 // Middleware

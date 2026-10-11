@@ -76,12 +76,22 @@ function tinyPng(W = 64, H = 40) {
 (async () => {
   // ── 1. Syntaxe ──
   section('[1] Syntaxe');
-  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'bootstrap-db.js']) {
+  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'reset-password.js', 'bootstrap-db.js']) {
     try {
       require('child_process').execFileSync(process.execPath, ['--check', path.join(__dirname, f)]);
       ok(f, true);
     } catch (e) { ok(f, false, e.message.split('\n')[0]); }
   }
+
+  // Anti-régression : le compte vit en base. Écrire dans data/account.json
+  // n'aurait aucun effet (l'application ne lit plus ce fichier) — le jour où
+  // on perd le mot de passe, le script de secours doit réellement agir.
+  const rpSrc = fs.readFileSync(path.join(__dirname, 'reset-password.js'), 'utf8');
+  ok('reset-password.js passe par la couche de persistance',
+    /require\('\.\/db'\)/.test(rpSrc) && !/writeFileSync\([^)]*account\.json/.test(rpSrc));
+  const srvSrc = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  ok('server.js ne lit/écrit plus account.json directement',
+    !/readJSON\(ACCOUNT_FILE/.test(srvSrc) && !/writeJSON\(ACCOUNT_FILE/.test(srvSrc));
 
   // ── 2 & 3. Persistance ──
   const prodUrl = (fs.existsSync(ENV) ? fs.readFileSync(ENV, 'utf-8') : '')
