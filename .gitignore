@@ -38,3 +38,11 @@ Thumbs.db
 # Backup
 *.bak
 *.backup
+
+# Outil de vérification (2 Mo, retéléchargé au besoin par verify.js)
+api/babel.min.js
+
+# Journaux du serveur lancé en tâche de fond
+server.log
+out.log
+err.log

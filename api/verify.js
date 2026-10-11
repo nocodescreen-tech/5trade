@@ -76,7 +76,7 @@ function tinyPng(W = 64, H = 40) {
 (async () => {
   // ── 1. Syntaxe ──
   section('[1] Syntaxe');
-  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'reset-password.js', 'bootstrap-db.js']) {
+  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'market.js', 'structure.js', 'reset-password.js', 'bootstrap-db.js']) {
     try {
       require('child_process').execFileSync(process.execPath, ['--check', path.join(__dirname, f)]);
       ok(f, true);
@@ -306,6 +306,46 @@ function tinyPng(W = 64, H = 40) {
   ok('CSV : stratégies jointes par |', csv.includes('a|b'));
   ok('CSV : 2 lignes pour 1 trade', lines.filter(Boolean).length === 2);
   ok('CSV : liste vide → en-tête seul', X.toCsv([]).trim().split('\r\n').length === 1);
+
+  // ── 9. Frontend : compilation JSX (détecte une erreur de syntaxe sans navigateur) ──
+  section('[9] Frontend — compilation JSX');
+  const vm = require('vm');
+  const FRONT = path.join(__dirname, '..', 'frontend');
+  const htmlSrc = fs.readFileSync(path.join(FRONT, 'index.html'), 'utf8');
+  // Tous les <script type="text/babel"> sans attribut src = notre application
+  const jsx = [...htmlSrc.matchAll(/<script([^>]*type="text\/babel"[^>]*)>([\s\S]*?)<\/script>/g)]
+    .filter(m => !/\bsrc=/.test(m[1])).map(m => m[2]).join('\n');
+  ok('bloc JSX inline récupéré', jsx.length > 1000, `${jsx.length} caractères`);
+
+  const babelFile = path.join(__dirname, 'babel.min.js');
+  if (!fs.existsSync(babelFile)) {
+    try {
+      const r = await fetch('https://unpkg.com/@babel/standalone/babel.min.js');
+      if (r.ok) fs.writeFileSync(babelFile, Buffer.from(await r.arrayBuffer()));
+    } catch { /* réseau indisponible : on saute le contrôle */ }
+  }
+  if (!fs.existsSync(babelFile)) {
+    console.log('  • babel.min.js indisponible → contrôle JSX ignoré');
+  } else {
+    const sandbox = { self: {}, window: {}, console: { log(){}, warn(){}, error(){} }, setTimeout, clearTimeout };
+    sandbox.global = sandbox;
+    vm.createContext(sandbox);
+    vm.runInContext(fs.readFileSync(babelFile, 'utf8'), sandbox);
+    const Babel = sandbox.Babel || sandbox.self.Babel;
+    const compile = (label, code) => {
+      try {
+        Babel.transform(code, { presets: [['react', { runtime: 'classic' }]], filename: label });
+        ok(label, true);
+      } catch (e) {
+        ok(label, false, `${String(e.message).split('\n')[0]}${e.loc ? ` (ligne ${e.loc.line})` : ''}`);
+      }
+    };
+    compile('app (JSX inline)', jsx);
+    compile('reactbits.jsx', fs.readFileSync(path.join(FRONT, 'reactbits.jsx'), 'utf8'));
+    ok('composant LiveMarket présent', /function LiveMarket\(\)/.test(jsx));
+    ok('onglet « Direct » déclaré', /id:'live'/.test(jsx));
+    ok('graphique chandeliers (drawCandles)', /function drawCandles/.test(jsx));
+  }
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués`);
   process.exit(fail ? 1 : 0);

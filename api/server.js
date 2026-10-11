@@ -179,6 +179,12 @@ const Search = require('./search');
 // ─── Export du journal (CSV / JSON) ───
 const Export = require('./export');
 
+// ─── Marché temps réel (bourses / proxys) ───
+const Market = require('./market');
+
+// ─── Analyse de structure sur données exactes ───
+const Structure = require('./structure');
+
 /** Miroir distant d'un artefact de la base : S3 → ImageKit → local */
 async function mirrorRemote(relPath, buffer, contentType) {
   const clean = String(relPath).replace(/\\/g, '/');
@@ -1423,6 +1429,134 @@ app.get('/api/search', requireAuth, async (req, res) => {
     const results = Search.search(all, q, { limit });
     res.json({ success: true, query: q, count: results.length, results });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────
+// MARCHÉ TEMPS RÉEL + ANALYSE SUR DONNÉES EXACTES
+// ─────────────────────────────────────────────────────────────
+
+// État du fournisseur de données (disponibilité réelle, pas déclarative)
+app.get('/api/market/status', requireAuth, async (req, res) => {
+  try {
+    const status = Market.providerStatus();
+    const probe = await Market.probe(status.provider);
+    res.json({ success: true, ...status, ready: probe.ok, probe });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/market/symbols', requireAuth, (req, res) => {
+  res.json({ success: true, symbols: Market.listSymbols(), timeframes: Market.TIMEFRAMES });
+});
+
+// Bougies OHLCV exactes (REST puis buffer live)
+app.get('/api/market/candles', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').trim();
+    const tf = String(req.query.tf || '5m').trim();
+    const count = Math.min(parseInt(req.query.count || '300', 10) || 300, 1000);
+    if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+    const r = await Market.getCandles(symbol, tf, count);
+    res.json({ success: true, symbol, timeframe: tf, ...r });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Analyse structurelle chiffrée (aucun modèle : que du calcul)
+app.get('/api/market/structure', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').trim();
+    const tf = String(req.query.tf || '5m').trim();
+    const count = Math.min(parseInt(req.query.count || '300', 10) || 300, 1000);
+    if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+    const { candles, provider, source } = await Market.getCandles(symbol, tf, count);
+    const report = Structure.analyze(candles, { symbol, timeframe: tf });
+    res.json({ success: true, symbol, timeframe: tf, provider, source, report });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Suivi temps réel (Server-Sent Events) — la bougie en cours arrive en continu
+app.get('/api/market/stream', requireAuth, (req, res) => {
+  const symbol = String(req.query.symbol || '').trim();
+  const tf = String(req.query.tf || '5m').trim();
+  if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  if (res.flushHeaders) res.flushHeaders();
+
+  let stop;
+  try {
+    stop = Market.watch(symbol, tf, candle => {
+      res.write(`event: candle\ndata: ${JSON.stringify(candle)}\n\n`);
+    });
+  } catch (e) {
+    res.write(`event: error\ndata: ${JSON.stringify({ error: e.message })}\n\n`);
+    return res.end();
+  }
+  res.write(`event: hello\ndata: ${JSON.stringify({ symbol, tf, provider: Market.activeProvider() })}\n\n`);
+
+  const keepAlive = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 20000);
+  req.on('close', () => { clearInterval(keepAlive); try { stop(); } catch {} });
+});
+
+// Analyse complète : structure calculée + base de connaissance + plan
+// Le modèle rédige à partir de NOMBRES exacts (pas d'une capture).
+app.post('/api/market/analyze', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.body.symbol || '').trim();
+    const tf = String(req.body.tf || '5m').trim();
+    const maxStrategies = parseInt(req.body.maxStrategies || '3', 10);
+    if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+
+    const { candles, provider, source } = await Market.getCandles(symbol, tf, 300);
+    const report = Structure.analyze(candles, { symbol, timeframe: tf });
+
+    const all = await loadAllStrategies();
+    const matched = searchKnowledgeBase(all, { pair: symbol, timeframes: [tf], visionAnalysis: report.summary });
+    const top = matched.slice(0, maxStrategies);
+
+    let plan;
+    try {
+      plan = await buildPlan({ pair: symbol, timeframes: [tf], visionAnalysis: report.summary, strategies: top });
+    } catch (e) {
+      plan = { action: 'HOLD', reason: 'Combinaison indisponible: ' + e.message, confidence: 'low', entry: {}, nextSteps: [], risk: 'medium' };
+    }
+
+    const analysis = {
+      mode: 'live',
+      symbol, pair: symbol, timeframe: tf,
+      provider, source,
+      dataPoints: candles.length,
+      lastPrice: report.lastPrice,
+      atr14: report.atr14,
+      structure: report.structure,
+      levels: report.levels,
+      premiumDiscount: report.premiumDiscount,
+      fvgs: report.fvgs,
+      orderBlocks: report.orderBlocks,
+      liquidity: report.liquidity,
+      summary: report.summary,
+      analysisDate: new Date().toISOString()
+    };
+
+    const recommendations = {
+      ...plan,
+      strategiesUsed: top.map(s => ({
+        id: s.id, title: s.title, type: s.type, source: s.source, relevanceScore: s.relevanceScore
+      })),
+      candidatesFound: matched.length
+    };
+
+    const historyId = newId('hist_');
+    await appendHistory({
+      id: historyId, mode: 'live', pair: symbol, timeframes: [tf],
+      action: plan.action, confidence: plan.confidence, reason: plan.reason,
+      strategiesUsed: recommendations.strategiesUsed, timestamp: analysis.analysisDate
+    });
+    analysis.analysisId = historyId;
+
+    res.json({ success: true, analysis, recommendations });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // ─────────────────────────────────────────────────────────────
