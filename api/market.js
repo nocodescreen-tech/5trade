@@ -234,6 +234,9 @@ function watch(symbol, tf, onCandle) {
   return () => {
     subscribers.delete(sub);
     if (sub._poll) clearInterval(sub._poll);
+    // Plus aucun abonné : on libère la connexion temps réel au lieu de la
+    // laisser ouverte indéfiniment (une seule suffit, mais pas zéro abonné).
+    if (subscribers.size === 0) closeStream();
   };
 }
 
@@ -285,7 +288,11 @@ function reopenStream(p, symbols, tf) {
 
 function closeStream() {
   if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
-  if (ws) { try { ws.removeAllListeners(); ws.close(); } catch {} ws = null; }
+  if (ws) {
+    try { ws.removeAllListeners(); ws.close(); } catch {}
+    ws = null;
+    console.log('   Marché     : flux temps réel libéré (plus aucun abonné)');
+  }
 }
 
 /** Fournisseur sans WebSocket : on rafraîchit par polling REST. */
