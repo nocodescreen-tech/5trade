@@ -1,0 +1,1917 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#070a11">
+<title>5trade — Plateforme de trading IA</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script>
+  // Runtime React "classic" : évite l'injection d'un import ESM dans les scripts inline.
+  Babel.registerPreset('react-classic', {
+    presets: [[Babel.availablePresets['react'], { runtime: 'classic' }]]
+  });
+</script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:#070a11; --panel:#0e1420; --panel2:#111a29; --border:#1b2433;
+    --txt:#e8eef7; --muted:#8a99ad; --dim:#5d6b7d;
+    --accent:#2563eb; --accent2:#7c3aed; --ok:#10b981; --warn:#f59e0b; --bad:#ef4444;
+    --glow:rgba(37,99,235,.35);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--txt);
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased; overflow-x:hidden;
+  }
+  ::selection{background:rgba(37,99,235,.35)}
+
+  /* ── Fond animé (aurora + grille) ── */
+  .bg-layer{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+  .bg-grid{
+    position:absolute;inset:-50%;
+    background-image:linear-gradient(rgba(37,99,235,.055) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(37,99,235,.055) 1px,transparent 1px);
+    background-size:52px 52px;
+    animation:gridDrift 26s linear infinite;
+  }
+  @keyframes gridDrift{to{transform:translate3d(52px,52px,0)}}
+  .bg-aurora{
+    position:absolute;width:60vw;height:60vw;border-radius:50%;filter:blur(90px);opacity:.5;
+  }
+  .bg-aurora.a{background:radial-gradient(circle,#2563eb,transparent 65%);top:-18vw;left:-12vw;animation:float1 22s ease-in-out infinite}
+  .bg-aurora.b{background:radial-gradient(circle,#7c3aed,transparent 65%);top:22vh;right:-16vw;animation:float2 28s ease-in-out infinite}
+  .bg-aurora.c{background:radial-gradient(circle,#0ea5e9,transparent 65%);bottom:-22vw;left:24vw;animation:float3 32s ease-in-out infinite}
+  @keyframes float1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(6vw,5vh) scale(1.15)}}
+  @keyframes float2{0%,100%{transform:translate(0,0) scale(1.1)}50%{transform:translate(-7vw,4vh) scale(.92)}}
+  @keyframes float3{0%,100%{transform:translate(0,0) scale(.95)}50%{transform:translate(4vw,-6vh) scale(1.2)}}
+  .bg-noise{position:absolute;inset:0;opacity:.035;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+  .shell{position:relative;z-index:1}
+
+  /* ── Surfaces ── */
+  .panel{
+    background:linear-gradient(160deg,rgba(17,26,41,.92),rgba(14,20,32,.86));
+    border:1px solid var(--border); border-radius:16px;
+    backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+  }
+  .panel-soft{background:rgba(14,20,32,.6);border:1px solid var(--border);border-radius:14px}
+
+  /* ── Boutons ── */
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    background:linear-gradient(135deg,var(--accent),#1d4ed8);color:#fff;border:none;
+    padding:11px 20px;border-radius:11px;cursor:pointer;font-weight:600;font-size:14px;
+    transition:transform .18s cubic-bezier(.2,.8,.2,1),box-shadow .18s,filter .18s;
+    box-shadow:0 6px 20px -8px var(--glow); font-family:inherit;
+  }
+  .btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 10px 26px -8px var(--glow);filter:brightness(1.06)}
+  .btn:active:not(:disabled){transform:translateY(0) scale(.985)}
+  .btn:disabled{opacity:.42;cursor:not-allowed;box-shadow:none}
+  .btn.ghost{background:rgba(27,36,51,.7);border:1px solid var(--border);box-shadow:none;color:var(--txt)}
+  .btn.ghost:hover:not(:disabled){background:rgba(37,99,235,.16);border-color:rgba(37,99,235,.5)}
+  .btn.ok{background:linear-gradient(135deg,#059669,#10b981)}
+  .btn.danger{background:linear-gradient(135deg,#b91c1c,#ef4444)}
+  .btn.sm{padding:8px 14px;font-size:13px;border-radius:9px}
+
+  /* ── Champs ── */
+  .fld{
+    width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:11px;
+    background:rgba(7,10,17,.75);color:var(--txt);font-family:inherit;font-size:14px;
+    transition:border-color .18s,box-shadow .18s;
+  }
+  .fld::placeholder{color:var(--dim)}
+  .fld:focus{outline:none;border-color:rgba(37,99,235,.75);box-shadow:0 0 0 3px rgba(37,99,235,.16)}
+  textarea.fld{resize:vertical;line-height:1.55}
+  label.lbl{display:block;font-size:11.5px;font-weight:600;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;margin:12px 0 6px}
+
+  /* ── Tags / badges ── */
+  .tag{display:inline-block;font-size:11px;background:rgba(37,99,235,.14);color:#8fb4ff;
+    border:1px solid rgba(37,99,235,.25);padding:3px 9px;border-radius:20px;margin:2px 3px 2px 0}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;
+    letter-spacing:.03em;padding:4px 11px;border-radius:20px}
+
+  /* ── Reveal ── */
+  .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s cubic-bezier(.2,.8,.2,1),transform .6s cubic-bezier(.2,.8,.2,1)}
+  .reveal.in{opacity:1;transform:none}
+
+  /* ── Tilt 3D ── */
+  .tilt{transform-style:preserve-3d;transition:transform .35s cubic-bezier(.2,.8,.2,1),box-shadow .35s;will-change:transform}
+  .tilt-inner{transform:translateZ(26px)}
+
+  /* ── Loaders ── */
+  .spin{display:inline-block;border-radius:50%;border:2.5px solid rgba(255,255,255,.18);
+    border-top-color:#fff;animation:sp .75s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .skel{position:relative;overflow:hidden;background:rgba(27,36,51,.6);border-radius:9px}
+  .skel::after{content:'';position:absolute;inset:0;transform:translateX(-100%);
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.07),transparent);
+    animation:shim 1.4s infinite}
+  @keyframes shim{to{transform:translateX(100%)}}
+  .dot-live{width:8px;height:8px;border-radius:50%;background:var(--ok);position:relative}
+  .dot-live::after{content:'';position:absolute;inset:0;border-radius:50%;background:var(--ok);animation:ping 1.8s cubic-bezier(0,0,.2,1) infinite}
+  @keyframes ping{0%{transform:scale(1);opacity:.7}75%,100%{transform:scale(3.2);opacity:0}}
+
+  /* ── Progression ── */
+  .bar{height:3px;background:rgba(27,36,51,.9);border-radius:9px;overflow:hidden}
+  .bar > i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));
+    border-radius:9px;transition:width .5s cubic-bezier(.2,.8,.2,1)}
+
+  /* ── Nav ── */
+  .nav{position:relative;display:flex;gap:4px;flex-wrap:wrap}
+  .nav-item{position:relative;z-index:1;display:inline-flex;align-items:center;gap:8px;
+    padding:9px 16px;border-radius:11px;font-size:14px;font-weight:600;color:var(--muted);
+    background:transparent;border:none;cursor:pointer;font-family:inherit;transition:color .2s}
+  .nav-item:hover{color:var(--txt)}
+  .nav-item.on{color:#fff}
+  .nav-pill{position:absolute;z-index:0;height:calc(100% - 0px);border-radius:11px;
+    background:linear-gradient(135deg,var(--accent),#1d4ed8);box-shadow:0 6px 22px -8px var(--glow);
+    transition:transform .35s cubic-bezier(.2,.9,.2,1),width .35s cubic-bezier(.2,.9,.2,1)}
+  .mobile-nav{display:none}
+  @media (max-width:820px){
+    .nav{display:none}
+    .mobile-nav{
+      display:grid;grid-template-columns:repeat(4,1fr);gap:4px;position:fixed;bottom:0;left:0;right:0;
+      z-index:60;padding:8px 10px calc(8px + env(safe-area-inset-bottom));
+      background:rgba(9,13,20,.94);backdrop-filter:blur(16px);border-top:1px solid var(--border)
+    }
+    .mobile-nav button{display:flex;flex-direction:column;align-items:center;gap:4px;background:none;border:none;
+      color:var(--muted),font-family:inherit;font-size:10.5px;font-weight:600;padding:7px 4px;border-radius:10px;cursor:pointer}
+    .mobile-nav button.on{color:#fff;background:rgba(37,99,235,.18)}
+    .pad-mobile{padding-bottom:82px}
+  }
+
+  /* ── OTP ── */
+  .otp-box{width:48px;height:58px;text-align:center;font-size:24px;font-weight:800;
+    background:rgba(7,10,17,.8);border:1.5px solid var(--border);border-radius:12px;color:var(--txt);
+    transition:border-color .18s,box-shadow .18s,transform .18s;font-family:inherit}
+  .otp-box:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.2);transform:translateY(-2px)}
+  .otp-box.filled{border-color:rgba(16,185,129,.6)}
+
+  /* ── Drop zone ── */
+  .drop{border:2px dashed var(--border);border-radius:14px;padding:26px;text-align:center;
+    cursor:pointer;transition:border-color .2s,background .2s,transform .2s;position:relative;overflow:hidden}
+  .drop:hover{border-color:rgba(37,99,235,.6);background:rgba(37,99,235,.06)}
+  .drop.hot{border-color:var(--ok);background:rgba(16,185,129,.09);transform:scale(1.01)}
+
+  .thumb{position:relative;border-radius:12px;overflow:hidden;border:1px solid var(--border);
+    background:#05080e;aspect-ratio:16/10;animation:popIn .4s cubic-bezier(.2,.9,.2,1)}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .5s}
+  .thumb:hover img{transform:scale(1.08)}
+  @keyframes popIn{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:none}}
+
+  .floaty{animation:floaty 6s ease-in-out infinite}
+  @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+
+  .glow-ring{box-shadow:0 0 0 1px rgba(37,99,235,.28),0 0 34px -12px var(--glow)}
+  .gtext{background:linear-gradient(92deg,#60a5fa,#2563eb 35%,#a78bfa 75%,#60a5fa);
+    background-size:250% auto;-webkit-background-clip:text;background-clip:text;color:transparent;
+    animation:gslide 6s linear infinite}
+  @keyframes gslide{to{background-position:250% center}}
+
+  .grid-auto{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(285px,1fr))}
+  .stat-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:#070a11}
+  ::-webkit-scrollbar-thumb{background:#222d3f;border-radius:6px;border:2px solid #070a11}
+  ::-webkit-scrollbar-thumb:hover{background:#2f3d54}
+
+  /* ── Curseur animé (move effects) ── */
+  #fx-glow{position:fixed;top:0;left:0;width:360px;height:360px;border-radius:50%;pointer-events:none;z-index:70;
+    background:radial-gradient(circle,rgba(37,99,235,.17),transparent 62%);transform:translate(-50%,-50%);
+    opacity:0;transition:opacity .4s;mix-blend-mode:screen;will-change:transform}
+  #fx-dot{position:fixed;top:0;left:0;width:9px;height:9px;border-radius:50%;pointer-events:none;z-index:72;
+    background:#7cb2ff;box-shadow:0 0 16px rgba(37,99,235,.95);transform:translate(-50%,-50%);will-change:transform}
+  #fx-ring{position:fixed;top:0;left:0;width:36px;height:36px;border-radius:50%;pointer-events:none;z-index:71;
+    border:1.5px solid rgba(124,178,255,.5);transform:translate(-50%,-50%);will-change:transform;
+    transition:width .25s,height .25s,border-color .25s}
+  #fx-ring.click{width:20px;height:20px;border-color:rgba(16,185,129,.9)}
+  .fx-ripple{position:fixed;border-radius:50%;pointer-events:none;z-index:69;
+    border:1.5px solid rgba(124,178,255,.75);transform:translate(-50%,-50%);
+    animation:fxRipple .75s cubic-bezier(.2,.8,.2,1) forwards}
+  @keyframes fxRipple{from{width:0;height:0;opacity:.95}to{width:130px;height:130px;opacity:0}}
+  @media (hover:none),(pointer:coarse){#fx-glow,#fx-dot,#fx-ring{display:none}}
+
+  /* ── Boutons 3D (appliqué à tous les .btn) ── */
+  .btn3d,.btn{position:relative;transform-style:preserve-3d;overflow:hidden;will-change:transform}
+  .btn3d::after,.btn::after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+    background:linear-gradient(115deg,transparent 34%,rgba(255,255,255,.3) 50%,transparent 66%);
+    transform:translateX(-130%);transition:transform .65s cubic-bezier(.2,.8,.2,1)}
+  .btn3d:hover::after,.btn:hover::after{transform:translateX(130%)}
+  .btn3d:hover,.btn:hover:not(:disabled){transform:perspective(600px) translateY(-3px) rotateX(9deg);
+    box-shadow:0 15px 32px -10px var(--glow),0 5px 0 0 rgba(29,78,216,.5)}
+  .btn3d:active,.btn:active:not(:disabled){transform:perspective(600px) translateY(1px) rotateX(0);
+    box-shadow:0 5px 14px -6px var(--glow),0 1px 0 0 rgba(29,78,216,.45)}
+  .btn.ghost:hover:not(:disabled){box-shadow:0 14px 30px -12px rgba(37,99,235,.5)}
+  .btn3d:disabled,.btn:disabled{transform:none!important}
+
+  /* ── Loader 3D (cube) ── */
+  .cube-wrap{perspective:360px;display:inline-block;flex-shrink:0}
+  .cube{width:100%;height:100%;position:relative;transform-style:preserve-3d;
+    animation:cubeSpin 2.6s cubic-bezier(.55,.05,.45,.95) infinite}
+  .cube b{position:absolute;inset:0;border:1.5px solid rgba(96,165,250,.8);
+    background:linear-gradient(140deg,rgba(37,99,235,.18),rgba(124,58,237,.1));border-radius:3px}
+  .cube b:nth-child(1){transform:translateZ(var(--d))}
+  .cube b:nth-child(2){transform:rotateY(180deg) translateZ(var(--d))}
+  .cube b:nth-child(3){transform:rotateY(90deg) translateZ(var(--d))}
+  .cube b:nth-child(4){transform:rotateY(-90deg) translateZ(var(--d))}
+  .cube b:nth-child(5){transform:rotateX(90deg) translateZ(var(--d))}
+  .cube b:nth-child(6){transform:rotateX(-90deg) translateZ(var(--d))}
+  @keyframes cubeSpin{from{transform:rotateX(-24deg) rotateY(0)}to{transform:rotateX(-24deg) rotateY(360deg)}}
+
+  /* ── Validation 3D ── */
+  .check3d{width:88px;height:88px;border-radius:27px;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(140deg,rgba(16,185,129,.24),rgba(37,99,235,.16));
+    border:1.5px solid rgba(16,185,129,.55);color:#34d399;font-size:34px;position:relative;
+    transform-style:preserve-3d;animation:checkPop .85s cubic-bezier(.2,1.1,.3,1) both;
+    box-shadow:0 18px 40px -14px rgba(16,185,129,.5)}
+  @keyframes checkPop{
+    0%{transform:perspective(650px) rotateY(-180deg) scale(.35);opacity:0}
+    60%{transform:perspective(650px) rotateY(14deg) scale(1.08);opacity:1}
+    100%{transform:perspective(650px) rotateY(0) scale(1)}
+  }
+  .check-ring{position:absolute;inset:-9px;border-radius:34px;border:2px solid rgba(16,185,129,.45);
+    animation:ping 1.5s cubic-bezier(0,0,.2,1) infinite}
+
+  /* ── Mascotte animée ── */
+  .mascot{transition:transform .6s cubic-bezier(.22,.9,.24,1),filter .4s;transform-origin:50% 100%;will-change:transform}
+  .mascot.login{transform:translateX(-16px) rotate(-3.5deg)}
+  .mascot.signup{transform:translateX(16px) rotate(3.5deg)}
+  .mascot:hover{filter:brightness(1.08)}
+  .blink{animation:blink 4.6s ease-in-out infinite}
+  @keyframes blink{0%,93%,100%{transform:scaleY(1)}95.5%{transform:scaleY(.08)}97%{transform:scaleY(1)}}
+
+  .authpane{animation:paneIn .5s cubic-bezier(.22,.9,.24,1) both}
+  @keyframes paneIn{from{opacity:0;transform:translateY(12px) scale(.99)}to{opacity:1;transform:none}}
+
+  /* ── Responsive ── */
+  .wrap{max-width:1280px;margin:0 auto;padding:22px 24px 48px;width:100%}
+  .otp-box{width:min(48px,12.5vw);height:min(58px,15vw)}
+
+  /* Grand écran : on exploite la largeur, tout tient sans scroll inutile */
+  @media (min-width:1360px){
+    .grid-auto{grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:16px}
+    .stat-grid{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+    .wrap{padding:26px 32px 56px}
+  }
+  @media (min-width:1700px){
+    .wrap{max-width:1500px}
+  }
+
+  /* Tablette */
+  @media (max-width:1024px){
+    .wrap{padding:18px 18px 44px}
+  }
+
+  /* Mobile */
+  @media (max-width:820px){
+    .wrap{padding:14px 14px 96px}
+    .panel{border-radius:14px}
+    .stat-grid{grid-template-columns:1fr 1fr;gap:10px}
+    .grid-auto{grid-template-columns:1fr;gap:12px}
+    .card{padding:16px}
+    header .hdr{padding:10px 14px !important}
+    .auth-card{padding:22px 18px 20px !important}
+    #fx-glow{display:none}
+    .bg-aurora{filter:blur(60px);opacity:.42}
+    .mascot{width:120px;height:129px}
+    .btn{padding:12px 18px}
+    .nav-item{padding:10px 14px}
+    pre{font-size:12px !important}
+  }
+  @media (max-width:430px){
+    .stat-grid{grid-template-columns:1fr}
+    .otp-box{height:52px;font-size:20px}
+  }
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+  }
+</style>
+</head>
+<body>
+<div class="bg-layer">
+  <div class="bg-grid"></div>
+  <div class="bg-aurora a"></div>
+  <div class="bg-aurora b"></div>
+  <div class="bg-aurora c"></div>
+  <div class="bg-noise"></div>
+</div>
+
+<div id="root" class="shell"></div>
+
+<!-- ── Composants ReactBits canoniques ── -->
+<script type="text/babel" data-presets="react-classic" src="reactbits.jsx"></script>
+
+<!-- ── Application 5trade ── -->
+<script type="text/babel" data-presets="react-classic">
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+const RB = window.ReactBits || {};
+const { SplashCursor, SpotlightCard, GradientText, ShinyText, LatticeLoader, Counter } = RB;
+
+const API_BASE = (window.location.port === '5173' || window.location.protocol === 'file:')
+  ? 'http://localhost:3001/api' : '/api';
+
+const api = (path, opts = {}) =>
+  fetch(`${API_BASE}${path}`, { credentials: 'include', ...opts });
+
+const REDUCED = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ══════════════ Primitives animées ══════════════ */
+
+function Reveal({ children, delay = 0, className = '', style = {} }) {
+  const ref = useRef(null);
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (REDUCED()) { setSeen(true); return; }
+    const io = new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) { setSeen(true); io.disconnect(); }
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return (
+    <div ref={ref}
+      className={`reveal ${seen ? 'in' : ''} ${className}`}
+      style={{ transitionDelay: `${delay}ms`, ...style }}>
+      {children}
+    </div>
+  );
+}
+
+function Tilt({ children, max = 9, scale = 1.015, className = '', style = {} }) {
+  const ref = useRef(null);
+  const onMove = (e) => {
+    const el = ref.current;
+    if (!el || REDUCED()) return;
+    const r = el.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width - 0.5;
+    const py = (e.clientY - r.top) / r.height - 0.5;
+    el.style.transform =
+      `perspective(900px) rotateY(${px * max * 2}deg) rotateX(${-py * max * 2}deg) scale(${scale})`;
+  };
+  const reset = () => { if (ref.current) ref.current.style.transform = ''; };
+  return (
+    <div ref={ref} className={`tilt ${className}`} style={style}
+      onMouseMove={onMove} onMouseLeave={reset}>
+      {children}
+    </div>
+  );
+}
+
+function Skeleton({ h = 14, w = '100%', r = 8, style = {} }) {
+  return <div className="skel" style={{ height: h, width: w, borderRadius: r, ...style }} />;
+}
+
+function Spinner({ size = 16, color = '#fff' }) {
+  return <span className="spin" style={{ width: size, height: size, borderTopColor: color }} />;
+}
+
+/* Curseur animé : halo + anneau + point, ripples au clic */
+function CursorFX() {
+  useEffect(() => {
+    if (REDUCED()) return;
+    if (window.matchMedia('(hover: none), (pointer: coarse)').matches) return;
+    const glow = document.getElementById('fx-glow');
+    const ring = document.getElementById('fx-ring');
+    const dot  = document.getElementById('fx-dot');
+    if (!glow || !ring || !dot) return;
+
+    let mx = window.innerWidth / 2, my = window.innerHeight / 2;
+    let gx = mx, gy = my, rx = mx, ry = my, raf = 0;
+
+    const onMove = (e) => {
+      mx = e.clientX; my = e.clientY;
+      dot.style.transform = `translate(${mx}px,${my}px) translate(-50%,-50%)`;
+    };
+    const onOver = (e) => {
+      const t = e.target.closest('button, a, input, select, textarea, .drop, .tilt');
+      ring.style.width  = t ? '52px' : '36px';
+      ring.style.height = t ? '52px' : '36px';
+    };
+    const onDown = (e) => {
+      ring.classList.add('click');
+      const sp = document.createElement('span');
+      sp.className = 'fx-ripple';
+      sp.style.left = e.clientX + 'px';
+      sp.style.top  = e.clientY + 'px';
+      document.body.appendChild(sp);
+      setTimeout(() => sp.remove(), 760);
+    };
+    const onUp = () => ring.classList.remove('click');
+
+    const loop = () => {
+      gx += (mx - gx) * 0.10; gy += (my - gy) * 0.10;
+      rx += (mx - rx) * 0.22; ry += (my - ry) * 0.22;
+      glow.style.transform = `translate(${gx}px,${gy}px) translate(-50%,-50%)`;
+      ring.style.transform = `translate(${rx}px,${ry}px) translate(-50%,-50%)`;
+      raf = requestAnimationFrame(loop);
+    };
+
+    glow.style.opacity = '1';
+    window.addEventListener('mousemove', onMove, { passive: true });
+    window.addEventListener('mouseover', onOver, { passive: true });
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('mouseup', onUp);
+    loop();
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseover', onOver);
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+
+  return (
+    <>
+      <div id="fx-glow"></div>
+      <div id="fx-ring"></div>
+      <div id="fx-dot"></div>
+    </>
+  );
+}
+
+/* Loader 3D — cube en rotation */
+function Loader3D({ size = 42, label = '' }) {
+  const half = size / 2;
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:12 }}>
+      <span className="cube-wrap" style={{ width:size, height:size }}>
+        <span className="cube" style={{ '--d': `${half}px` }}>
+          {[0,1,2,3,4,5].map(i => <b key={i}></b>)}
+        </span>
+      </span>
+      {label && <span style={{ color:'var(--muted)', fontSize:13 }}>{label}</span>}
+    </span>
+  );
+}
+
+/* Validation 3D — coche animée */
+function Check3D({ label = 'Vérifié' }) {
+  return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:14, padding:'10px 0' }}>
+      <div className="check3d">
+        <span className="check-ring"></span>
+        <i className="fas fa-check"></i>
+      </div>
+      <span style={{ color:'#6ee7b7', fontSize:13.5, fontWeight:600 }}>{label}</span>
+    </div>
+  );
+}
+
+function ActionBadge({ action }) {
+  const map = {
+    BUY:  { bg:'rgba(16,185,129,.16)', fg:'#34d399', br:'rgba(16,185,129,.4)', ic:'fa-arrow-trend-up' },
+    SELL: { bg:'rgba(239,68,68,.16)',  fg:'#f87171', br:'rgba(239,68,68,.4)',  ic:'fa-arrow-trend-down' },
+    HOLD: { bg:'rgba(245,158,11,.16)', fg:'#fbbf24', br:'rgba(245,158,11,.4)', ic:'fa-pause' },
+    WAIT: { bg:'rgba(148,163,184,.16)',fg:'#cbd5e1', br:'rgba(148,163,184,.35)',ic:'fa-hourglass-half' }
+  };
+  const s = map[action] || map.HOLD;
+  return (
+    <span className="badge" style={{ background:s.bg, color:s.fg, border:`1px solid ${s.br}` }}>
+      <i className={`fas ${s.ic}`}></i>{action}
+    </span>
+  );
+}
+
+function StatTile({ icon, label, value, decimals = 0, suffix = '', color = '#60a5fa', delay = 0 }) {
+  return (
+    <Reveal delay={delay}>
+      <Tilt max={7}>
+        <SpotlightCard className="panel" spotlightColor="rgba(37,99,235,.22)">
+          <div style={{ padding:'16px 18px' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:9, color:'var(--muted)', fontSize:11.5,
+              fontWeight:700, letterSpacing:'.05em', textTransform:'uppercase' }}>
+              <i className={`fas ${icon}`} style={{ color }}></i>{label}
+            </div>
+            <div style={{ marginTop:6, color:'#fff', fontWeight:800, fontSize:30, letterSpacing:'-1px' }}>
+              {Counter ? <Counter value={value} decimals={decimals} suffix={suffix} fontSize={30} /> : `${value}${suffix}`}
+            </div>
+          </div>
+        </SpotlightCard>
+      </Tilt>
+    </Reveal>
+  );
+}
+
+/* ══════════════ MASCOTTE ANIMÉE ══════════════ */
+
+function AuthMascot({ mode = 'login', focus = null }) {
+  const covering = focus === 'password';
+  const lookingUp = focus === 'username' || focus === 'email' || covering;
+  const look = focus === 'username' ? -3 : focus === 'email' ? 0 : covering ? 0 : 3;
+
+  return (
+    <div style={{ display:'flex', justifyContent:'center', marginBottom:-4 }}>
+      <svg viewBox="0 0 200 214" width="152" height="163"
+        className={`mascot ${mode}`}
+        role="img" aria-label="Assistant 5trade">
+        <defs>
+          <linearGradient id="mBody" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#3b82f6" />
+            <stop offset="1" stopColor="#7c3aed" />
+          </linearGradient>
+          <linearGradient id="mHead" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#1b2434" />
+            <stop offset="1" stopColor="#121826" />
+          </linearGradient>
+          <radialGradient id="mGlow" cx="50%" cy="50%">
+            <stop offset="0" stopColor="rgba(37,99,235,.35)" />
+            <stop offset="1" stopColor="rgba(37,99,235,0)" />
+          </radialGradient>
+        </defs>
+
+        <ellipse cx="100" cy="206" rx="56" ry="10" fill="rgba(37,99,235,.16)" />
+        <circle cx="100" cy="96" r="86" fill="url(#mGlow)" />
+
+        {/* corps */}
+        <path d="M62 205 C62 152 78 130 100 130 C122 130 138 152 138 205 Z" fill="url(#mBody)" />
+        <path d="M100 130 L100 205" stroke="rgba(255,255,255,.13)" strokeWidth="1.4" />
+
+        {/* bras (masqués quand la mascotte se couvre les yeux) */}
+        <g style={{ opacity: covering ? 0 : 1, transition:'opacity .28s' }}>
+          <path d="M64 144 C47 154 41 170 46 185" stroke="#2563eb" strokeWidth="12"
+            fill="none" strokeLinecap="round" />
+          <path d="M136 144 C153 154 159 170 154 185" stroke="#2563eb" strokeWidth="12"
+            fill="none" strokeLinecap="round" />
+        </g>
+
+        {/* tête */}
+        <circle cx="100" cy="84" r="45" fill="url(#mHead)"
+          stroke="rgba(96,165,250,.35)" strokeWidth="1.6" />
+
+        {/* casque / cheveux */}
+        <path d="M55 76 C57 46 78 31 100 31 C122 31 143 46 145 76 C131 63 118 59 100 59 C82 59 69 63 55 76 Z"
+          fill="url(#mBody)" />
+
+        {/* yeux */}
+        <g className="blink" style={{ transformOrigin:'100px 82px', transformBox:'view-box' }}>
+          <ellipse cx="86" cy="82" rx="10.5" ry="11.5" fill="#080c14" stroke="rgba(96,165,250,.45)" strokeWidth="1.2" />
+          <ellipse cx="114" cy="82" rx="10.5" ry="11.5" fill="#080c14" stroke="rgba(96,165,250,.45)" strokeWidth="1.2" />
+        </g>
+
+        {/* pupilles (suivent le champ actif) */}
+        <g style={{ transform:`translate(${look}px,${lookingUp ? -1.5 : 1.5}px)`,
+          transition:'transform .35s cubic-bezier(.2,.9,.2,1)' }}>
+          <circle cx="86" cy="82" r="4.6" fill="#8dc0ff" />
+          <circle cx="114" cy="82" r="4.6" fill="#8dc0ff" />
+        </g>
+
+        {/* mains devant les yeux */}
+        <g style={{
+          opacity: covering ? 1 : 0,
+          transform: `scale(${covering ? 1 : 0.55})`,
+          transformOrigin: '100px 84px', transformBox: 'view-box',
+          transition: 'opacity .26s, transform .34s cubic-bezier(.2,.9,.2,1)'
+        }}>
+          <circle cx="85" cy="80" r="15" fill="#2563eb" />
+          <circle cx="115" cy="80" r="15" fill="#2563eb" />
+          <circle cx="85" cy="80" r="15" fill="none" stroke="rgba(255,255,255,.2)" strokeWidth="1.2" />
+          <circle cx="115" cy="80" r="15" fill="none" stroke="rgba(255,255,255,.2)" strokeWidth="1.2" />
+        </g>
+
+        {/* bouche */}
+        <path
+          d={covering
+            ? 'M92 106 Q100 100 108 106'
+            : mode === 'signup'
+              ? 'M88 101 Q100 113 112 101'
+              : 'M90 104 Q100 109 110 104'}
+          stroke="#8dc0ff" strokeWidth="3" fill="none" strokeLinecap="round"
+          style={{ transition:'transform .3s' }} />
+      </svg>
+    </div>
+  );
+}
+
+/* ══════════════ AUTH ══════════════ */
+
+function Auth({ onLogin }) {
+  const [mode, setMode] = useState('login');
+  const [step, setStep] = useState('creds');
+  const [form, setForm] = useState({ username:'', email:'', password:'' });
+  const [digits, setDigits] = useState(['','','','','','']);
+  const [ctx, setCtx] = useState({ username:'', purpose:'', email:'' });
+  const [err, setErr] = useState('');
+  const [info, setInfo] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [tick, setTick] = useState(0);
+  const [focus, setFocus] = useState(null);
+  const [ok, setOk] = useState(false);
+  const boxes = useRef([]);
+
+  useEffect(() => {
+    api('/account-exists').then(r => r.json()).then(d => {
+      if (d.exists) setMode('login');
+      else { setMode('signup'); setForm(f => ({ ...f, email: d.ownerEmail || '' })); }
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  const submitCreds = async (e) => {
+    e.preventDefault(); setBusy(true); setErr(''); setInfo('');
+    try {
+      const r = await api(`/${mode}`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(form)
+      });
+      const d = await r.json();
+      if (d.success && d.otpRequired) {
+        setCtx({ username: form.username, purpose: d.purpose, email: d.email });
+        setDigits(['','','','','','']); setStep('otp'); setCooldown(60);
+        setInfo(`Code envoyé à ${d.email}`);
+        setTimeout(() => boxes.current[0] && boxes.current[0].focus(), 120);
+      } else if (d.success && d.user) onLogin(d.user);
+      else setErr(d.error || 'Erreur');
+    } catch { setErr('Serveur injoignable'); }
+    finally { setBusy(false); }
+  };
+
+  const setDigit = (i, v) => {
+    const c = v.replace(/\D/g, '');
+    if (!c) { const n=[...digits]; n[i]=''; setDigits(n); return; }
+    if (c.length > 1) {  // coller le code complet
+      const n = [...digits];
+      c.slice(0,6).split('').forEach((ch,k) => { if (i+k < 6) n[i+k] = ch; });
+      setDigits(n);
+      const last = Math.min(i + c.length, 5);
+      boxes.current[last] && boxes.current[last].focus();
+      return;
+    }
+    const n = [...digits]; n[i] = c; setDigits(n);
+    if (i < 5) boxes.current[i+1] && boxes.current[i+1].focus();
+  };
+
+  const onKey = (i, e) => {
+    if (e.key === 'Backspace' && !digits[i] && i > 0) boxes.current[i-1] && boxes.current[i-1].focus();
+    if (e.key === 'ArrowLeft' && i > 0) boxes.current[i-1].focus();
+    if (e.key === 'ArrowRight' && i < 5) boxes.current[i+1].focus();
+  };
+
+  const code = digits.join('');
+
+  const submitOtp = async (e) => {
+    if (e) e.preventDefault();
+    if (code.length !== 6 || busy) return;
+    setBusy(true); setErr('');
+    try {
+      const r = await api('/verify-otp', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ username: ctx.username, code, purpose: ctx.purpose })
+      });
+      const d = await r.json();
+      if (d.success) {
+        setOk(true);
+        setTimeout(() => onLogin(d.user), 1150);
+      } else { setErr(d.error || 'Code invalide'); setDigits(['','','','','','']); boxes.current[0] && boxes.current[0].focus(); }
+    } catch { setErr('Serveur injoignable'); }
+    finally { setBusy(false); }
+  };
+
+  useEffect(() => { if (code.length === 6) submitOtp(); }, [code]);
+
+  const resend = async () => {
+    if (cooldown > 0) return;
+    setErr('');
+    try {
+      const r = await api('/resend-otp', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ username: ctx.username, purpose: ctx.purpose })
+      });
+      const d = await r.json();
+      if (d.success) { setInfo(`Nouveau code envoyé à ${d.email}`); setCooldown(60); }
+      else setErr(d.error || 'Erreur');
+    } catch { setErr('Serveur injoignable'); }
+  };
+
+  const pwd = form.password || '';
+  const strength = (pwd.length >= 8 ? 1 : 0) + (/[A-Z]/.test(pwd) ? 1 : 0) +
+                   (/[a-z]/.test(pwd) ? 1 : 0) + (/[0-9]/.test(pwd) ? 1 : 0) +
+                   (/[^A-Za-z0-9]/.test(pwd) ? 1 : 0);
+
+  return (
+    <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+      <div style={{ width:'100%', maxWidth:440 }}>
+        <Reveal>
+          <Tilt max={6} scale={1}>
+            <SpotlightCard className="panel glow-ring" spotlightColor="rgba(37,99,235,.25)">
+              <div className="auth-card" style={{ padding:'30px 28px 26px', position:'relative', overflow:'hidden' }}>
+                {ok && (
+                  <div style={{ position:'absolute', inset:0, zIndex:9, display:'flex',
+                    alignItems:'center', justifyContent:'center', background:'rgba(7,10,17,.9)',
+                    backdropFilter:'blur(8px)', borderRadius:16 }}>
+                    <Check3D label="Identité vérifiée" />
+                  </div>
+                )}
+
+                <div style={{ textAlign:'center', marginBottom:22 }}>
+                  <div style={{ fontSize:40, fontWeight:900, letterSpacing:'-2px' }}>
+                    <GradientText>5trade</GradientText>
+                  </div>
+                  <div style={{ marginTop:7, fontSize:13 }}>
+                    <ShinyText text="Plateforme d'analyse de trading assistée par IA"
+                      color="#7f8ea3" shineColor="#dbeafe" speed={3} />
+                  </div>
+                </div>
+
+                {step === 'creds' && <AuthMascot mode={mode} focus={focus} />}
+
+                {step === 'creds' && (<div className="authpane" key={mode}>
+                  <div className="nav" style={{ marginBottom:18 }}>
+                    {['login','signup'].map(m => (
+                      <button key={m} className={`nav-item ${mode===m?'on':''}`} type="button"
+                        style={{ flex:1, justifyContent:'center' }}
+                        onClick={()=>{setMode(m);setErr('');setInfo('')}}>
+                        <i className={`fas ${m==='login'?'fa-right-to-bracket':'fa-user-plus'}`}></i>
+                        {m==='login' ? 'Connexion' : 'Inscription'}
+                      </button>
+                    ))}
+                  </div>
+
+                  <form onSubmit={submitCreds}>
+                    <label className="lbl">Nom d'utilisateur</label>
+                    <input className="fld" value={form.username} autoFocus required
+                      onFocus={()=>setFocus('username')} onBlur={()=>setFocus(null)}
+                      onChange={e=>setForm({...form, username:e.target.value})} />
+
+                    {mode==='signup' && (<>
+                      <label className="lbl">Email de vérification</label>
+                      <input className="fld" type="email" value={form.email}
+                        onFocus={()=>setFocus('email')} onBlur={()=>setFocus(null)}
+                        onChange={e=>setForm({...form, email:e.target.value})} />
+                    </>)}
+
+                    <label className="lbl">Mot de passe</label>
+                    <input className="fld" type="password" value={form.password} required
+                      onFocus={()=>setFocus('password')} onBlur={()=>setFocus(null)}
+                      onChange={e=>setForm({...form, password:e.target.value})} />
+
+                    {mode==='signup' && (<>
+                      <div style={{ display:'flex', gap:5, marginTop:9 }}>
+                        {[0,1,2,3,4].map(i => (
+                          <span key={i} style={{
+                            flex:1, height:4, borderRadius:9,
+                            background: i < strength
+                              ? (strength<=2 ? '#ef4444' : strength<=3 ? '#f59e0b' : '#10b981')
+                              : 'rgba(27,36,51,.9)',
+                            transition:'background .3s'
+                          }}></span>
+                        ))}
+                      </div>
+                      <p style={{ fontSize:11, color:'var(--dim)', marginTop:7, lineHeight:1.5 }}>
+                        8 caractères minimum, avec majuscule, minuscule et chiffre. Un code de vérification sera envoyé par email.
+                      </p>
+                    </>)}
+
+                    {err && <div style={{ background:'rgba(239,68,68,.12)', border:'1px solid rgba(239,68,68,.35)',
+                      color:'#fca5a5', padding:11, borderRadius:11, marginTop:12, fontSize:13 }}>
+                      <i className="fas fa-circle-exclamation" style={{marginRight:7}}></i>{err}</div>}
+                    {info && <div style={{ background:'rgba(16,185,129,.1)', border:'1px solid rgba(16,185,129,.3)',
+                      color:'#6ee7b7', padding:11, borderRadius:11, marginTop:12, fontSize:13 }}>
+                      <i className="fas fa-circle-check" style={{marginRight:7}}></i>{info}</div>}
+
+                    <button className="btn" type="submit" disabled={busy} style={{ width:'100%', marginTop:16 }}>
+                      {busy ? <Spinner /> : <i className={`fas ${mode==='login'?'fa-right-to-bracket':'fa-user-plus'}`}></i>}
+                      {mode==='login' ? 'Se connecter' : "S'inscrire"}
+                    </button>
+                  </form>
+                </div>)}
+
+                {step === 'otp' && (
+                  <form onSubmit={submitOtp}>
+                    <div style={{ textAlign:'center', marginBottom:16 }}>
+                      <div className="floaty" style={{ display:'inline-flex', width:52, height:52, borderRadius:15,
+                        alignItems:'center', justifyContent:'center', background:'rgba(37,99,235,.14)',
+                        border:'1px solid rgba(37,99,235,.3)' }}>
+                        <i className="fas fa-shield-halved" style={{ fontSize:21, color:'#60a5fa' }}></i>
+                      </div>
+                      <p style={{ color:'var(--muted)', fontSize:13, marginTop:11, lineHeight:1.6 }}>
+                        Saisissez le code à 6 chiffres envoyé à<br/>
+                        <b style={{ color:'var(--txt)' }}>{ctx.email}</b>
+                      </p>
+                    </div>
+
+                    <div style={{ display:'flex', gap:8, justifyContent:'center' }}>
+                      {digits.map((d,i) => (
+                        <input key={i} ref={el => boxes.current[i] = el}
+                          className={`otp-box ${d ? 'filled' : ''}`}
+                          value={d} inputMode="numeric" maxLength={6}
+                          autoComplete={i===0 ? 'one-time-code' : 'off'}
+                          onChange={e => setDigit(i, e.target.value)}
+                          onKeyDown={e => onKey(i, e)}
+                          onFocus={e => e.target.select()} />
+                      ))}
+                    </div>
+
+                    {busy && (
+                      <div style={{ display:'flex', justifyContent:'center', marginTop:16 }}>
+                        <Loader3D size={40} label="Vérification du code…" />
+                      </div>
+                    )}
+
+                    {err && <div style={{ background:'rgba(239,68,68,.12)', border:'1px solid rgba(239,68,68,.35)',
+                      color:'#fca5a5', padding:11, borderRadius:11, marginTop:12, fontSize:13, textAlign:'center' }}>{err}</div>}
+                    {info && <div style={{ background:'rgba(16,185,129,.1)', border:'1px solid rgba(16,185,129,.3)',
+                      color:'#6ee7b7', padding:11, borderRadius:11, marginTop:12, fontSize:13, textAlign:'center' }}>{info}</div>}
+
+                    <button className="btn ok" type="submit" disabled={busy || code.length!==6}
+                      style={{ width:'100%', marginTop:16 }}>
+                      {busy ? <Spinner /> : <i className="fas fa-check"></i>}Valider
+                    </button>
+
+                    <div style={{ display:'flex', justifyContent:'space-between', marginTop:12 }}>
+                      <button type="button" className="btn ghost sm"
+                        onClick={()=>{setStep('creds');setErr('');setInfo('');setDigits(['','','','','','']);}}>
+                        <i className="fas fa-arrow-left"></i>Retour
+                      </button>
+                      <button type="button" className="btn ghost sm" onClick={resend} disabled={cooldown>0}>
+                        <i className="fas fa-rotate-right"></i>
+                        {cooldown>0 ? `Renvoyer (${cooldown}s)` : 'Renvoyer le code'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            </SpotlightCard>
+          </Tilt>
+        </Reveal>
+        <p style={{ textAlign:'center', color:'var(--dim)', fontSize:11.5, marginTop:16 }}>
+          <i className="fas fa-lock" style={{marginRight:6}}></i>
+          Connexion sécurisée · session httpOnly · validation par code à usage unique
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════ ANALYSE ══════════════ */
+
+function Analyzer({ onDone }) {
+  const [files, setFiles] = useState([]);
+  const [tfs, setTfs] = useState('M5, M30, H1');
+  const [pair, setPair] = useState('XAUUSD');
+  const [notes, setNotes] = useState('');
+  const [maxStrat, setMaxStrat] = useState(3);
+  const [busy, setBusy] = useState(false);
+  const [prog, setProg] = useState(0);
+  const [hot, setHot] = useState(false);
+  const [err, setErr] = useState('');
+  const [phase, setPhase] = useState('');
+  const timer = useRef(null);
+
+  const add = (fl) => {
+    const arr = Array.from(fl).filter(f => f.type.startsWith('image/'));
+    setFiles(prev => [...prev, ...arr].slice(0, 4));
+  };
+
+  const stepLabels = ['Analyse des graphiques…','Recherche dans la base…','Combinaison des stratégies…','Génération du plan…'];
+
+  const run = async () => {
+    if (!files.length) { setErr('Ajoutez au moins une capture.'); return; }
+    setBusy(true); setErr(''); setProg(8); setPhase(stepLabels[0]);
+    let i = 0;
+    timer.current = setInterval(() => {
+      i = Math.min(i + 1, stepLabels.length - 1);
+      setPhase(stepLabels[i]);
+      setProg(p => Math.min(p + 22, 88));
+    }, 2200);
+
+    const fd = new FormData();
+    files.forEach(f => fd.append('charts', f));
+    fd.append('pair', pair); fd.append('timeframes', tfs);
+    fd.append('notes', notes); fd.append('maxStrategies', String(maxStrat));
+
+    try {
+      const r = await api('/analyze', { method:'POST', body: fd });
+      const d = await r.json();
+      if (d.success) { setProg(100); setPhase('Terminé');
+        setTimeout(() => { onDone(d); setBusy(false); setProg(0); setPhase(''); }, 420); }
+      else { setErr(d.error || 'Erreur d\'analyse'); setBusy(false); setProg(0); }
+    } catch (e) { setErr('Erreur: ' + e.message); setBusy(false); setProg(0); }
+    finally { clearInterval(timer.current); }
+  };
+
+  return (
+    <Reveal>
+      <SpotlightCard className="panel" spotlightColor="rgba(37,99,235,.2)">
+        <div style={{ padding:'22px 22px 24px' }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10, marginBottom:16 }}>
+            <h2 style={{ fontSize:18, fontWeight:800, display:'flex', alignItems:'center', gap:10 }}>
+              <i className="fas fa-images" style={{ color:'#60a5fa' }}></i>Analyse multi-timeframe
+            </h2>
+            <span className="badge" style={{ background:'rgba(37,99,235,.14)', color:'#8fb4ff' }}>
+              <i className="fas fa-layer-group"></i>jusqu'à 4 captures
+            </span>
+          </div>
+
+          <div style={{ display:'grid', gap:14, gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))' }}>
+            <div>
+              <label className="lbl" style={{marginTop:0}}>Paire</label>
+              <input className="fld" value={pair} onChange={e=>setPair(e.target.value.toUpperCase())} />
+            </div>
+            <div>
+              <label className="lbl" style={{marginTop:0}}>Timeframes (ordre des images)</label>
+              <input className="fld" value={tfs} onChange={e=>setTfs(e.target.value)} placeholder="M5, M30, H1" />
+            </div>
+            <div>
+              <label className="lbl" style={{marginTop:0}}>Stratégies à combiner</label>
+              <select className="fld" value={maxStrat} onChange={e=>setMaxStrat(e.target.value)}>
+                {[2,3,4].map(n=> <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <label className="lbl">Contexte du trader (optionnel)</label>
+          <textarea className="fld" rows="2" value={notes} onChange={e=>setNotes(e.target.value)}
+            placeholder="Ex : scalp London sur XAUUSD, biais H1 haussier…" />
+
+          <div className={`drop ${hot?'hot':''}`} style={{ marginTop:16 }}
+            onClick={()=>document.getElementById('f-charts').click()}
+            onDragOver={e=>{e.preventDefault();setHot(true)}}
+            onDragLeave={()=>setHot(false)}
+            onDrop={e=>{e.preventDefault();setHot(false);add(e.dataTransfer.files)}}>
+            <input id="f-charts" type="file" accept="image/*" multiple style={{display:'none'}}
+              onChange={e=>add(e.target.files)} />
+            <div className="floaty" style={{ display:'inline-flex', width:52, height:52, borderRadius:15,
+              alignItems:'center', justifyContent:'center', background:'rgba(37,99,235,.12)' }}>
+              <i className="fas fa-cloud-arrow-up" style={{ fontSize:22, color:'#60a5fa' }}></i>
+            </div>
+            <p style={{ color:'var(--muted)', marginTop:10, fontSize:13.5, fontWeight:600 }}>
+              Glissez vos captures TradingView ici
+            </p>
+            <p style={{ color:'var(--dim)', fontSize:11.5, marginTop:4 }}>ou cliquez · PNG / JPG · 4 max</p>
+          </div>
+
+          {files.length > 0 && (
+            <div style={{ display:'grid', gap:12, gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', marginTop:14 }}>
+              {files.map((f,i) => (
+                <div key={i} className="thumb">
+                  <img src={URL.createObjectURL(f)} alt={f.name} />
+                  <div style={{ position:'absolute', top:6, left:6, background:'rgba(7,10,17,.82)',
+                    border:'1px solid var(--border)', borderRadius:8, padding:'2px 8px',
+                    fontSize:10.5, fontWeight:700, color:'#8fb4ff' }}>
+                    {(tfs.split(',')[i]||`#${i+1}`).trim()}
+                  </div>
+                  <button onClick={()=>setFiles(files.filter((_,j)=>j!==i))}
+                    style={{ position:'absolute', top:6, right:6, width:24, height:24, borderRadius:8,
+                      border:'1px solid rgba(239,68,68,.4)', background:'rgba(7,10,17,.82)',
+                      color:'#f87171', cursor:'pointer', fontSize:11 }}>
+                    <i className="fas fa-times"></i>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {busy && (
+            <div style={{ marginTop:16 }}>
+              <div className="bar"><i style={{ width:`${prog}%` }}></i></div>
+              <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:10, color:'var(--muted)', fontSize:12.5 }}>
+                <Spinner size={15} color="#60a5fa" />
+                <span>{phase}</span>
+                <span style={{ marginLeft:'auto', color:'var(--dim)' }}>{prog}%</span>
+              </div>
+            </div>
+          )}
+
+          {err && <div style={{ background:'rgba(239,68,68,.12)', border:'1px solid rgba(239,68,68,.35)',
+            color:'#fca5a5', padding:11, borderRadius:11, marginTop:12, fontSize:13 }}>{err}</div>}
+
+          <button className="btn ok" style={{ width:'100%', marginTop:16, padding:'13px' }}
+            onClick={run} disabled={busy || !files.length}>
+            {busy ? <Spinner /> : <i className="fas fa-bolt"></i>}
+            {busy ? 'Analyse en cours…' : "Lancer l'analyse"}
+          </button>
+        </div>
+      </SpotlightCard>
+    </Reveal>
+  );
+}
+
+/* ══════════════ RÉSULTAT ══════════════ */
+
+function Result({ result }) {
+  const [open, setOpen] = useState(false);
+  const { analysis, recommendations: rec } = result;
+
+  const KV = ({ k, v }) => (
+    <div style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'6px 0',
+      borderBottom:'1px solid rgba(27,36,51,.55)' }}>
+      <span style={{ color:'var(--muted)', fontSize:12.5 }}>{k}</span>
+      <span style={{ fontWeight:600, fontSize:13, textAlign:'right' }}>{v || '—'}</span>
+    </div>
+  );
+
+  return (
+    <div style={{ marginTop:18 }}>
+      <Reveal>
+        <SpotlightCard className="panel" spotlightColor="rgba(16,185,129,.18)">
+          <div style={{ padding:'22px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12 }}>
+              <h2 style={{ fontSize:19, fontWeight:800, display:'flex', alignItems:'center', gap:10 }}>
+                <i className="fas fa-crosshairs" style={{ color:'#34d399' }}></i>
+                Plan d'action — {analysis.pair}
+              </h2>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                <ActionBadge action={rec.action} />
+                <span className="badge" style={{ background:'rgba(148,163,184,.12)', color:'var(--muted)' }}>
+                  <i className="fas fa-gauge-high"></i>{rec.confidence}
+                </span>
+                <span className="badge" style={{ background:'rgba(148,163,184,.12)', color:'var(--muted)' }}>
+                  <i className="fas fa-image"></i>{analysis.imagesAnalyzed}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ marginTop:14, padding:15, borderRadius:13,
+              background:'linear-gradient(135deg,rgba(16,185,129,.11),rgba(37,99,235,.07))',
+              borderLeft:'3px solid #10b981', fontSize:13.5, lineHeight:1.7 }}>
+              {rec.reason}
+              {rec.strategiesCombined && rec.strategiesCombined.length > 0 && (
+                <div style={{ marginTop:9 }}>
+                  <span style={{ fontSize:11.5, color:'var(--muted)', fontWeight:600 }}>COMBINAISON : </span>
+                  {rec.strategiesCombined.map((s,i)=> <span key={i} className="tag">{s}</span>)}
+                </div>
+              )}
+            </div>
+          </div>
+        </SpotlightCard>
+      </Reveal>
+
+      <div style={{ display:'grid', gap:14, gridTemplateColumns:'repeat(auto-fit,minmax(290px,1fr))', marginTop:14 }}>
+        {[
+          { t:'Entrée', ic:'fa-sign-in-alt', c:'#60a5fa', rows:[
+              ['Zone', rec.entry?.zone], ['Déclencheur', rec.entry?.trigger], ['Timeframe', rec.entry?.timeframe] ] },
+          { t:'Stop Loss & Risque', ic:'fa-shield-halved', c:'#f87171', rows:[
+              ['Stop loss', rec.stopLoss?.level], ['Logique', rec.stopLoss?.reason],
+              ['Risque / trade', rec.riskManagement?.riskPerTrade], ['R:R', rec.riskManagement?.rr] ] }
+        ].map((box, idx) => (
+          <Reveal key={box.t} delay={80 + idx*70}>
+            <div className="panel" style={{ padding:18, height:'100%' }}>
+              <h3 style={{ fontWeight:700, fontSize:14, marginBottom:10, display:'flex', alignItems:'center', gap:9 }}>
+                <i className={`fas ${box.ic}`} style={{ color:box.c }}></i>{box.t}
+              </h3>
+              {box.rows.map(([k,v]) => <KV key={k} k={k} v={v} />)}
+            </div>
+          </Reveal>
+        ))}
+      </div>
+
+      {rec.takeProfit && rec.takeProfit.length > 0 && (
+        <Reveal delay={140}>
+          <div className="panel" style={{ padding:18, marginTop:14 }}>
+            <h3 style={{ fontWeight:700, fontSize:14, marginBottom:10, display:'flex', alignItems:'center', gap:9 }}>
+              <i className="fas fa-bullseye" style={{ color:'#34d399' }}></i>Objectifs
+            </h3>
+            {rec.takeProfit.map((tp,i) => (
+              <div key={i} style={{ display:'flex', gap:12, alignItems:'center', padding:'9px 12px',
+                borderRadius:10, background:'rgba(16,185,129,.07)', marginBottom:7, border:'1px solid rgba(16,185,129,.18)' }}>
+                <span className="badge" style={{ background:'rgba(16,185,129,.18)', color:'#34d399' }}>TP{i+1}</span>
+                <b style={{ fontSize:13.5 }}>{tp.level}</b>
+                <span style={{ color:'var(--muted)', fontSize:12.5 }}>{tp.reason}</span>
+              </div>
+            ))}
+          </div>
+        </Reveal>
+      )}
+
+      {rec.executionPlan && rec.executionPlan.length > 0 && (
+        <Reveal delay={180}>
+          <div className="panel" style={{ padding:18, marginTop:14 }}>
+            <h3 style={{ fontWeight:700, fontSize:14, marginBottom:12, display:'flex', alignItems:'center', gap:9 }}>
+              <i className="fas fa-list-ol" style={{ color:'#fbbf24' }}></i>Plan d'exécution
+            </h3>
+            {rec.executionPlan.map((s,i) => (
+              <div key={i} style={{ display:'flex', gap:12, marginBottom:12 }}>
+                <div style={{ flexShrink:0, width:28, height:28, borderRadius:9,
+                  background:'rgba(245,158,11,.16)', border:'1px solid rgba(245,158,11,.35)',
+                  color:'#fbbf24', fontWeight:800, fontSize:12.5, display:'flex',
+                  alignItems:'center', justifyContent:'center' }}>{s.step}</div>
+                <div style={{ flex:1, paddingBottom:8, borderBottom:'1px solid rgba(27,36,51,.5)' }}>
+                  <div style={{ fontSize:12.5, fontWeight:700, color:'#fbbf24' }}>{s.when}</div>
+                  <div style={{ fontSize:13.5, marginTop:3, lineHeight:1.6 }}>{s.do}</div>
+                  {s.before && <div style={{ fontSize:12, color:'var(--muted)', marginTop:3 }}>
+                    <i className="fas fa-arrow-left" style={{marginRight:5}}></i>Avant : {s.before}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Reveal>
+      )}
+
+      {rec.nextSteps && rec.nextSteps.length > 0 && (
+        <Reveal delay={210}>
+          <div className="panel" style={{ padding:18, marginTop:14 }}>
+            <h3 style={{ fontWeight:700, fontSize:14, marginBottom:9, display:'flex', alignItems:'center', gap:9 }}>
+              <i className="fas fa-forward" style={{ color:'#60a5fa' }}></i>Ensuite
+            </h3>
+            {rec.nextSteps.map((s,i) => (
+              <div key={i} style={{ fontSize:13.5, color:'#c9d4e0', padding:'4px 0', display:'flex', gap:9 }}>
+                <i className="fas fa-chevron-right" style={{ color:'#2563eb', fontSize:10, marginTop:6 }}></i>{s}
+              </div>
+            ))}
+          </div>
+        </Reveal>
+      )}
+
+      {rec.invalidation && (
+        <Reveal delay={240}>
+          <div style={{ marginTop:14, padding:14, borderRadius:12,
+            background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.3)' }}>
+            <b style={{ fontSize:13, color:'#f87171' }}>
+              <i className="fas fa-ban" style={{marginRight:7}}></i>Invalidation</b>
+            <span style={{ fontSize:13, color:'#fca5a5', marginLeft:7 }}>{rec.invalidation}</span>
+          </div>
+        </Reveal>
+      )}
+
+      <Reveal delay={260}>
+        <div style={{ marginTop:16 }}>
+          <button className="btn ghost sm" onClick={()=>setOpen(!open)}>
+            <i className={`fas fa-chevron-${open?'up':'down'}`}></i>
+            {open ? 'Masquer' : 'Voir'} l'analyse visuelle détaillée
+          </button>
+          {open && (
+            <pre className="panel-soft" style={{ marginTop:11, padding:16, whiteSpace:'pre-wrap',
+              wordBreak:'break-word', fontSize:13, lineHeight:1.65, color:'#c9d4e0',
+              fontFamily:'ui-monospace,Consolas,monospace', maxHeight:400, overflow:'auto' }}>
+              {analysis.visionAnalysis}
+            </pre>
+          )}
+          <div style={{ marginTop:12, fontSize:11.5, color:'var(--dim)' }}>
+            {rec.candidatesFound} stratégie(s) trouvée(s) · {rec.strategiesUsed?.length || 0} retenue(s) pour la combinaison
+          </div>
+        </div>
+      </Reveal>
+    </div>
+  );
+}
+
+/* ══════════════ AJOUT DE CONNAISSANCE ══════════════ */
+
+function AddKnowledge({ refresh }) {
+  const [tab, setTab] = useState('upload');
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState(null);
+  const [manual, setManual] = useState({ title:'', content:'', type:'strategy' });
+  const [urls, setUrls] = useState('');
+  const [sq, setSq] = useState('');
+  const [slim, setSlim] = useState(5);
+  const [forum, setForum] = useState('babypips');
+  const [fkw, setFkw] = useState('');
+
+  const post = async (path, body, isForm) => {
+    setBusy(true); setRes(null);
+    try {
+      const r = await api(path, {
+        method:'POST',
+        headers: isForm ? {} : { 'Content-Type':'application/json' },
+        body: isForm ? body : JSON.stringify(body)
+      });
+      const d = await r.json();
+      setRes({ ok: d.success !== false, data: d });
+      if (d.success) refresh();
+    } catch (e) { setRes({ ok:false, data:{ error:e.message } }); }
+    finally { setBusy(false); }
+  };
+
+  const METHODS = [
+    { id:'upload', label:'Documents', icon:'fa-file-arrow-up' },
+    { id:'manual', label:'Manuel',    icon:'fa-pen' },
+    { id:'url',    label:'Depuis URL',icon:'fa-link' },
+    { id:'search', label:'Recherche web', icon:'fa-magnifying-glass' },
+    { id:'forum',  label:'Forums',    icon:'fa-comments' }
+  ];
+
+  const summary = (() => {
+    if (!res) return null;
+    const d = res.data;
+    if (d.saved) return `${d.saved.length} stratégie(s) sauvegardée(s) · ${d.found?.length || 0} résultat(s) trouvé(s)`;
+    if (d.results) return d.results.map(r => `${r.success ? '✓' : '✗'} ${r.url || r.strategy?.title}`).join(' · ');
+    if (d.strategy) return `Ajouté : ${d.strategy.title}`;
+    return 'Terminé';
+  })();
+
+  return (
+    <Reveal>
+      <SpotlightCard className="panel" spotlightColor="rgba(124,58,237,.2)">
+        <div style={{ padding:'22px' }}>
+          <h2 style={{ fontSize:18, fontWeight:800, marginBottom:14, display:'flex', alignItems:'center', gap:10 }}>
+            <i className="fas fa-brain" style={{ color:'#a78bfa' }}></i>Ajouter à la base de connaissance
+          </h2>
+
+          <div className="nav" style={{ marginBottom:20 }}>
+            {METHODS.map(m => (
+              <button key={m.id} type="button"
+                className={`nav-item ${tab===m.id?'on':''}`}
+                onClick={()=>{setTab(m.id);setRes(null)}}>
+                <i className={`fas ${m.icon}`}></i>{m.label}
+              </button>
+            ))}
+          </div>
+
+          {tab==='upload' && (<>
+            <p style={{ fontSize:13, color:'var(--muted)', marginBottom:12 }}>
+              PDF, DOCX, TXT ou MD — plusieurs fichiers à la fois. Le texte est extrait puis indexé.
+            </p>
+            <div className="drop" onClick={()=>document.getElementById('f-docs').click()}>
+              <input id="f-docs" type="file" multiple accept=".pdf,.docx,.txt,.md" style={{display:'none'}}
+                onChange={e=>{ const fd=new FormData(); Array.from(e.target.files).forEach(f=>fd.append('documents',f)); post('/upload-strategies', fd, true); }} />
+              <i className="fas fa-file-arrow-up" style={{ fontSize:26, color:'#60a5fa' }}></i>
+              <p style={{ color:'var(--muted)', marginTop:9, fontSize:13.5, fontWeight:600 }}>Cliquez pour choisir des fichiers</p>
+            </div>
+          </>)}
+
+          {tab==='manual' && (<>
+            <label className="lbl" style={{marginTop:0}}>Titre</label>
+            <input className="fld" value={manual.title} onChange={e=>setManual({...manual,title:e.target.value})} />
+            <label className="lbl">Contenu (règles, conditions, gestion du risque)</label>
+            <textarea className="fld" rows="8" value={manual.content}
+              onChange={e=>setManual({...manual,content:e.target.value})} />
+            <label className="lbl">Type</label>
+            <select className="fld" value={manual.type} onChange={e=>setManual({...manual,type:e.target.value})}>
+              <option value="strategy">Stratégie</option>
+              <option value="concept">Concept</option>
+              <option value="pattern">Pattern</option>
+              <option value="money-management">Gestion du risque</option>
+            </select>
+            <button className="btn" style={{ marginTop:14 }} disabled={busy}
+              onClick={()=>post('/knowledge', manual)}>
+              {busy ? <Spinner /> : <i className="fas fa-plus"></i>}Ajouter
+            </button>
+          </>)}
+
+          {tab==='url' && (<>
+            <p style={{ fontSize:13, color:'var(--muted)', marginBottom:12 }}>
+              L'IA lit la page, en extrait les stratégies et les structure (entrée, SL, TP, timeframes, conditions).
+            </p>
+            <label className="lbl" style={{marginTop:0}}>URLs (une par ligne)</label>
+            <textarea className="fld" rows="5" value={urls} onChange={e=>setUrls(e.target.value)}
+              placeholder="https://www.babypips.com/learn/forex/…" />
+            <button className="btn" style={{ marginTop:14 }} disabled={busy}
+              onClick={()=>post('/scrape-strategies', { urls: urls.split('\n').map(u=>u.trim()).filter(Boolean) })}>
+              {busy ? <Spinner /> : <i className="fas fa-download"></i>}Importer &amp; structurer
+            </button>
+          </>)}
+
+          {tab==='search' && (<>
+            <p style={{ fontSize:13, color:'var(--muted)', marginBottom:12 }}>
+              Recherche web autonome, scraping des meilleurs résultats et sauvegarde automatique.
+            </p>
+            <label className="lbl" style={{marginTop:0}}>Requête</label>
+            <input className="fld" value={sq} onChange={e=>setSq(e.target.value)}
+              placeholder="ex : order block strategy XAUUSD scalping" />
+            <label className="lbl">Pages à sauvegarder</label>
+            <select className="fld" value={slim} onChange={e=>setSlim(e.target.value)}>
+              {[3,5,8,10].map(n=><option key={n} value={n}>{n}</option>)}
+            </select>
+            <button className="btn ok" style={{ marginTop:14, width:'100%' }}
+              disabled={busy || !sq}
+              onClick={()=>post('/search-and-save', { query: sq, limit: Number(slim), autoSave: true })}>
+              {busy ? <Spinner /> : <i className="fas fa-magnifying-glass"></i>}Chercher &amp; sauvegarder
+            </button>
+          </>)}
+
+          {tab==='forum' && (<>
+            <label className="lbl" style={{marginTop:0}}>Source</label>
+            <select className="fld" value={forum} onChange={e=>setForum(e.target.value)}>
+              <option value="babypips">BabyPips</option>
+              <option value="forexfactory">ForexFactory</option>
+              <option value="tradingview">TradingView</option>
+              <option value="reddit">Reddit r/Forex</option>
+              <option value="investopedia">Investopedia</option>
+            </select>
+            <label className="lbl">Mots-clés (optionnel)</label>
+            <input className="fld" value={fkw} onChange={e=>setFkw(e.target.value)} placeholder="ex : liquidity sweep" />
+            <button className="btn" style={{ marginTop:14 }} disabled={busy}
+              onClick={()=>post('/scrape-forums', { forum, keywords: fkw, limit: 5 })}>
+              {busy ? <Spinner /> : <i className="fas fa-comments"></i>}Miner depuis {forum}
+            </button>
+          </>)}
+
+          {busy && (
+            <div style={{ marginTop:18, display:'flex', alignItems:'center', gap:12 }}>
+              {LatticeLoader
+                ? <LatticeLoader label="Traitement" status="working" color="#a78bfa" fontSize={12} />
+                : <><Spinner size={18} color="#a78bfa" /><span style={{color:'var(--muted)',fontSize:13}}>Traitement…</span></>}
+            </div>
+          )}
+
+          {res && !busy && (
+            <div style={{ marginTop:16, padding:13, borderRadius:11, fontSize:12.5, lineHeight:1.6,
+              background: res.ok ? 'rgba(16,185,129,.1)' : 'rgba(239,68,68,.1)',
+              border: `1px solid ${res.ok ? 'rgba(16,185,129,.3)' : 'rgba(239,68,68,.3)'}`,
+              color: res.ok ? '#6ee7b7' : '#fca5a5' }}>
+              <div style={{ fontWeight:700, marginBottom:4 }}>
+                <i className={`fas ${res.ok ? 'fa-circle-check' : 'fa-circle-exclamation'}`} style={{marginRight:7}}></i>
+                {res.ok ? 'Succès' : 'Échec'}
+              </div>
+              <div>{res.data.error || summary}</div>
+            </div>
+          )}
+        </div>
+      </SpotlightCard>
+    </Reveal>
+  );
+}
+
+/* ══════════════ STRATÉGIES ══════════════ */
+
+function Strategies({ strategies, onDelete }) {
+  const [q, setQ] = useState('');
+  const list = useMemo(() => strategies.filter(s =>
+    !q || `${s.title} ${s.content} ${(s.tags||[]).join(' ')}`.toLowerCase().includes(q.toLowerCase())
+  ), [strategies, q]);
+
+  return (
+    <div>
+      <Reveal>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:14,
+          flexWrap:'wrap', marginBottom:16 }}>
+          <h2 style={{ fontSize:18, fontWeight:800, display:'flex', alignItems:'center', gap:10 }}>
+            <i className="fas fa-book" style={{ color:'#60a5fa' }}></i>
+            Base de connaissance
+            <span className="badge" style={{ background:'rgba(37,99,235,.14)', color:'#8fb4ff' }}>{strategies.length}</span>
+          </h2>
+          <input className="fld" style={{ maxWidth:280, margin:0 }} placeholder="Rechercher…"
+            value={q} onChange={e=>setQ(e.target.value)} />
+        </div>
+      </Reveal>
+
+      {list.length === 0 && (
+        <div className="panel" style={{ padding:34, textAlign:'center', color:'var(--muted)', fontSize:13.5 }}>
+          <i className="fas fa-inbox" style={{ fontSize:26, color:'var(--dim)', display:'block', marginBottom:10 }}></i>
+          Aucune stratégie pour l'instant — utilisez l'onglet « Ajouter ».
+        </div>
+      )}
+
+      <div className="grid-auto">
+        {list.map((s, i) => (
+          <Reveal key={s.id} delay={Math.min(i*45, 360)}>
+            <SpotlightCard className="panel" spotlightColor="rgba(37,99,235,.2)">
+              <div style={{ padding:17, height:'100%', display:'flex', flexDirection:'column' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', gap:9, alignItems:'flex-start' }}>
+                  <h3 style={{ fontSize:14.5, fontWeight:700, lineHeight:1.35 }}>{s.title}</h3>
+                  <span className="badge" style={{ flexShrink:0, background:'rgba(148,163,184,.12)', color:'var(--muted)' }}>
+                    {s.source || s.type}
+                  </span>
+                </div>
+                <p style={{ fontSize:12.5, color:'var(--muted)', lineHeight:1.6, margin:'9px 0 11px', flex:1 }}>
+                  {(s.structured?.summary || s.content || '').slice(0,190)}…
+                </p>
+                <div style={{ marginBottom:11 }}>
+                  {(s.tags||[]).slice(0,6).map((t,k)=> <span key={k} className="tag">{t}</span>)}
+                </div>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                  paddingTop:10, borderTop:'1px solid rgba(27,36,51,.6)' }}>
+                  <span style={{ fontSize:11, color:'var(--dim)' }}>
+                    <i className="fas fa-clock" style={{marginRight:5}}></i>
+                    {new Date(s.createdAt).toLocaleDateString('fr-FR')}
+                  </span>
+                  <div style={{ display:'flex', gap:8 }}>
+                    {s.sourceUrl && (
+                      <a href={s.sourceUrl} target="_blank" rel="noreferrer"
+                        style={{ color:'#60a5fa', fontSize:12.5 }}>
+                        <i className="fas fa-external-link-alt"></i></a>
+                    )}
+                    <button onClick={()=>onDelete(s.id)}
+                      style={{ background:'none', border:'none', color:'#f87171', cursor:'pointer', fontSize:12.5 }}>
+                      <i className="fas fa-trash"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </SpotlightCard>
+          </Reveal>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════ HISTORIQUE ══════════════ */
+
+function History({ history }) {
+  if (!history.length) {
+    return (
+      <div className="panel" style={{ padding:34, textAlign:'center', color:'var(--muted)', fontSize:13.5 }}>
+        <i className="fas fa-clock-rotate-left" style={{ fontSize:26, color:'var(--dim)', display:'block', marginBottom:10 }}></i>
+        Aucune analyse pour l'instant.
+      </div>
+    );
+  }
+  return (
+    <div>
+      <Reveal>
+        <h2 style={{ fontSize:18, fontWeight:800, marginBottom:16, display:'flex', alignItems:'center', gap:10 }}>
+          <i className="fas fa-clock-rotate-left" style={{ color:'#60a5fa' }}></i>Historique des analyses
+        </h2>
+      </Reveal>
+      <div style={{ position:'relative', paddingLeft:22 }}>
+        <div style={{ position:'absolute', left:7, top:6, bottom:6, width:2,
+          background:'linear-gradient(180deg,rgba(37,99,235,.6),rgba(124,58,237,.15))' }}></div>
+        {history.map((h,i) => (
+          <Reveal key={h.id} delay={Math.min(i*50, 300)}>
+            <div style={{ position:'relative', marginBottom:13 }}>
+              <div style={{ position:'absolute', left:-21, top:16, width:12, height:12, borderRadius:'50%',
+                background: h.action==='BUY' ? '#10b981' : h.action==='SELL' ? '#ef4444' : '#f59e0b',
+                border:'2px solid #070a11', boxShadow:'0 0 10px rgba(37,99,235,.5)' }}></div>
+              <div className="panel" style={{ padding:15 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+                  <span style={{ fontWeight:700, fontSize:14, display:'flex', alignItems:'center', gap:9 }}>
+                    {h.pair}
+                    <span style={{ color:'var(--muted)', fontWeight:500, fontSize:12.5 }}>{h.timeframes}</span>
+                    <ActionBadge action={h.action} />
+                  </span>
+                  <span style={{ fontSize:11, color:'var(--dim)' }}>{new Date(h.timestamp).toLocaleString('fr-FR')}</span>
+                </div>
+                <div style={{ fontSize:12.5, color:'var(--muted)', marginTop:6, lineHeight:1.6 }}>{h.reason}</div>
+              </div>
+            </div>
+          </Reveal>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════ JOURNAL DE TRADES ══════════════ */
+
+const TRADE_R = {
+  win:  { label:'Gain',  color:'#10b981', bg:'rgba(16,185,129,.13)', icon:'fa-arrow-trend-up' },
+  loss: { label:'Perte', color:'#ef4444', bg:'rgba(239,68,68,.13)',  icon:'fa-arrow-trend-down' },
+  breakeven:{ label:'Neutre', color:'#94a3b8', bg:'rgba(148,163,184,.13)', icon:'fa-equals' }
+};
+
+function ResultBadge({ result, status }) {
+  if (status === 'open') {
+    return <span className="badge" style={{ background:'rgba(37,99,235,.14)', color:'#7cb2ff' }}>
+      <i className="fas fa-hourglass-half"></i>en cours</span>;
+  }
+  const s = TRADE_R[result] || { label:result || '—', color:'#94a3b8', bg:'rgba(148,163,184,.13)', icon:'fa-circle' };
+  return <span className="badge" style={{ background:s.bg, color:s.color }}>
+    <i className={`fas ${s.icon}`}></i>{s.label}</span>;
+}
+
+function Journal() {
+  const [trades, setTrades] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ pair:'', direction:'BUY', entry:'', sl:'', tp:'', size:'', notes:'' });
+  const [closing, setClosing] = useState({});
+
+  const load = async () => {
+    try {
+      const r = await api('/trades');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Chargement impossible');
+      setTrades(d.trades || []); setStats(d.stats || null); setErr('');
+    } catch (e) { setErr(e.message); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const create = async (e) => {
+    e.preventDefault();
+    setBusy(true); setErr('');
+    try {
+      const r = await api('/trades', {
+        method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(form)
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Création refusée');
+      setForm({ pair:'', direction:'BUY', entry:'', sl:'', tp:'', size:'', notes:'' });
+      await load();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const doClose = async (id) => {
+    const c = closing[id] || {};
+    if (c.exit === undefined || c.exit === '') { setErr('Renseigne le prix de sortie pour clôturer'); return; }
+    setBusy(true); setErr('');
+    try {
+      const payload = { action:'close', exit:c.exit };
+      if (c.pnl !== undefined && c.pnl !== '') payload.pnl = c.pnl;
+      const r = await api(`/trades/${id}`, {
+        method:'PATCH', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload)
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Clôture refusée');
+      setClosing(s => { const n = { ...s }; delete n[id]; return n; });
+      await load();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const del = async (id) => { await api(`/trades/${id}`, { method:'DELETE' }); load(); };
+
+  const n2 = v => (v === null || v === undefined ? '—' : Number(v).toFixed(2));
+  const n6 = v => (v === null || v === undefined ? '—' : Number(v).toFixed(v % 1 === 0 ? 0 : 4));
+  const open = trades.filter(t => t.status === 'open');
+  const closed = trades.filter(t => t.status === 'closed');
+
+  if (loading) return <div className="panel" style={{ padding:22 }}><Skeleton h={120} /></div>;
+
+  return (
+    <>
+      <div className="stat-grid" style={{ marginBottom:18 }}>
+        <StatTile icon="fa-receipt" label="Trades enregistrés" value={stats?.total || 0} color="#60a5fa" delay={0} />
+        <StatTile icon="fa-bullseye" label="Taux de réussite" value={stats?.winRate ?? 0} decimals={1} suffix=" %" color="#34d399" delay={70} />
+        <StatTile icon="fa-scale-balanced" label="PnL cumulé" value={stats?.pnlTotal ?? 0} decimals={2} color="#f59e0b" delay={140} />
+        <StatTile icon="fa-wave-square" label="RR moyen" value={stats?.rrAvg ?? 0} decimals={2} color="#a78bfa" delay={210} />
+      </div>
+
+      {stats && (stats.wins > 0 || stats.losses > 0) && (
+        <div className="panel" style={{ padding:'14px 18px', marginBottom:16, display:'flex',
+          flexWrap:'wrap', gap:18, alignItems:'center', fontSize:13 }}>
+          <span style={{ color:'#34d399' }}><i className="fas fa-check" style={{marginRight:6}}></i>{stats.wins} gain(s)</span>
+          <span style={{ color:'#ef4444' }}><i className="fas fa-xmark" style={{marginRight:6}}></i>{stats.losses} perte(s)</span>
+          <span style={{ color:'var(--muted)' }}><i className="fas fa-equals" style={{marginRight:6}}></i>{stats.breakeven} neutre(s)</span>
+          <span style={{ color:'var(--muted)' }}><i className="fas fa-layer-group" style={{marginRight:6}}></i>{stats.open} en cours</span>
+          {stats.streak && (
+            <span style={{ color: stats.streak.type === 'win' ? '#34d399' : '#ef4444' }}>
+              <i className="fas fa-fire" style={{marginRight:6}}></i>série : {stats.streak.count} {stats.streak.type === 'win' ? 'gain(s)' : 'perte(s)'}
+            </span>
+          )}
+        </div>
+      )}
+
+      {err && (
+        <div className="panel" style={{ padding:'12px 16px', marginBottom:16,
+          borderColor:'rgba(239,68,68,.45)', color:'#fca5a5', fontSize:13 }}>
+          <i className="fas fa-triangle-exclamation" style={{ marginRight:8 }}></i>{err}
+        </div>
+      )}
+
+      <div className="panel" style={{ padding:20, marginBottom:16 }}>
+        <h3 style={{ margin:'0 0 4px', fontSize:15 }}>Nouveau trade</h3>
+        <p style={{ margin:'0 0 14px', color:'var(--muted)', fontSize:12.5 }}>
+          Enregistre ce que tu prends réellement. Le résultat est déduit du prix de sortie.
+        </p>
+        <form onSubmit={create} style={{ display:'grid', gap:12,
+          gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))' }}>
+          <label style={{ display:'grid', gap:5, fontSize:12, color:'var(--muted)' }}>Paire
+            <input className="fld" value={form.pair} placeholder="XAUUSD"
+              onChange={e=>setForm({...form, pair:e.target.value.toUpperCase()})} /></label>
+          <label style={{ display:'grid', gap:5, fontSize:12, color:'var(--muted)' }}>Sens
+            <select className="fld" value={form.direction} onChange={e=>setForm({...form, direction:e.target.value})}>
+              <option value="BUY">BUY</option><option value="SELL">SELL</option>
+            </select></label>
+          <label style={{ display:'grid', gap:5, fontSize:12, color:'var(--muted)' }}>Entrée
+            <input className="fld" inputMode="decimal" value={form.entry} placeholder="4700"
+              onChange={e=>setForm({...form, entry:e.target.value})} /></label>
+          <label style={{ display:'grid', gap:5, fontSize:12, color:'var(--muted)' }}>Stop loss
+            <input className="fld" inputMode="decimal" value={form.sl} placeholder="4690"
+              onChange={e=>setForm({...form, sl:e.target.value})} /></label>
+          <label style={{ display:'grid', gap:5, fontSize:12, color:'var(--muted)' }}>Take profit
+            <input className="fld" inputMode="decimal" value={form.tp} placeholder="4720"
+              onChange={e=>setForm({...form, tp:e.target.value})} /></label>
+          <label style={{ display:'grid', gap:5, fontSize:12, color:'var(--muted)' }}>Taille
+            <input className="fld" inputMode="decimal" value={form.size} placeholder="0.5"
+              onChange={e=>setForm({...form, size:e.target.value})} /></label>
+          <div style={{ display:'flex', alignItems:'flex-end' }}>
+            <button className="btn" type="submit" disabled={busy} style={{ width:'100%' }}>
+              {busy ? <Spinner/> : <><i className="fas fa-plus"></i>Enregistrer</>}
+            </button>
+          </div>
+        </form>
+        <label style={{ display:'grid', gap:5, fontSize:12, color:'var(--muted)', marginTop:12 }}>Notes
+          <textarea className="fld" rows="2" value={form.notes} placeholder="Contexte, raison du trade…"
+            onChange={e=>setForm({...form, notes:e.target.value})} /></label>
+        {(() => {
+          const e0 = parseFloat(String(form.entry).replace(',','.'));
+          const s0 = parseFloat(String(form.sl).replace(',','.'));
+          const t0 = parseFloat(String(form.tp).replace(',','.'));
+          if (!isFinite(e0) || !isFinite(s0)) return null;
+          const risk = Math.abs(e0 - s0);
+          const rr = isFinite(t0) ? (Math.abs(t0 - e0) / risk) : null;
+          return <p style={{ margin:'12px 0 0', fontSize:12.5, color:'var(--muted)' }}>
+            Risque par unité : <b style={{color:'#fff'}}>{risk.toFixed(4)}</b>
+            {rr !== null && <> · Ratio prévu : <b style={{color:'#fff'}}>{rr.toFixed(2)}R</b></>}
+          </p>;
+        })()}
+      </div>
+
+      {open.length > 0 && (
+        <div className="panel" style={{ padding:20, marginBottom:16 }}>
+          <h3 style={{ margin:'0 0 14px', fontSize:15 }}>
+            Positions en cours <span className="badge" style={{ marginLeft:8 }}>{open.length}</span>
+          </h3>
+          <div style={{ display:'grid', gap:10 }}>
+            {open.map(t => (
+              <div key={t.id} className="card" style={{ padding:'12px 14px' }}>
+                <div style={{ display:'flex', flexWrap:'wrap', gap:10, alignItems:'center',
+                  justifyContent:'space-between' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+                    <b style={{ color:'#fff' }}>{t.pair}</b>
+                    <span className="badge" style={{ background: t.direction==='BUY' ? 'rgba(16,185,129,.13)' : 'rgba(239,68,68,.13)',
+                      color: t.direction==='BUY' ? '#34d399' : '#f87171' }}>{t.direction}</span>
+                    <span style={{ fontSize:12.5, color:'var(--muted)' }}>
+                      entrée <b style={{color:'#fff'}}>{n6(t.entry)}</b>
+                      {t.sl !== null && <> · SL <b style={{color:'#fff'}}>{n6(t.sl)}</b></>}
+                      {t.tp !== null && <> · TP <b style={{color:'#fff'}}>{n6(t.tp)}</b></>}
+                      {t.plannedRR !== null && <> · {t.plannedRR}R prévu</>}
+                    </span>
+                  </div>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                    <input className="fld" style={{ width:96 }} inputMode="decimal" placeholder="Sortie"
+                      value={(closing[t.id]||{}).exit || ''}
+                      onChange={e=>setClosing(s=>({ ...s, [t.id]:{ ...(s[t.id]||{}), exit:e.target.value } }))} />
+                    <input className="fld" style={{ width:96 }} inputMode="decimal" placeholder="PnL (opt.)"
+                      value={(closing[t.id]||{}).pnl || ''}
+                      onChange={e=>setClosing(s=>({ ...s, [t.id]:{ ...(s[t.id]||{}), pnl:e.target.value } }))} />
+                    <button className="btn sm" onClick={()=>doClose(t.id)} disabled={busy}>
+                      <i className="fas fa-flag-checkered"></i>Clôturer
+                    </button>
+                    <button className="btn ghost sm" onClick={()=>del(t.id)} title="Supprimer">
+                      <i className="fas fa-trash"></i>
+                    </button>
+                  </div>
+                </div>
+                {t.notes && <p style={{ margin:'8px 0 0', fontSize:12.5, color:'var(--muted)' }}>{t.notes}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="panel" style={{ padding:20, marginBottom:16 }}>
+        <h3 style={{ margin:'0 0 14px', fontSize:15 }}>Trades clôturés <span className="badge" style={{ marginLeft:8 }}>{closed.length}</span></h3>
+        {closed.length === 0 ? (
+          <p style={{ color:'var(--muted)', fontSize:13, margin:0 }}>
+            Aucun trade clôturé. Enregistre un trade puis clôture-le avec son prix de sortie :
+            le taux de réussite se construit ici.
+          </p>
+        ) : (
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13, minWidth:640 }}>
+              <thead>
+                <tr style={{ color:'var(--muted)', fontSize:11.5, textTransform:'uppercase', letterSpacing:'.05em' }}>
+                  <th style={{ textAlign:'left', padding:'8px 10px' }}>Paire</th>
+                  <th style={{ textAlign:'left', padding:'8px 10px' }}>Sens</th>
+                  <th style={{ textAlign:'right', padding:'8px 10px' }}>Entrée</th>
+                  <th style={{ textAlign:'right', padding:'8px 10px' }}>Sortie</th>
+                  <th style={{ textAlign:'right', padding:'8px 10px' }}>R</th>
+                  <th style={{ textAlign:'right', padding:'8px 10px' }}>PnL</th>
+                  <th style={{ textAlign:'left', padding:'8px 10px' }}>Résultat</th>
+                  <th style={{ padding:'8px 10px' }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {closed.map(t => (
+                  <tr key={t.id} style={{ borderTop:'1px solid var(--border)' }}>
+                    <td style={{ padding:'9px 10px', color:'#fff', fontWeight:600 }}>{t.pair}</td>
+                    <td style={{ padding:'9px 10px', color:'var(--muted)' }}>{t.direction}</td>
+                    <td style={{ padding:'9px 10px', textAlign:'right' }}>{n6(t.entry)}</td>
+                    <td style={{ padding:'9px 10px', textAlign:'right' }}>{n6(t.exit)}</td>
+                    <td style={{ padding:'9px 10px', textAlign:'right',
+                      color: t.rr > 0 ? '#34d399' : t.rr < 0 ? '#f87171' : 'var(--muted)' }}>{n2(t.rr)}</td>
+                    <td style={{ padding:'9px 10px', textAlign:'right',
+                      color: t.pnl > 0 ? '#34d399' : t.pnl < 0 ? '#f87171' : 'var(--muted)' }}>{n6(t.pnl)}</td>
+                    <td style={{ padding:'9px 10px' }}><ResultBadge result={t.result} status={t.status} /></td>
+                    <td style={{ padding:'9px 10px', textAlign:'right' }}>
+                      <button className="btn ghost sm" onClick={()=>del(t.id)} title="Supprimer">
+                        <i className="fas fa-trash"></i>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {stats && stats.byStrategy && stats.byStrategy.length > 0 && (
+        <div className="panel" style={{ padding:20 }}>
+          <h3 style={{ margin:'0 0 14px', fontSize:15 }}>Réussite par stratégie</h3>
+          <div style={{ display:'grid', gap:10 }}>
+            {stats.byStrategy.map(s => (
+              <div key={s.key} style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+                <span style={{ flex:'1 1 220px', fontSize:13, color:'#fff' }}>{s.label}</span>
+                <span style={{ width:160, height:8, background:'rgba(148,163,184,.18)', borderRadius:99, overflow:'hidden' }}>
+                  <span style={{ display:'block', height:'100%', width:`${s.winRate || 0}%`,
+                    background: (s.winRate||0) >= 50 ? '#10b981' : '#f59e0b' }}></span>
+                </span>
+                <span style={{ fontSize:12.5, color:'var(--muted)', minWidth:150, textAlign:'right' }}>
+                  {s.wins}/{s.trades} · {s.winRate === null ? '—' : s.winRate + ' %'}
+                  {s.pnl ? <> · PnL {n6(s.pnl)}</> : null}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ══════════════ DASHBOARD ══════════════ */
+
+function Dashboard({ user, onLogout }) {
+  const [tab, setTab] = useState('analyze');
+  const [result, setResult] = useState(null);
+  const [strategies, setStrategies] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const navRef = useRef(null);
+  const itemRefs = useRef({});
+  const [pill, setPill] = useState({ left:0, width:0, top:0, height:0 });
+
+  const load = useCallback(async () => {
+    try {
+      const [k,h,st] = await Promise.all([
+        api('/knowledge').then(r=>r.ok?r.json():null),
+        api('/history').then(r=>r.ok?r.json():null),
+        api('/stats').then(r=>r.ok?r.json():null)
+      ]);
+      if (k?.success) setStrategies(k.strategies);
+      if (h?.success) setHistory(h.history);
+      if (st?.success) setStats(st);
+    } catch {}
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const del = async (id) => {
+    await api(`/knowledge/${id}`, { method:'DELETE' });
+    load();
+  };
+
+  const NAV = [
+    { id:'analyze',    label:'Analyse',   icon:'fa-crosshairs' },
+    { id:'add',        label:'Ajouter',   icon:'fa-circle-plus' },
+    { id:'strategies', label:'Stratégies',icon:'fa-book' },
+    { id:'journal',    label:'Journal',   icon:'fa-receipt' },
+    { id:'history',    label:'Historique',icon:'fa-clock-rotate-left' }
+  ];
+
+  useEffect(() => {
+    const el = itemRefs.current[tab];
+    if (el && navRef.current) {
+      const a = el.getBoundingClientRect(), b = navRef.current.getBoundingClientRect();
+      setPill({ left: a.left - b.left, width: a.width, top: 0, height: a.height });
+    }
+  }, [tab, strategies.length]);
+
+  return (
+    <div style={{ minHeight:'100vh' }} className="pad-mobile">
+
+      <header style={{ position:'sticky', top:0, zIndex:40, borderBottom:'1px solid var(--border)',
+        background:'rgba(9,13,20,.82)', backdropFilter:'blur(16px)' }}>
+        <div className="hdr" style={{ maxWidth:1240, margin:'0 auto', padding:'12px 20px', display:'flex',
+          justifyContent:'space-between', alignItems:'center', gap:14, flexWrap:'wrap' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+            <span style={{ fontSize:23, fontWeight:900, letterSpacing:'-1.2px' }}>
+              <GradientText>5trade</GradientText>
+            </span>
+            <span className="badge" style={{ background:'rgba(16,185,129,.12)', color:'#34d399' }}>
+              <span className="dot-live"></span>en ligne
+            </span>
+            {stats && (
+              <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--muted)' }}>
+                <i className="fas fa-database"></i>{stats.total} stratégies
+              </span>
+            )}
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+            <span style={{ fontSize:12.5, color:'var(--muted)' }}>
+              <i className="fas fa-user-astronaut" style={{ marginRight:6 }}></i>
+              {user.username}
+              {user.handle && <span style={{ color:'var(--dim)' }}> · {user.handle}</span>}
+            </span>
+            <button className="btn ghost sm" onClick={onLogout}>
+              <i className="fas fa-right-from-bracket"></i>Déconnexion
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="wrap">
+        <div className="nav" ref={navRef} style={{ marginBottom:20 }}>
+          {pill.width > 0 && (
+            <span className="nav-pill" style={{ width:pill.width, transform:`translateX(${pill.left}px)`, top:pill.top, height:pill.height }}></span>
+          )}
+          {NAV.map(n => (
+            <button key={n.id} ref={el => itemRefs.current[n.id] = el}
+              className={`nav-item ${tab===n.id?'on':''}`} onClick={()=>setTab(n.id)}>
+              <i className={`fas ${n.icon}`}></i>{n.label}
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <div style={{ display:'grid', gap:14 }}>
+            <div className="stat-grid">
+              {[0,1,2].map(i => <div key={i} className="panel" style={{padding:18}}>
+                <Skeleton h={11} w="52%" /><Skeleton h={28} w="40%" style={{marginTop:10}} /></div>)}
+            </div>
+            <div className="panel" style={{ padding:22 }}>
+              <Skeleton h={16} w="34%" />
+              <Skeleton h={44} style={{ marginTop:16 }} />
+              <Skeleton h={120} style={{ marginTop:12 }} />
+            </div>
+          </div>
+        ) : (<>
+          {tab === 'analyze' && (<>
+            <div className="stat-grid" style={{ marginBottom:18 }}>
+              <StatTile icon="fa-database" label="Stratégies" value={stats?.total || 0} color="#60a5fa" delay={0} />
+              <StatTile icon="fa-globe" label="Scrapées du web" value={(stats?.bySource?.search||0)+(stats?.bySource?.scrape||0)}
+                color="#a78bfa" delay={70} />
+              <StatTile icon="fa-clock-rotate-left" label="Analyses" value={history.length} color="#34d399" delay={140} />
+            </div>
+            <Analyzer onDone={setResult} />
+            {result && <Result result={result} />}
+          </>)}
+
+          {tab === 'add' && <AddKnowledge refresh={load} />}
+          {tab === 'strategies' && <Strategies strategies={strategies} onDelete={del} />}
+          {tab === 'journal' && <Journal />}
+          {tab === 'history' && <History history={history} />}
+        </>)}
+      </main>
+
+      <nav className="mobile-nav">
+        {NAV.map(n => (
+          <button key={n.id} className={tab===n.id?'on':''} onClick={()=>setTab(n.id)}>
+            <i className={`fas ${n.icon}`} style={{ fontSize:16 }}></i>{n.label}
+          </button>
+        ))}
+      </nav>
+    </div>
+  );
+}
+
+/* ══════════════ APP ══════════════ */
+
+function App() {
+  const [user, setUser] = useState(null);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    api('/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.user) setUser(d.user); })
+      .catch(() => {})
+      .finally(() => setChecking(false));
+  }, []);
+
+  const logout = async () => {
+    try { await api('/logout', { method:'POST' }); } catch {}
+    setUser(null);
+  };
+
+  if (checking) {
+    return (
+      <>
+        
+        <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:20 }}>
+            <Loader3D size={56} />
+            <span style={{ color:'var(--muted)', fontSize:13 }}>
+              <ShinyText text="Chargement de 5trade" color="#5d6b7d" shineColor="#cfe3ff" speed={2.4} />
+            </span>
+          </div>
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      
+      {user ? <Dashboard user={user} onLogout={logout} /> : <Auth onLogin={setUser} />}
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
