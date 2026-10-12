@@ -1884,6 +1884,130 @@ app.get('/api/concepts', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Décrire une stratégie : le trader l'explique, le moteur la structure ───
+// « Je lui explique une stratégie, il analyse, rassemble les infos et me la
+//  rend en la sauvegardant. » Le résultat n'est pas un texte : c'est une fiche
+// exploitable, avec le moteur qui décide comment analyser.
+app.post('/api/strategies/decrire', requireAuth, async (req, res) => {
+  try {
+    const texte = String((req.body && req.body.texte) || '').trim();
+    if (texte.length < 30) {
+      return res.status(400).json({ error: 'Décris ta stratégie en quelques phrases (30 caractères minimum).' });
+    }
+    if (texte.length > 8000) {
+      return res.status(400).json({ error: 'Description trop longue (8000 caractères maximum).' });
+    }
+
+    const consigne = `Tu transformes la description d'un trader en FICHE DE STRATÉGIE exploitable par un moteur d'analyse.
+
+DESCRIPTION DU TRADER :
+"""${texte}"""
+
+RÈGLES DISPONIBLES (choisis uniquement celles qui correspondent réellement à ce qu'il décrit) :
+  R1 = balayage de liquidité (mèche au-delà d'un niveau puis retour)
+  R2 = rupture de structure (BOS / CHoCH, cassure confirmée par la clôture)
+  R3 = zone réactive (order block, FVG, breaker : le prix réagit sur une zone)
+  R4 = position dans le range (premium pour vendre, discount pour acheter)
+
+STYLES (choisis-en un si c'est indiqué, sinon null) :
+  scalping = quelques minutes (1m / 5m / 15m)
+  intraday = la journée (5m / 15m / 1h)
+  swing    = plusieurs jours (1h / 4h / 1d)
+
+Réponds en JSON strict, sans texte autour :
+{
+  "titre": "titre court et parlant, 60 caractères max",
+  "resume": "2 ou 3 phrases qui résument la logique de la stratégie",
+  "regles": ["R1","R3"],
+  "style": "scalping" | "intraday" | "swing" | null,
+  "timeframes": ["1m","5m","15m"],
+  "seuilAlignes": 2,
+  "seuilForce": 0.5,
+  "entree": "condition d'entrée, précise et vérifiable",
+  "invalidation": "ce qui annule le scénario",
+  "objectif": "où prendre le profit",
+  "contexte": "quand NE PAS trader",
+  "concepts": ["OB","FVG","Sweep"],
+  "motsCles": ["3 à 6 mots-clés pour retrouver la fiche"]
+}
+N'invente rien : si une information n'est pas dans la description, mets null ou une liste vide.`;
+
+    let fiche;
+    try {
+      const out = await deepseek([{ role: 'user', content: consigne }], { maxTokens: 1400, json: true });
+      fiche = JSON.parse(out);
+    } catch (e) {
+      return res.status(502).json({
+        error: `L'analyse du texte a échoué (${e.message}). Vérifie que le service d'IA répond, puis réessaie.`
+      });
+    }
+
+    // Le moteur est normalisé : aucune valeur hors bornes n'entre en base.
+    const reglesConnues = Array.isArray(fiche.regles)
+      ? fiche.regles.map(r => String(r).toUpperCase()).filter(r => Signals.TOUTES_REGLES[r]) : [];
+    // Un style déclaré impose ses unités de temps si le trader n'en a pas donné
+    // assez : « scalping » sur une seule unité ne produirait aucun alignement,
+    // donc aucun signal fiable — exactement ce qu'on cherche à éviter.
+    const tfIA = Array.isArray(fiche.timeframes) ? fiche.timeframes.filter(t => /^\d+[mhd]$/.test(String(t))) : [];
+    const tfStyle = (fiche.style && Signals.STYLES[fiche.style])
+      ? Signals.STYLES[fiche.style].timeframes : [];
+    const timeframes = (tfIA.length >= 2 ? tfIA : (tfIA.length && tfStyle.length ? tfStyle : tfIA)) || null;
+    const moteur = Signals.normaliserMoteur({
+      regles: reglesConnues,
+      style: fiche.style || null,
+      timeframes,
+      seuilAlignes: fiche.seuilAlignes,
+      seuilForce: fiche.seuilForce
+    });
+
+    const titre = String(fiche.titre || 'Stratégie décrite').slice(0, 90);
+    const contenu = [
+      fiche.resume || '',
+      fiche.entree ? `Entrée : ${fiche.entree}` : '',
+      fiche.invalidation ? `Invalidation : ${fiche.invalidation}` : '',
+      fiche.objectif ? `Objectif : ${fiche.objectif}` : '',
+      fiche.contexte ? `À éviter : ${fiche.contexte}` : '',
+      '',
+      '--- description d\'origine ---',
+      texte
+    ].filter(Boolean).join('\n');
+
+    const strategy = {
+      id: newId('man_'),
+      title: titre,
+      content: contenu,
+      type: 'strategy',
+      source: 'decrite',
+      tags: (Array.isArray(fiche.motsCles) ? fiche.motsCles : []).map(String).slice(0, 12),
+      structured: {
+        summary: fiche.resume || '',
+        concepts: Array.isArray(fiche.concepts) ? fiche.concepts.map(String).slice(0, 12) : [],
+        conditions: fiche.contexte || '',
+        rules: { entree: fiche.entree || null, invalidation: fiche.invalidation || null, objectif: fiche.objectif || null }
+      },
+      moteur,
+      createdAt: new Date().toISOString()
+    };
+
+    // Sauvegarde : ce que le trader a expliqué devient utilisable tout de suite.
+    if (req.body.enregistrer !== false) await saveStrategy(strategy);
+
+    const profil = Signals.profilDepuisStrategie(strategy);
+    res.json({
+      success: true,
+      enregistree: req.body.enregistrer !== false,
+      strategy,
+      moteur,
+      profil,
+      fiche,
+      lecture: `Règles ${(profil.regles || []).join(' + ') || 'toutes'}`
+        + (profil.style ? ` · style ${profil.style}` : '')
+        + (profil.timeframes ? ` · unités ${profil.timeframes.join('/')}` : '')
+        + (profil.seuilAlignes ? ` · alignement sur ${profil.seuilAlignes}` : '')
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 /**
  * Détermine comment analyser :
  *   mode=auto → toutes les règles (l'app combine tout ce qu'elle sait)

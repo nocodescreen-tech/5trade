@@ -945,6 +945,41 @@ function tinyPng(W = 64, H = 40) {
       /setCandles\(cb\.candles\)/.test(jsx) && /Promise\.all\(\[/.test(jsx));
   }
 
+  // ── Décrire une stratégie : le trader explique, le moteur structure ──
+  // « Je lui explique une stratégie, il analyse, rassemble les infos, me la rend
+  //  et la sauvegarde. »
+  {
+    const srv2 = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('la route de description existe', /app\.post\('\/api\/strategies\/decrire'/.test(srv2));
+    ok('une description trop courte est refusée', /30 caractères minimum/.test(srv2));
+    ok('une description trop longue est refusée', /8000 caractères maximum/.test(srv2));
+    ok('le texte est envoyé au modèle d\'analyse', /DESCRIPTION DU TRADER/.test(srv2));
+    ok('les 4 règles sont expliquées au modèle', /R1 = balayage de liquidité/.test(srv2)
+      && /R2 = rupture de structure/.test(srv2) && /R3 = zone réactive/.test(srv2)
+      && /R4 = position dans le range/.test(srv2));
+    ok('le modèle n\'invente rien (consigne explicite)', /N'invente rien/.test(srv2));
+    ok('le moteur produit est normalisé', /Signals\.normaliserMoteur\(\{[\s\S]{0,320}regles: reglesConnues/.test(srv2));
+    ok('la fiche est enregistrée', /await saveStrategy\(strategy\)/.test(srv2));
+    ok('les règles inconnues sont écartées',
+      /filter\(r => Signals\.TOUTES_REGLES\[r\]\)/.test(srv2));
+
+    // Le point de fiabilité : un style déclaré doit donner PLUSIEURS unités de
+    // temps. « Scalping » réduit à 1m ne produirait aucun alignement.
+    const Sg = require('./signals.js');
+    const scalping = Sg.normaliserMoteur({ style: 'scalping', regles: ['R1'] });
+    ok('un style déclaré impose ses unités de temps',
+      Array.isArray(scalping.timeframes) && scalping.timeframes.length >= 2,
+      (scalping.timeframes || []).join('/'));
+    ok('et son seuil d\'alignement reste atteignable',
+      scalping.seuilAlignes >= 1 && scalping.seuilAlignes <= scalping.timeframes.length,
+      `seuil ${scalping.seuilAlignes} sur ${scalping.timeframes.length}`);
+    ok('l\'interface propose la description', /id:'decrire', label:'Décrire'/.test(jsx));
+    ok('l\'interface affiche la fiche obtenue', /fiche\.moteur\.regles/.test(jsx)
+      && /Analyser et enregistrer/.test(jsx));
+    ok('l\'interface interdit d\'envoyer une description trop courte',
+      /decrire\.trim\(\)\.length < 30/.test(jsx));
+  }
+
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
   if (skip) console.log(`  (${skip} test(s) non exécuté(s) : dépendance externe absente — voir les lignes « • »)`);
   process.exit(fail ? 1 : 0);

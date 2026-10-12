@@ -1247,6 +1247,12 @@ function AddKnowledge({ refresh }) {
   const [slim, setSlim] = useState(5);
   const [forum, setForum] = useState('babypips');
   const [fkw, setFkw] = useState('');
+  // « Je lui explique une strategie, il analyse, rassemble les infos, me la rend
+  //  et la sauvegarde. »
+  const [decrire, setDecrire] = useState('');
+  const [fiche, setFiche] = useState(null);
+  const [decrireBusy, setDecrireBusy] = useState(false);
+  const [decrireErr, setDecrireErr] = useState('');
 
   const post = async (path, body, isForm) => {
     setBusy(true); setRes(null);
@@ -1263,7 +1269,24 @@ function AddKnowledge({ refresh }) {
     finally { setBusy(false); }
   };
 
+  /** Envoie la description au moteur, qui la structure et l'enregistre. */
+  const analyserDescription = async () => {
+    setDecrireBusy(true); setDecrireErr(''); setFiche(null);
+    try {
+      const r = await api('/strategies/decrire', {
+        method:'POST', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ texte: decrire })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Analyse refusée');
+      setFiche(d);
+      refresh();
+    } catch (e) { setDecrireErr(e.message); }
+    finally { setDecrireBusy(false); }
+  };
+
   const METHODS = [
+    { id:'decrire', label:'Décrire',  icon:'fa-wand-magic-sparkles' },
     { id:'upload', label:'Documents', icon:'fa-file-arrow-up' },
     { id:'manual', label:'Manuel',    icon:'fa-pen' },
     { id:'url',    label:'Depuis URL',icon:'fa-link' },
@@ -1297,6 +1320,84 @@ function AddKnowledge({ refresh }) {
               </button>
             ))}
           </div>
+
+          {tab==='decrire' && (<>
+            <p style={{ fontSize:13, color:'var(--muted)', marginBottom:12 }}>
+              Explique ta stratégie avec tes mots. L'application l'analyse, en tire une
+              fiche structurée — règles, style, unités de temps, entrée, invalidation — et
+              l'enregistre. Elle est ensuite utilisable dans « Ma stratégie ».
+            </p>
+            <textarea className="fld" rows="8" value={decrire}
+              onChange={e=>setDecrire(e.target.value)}
+              placeholder="Ex. Je scalpe les indices synthétiques en 1 minute. J'attends que le prix balaie un plus bas évident puis revienne vite au-dessus. Là je regarde si la bougie de retour laisse un FVG ou un order block : quand le prix revient tester cette zone et rejette, j'achète. Stop sous le plus bas du balayage, objectif sur l'équilibre du range. Je ne trade pas la session asiatique." />
+            <div style={{ display:'flex', gap:12, alignItems:'center', marginTop:10, flexWrap:'wrap' }}>
+              <button className="btn" disabled={decrireBusy || decrire.trim().length < 30}
+                onClick={analyserDescription}>
+                {decrireBusy
+                  ? <><i className="fas fa-spinner fa-spin"></i> Analyse…</>
+                  : <><i className="fas fa-wand-magic-sparkles"></i> Analyser et enregistrer</>}
+              </button>
+              <span style={{ fontSize:12, color:'var(--dim)' }}>
+                {decrire.trim().length} caractère(s){decrire.trim().length < 30 ? ' — 30 minimum' : ''}
+              </span>
+            </div>
+            {decrireErr && (
+              <p style={{ color:'#f87171', fontSize:12.5, marginTop:10 }}>
+                <i className="fas fa-circle-exclamation" style={{ marginRight:6 }}></i>{decrireErr}
+              </p>
+            )}
+
+            {fiche && (
+              <div className="panel" style={{ marginTop:14, padding:'14px 16px',
+                borderColor:'rgba(16,185,129,.35)' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:9 }}>
+                  <b style={{ fontSize:14 }}>{fiche.strategy.title}</b>
+                  <span className="badge" style={{ background:'rgba(16,185,129,.14)', color:'#34d399' }}>
+                    <i className="fas fa-check" style={{ marginRight:5 }}></i>enregistrée
+                  </span>
+                  {fiche.moteur.style && <span className="tag">{fiche.moteur.style}</span>}
+                  {(fiche.moteur.timeframes || []).map(t => <span key={t} className="tag">{t}</span>)}
+                </div>
+                {fiche.fiche && fiche.fiche.resume && (
+                  <p style={{ fontSize:13, color:'var(--muted)', margin:'0 0 11px' }}>{fiche.fiche.resume}</p>
+                )}
+                <div style={{ display:'grid', gap:7, fontSize:12.5 }}>
+                  <div>
+                    <b style={{ color:'#93c5fd' }}>Règles retenues : </b>
+                    {(fiche.moteur.regles || []).join(' + ') || 'toutes'}
+                  </div>
+                  <div>
+                    <b style={{ color:'#93c5fd' }}>Alignement : </b>
+                    {(fiche.moteur.timeframes || []).join(' + ') || 'unités du graphique'}
+                    {fiche.moteur.seuilAlignes ? ` · au moins ${fiche.moteur.seuilAlignes} d'accord` : ''}
+                  </div>
+                  <div>
+                    <b style={{ color:'#93c5fd' }}>Force minimale : </b>
+                    {Math.round((fiche.moteur.seuilForce || 0) * 100)} %
+                    {' · stop '}{fiche.moteur.atrStop}× ATR
+                  </div>
+                  {fiche.fiche && fiche.fiche.entree && (
+                    <div><b style={{ color:'#93c5fd' }}>Entrée : </b>{fiche.fiche.entree}</div>)}
+                  {fiche.fiche && fiche.fiche.invalidation && (
+                    <div><b style={{ color:'#93c5fd' }}>Invalidation : </b>{fiche.fiche.invalidation}</div>)}
+                  {fiche.fiche && fiche.fiche.objectif && (
+                    <div><b style={{ color:'#93c5fd' }}>Objectif : </b>{fiche.fiche.objectif}</div>)}
+                  {fiche.fiche && fiche.fiche.contexte && (
+                    <div><b style={{ color:'#93c5fd' }}>À éviter : </b>{fiche.fiche.contexte}</div>)}
+                  {(fiche.strategy.structured && fiche.strategy.structured.concepts || []).length > 0 && (
+                    <div>
+                      <b style={{ color:'#93c5fd' }}>Concepts : </b>
+                      {fiche.strategy.structured.concepts.join(', ')}
+                    </div>
+                  )}
+                </div>
+                <p style={{ fontSize:11.5, color:'var(--dim)', marginTop:11 }}>
+                  Utilisable tout de suite : onglet Direct → « Ma stratégie ».
+                  Tu peux l'ajuster ensuite depuis l'onglet Stratégies.
+                </p>
+              </div>
+            )}
+          </>)}
 
           {tab==='upload' && (<>
             <p style={{ fontSize:13, color:'var(--muted)', marginBottom:12 }}>
