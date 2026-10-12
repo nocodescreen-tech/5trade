@@ -1374,10 +1374,36 @@ function AddKnowledge({ refresh }) {
 
 /* ══════════════ STRATÉGIES ══════════════ */
 
-function Strategies({ strategies, onDelete }) {
+function Strategies({ strategies, onDelete, onSaved }) {
   const [q, setQ] = useState('');
   const [remote, setRemote] = useState(null);   // résultats du moteur plein-texte
   const [searching, setSearching] = useState(false);
+  // Édition en place : on modifie une stratégie sans quitter la liste.
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({ title:'', content:'', type:'strategy' });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const ouvrirEdition = (s) => {
+    setEditing(s.id);
+    setForm({ title: s.title || '', content: s.content || s.structured?.summary || '', type: s.type || 'strategy' });
+    setErr('');
+  };
+
+  const enregistrer = async () => {
+    setBusy(true); setErr('');
+    try {
+      const r = await api('/knowledge/' + encodeURIComponent(editing), {
+        method:'PUT', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify(form)
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Modification refusée');
+      setEditing(null);
+      if (onSaved) await onSaved();       // recharge la liste ET les profils
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
 
   // Recherche serveur (accents, pondération titre/tags/contenu, extrait).
   // En dessous de 2 caractères on affiche la liste complète.
@@ -1451,11 +1477,31 @@ function Strategies({ strategies, onDelete }) {
                     {s.source || s.type}
                   </span>
                 </div>
-                <p style={{ fontSize:12.5, color:'var(--muted)', lineHeight:1.6, margin:'9px 0 11px', flex:1 }}>
-                  {s._excerpt
-                    ? s._excerpt
-                    : `${(s.structured?.summary || s.content || '').slice(0,190)}…`}
-                </p>
+                {editing === s.id ? (
+                  <div style={{ margin:'9px 0 11px', display:'grid', gap:8 }}>
+                    <input className="fld" style={{ margin:0 }} value={form.title}
+                      onChange={e=>setForm(f=>({ ...f, title:e.target.value }))} placeholder="Titre" />
+                    <select className="fld" style={{ margin:0 }} value={form.type}
+                      onChange={e=>setForm(f=>({ ...f, type:e.target.value }))}>
+                      <option value="strategy">stratégie</option>
+                      <option value="concept">concept</option>
+                      <option value="guide">guide</option>
+                    </select>
+                    <textarea className="fld" rows={7} style={{ margin:0, fontFamily:'ui-monospace,monospace', fontSize:12 }}
+                      value={form.content}
+                      onChange={e=>setForm(f=>({ ...f, content:e.target.value }))}
+                      placeholder="Contenu — ce texte conditionne les règles qui seront appliquées en mode « Ma stratégie »." />
+                    <p style={{ margin:0, fontSize:11.5, color:'var(--dim)' }}>
+                      Les étiquettes et les règles d'analyse sont recalculées depuis ce texte.
+                    </p>
+                  </div>
+                ) : (
+                  <p style={{ fontSize:12.5, color:'var(--muted)', lineHeight:1.6, margin:'9px 0 11px', flex:1 }}>
+                    {s._excerpt
+                      ? s._excerpt
+                      : `${(s.structured?.summary || s.content || '').slice(0,190)}…`}
+                  </p>
+                )}
                 <div style={{ marginBottom:11 }}>
                   {(s.tags||[]).slice(0,6).map((t,k)=> <span key={k} className="tag">{t}</span>)}
                 </div>
@@ -1470,6 +1516,23 @@ function Strategies({ strategies, onDelete }) {
                       <a href={s.sourceUrl} target="_blank" rel="noreferrer"
                         style={{ color:'#60a5fa', fontSize:12.5 }}>
                         <i className="fas fa-external-link-alt"></i></a>
+                    )}
+                    {editing === s.id ? (
+                      <>
+                        <button onClick={enregistrer} disabled={busy}
+                          style={{ background:'none', border:'none', color:'#34d399', cursor:'pointer', fontSize:12.5 }}>
+                          {busy ? '…' : <><i className="fas fa-check"></i> Enregistrer</>}
+                        </button>
+                        <button onClick={()=>setEditing(null)}
+                          style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:12.5 }}>
+                          <i className="fas fa-xmark"></i>
+                        </button>
+                      </>
+                    ) : (
+                      <button onClick={()=>ouvrirEdition(s)} title="Modifier le titre, le type et le contenu"
+                        style={{ background:'none', border:'none', color:'#60a5fa', cursor:'pointer', fontSize:12.5 }}>
+                        <i className="fas fa-pen"></i>
+                      </button>
                     )}
                     <button onClick={()=>onDelete(s.id)}
                       style={{ background:'none', border:'none', color:'#f87171', cursor:'pointer', fontSize:12.5 }}>
@@ -1598,6 +1661,9 @@ function PriceChart({ candles, levels, signal, height, symbol, tf }) {
   // setData au premier chargement (ou après changement de symbole/timeframe),
   // puis update du seul dernier point : c'est ce qui rend le direct fluide.
   useEffect(() => {
+    // Toute erreur de dessin est rattrapée ici : elle ne doit jamais remonter à
+    // React et faire disparaître toute l'interface (erreur vécue).
+    try {
     const { chart, series, vol } = api.current;
     if (!series || !candles || !candles.length) return;
     const sigKey = `${symbol}|${tf}`;
@@ -1608,12 +1674,29 @@ function PriceChart({ candles, levels, signal, height, symbol, tf }) {
     if (api.current.full) {
       series.setData(candles.map(point));
       if (vol) vol.setData(candles.map(bar));
-      try { chart.timeScale().fitContent(); } catch (e) {}
+      api.current.chart.timeScale().fitContent();
       api.current.full = false;
+      api.current.lastTime = toTime(candles[candles.length - 1]);
     } else {
       const last = candles[candles.length - 1];
-      series.update(point(last));
-      if (vol) vol.update(bar(last));
+      const t = toTime(last);
+      // PIÈGE (erreur vécue) : après une reconnexion ou un rechargement, la
+      // bougie reçue peut être PLUS ANCIENNE que le dernier point affiché. Un
+      // update() lève alors « Cannot update oldest data » — une exception que
+      // React ne rattrape pas, et toute l'application tombe. On recharge donc
+      // la série complète dans ce cas.
+      if (api.current.lastTime !== undefined && t < api.current.lastTime) {
+        series.setData(candles.map(point));
+        if (vol) vol.setData(candles.map(bar));
+      } else {
+        series.update(point(last));
+        if (vol) vol.update(bar(last));
+      }
+      api.current.lastTime = t;
+    }
+    } catch (e) {
+      // On repart d'un rechargement complet au prochain rendu.
+      api.current.full = true;
     }
   }, [candles, symbol, tf]);
 
@@ -1689,6 +1772,24 @@ function LiveMarket({ onToJournal }) {
   const [ticks, setTicks] = useState(0);          // preuve visible que ça bouge
   const [lastUpdate, setLastUpdate] = useState(null);
   const [signal, setSignal] = useState(null);      // verdict en direct
+  // Mode d'analyse : 'auto' (l'app combine toutes les règles) ou 'manuel'
+  // (uniquement les règles d'une stratégie choisie dans la base).
+  const [mode, setMode] = useState('auto');
+  const [strategyId, setStrategyId] = useState('');
+  const [profils, setProfils] = useState([]);
+
+  // Profils : quelles règles chaque stratégie de la base active. Sert au mode
+  // manuel (on choisit sa stratégie) et affiche le détail des seuils.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api('/strategies/profiles');
+        const d = await r.json();
+        if (d.success) setProfils(d.profils || []);
+      } catch (e) {}
+    })();
+  }, []);
+
   const [tick, setTick] = useState(null);          // dernier tick BRUT (prix réel)
   const [tickRate, setTickRate] = useState(0);     // ticks par seconde
   const tickPrec = useRef(null);                   // pour la couleur (hausse/baisse)
@@ -1728,7 +1829,7 @@ function LiveMarket({ onToJournal }) {
         ? `${m} — ce marché est probablement FERMÉ (week-end ou hors séance). Les indices synthétiques (Volatility) et les cryptos cotent 24 h/24 : essayez-en un.`
         : m);
     }
-  }, [symbol, tf, provider]);
+  }, [symbol, tf, provider, mode, strategyId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1782,7 +1883,8 @@ function LiveMarket({ onToJournal }) {
   // donc un signal reçu = un vrai changement, pas du bruit.
   useEffect(() => {
     setSignal(null);
-    const es = new EventSource(`/api/signals/stream?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`);
+    const es = new EventSource(`/api/signals/stream?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`
+      + `&mode=${mode}${mode === 'manuel' && strategyId ? '&strategyId=' + encodeURIComponent(strategyId) : ''}`);
     es.addEventListener('signal', ev => {
       try {
         const v = JSON.parse(ev.data);
@@ -1840,6 +1942,21 @@ function LiveMarket({ onToJournal }) {
         <select className="fld" style={{ width:100 }} value={tf} onChange={e=>setTf(e.target.value)}>
           {meta.timeframes.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
+        <select className="fld" style={{ width:150 }} value={mode} onChange={e=>setMode(e.target.value)}
+          title="Auto : l'app combine toutes les règles. Manuel : uniquement les règles d'une stratégie de ta base.">
+          <option value="auto">Analyse auto</option>
+          <option value="manuel">Ma stratégie</option>
+        </select>
+        {mode === 'manuel' && (
+          <select className="fld" style={{ width:250 }} value={strategyId}
+            onChange={e=>setStrategyId(e.target.value)}
+            title="La stratégie appliquée : seules ses règles compteront pour la confirmation.">
+            <option value="">— choisir une stratégie —</option>
+            {profils.map(p => (
+              <option key={p.id} value={p.id}>{p.titre} · {p.regles.join('+')}</option>
+            ))}
+          </select>
+        )}
         <span className="badge" style={{ background: live ? 'rgba(16,185,129,.13)' : 'rgba(245,158,11,.13)',
           color: live ? '#34d399' : '#f59e0b' }}>
           <span className="dot-live"></span>{live ? 'direct' : 'connexion…'}
@@ -1920,6 +2037,18 @@ function LiveMarket({ onToJournal }) {
         <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
           <i className="fas fa-bolt" style={{ color:'#f59e0b' }}></i>
           <b style={{ fontSize:14, color:'#fff' }}>Signal en direct</b>
+          {signal && signal.mode === 'manuel' && signal.strategieAppliquee && (
+            <span className="badge" style={{ background:'rgba(167,139,250,.14)', color:'#c4b5fd' }}
+              title={`Verdict limité aux règles de cette stratégie : ${signal.strategieAppliquee.regles.join(', ')}`}>
+              <i className="fas fa-book"></i>{signal.strategieAppliquee.titre}
+            </span>
+          )}
+          {signal && signal.mode === 'auto' && (
+            <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--muted)' }}
+              title={`Analyse automatique : toutes les règles (${(signal.reglesActives || []).join(', ')})`}>
+              <i className="fas fa-wand-magic-sparkles"></i>auto
+            </span>
+          )}
           {!signal && <span style={{ fontSize:13, color:'var(--muted)' }}>en attente du premier verdict…</span>}
           {signal && (<>
             <span className="badge" style={{
@@ -2716,6 +2845,256 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
   );
 }
 
+/**
+ * Garde-fou : si un composant lève une erreur d'affichage, on montre un message
+ * et un bouton de rechargement au lieu d'un écran vide — l'utilisateur ne doit
+ * jamais se retrouver devant une page morte sans explication.
+ */
+class Garde extends React.Component {
+  constructor(p) { super(p); this.state = { err: null }; }
+  static getDerivedStateFromError(e) { return { err: e }; }
+  componentDidCatch(e) { try { console.error('Erreur d\'affichage :', e && e.message); } catch (_) {} }
+  render() {
+    if (this.state.err) {
+      return (
+        <div className="panel" style={{ padding:24, margin:'24px auto', maxWidth:560, textAlign:'center' }}>
+          <div style={{ fontSize:26, color:'#fbbf24', marginBottom:10 }}>
+            <i className="fas fa-triangle-exclamation"></i>
+          </div>
+          <h3 style={{ margin:'0 0 8px' }}>Un affichage a échoué</h3>
+          <p style={{ color:'var(--muted)', fontSize:13, margin:'0 0 16px' }}>
+            {String(this.state.err && this.state.err.message || 'erreur inconnue')}
+          </p>
+          <button className="btn" onClick={() => { this.setState({ err:null }); window.location.reload(); }}>
+            <i className="fas fa-rotate"></i>Recharger l'interface
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+/* ══════════════ ALERTES ══════════════ */
+
+function Alertes() {
+  const [cfg, setCfg] = useState(null);
+  // Les marchés proposés viennent de la même source que l'onglet Direct.
+  const [meta, setMeta] = useState({ symbols: [], timeframes: [] });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+  const [nouveau, setNouveau] = useState({ symbol: 'frxXAUUSD', tf: '15m', provider: 'deriv' });
+  const [compte, setCompte] = useState(null);
+
+  const load = async () => {
+    try {
+      const r = await api('/alerts');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Lecture impossible');
+      setCfg(d.config || null);
+    } catch (e) { setErr(e.message); }
+  };
+  useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api('/market/symbols');
+        const d = await r.json();
+        if (d.success) setMeta({ symbols: d.symbols || [], timeframes: d.timeframes || [] });
+      } catch (e) {}
+    })();
+  }, []);
+
+  const sauver = async (patch) => {
+    setBusy(true); setErr(''); setMsg('');
+    try {
+      const r = await api('/alerts', { method:'PUT', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ ...cfg, ...patch }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Enregistrement refusé');
+      setCfg(d.config);
+      setMsg('Réglages enregistrés.');
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const tester = async () => {
+    setBusy(true); setErr(''); setMsg('');
+    try {
+      const r = await api('/alerts/test', { method:'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Envoi impossible');
+      setMsg(`Email de test envoyé à ${d.to}.`);
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const controler = async () => {
+    setBusy(true); setErr(''); setMsg('');
+    try {
+      const r = await api('/alerts/verifier', { method:'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Contrôle impossible');
+      setCompte(d);
+      setMsg(d.envoyes ? `${d.envoyes} alerte(s) envoyée(s).` : 'Aucun signal confirmé pour l\'instant.');
+      await load();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const ajouterMarche = () => {
+    if (!nouveau.symbol) return;
+    const m = cfg.marches || [];
+    if (m.some(x => x.symbol === nouveau.symbol && x.tf === nouveau.tf && x.provider === nouveau.provider)) return;
+    sauver({ marches: [...m, { ...nouveau }] });
+  };
+  const retirerMarche = (i) => sauver({ marches: (cfg.marches || []).filter((_, k) => k !== i) });
+
+  if (!cfg) return <div className="panel" style={{ padding:28, textAlign:'center', color:'var(--muted)' }}>
+    {err ? err : 'Chargement des réglages…'}</div>;
+
+  const libelle = (sym, prov) => {
+    const s = (meta.symbols || []).find(x => x.symbol === sym && x.provider === prov);
+    return s ? (s.tv || s.label) : `${prov}:${sym}`;
+  };
+
+  return (
+    <div style={{ display:'grid', gap:16 }}>
+      <Reveal>
+        <div className="panel" style={{ padding:20 }}>
+          <h2 style={{ fontSize:17, fontWeight:800, margin:'0 0 6px' }}>
+            <i className="fas fa-bell" style={{ color:'#fbbf24', marginRight:9 }}></i>Alertes par email
+          </h2>
+          <p style={{ margin:'0 0 16px', fontSize:12.5, color:'var(--muted)' }}>
+            Un signal confirmé n'existe que si l'onglet est ouvert. Ici, l'app surveille
+            les marchés choisis et t'envoie un email au premier signal confirmé — une seule
+            fois par signal.
+          </p>
+
+          {msg && <div style={{ marginBottom:12, padding:'9px 12px', borderRadius:8, fontSize:12.5,
+            background:'rgba(16,185,129,.1)', color:'#6ee7b7' }}>{msg}</div>}
+          {err && <div style={{ marginBottom:12, padding:'9px 12px', borderRadius:8, fontSize:12.5,
+            background:'rgba(239,68,68,.1)', color:'#fca5a5' }}>{err}</div>}
+
+          <div style={{ display:'grid', gap:12, gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))' }}>
+            <label style={{ display:'grid', gap:5 }}>
+              <span style={{ fontSize:12, color:'var(--muted)' }}>Surveillance</span>
+              <select className="fld" style={{ margin:0 }} value={cfg.actif ? 'on' : 'off'}
+                onChange={e => sauver({ actif: e.target.value === 'on' })}>
+                <option value="off">désactivée</option>
+                <option value="on">active</option>
+              </select>
+            </label>
+            <label style={{ display:'grid', gap:5 }}>
+              <span style={{ fontSize:12, color:'var(--muted)' }}>Adresse de réception</span>
+              <input className="fld" style={{ margin:0 }} value={cfg.email || ''}
+                placeholder="ton@email.com"
+                onChange={e => setCfg({ ...cfg, email: e.target.value })}
+                onBlur={() => sauver({ email: cfg.email })} />
+            </label>
+            <label style={{ display:'grid', gap:5 }}>
+              <span style={{ fontSize:12, color:'var(--muted)' }}>
+                Force minimale : {Math.round((cfg.forceMin || 0) * 100)} %
+              </span>
+              <input type="range" min="0" max="100" step="5" value={Math.round((cfg.forceMin || 0) * 100)}
+                onChange={e => setCfg({ ...cfg, forceMin: Number(e.target.value) / 100 })}
+                onMouseUp={() => sauver({ forceMin: cfg.forceMin })} />
+            </label>
+            <label style={{ display:'grid', gap:5 }}>
+              <span style={{ fontSize:12, color:'var(--muted)' }}>Intervalle de contrôle (s)</span>
+              <input className="fld" style={{ margin:0 }} type="number" min="15" max="3600"
+                value={cfg.intervalleSec || 60}
+                onChange={e => setCfg({ ...cfg, intervalleSec: Number(e.target.value) })}
+                onBlur={() => sauver({ intervalleSec: cfg.intervalleSec })} />
+            </label>
+          </div>
+
+          <div style={{ display:'flex', gap:10, marginTop:16, flexWrap:'wrap' }}>
+            <button className="btn" onClick={tester} disabled={busy}>
+              <i className="fas fa-paper-plane"></i>Envoyer un email de test
+            </button>
+            <button className="btn ghost" onClick={controler} disabled={busy}>
+              <i className="fas fa-magnifying-glass-chart"></i>Vérifier maintenant
+            </button>
+          </div>
+
+          {compte && compte.marches && (
+            <div style={{ marginTop:14, fontSize:12.5, display:'grid', gap:5 }}>
+              <div style={{ color:'var(--muted)' }}>Dernier contrôle :</div>
+              {compte.marches.map((m, i) => (
+                <div key={i} style={{ display:'flex', justifyContent:'space-between', gap:10 }}>
+                  <span style={{ color:'var(--muted)' }}>{libelle(m.symbol, m.provider)} {m.tf}</span>
+                  <span style={{ color: /ALERTE/.test(m.verdict) ? '#6ee7b7' : 'var(--dim)' }}>{m.verdict}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Reveal>
+
+      <div className="panel" style={{ padding:20 }}>
+        <h3 style={{ margin:'0 0 12px', fontSize:15 }}>
+          { (cfg.marches || []).length } marché(s) surveillé(s)
+        </h3>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:14 }}>
+          <select className="fld" style={{ margin:0, width:'auto' }} value={nouveau.provider}
+            onChange={e => setNouveau({ ...nouveau, symbol:'', provider: e.target.value })}>
+            <option value="deriv">Deriv</option>
+            <option value="binance">Binance</option>
+          </select>
+          <select className="fld" style={{ margin:0, width:'auto' }} value={nouveau.symbol}
+            onChange={e => setNouveau({ ...nouveau, symbol: e.target.value })}>
+            <option value="">— marché —</option>
+            {(meta.symbols || []).filter(s => s.provider === nouveau.provider)
+              .map(s => <option key={s.symbol} value={s.symbol}>{s.tv || s.label}</option>)}
+          </select>
+          <select className="fld" style={{ margin:0, width:'auto' }} value={nouveau.tf}
+            onChange={e => setNouveau({ ...nouveau, tf: e.target.value })}>
+            {(meta.timeframes || []).map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <button className="btn ghost sm" onClick={ajouterMarche} disabled={busy || !nouveau.symbol}>
+            <i className="fas fa-plus"></i>Ajouter
+          </button>
+        </div>
+        <div style={{ display:'grid', gap:7 }}>
+          {(cfg.marches || []).map((m, i) => (
+            <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+              gap:10, paddingBottom:7, borderBottom:'1px solid rgba(27,36,51,.5)' }}>
+              <span style={{ fontSize:13, color:'#fff' }}>{libelle(m.symbol, m.provider)} <span style={{ color:'var(--dim)' }}>· {m.tf}</span></span>
+              <button onClick={() => retirerMarche(i)} disabled={busy}
+                style={{ background:'none', border:'none', color:'#f87171', cursor:'pointer', fontSize:12.5 }}>
+                <i className="fas fa-trash"></i>
+              </button>
+            </div>
+          ))}
+          {!(cfg.marches || []).length && <span style={{ color:'var(--dim)', fontSize:12.5 }}>Aucun marché surveillé.</span>}
+        </div>
+      </div>
+
+      <div className="panel" style={{ padding:20 }}>
+        <h3 style={{ margin:'0 0 12px', fontSize:15 }}>Alertes envoyées</h3>
+        {!(cfg.derniers || []).length && <span style={{ color:'var(--dim)', fontSize:12.5 }}>Aucune alerte envoyée pour l'instant.</span>}
+        <div style={{ display:'grid', gap:8 }}>
+          {(cfg.derniers || []).map((a, i) => (
+            <div key={i} style={{ display:'flex', justifyContent:'space-between', gap:12, flexWrap:'wrap',
+              fontSize:12.5, paddingBottom:7, borderBottom:'1px solid rgba(27,36,51,.5)' }}>
+              <span>
+                <b style={{ color: a.direction === 'BUY' ? '#34d399' : '#f87171' }}>{a.direction}</b>
+                {' '}{libelle(a.symbol, a.provider)} · {a.tf}
+              </span>
+              <span style={{ color:'var(--muted)' }}>
+                force {Math.round((a.strength || 0) * 100)} % · {new Date(a.at).toLocaleString('fr-FR')}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ══════════════ DASHBOARD ══════════════ */
 
 function Dashboard({ user, onLogout }) {
@@ -2765,7 +3144,8 @@ function Dashboard({ user, onLogout }) {
     { id:'add',        label:'Ajouter',   icon:'fa-circle-plus' },
     { id:'strategies', label:'Stratégies',icon:'fa-book' },
     { id:'journal',    label:'Journal',   icon:'fa-receipt' },
-    { id:'history',    label:'Historique',icon:'fa-clock-rotate-left' }
+    { id:'history',    label:'Historique',icon:'fa-clock-rotate-left' },
+    { id:'alerts',     label:'Alertes',    icon:'fa-bell' }
   ];
 
   useEffect(() => {
@@ -2850,11 +3230,14 @@ function Dashboard({ user, onLogout }) {
             {result && <Result result={result} onToJournal={sendToJournal} />}
           </>)}
 
-          {tab === 'live' && <LiveMarket onToJournal={sendToJournal} />}
-          {tab === 'add' && <AddKnowledge refresh={load} />}
-          {tab === 'strategies' && <Strategies strategies={strategies} onDelete={del} />}
-          {tab === 'journal' && <Journal prefill={prefill} onPrefillUsed={()=>setPrefill(null)} strategies={strategies} />}
-          {tab === 'history' && <History history={history} />}
+          <Garde>
+            {tab === 'live' && <LiveMarket onToJournal={sendToJournal} />}
+            {tab === 'add' && <AddKnowledge refresh={load} />}
+            {tab === 'strategies' && <Strategies strategies={strategies} onDelete={del} onSaved={load} />}
+            {tab === 'journal' && <Journal prefill={prefill} onPrefillUsed={()=>setPrefill(null)} strategies={strategies} />}
+            {tab === 'history' && <History history={history} />}
+            {tab === 'alerts' && <Alertes />}
+          </Garde>
         </>)}
       </main>
 

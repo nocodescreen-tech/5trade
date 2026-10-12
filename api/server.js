@@ -806,6 +806,45 @@ async function extractDocx(filePath) {
 // ─────────────────────────────────────────────────────────────
 // 2) SAISIE MANUELLE
 // ─────────────────────────────────────────────────────────────
+/**
+ * Modification d'une stratégie existante.
+ * Modifier le texte change AUSSI le profil d'analyse (les règles déduites) :
+ * on renvoie donc le profil recalculé, pour que le mode manuel en tienne compte
+ * immédiatement.
+ */
+app.put('/api/knowledge/:id', requireAuth, async (req, res) => {
+  try {
+    const { title, content, type, tags } = req.body || {};
+    const strategies = await loadAllStrategies().catch(() => []);
+    const existante = (strategies || []).find(x => x.id === req.params.id);
+    if (!existante) return res.status(404).json({ error: 'Stratégie introuvable' });
+
+    const contenuFinal = content !== undefined ? String(content).slice(0, 20000) : existante.content;
+    const titreFinal = title !== undefined ? String(title).trim().slice(0, 200) : existante.title;
+    if (!titreFinal || !contenuFinal) {
+      return res.status(400).json({ error: 'Le titre et le contenu ne peuvent pas être vides' });
+    }
+
+    const maj = {
+      ...existante,
+      title: titreFinal,
+      content: contenuFinal,
+      type: type || existante.type || 'strategy',
+      // Les étiquettes suivent le contenu si celui-ci change : une stratégie
+      // dont on réécrit le texte ne doit pas garder les anciennes.
+      tags: Array.isArray(tags) ? tags.map(String).slice(0, 20)
+        : (content !== undefined ? extractTags(contenuFinal) : (existante.tags || [])),
+      updatedAt: new Date().toISOString()
+    };
+
+    await saveStrategy(maj);
+    const profil = Signals.profilDepuisStrategie(maj);
+    res.json({ success: true, strategy: maj, profil });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/knowledge', requireAuth, async (req, res) => {
   try {
     const { title, content, type, source } = req.body;
@@ -1693,20 +1732,101 @@ app.post('/api/market/analyze', requireAuth, async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 
 /** Stratégies de la base qui correspondent au signal (pour dire « laquelle s'applique »). */
+/**
+ * Stratégies de la base cohérentes avec le verdict.
+ *
+ * Remplace la recherche plein-texte : celle-ci remontait toute stratégie dont le
+ * texte contenait un mot du marché (« discount », « haussier »), ce qui affichait
+ * des stratégies de liquidité alors que l'utilisateur avait choisi « OB ».
+ * Ici on compare les RÈGLES : une stratégie est pertinente si elle active les
+ * mêmes familles de règles que celles appliquées. Le score est explicable.
+ */
 async function strategiesForSignal(verdict) {
   try {
     const all = await loadAllStrategies();
-    const query = [
-      verdict.direction === 'BUY' ? 'achat haussier' : verdict.direction === 'SELL' ? 'vente baissier' : '',
-      (verdict.rules || []).map(r => r.name).join(' '),
-      verdict.context && verdict.context.position ? verdict.context.position : ''
-    ].join(' ');
-    const matched = searchKnowledgeBase(all, { pair: verdict.symbol, timeframes: [verdict.timeframe], visionAnalysis: query });
-    return matched.slice(0, 4).map(s => ({ id: s.id, title: s.title, type: s.type, relevanceScore: s.relevanceScore }));
+    const declenchees = [...new Set((verdict.rules || []).map(r => r.rule))];
+    const actives = verdict.reglesActives || [];
+    const appliquee = verdict.strategieAppliquee;
+
+    // Priorité aux règles réellement déclenchées ; à défaut, celles du mode.
+    const reference = appliquee && Array.isArray(appliquee.regles) && appliquee.regles.length
+      ? appliquee.regles
+      : (declenchees.length ? declenchees : actives);
+    if (!reference.length) return [];
+
+    const dejaAffichee = appliquee && appliquee.id ? String(appliquee.id) : null;
+
+    return (all || [])
+      .filter(s => String(s.id) !== dejaAffichee)
+      .map(s => {
+        const profil = Signals.profilDepuisStrategie(s);
+        const communes = profil.regles.filter(r => reference.includes(r));
+        return {
+          id: s.id, title: s.title, type: s.type,
+          regles: profil.regles,
+          communes,
+          pertinence: Math.round((communes.length / reference.length) * 100)
+        };
+      })
+      .filter(x => x.communes.length > 0)
+      .sort((a, b) => b.pertinence - a.pertinence || b.communes.length - a.communes.length)
+      .slice(0, 4);
   } catch { return []; }
 }
 
 // Verdict ponctuel sur la dernière bougie clôturée
+/**
+ * Profils d'analyse : chaque stratégie de la base, avec les règles qu'elle
+ * active. C'est ce qui permet d'analyser SELON une stratégie et pas seulement
+ * selon un verdict unique.
+ */
+async function profilsStrategies() {
+  const strategies = await loadAllStrategies();
+  return (strategies || []).map(x => Signals.profilDepuisStrategie(x));
+}
+
+app.get('/api/strategies/profiles', requireAuth, async (req, res) => {
+  try {
+    const profils = await profilsStrategies();
+    res.json({
+      success: true,
+      reglesDisponibles: Object.keys(Signals.TOUTES_REGLES),
+      profils,
+      resume: {
+        total: profils.length,
+        deduits: profils.filter(p => p.deduitDuTexte).length,
+        toutesRegles: profils.filter(p => !p.deduitDuTexte).length
+      }
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/**
+ * Détermine comment analyser :
+ *   mode=auto   → toutes les règles (l'app combine tout ce qu'elle sait)
+ *   mode=manuel + strategyId → uniquement les règles de cette stratégie
+ */
+async function optionsAnalyse(src) {
+  const mode = String(src.mode || 'auto').toLowerCase();
+  const strategyId = String(src.strategyId || '').trim();
+  if (mode === 'manuel' && strategyId) {
+    const strategies = await loadAllStrategies().catch(() => []);
+    const doc = (strategies || []).find(x => x.id === strategyId);
+    if (doc) {
+      const profil = Signals.profilDepuisStrategie(doc);
+      return {
+        mode: 'manuel',
+        regles: profil.regles,
+        seuilForce: profil.seuilForce,
+        seuilRegles: profil.seuilRegles,
+        strategie: { id: profil.id, titre: profil.titre, regles: profil.regles, motif: profil.motif }
+      };
+    }
+    return { mode: 'manuel', strategieManquante: strategyId };
+  }
+  return { mode: 'auto' };
+}
+
 app.get('/api/signals', requireAuth, async (req, res) => {
   try {
     const symbol = String(req.query.symbol || '').trim();
@@ -1722,8 +1842,11 @@ app.get('/api/signals', requireAuth, async (req, res) => {
         note: `Seulement ${closed.length} bougie(s) clôturée(s) : signal impossible pour l'instant (20 minimum).`
       });
     }
-    const verdict = Signals.detect(closed, { symbol, timeframe: tf });
+    const options = await optionsAnalyse(req.query);
+    const verdict = Signals.detect(closed, { symbol, timeframe: tf }, options);
     verdict.strategies = await strategiesForSignal(verdict);
+    verdict.mode = options.mode;
+    verdict.strategieAppliquee = options.strategie || null;
     res.json({ success: true, provider, offline: !!offline, dataPoints: closed.length, verdict });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -1743,6 +1866,10 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
 
   let lastKey = null;
   let closed = true;
+  // Résolu une seule fois : la stratégie choisie ne change pas pendant le flux.
+  let optionsFlux = { mode: 'auto' };
+  optionsAnalyse(req.query).then(o => { optionsFlux = o; evaluate(); }).catch(() => {});
+
   let evaluate = async () => {
     try {
       const { candles } = await Market.getCandles(symbol, tf, 300, provider);
@@ -1758,11 +1885,13 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
         }
         return;
       }
-      const verdict = Signals.detect(done, { symbol, timeframe: tf });
+      const verdict = Signals.detect(done, { symbol, timeframe: tf }, optionsFlux);
       const key = [verdict.status, verdict.direction, (verdict.rules || []).map(r => r.rule).sort().join(',')].join('|');
       if (key !== lastKey) {
         lastKey = key;
         verdict.strategies = await strategiesForSignal(verdict);
+      verdict.mode = optionsFlux.mode;
+      verdict.strategieAppliquee = optionsFlux.strategie || null;
         verdict.at_price = candles[candles.length - 1].c;
         if (closed) res.write(`event: signal\ndata: ${JSON.stringify(verdict)}\n\n`);
       }

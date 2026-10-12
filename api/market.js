@@ -112,17 +112,50 @@ const deriv = {
   needsKey: false,
   note: 'API v1 (api.derivws.com) — indices synthétiques 24/7, or, forex, crypto. Lecture seule.',
   symbols: [
-    { symbol: 'R_10', tv: 'DERIV:R_10', label: 'Volatility 10', kind: 'synthetic' },
-    { symbol: 'R_25', tv: 'DERIV:R_25', label: 'Volatility 25', kind: 'synthetic' },
-    { symbol: 'R_50', tv: 'DERIV:R_50', label: 'Volatility 50', kind: 'synthetic' },
-    { symbol: 'R_75', tv: 'DERIV:R_75', label: 'Volatility 75', kind: 'synthetic' },
-    { symbol: 'R_100', tv: 'DERIV:R_100', label: 'Volatility 100', kind: 'synthetic' },
-    { symbol: '1HZ100V', tv: 'DERIV:1HZ100V', label: 'Volatility 100 (1 s)', kind: 'synthetic' },
-    { symbol: 'frxXAUUSD', tv: 'DERIV:XAUUSD', label: 'Or / USD — spot', kind: 'metal' },
-    { symbol: 'frxXAGUSD', tv: 'DERIV:XAGUSD', label: 'Argent / USD — spot', kind: 'metal' },
+    // Les codes sont ceux de l'API Deriv ; le ticker TradingView est affiché.
+    // Volatility (les plus traités)
+    { symbol: 'R_10', tv: 'DERIV:R_10', label: 'Volatility 10', kind: 'synthétique' },
+    { symbol: 'R_25', tv: 'DERIV:R_25', label: 'Volatility 25', kind: 'synthétique' },
+    { symbol: 'R_50', tv: 'DERIV:R_50', label: 'Volatility 50', kind: 'synthétique' },
+    { symbol: 'R_75', tv: 'DERIV:R_75', label: 'Volatility 75', kind: 'synthétique' },
+    { symbol: 'R_100', tv: 'DERIV:R_100', label: 'Volatility 100', kind: 'synthétique' },
+    { symbol: '1HZ100V', tv: 'DERIV:1HZ100V', label: 'Volatility 100 (1 s)', kind: 'synthétique' },
+    // Métaux au comptant — c'est ici que se trouve l'or de TradingView
+    { symbol: 'frxXAUUSD', tv: 'DERIV:XAUUSD', label: 'Or / USD — spot', kind: 'métal' },
+    { symbol: 'frxXAGUSD', tv: 'DERIV:XAGUSD', label: 'Argent / USD — spot', kind: 'métal' },
+    { symbol: 'frxXPTUSD', tv: 'DERIV:XPTUSD', label: 'Platine / USD', kind: 'métal' },
+    { symbol: 'frxXPDUSD', tv: 'DERIV:XPDUSD', label: 'Palladium / USD', kind: 'métal' },
+    // Forex majeures
     { symbol: 'frxEURUSD', tv: 'DERIV:EURUSD', label: 'EUR / USD', kind: 'forex' },
     { symbol: 'frxGBPUSD', tv: 'DERIV:GBPUSD', label: 'GBP / USD', kind: 'forex' },
     { symbol: 'frxUSDJPY', tv: 'DERIV:USDJPY', label: 'USD / JPY', kind: 'forex' },
+    { symbol: 'frxUSDCHF', tv: 'DERIV:USDCHF', label: 'USD / CHF', kind: 'forex' },
+    { symbol: 'frxUSDCAD', tv: 'DERIV:USDCAD', label: 'USD / CAD', kind: 'forex' },
+    { symbol: 'frxAUDUSD', tv: 'DERIV:AUDUSD', label: 'AUD / USD', kind: 'forex' },
+    { symbol: 'frxNZDUSD', tv: 'DERIV:NZDUSD', label: 'NZD / USD', kind: 'forex' },
+    // Forex croisées
+    { symbol: 'frxEURGBP', tv: 'DERIV:EURGBP', label: 'EUR / GBP', kind: 'forex' },
+    { symbol: 'frxEURJPY', tv: 'DERIV:EURJPY', label: 'EUR / JPY', kind: 'forex' },
+    { symbol: 'frxGBPJPY', tv: 'DERIV:GBPJPY', label: 'GBP / JPY', kind: 'forex' },
+    { symbol: 'frxEURCHF', tv: 'DERIV:EURCHF', label: 'EUR / CHF', kind: 'forex' },
+    { symbol: 'frxAUDJPY', tv: 'DERIV:AUDJPY', label: 'AUD / JPY', kind: 'forex' },
+    { symbol: 'frxGBPCHF', tv: 'DERIV:GBPCHF', label: 'GBP / CHF', kind: 'forex' },
+    // Indices
+    { symbol: 'OTC_SPC', tv: 'DERIV:OTC_SPC', label: 'US 500', kind: 'indice' },
+    { symbol: 'OTC_NDX', tv: 'DERIV:OTC_NDX', label: 'US Tech 100', kind: 'indice' },
+    { symbol: 'OTC_DJI', tv: 'DERIV:OTC_DJI', label: 'Wall Street 30', kind: 'indice' },
+    { symbol: 'OTC_FCHI', tv: 'DERIV:OTC_FCHI', label: 'France 40', kind: 'indice' },
+    { symbol: 'OTC_GDAXI', tv: 'DERIV:OTC_GDAXI', label: 'Germany 40', kind: 'indice' },
+    { symbol: 'OTC_FTSE', tv: 'DERIV:OTC_FTSE', label: 'UK 100', kind: 'indice' },
+    { symbol: 'OTC_N225', tv: 'DERIV:OTC_N225', label: 'Japan 225', kind: 'indice' },
+    { symbol: 'OTC_HSI', tv: 'DERIV:OTC_HSI', label: 'Hong Kong 50', kind: 'indice' },
+    { symbol: 'OTC_SX5E', tv: 'DERIV:OTC_SX5E', label: 'Euro 50', kind: 'indice' },
+    // Boom / Crash — très traités chez Deriv
+    { symbol: 'BOOM500', tv: 'DERIV:BOOM500', label: 'Boom 500', kind: 'synthétique' },
+    { symbol: 'CRASH500', tv: 'DERIV:CRASH500', label: 'Crash 500', kind: 'synthétique' },
+    { symbol: 'BOOM1000', tv: 'DERIV:BOOM1000', label: 'Boom 1000', kind: 'synthétique' },
+    { symbol: 'CRASH1000', tv: 'DERIV:CRASH1000', label: 'Crash 1000', kind: 'synthétique' },
+    // Crypto
     { symbol: 'cryBTCUSD', tv: 'DERIV:BTCUSD', label: 'BTC / USD', kind: 'crypto' },
     { symbol: 'cryETHUSD', tv: 'DERIV:ETHUSD', label: 'ETH / USD', kind: 'crypto' }
   ],

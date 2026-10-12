@@ -259,19 +259,73 @@ function checklist(report) {
   ];
 }
 
+/** Les quatre familles de règles, adressables par identifiant. */
+const TOUTES_REGLES = {
+  R1: (candles, report) => ruleSweep(candles, report),
+  R2: (candles, report) => ruleBreak(candles, report),
+  R3: (candles, report) => ruleZone(candles, report),
+  R4: (candles, report) => rulePosition(report)
+};
+
+const sansAccents = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+/**
+ * Ce qu'une stratégie de la base demande de surveiller, déduit de son texte.
+ * Une stratégie « Liquidity Sweep » n'a pas à être jugée sur les Fibonacci :
+ * on lit ce qu'elle décrit et on n'active que les règles correspondantes.
+ * Si le texte ne dit rien d'exploitable, on applique tout (mieux que rien).
+ */
+const MOTIFS_REGLE = [
+  { regles: ['R1'], motifs: /sweep|balayage|liquidit|raid|stop.?hunt|chasse|manipulat/ },
+  { regles: ['R2'], motifs: /bos|break of structure|changement de caractere|rupture|mss|market structure|structure shift|\bchoch\b|tendance|trend|breakout|cassure|retournement|reversal|pullback/ },
+  { regles: ['R3'], motifs: /order block|\bob\b|fvg|fair value|imbalance|mitigation|breaker|zone de reaction|support|resistance/ },
+  { regles: ['R4'], motifs: /premium|discount|ote|fibonacci|retracement|equilibre|golden zone/ },
+  { regles: ['R1', 'R2'], motifs: /momentum|continuation|impulsion|impulse/ },
+  // « Price action » au sens large : structure + zones + liquidité.
+  { regles: ['R1', 'R2', 'R3'], motifs: /price action/ }
+];
+
+function profilDepuisStrategie(doc) {
+  const texte = sansAccents(`${doc.title || ''} ${doc.content || ''} ${(doc.tags || []).join(' ')}`);
+  const trouvees = [...new Set(MOTIFS_REGLE.filter(m => m.motifs.test(texte)).flatMap(m => m.regles))];
+  const tous = Object.keys(TOUTES_REGLES);
+  const regles = trouvees.length ? trouvees : tous;
+  return {
+    id: doc.id || null,
+    titre: doc.title || null,
+    regles,
+    // Une stratégie mono-règle ne peut pas croiser deux confirmations : on exige
+    // alors davantage de force, sinon elle ne confirmerait jamais rien.
+    seuilRegles: regles.length >= 2 ? 2 : 1,
+    seuilForce: regles.length >= 2 ? 0.35 : 0.6,
+    deduitDuTexte: trouvees.length > 0,
+    motif: trouvees.length ? 'règles déduites du texte de la stratégie'
+      : 'texte sans indication : toutes les règles appliquées'
+  };
+}
+
 /**
  * Verdict sur la dernière bougie clôturée.
- * @returns {{status:'confirme'|'surveiller'|'neutre', direction:string,
- *            strength:number, rules:Array, confirmations:number,
- *            scenarios:object, checklist:Array, missing:Array,
- *            levels:object, summary:string, at:number}}
+ * @param {Array} candles bougies OHLCV
+ * @param {{symbol?:string, timeframe?:string}} meta
+ * @param {{regles?:string[], seuilForce?:number, seuilRegles?:number,
+ *          strategie?:{id:string, titre:string}}} [options]
+ *        `regles` restreint l'analyse à certaines familles : c'est ce qui permet
+ *        d'analyser SELON une stratégie précise au lieu d'un verdict unique.
+ * @returns {{status, direction, strength, rules, confirmations, scenarios,
+ *            checklist, missing, levels, summary, at, strategie}}
  */
-function detect(candles, meta = {}) {
+function detect(candles, meta = {}, options = {}) {
   const clean = (candles || []).filter(c => c && Number.isFinite(c.c));
   if (clean.length < 20) throw new Error('Pas assez de bougies (20 minimum)');
 
   const report = S.analyze(clean, meta);
-  const rules = [ruleSweep(clean, report), ruleBreak(clean, report), ruleZone(clean, report), rulePosition(report)]
+
+  // Règles actives : celles demandées, sinon toutes.
+  const demandees = Array.isArray(options.regles) ? options.regles.filter(r => TOUTES_REGLES[r]) : [];
+  const actives = demandees.length ? demandees : Object.keys(TOUTES_REGLES);
+  const rules = actives
+    .map(id => { try { return TOUTES_REGLES[id](clean, report); } catch { return null; } })
     .filter(Boolean);
 
   const buy = rules.filter(r => r.direction === 'BUY');
@@ -290,15 +344,24 @@ function detect(candles, meta = {}) {
   const penalty = 0.1 * loser.length;
   const strength = +Math.max(0, Math.min(avg + bonus - penalty, 1)).toFixed(3);
 
-  // Confirmation = au moins 2 règles indépendantes du même côté.
-  const status = (independent >= 2 && strength >= 0.35) ? 'confirme'
-    : (independent >= 1 && strength >= 0.3) ? 'surveiller' : 'neutre';
+  // Confirmation = règles indépendantes du même côté, au seuil demandé.
+  // Une stratégie mono-règle (ex. « order blocks ») ne peut pas croiser deux
+  // confirmations : son profil relève alors le seuil de force (voir plus haut).
+  const seuilRegles = Number.isFinite(options.seuilRegles) ? options.seuilRegles : 2;
+  const seuilForce = Number.isFinite(options.seuilForce) ? options.seuilForce : 0.35;
+  const seuilSurveiller = Math.max(0.3, seuilForce - 0.05);
+  const status = (independent >= seuilRegles && strength >= seuilForce) ? 'confirme'
+    : (independent >= 1 && strength >= seuilSurveiller) ? 'surveiller' : 'neutre';
 
   // Pourquoi ce n'est pas confirmé : on l'écrit au lieu de laisser deviner.
   const missing = [];
   if (status !== 'confirme') {
-    if (independent < 2) missing.push(`il faut 2 règles concordantes (${independent} pour l'instant)`);
-    if (strength < 0.35) missing.push(`force ${(strength * 100).toFixed(0)} % < 35 % requis`);
+    if (independent < seuilRegles) {
+      missing.push(`il faut ${seuilRegles} règle(s) concordante(s) (${independent} pour l'instant)`);
+    }
+    if (strength < seuilForce) {
+      missing.push(`force ${(strength * 100).toFixed(0)} % < ${(seuilForce * 100).toFixed(0)} % requis`);
+    }
     if (!winner.length) missing.push('aucune règle déclenchée sur la dernière bougie clôturée');
   }
 
@@ -311,10 +374,12 @@ function detect(candles, meta = {}) {
     : levelsFor(report, direction);
   const fmt = v => (v === null || v === undefined ? '—' : v);
 
+  const entete = options.strategie && options.strategie.titre
+    ? `[${options.strategie.titre}] ` : '';
   const summary = status === 'neutre'
-    ? `Aucun signal confirmé : ${missing.join(' ; ') || 'conditions insuffisantes'}.`
+    ? `${entete}Aucun signal confirmé : ${missing.join(' ; ') || 'conditions insuffisantes'}.`
       + ` Scénarios : achat si ${sc.bullish.trigger}, vente si ${sc.bearish.trigger}.`
-    : `${direction === 'BUY' ? 'ACHAT' : 'VENTE'} ${status === 'confirme' ? 'CONFIRMÉ' : 'à surveiller'}`
+    : `${entete}${direction === 'BUY' ? 'ACHAT' : 'VENTE'} ${status === 'confirme' ? 'CONFIRMÉ' : 'à surveiller'}`
       + ` — ${independent} règle(s) : ${winner.map(r => r.name).join(' + ')}`
       + ` · force ${(strength * 100).toFixed(0)} %`
       + ` · entrée ${fmt(levels.entry)} / invalidation ${fmt(levels.stop)} / objectifs ${fmt(levels.target1)} puis ${fmt(levels.target2)}`;
@@ -333,6 +398,10 @@ function detect(candles, meta = {}) {
     price: report.lastPrice,
     trend: report.structure.trend,
     summary,
+    // Traçabilité : quelles règles ont été appliquées, et au nom de quoi.
+    reglesActives: actives,
+    seuils: { regles: seuilRegles, force: seuilForce },
+    strategie: options.strategie || null,
     context: {
       trend: report.structure.trend,
       event: report.structure.event,
@@ -342,4 +411,7 @@ function detect(candles, meta = {}) {
   };
 }
 
-module.exports = { detect, scenarios, checklist, ruleSweep, ruleBreak, ruleZone, rulePosition, levelsFor };
+module.exports = {
+  detect, scenarios, checklist, levelsFor, profilDepuisStrategie, TOUTES_REGLES,
+  ruleSweep, ruleBreak, ruleZone, rulePosition
+};

@@ -579,6 +579,66 @@ function tinyPng(W = 64, H = 40) {
     ok('alertes : désactivées après les tests (aucun envoi non voulu)', Al.get().actif === false);
   }
 
+  // ── Mode auto / manuel : les stratégies de la base deviennent des moteurs ──
+  // Demande : « sélectionner une stratégie moi-même et la lancer » + « mode auto
+  // où l'IA combine ». Chaque stratégie déclare les règles qu'elle surveille.
+  {
+    const p1 = Sig.profilDepuisStrategie({ id:'a', title:'Liquidity Sweep Trading', content:'balayage de liquidité avant retournement', tags:[] });
+    ok('profil : une stratégie de balayage surveille la liquidité', p1.regles.includes('R1'), p1.regles.join('+'));
+    const p2 = Sig.profilDepuisStrategie({ id:'b', title:'Order Blocks', content:'réaction sur order block et FVG', tags:[] });
+    ok('profil : une stratégie d\'order blocks surveille la zone réactive', p2.regles.includes('R3'), p2.regles.join('+'));
+    const p3 = Sig.profilDepuisStrategie({ id:'c', title:'Fibonacci Premium Discount', content:'OTE et retracement du range', tags:[] });
+    ok('profil : une stratégie Fibonacci surveille la position', p3.regles.includes('R4'), p3.regles.join('+'));
+    const p4 = Sig.profilDepuisStrategie({ id:'d', title:'zzz', content:'xyz', tags:[] });
+    ok('profil : texte sans indication → toutes les règles (rien d\'omis)', p4.regles.length === 4 && !p4.deduitDuTexte);
+    ok('profil : une stratégie mono-règle relève son seuil de force',
+      p3.seuilRegles === 1 && p3.seuilForce > 0.35, JSON.stringify({ r: p3.seuilRegles, f: p3.seuilForce }));
+    ok('profil : une stratégie multi-règles garde le seuil standard',
+      p1.seuilRegles === 2 && p1.seuilForce === 0.35);
+
+    const serie = [];
+    let ts = 0;
+    const push = (o, h, l, c) => serie.push({ t: ts += 60000, o, h, l, c, v: 1, closed: true });
+    push(104,105,103,104); push(103,104,102,103); push(102,103,101,102);
+    push(101,102,100,100.5); push(100.5,102,100.5,101.5); push(101.5,103,101,102.5);
+    push(102.5,103.5,102,103); push(103,104,102.5,102.8); push(102.8,103,100.2,100.4);
+    push(100.4,102,100.3,101.8); push(101.8,103,101.5,102.9); push(102.9,104,102.6,103.8);
+    push(103.8,104.5,103.5,104.2); push(104.2,105,104,104.8); push(104.8,105.5,104.5,105.2);
+    push(105.2,106,105,105.8); push(105.8,106.5,105.5,106.2); push(106.2,107,106,106.8);
+    push(106.8,107.2,106.5,107); push(107,108,106.8,107.5); push(107.5,108.5,107.2,108.2);
+    push(108.2,109,108,108.8); push(108.8,109.5,108.5,109.2);
+    push(99.5,101.5,98,101);
+
+    const vAuto = Sig.detect(serie, { symbol:'T', timeframe:'1m' });
+    ok('mode auto : toutes les règles sont évaluées', vAuto.reglesActives.length === 4,
+      vAuto.reglesActives.join('+'));
+
+    const vManuel = Sig.detect(serie, { symbol:'T', timeframe:'1m' },
+      { regles:['R4'], seuilRegles:1, seuilForce:0.3, strategie:{ id:'x', titre:'Ma stratégie à moi' } });
+    ok('mode manuel : SEULES les règles demandées sont évaluées',
+      vManuel.reglesActives.length === 1 && vManuel.reglesActives[0] === 'R4',
+      vManuel.reglesActives.join('+'));
+    ok('mode manuel : le verdict nomme la stratégie appliquée',
+      /\[Ma stratégie à moi\]/.test(vManuel.summary), vManuel.summary.slice(0, 70));
+    ok('mode manuel : aucune règle hors périmètre ne peut confirmer',
+      (vManuel.rules || []).every(r => r.rule === 'R4'),
+      (vManuel.rules || []).map(r => r.rule).join(','));
+
+    // Fichier de vérification du front (mode + édition)
+    const htmlMode = fs.readFileSync(path.join(FRONT, 'index.html'), 'utf8');
+    ok('interface : sélecteur auto / ma stratégie', /Analyse auto/.test(htmlMode) && /Ma stratégie/.test(htmlMode));
+    ok('interface : le mode est transmis au flux de signaux', /&mode=\$\{mode\}/.test(htmlMode));
+    ok('interface : la stratégie appliquée est affichée', /signal\.strategieAppliquee\.titre/.test(htmlMode));
+    ok('interface : édition d\'une stratégie (bouton crayon)', /ouvrirEdition/.test(htmlMode) && /fa-pen/.test(htmlMode));
+    ok('interface : enregistrement d\'une stratégie par PUT',
+      /method:'PUT'/.test(htmlMode) && /'\/knowledge\/' \+ encodeURIComponent\(editing\)/.test(htmlMode));
+    ok('interface : onglet Alertes déclaré', /id:'alerts'/.test(htmlMode));
+    ok('interface : écran des alertes', /function Alertes\(/.test(htmlMode));
+    ok('interface : garde-fou contre les erreurs d\'affichage', /class Garde extends React\.Component/.test(htmlMode));
+    ok('interface : le graphique tolère une bougie plus ancienne',
+      /Cannot update oldest data|lastTime !== undefined && t < api\.current\.lastTime/.test(htmlMode));
+  }
+
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
   if (skip) console.log(`  (${skip} test(s) non exécuté(s) : dépendance externe absente — voir les lignes « • »)`);
   process.exit(fail ? 1 : 0);
