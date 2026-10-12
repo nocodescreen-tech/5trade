@@ -44,13 +44,13 @@ const binance = {
   needsKey: false,
   note: 'Crypto + proxys : EURUSDT ≈ EURUSD, PAXGUSDT ≈ or',
   symbols: [
-    { symbol: 'BTCUSDT', label: 'BTC / USD', kind: 'crypto' },
-    { symbol: 'ETHUSDT', label: 'ETH / USD', kind: 'crypto' },
-    { symbol: 'SOLUSDT', label: 'SOL / USD', kind: 'crypto' },
-    { symbol: 'XRPUSDT', label: 'XRP / USD', kind: 'crypto' },
-    { symbol: 'PAXGUSDT', label: 'Or tokenisé / USD  (proche XAUUSD)', kind: 'metal' },
-    { symbol: 'EURUSDT', label: 'EUR / USD', kind: 'forex' },
-    { symbol: 'GBPUSDT', label: 'GBP / USD', kind: 'forex' }
+    { symbol: 'BTCUSDT', tv: 'BINANCE:BTCUSDT', label: 'BTC / USD', kind: 'crypto' },
+    { symbol: 'ETHUSDT', tv: 'BINANCE:ETHUSDT', label: 'ETH / USD', kind: 'crypto' },
+    { symbol: 'SOLUSDT', tv: 'BINANCE:SOLUSDT', label: 'SOL / USD', kind: 'crypto' },
+    { symbol: 'XRPUSDT', tv: 'BINANCE:XRPUSDT', label: 'XRP / USD', kind: 'crypto' },
+    { symbol: 'PAXGUSDT', tv: 'BINANCE:PAXGUSDT', label: 'Or tokenisé / USD  (proche XAUUSD)', kind: 'metal' },
+    { symbol: 'EURUSDT', tv: 'BINANCE:EURUSDT', label: 'EUR / USD', kind: 'forex' },
+    { symbol: 'GBPUSDT', tv: 'BINANCE:GBPUSDT', label: 'GBP / USD', kind: 'forex' }
   ],
   async candles(symbol, tf, count) {
     const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(symbol)}` +
@@ -108,23 +108,23 @@ const binance = {
 // ─────────────────────────────────────────────────────────────
 const deriv = {
   id: 'deriv',
-  label: 'Deriv (Volatility, or, forex)',
+  label: 'Deriv — Volatility, or spot, forex',
   needsKey: false,
   note: 'API v1 (api.derivws.com) — indices synthétiques 24/7, or, forex, crypto. Lecture seule.',
   symbols: [
-    { symbol: 'R_10', label: 'Volatility 10', kind: 'synthetic' },
-    { symbol: 'R_25', label: 'Volatility 25', kind: 'synthetic' },
-    { symbol: 'R_50', label: 'Volatility 50', kind: 'synthetic' },
-    { symbol: 'R_75', label: 'Volatility 75', kind: 'synthetic' },
-    { symbol: 'R_100', label: 'Volatility 100', kind: 'synthetic' },
-    { symbol: '1HZ100V', label: 'Volatility 100 (1 s)', kind: 'synthetic' },
-    { symbol: 'frxXAUUSD', label: 'Or / USD (XAUUSD)', kind: 'metal' },
-    { symbol: 'frxXAGUSD', label: 'Argent / USD', kind: 'metal' },
-    { symbol: 'frxEURUSD', label: 'EUR / USD', kind: 'forex' },
-    { symbol: 'frxGBPUSD', label: 'GBP / USD', kind: 'forex' },
-    { symbol: 'frxUSDJPY', label: 'USD / JPY', kind: 'forex' },
-    { symbol: 'cryBTCUSD', label: 'BTC / USD', kind: 'crypto' },
-    { symbol: 'cryETHUSD', label: 'ETH / USD', kind: 'crypto' }
+    { symbol: 'R_10', tv: 'DERIV:R_10', label: 'Volatility 10', kind: 'synthetic' },
+    { symbol: 'R_25', tv: 'DERIV:R_25', label: 'Volatility 25', kind: 'synthetic' },
+    { symbol: 'R_50', tv: 'DERIV:R_50', label: 'Volatility 50', kind: 'synthetic' },
+    { symbol: 'R_75', tv: 'DERIV:R_75', label: 'Volatility 75', kind: 'synthetic' },
+    { symbol: 'R_100', tv: 'DERIV:R_100', label: 'Volatility 100', kind: 'synthetic' },
+    { symbol: '1HZ100V', tv: 'DERIV:1HZ100V', label: 'Volatility 100 (1 s)', kind: 'synthetic' },
+    { symbol: 'frxXAUUSD', tv: 'DERIV:XAUUSD', label: 'Or / USD — spot', kind: 'metal' },
+    { symbol: 'frxXAGUSD', tv: 'DERIV:XAGUSD', label: 'Argent / USD — spot', kind: 'metal' },
+    { symbol: 'frxEURUSD', tv: 'DERIV:EURUSD', label: 'EUR / USD', kind: 'forex' },
+    { symbol: 'frxGBPUSD', tv: 'DERIV:GBPUSD', label: 'GBP / USD', kind: 'forex' },
+    { symbol: 'frxUSDJPY', tv: 'DERIV:USDJPY', label: 'USD / JPY', kind: 'forex' },
+    { symbol: 'cryBTCUSD', tv: 'DERIV:BTCUSD', label: 'BTC / USD', kind: 'crypto' },
+    { symbol: 'cryETHUSD', tv: 'DERIV:ETHUSD', label: 'ETH / USD', kind: 'crypto' }
   ],
   // L'ancien point d'entrée ws.derivws.com/websockets/v3 est obsolète (520).
   // L'API v1 expose un WebSocket public pour les données de marché : aucune
@@ -256,90 +256,7 @@ const twelvedata = {
   parse() { return null; }
 };
 
-/**
- * Yahoo Finance : les marchés cotés que l'on voit sur TradingView — or et argent
- * COMEX (GC1! / SI1!), pétrole NYMEX, indices CME, forex, crypto.
- *
- * Pourquoi cette source : l'or COMEX (GC=F, bourse CMX) cote environ 1 % au-dessus
- * du spot XAUUSD — c'est le portage du contrat à terme, pas une erreur. Confondre
- * les deux fait croire que « l'app affiche de faux prix ».
- *
- * Pas de clé. Pas de WebSocket public non plus : le moteur interroge à intervalle
- * régulier (voir startPolling).
- */
-const UA_YAHOO = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-  + '(KHTML, like Gecko) Chrome/122.0 Safari/537.36';
-
-const yahoo = {
-  id: 'yahoo',
-  label: 'Marchés cotés (COMEX, NYMEX, CME)',
-  needsKey: false,
-  note: 'Or et argent COMEX (GC1!/SI1!), pétrole, indices, forex, crypto. Sans clé.',
-  poll: 20000,
-  symbols: [
-    { symbol: 'GC=F', label: 'Or COMEX (GC1!)', kind: 'matières premières' },
-    { symbol: 'SI=F', label: 'Argent COMEX (SI1!)', kind: 'matières premières' },
-    { symbol: 'HG=F', label: 'Cuivre', kind: 'matières premières' },
-    { symbol: 'CL=F', label: 'Pétrole WTI', kind: 'matières premières' },
-    { symbol: 'NG=F', label: 'Gaz naturel', kind: 'matières premières' },
-    { symbol: 'ES=F', label: 'S&P 500 (futures)', kind: 'indices' },
-    { symbol: 'NQ=F', label: 'Nasdaq 100 (futures)', kind: 'indices' },
-    { symbol: 'YM=F', label: 'Dow Jones (futures)', kind: 'indices' },
-    { symbol: 'EURUSD=X', label: 'EUR / USD', kind: 'forex' },
-    { symbol: 'GBPUSD=X', label: 'GBP / USD', kind: 'forex' },
-    { symbol: 'USDJPY=X', label: 'USD / JPY', kind: 'forex' },
-    { symbol: 'DX-Y.NYB', label: 'Indice dollar (DXY)', kind: 'forex' },
-    { symbol: 'BTC-USD', label: 'BTC / USD', kind: 'crypto' },
-    { symbol: 'ETH-USD', label: 'ETH / USD', kind: 'crypto' }
-  ],
-  // Yahoo n'accepte que ces intervalles : 4 h est obtenu en regroupant des 1 h.
-  _iv: { '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m', '1h': '60m', '4h': '60m', '1d': '1d' },
-  _range: { '1m': '7d', '5m': '1mo', '15m': '1mo', '30m': '1mo', '1h': '3mo', '4h': '6mo', '1d': '2y' },
-
-  async candles(symbol, tf, count = 300) {
-    const iv = this._iv[tf];
-    if (!iv) throw new Error(`Unité de temps non gérée par Yahoo : ${tf}`);
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`
-      + `?interval=${iv}&range=${this._range[tf]}`;
-    const r = await fetch(url, { headers: { 'User-Agent': UA_YAHOO } });
-    if (!r.ok) throw new Error(`Yahoo ${r.status}`);
-    const j = await r.json();
-    const res = j.chart && j.chart.result && j.chart.result[0];
-    if (!res || !res.timestamp) throw new Error(`Symbole inconnu chez Yahoo : ${symbol}`);
-    const q = (res.indicators && res.indicators.quote && res.indicators.quote[0]) || {};
-    // Les trous (marché fermé, séance interrompue) arrivent en null : on les jette.
-    let cs = res.timestamp.map((t, i) => ({
-      t: t * 1000,
-      o: q.open ? q.open[i] : null, h: q.high ? q.high[i] : null,
-      l: q.low ? q.low[i] : null, c: q.close ? q.close[i] : null,
-      v: (q.volume && q.volume[i]) || 0
-    })).filter(c => Number.isFinite(c.o) && Number.isFinite(c.c)
-      && Number.isFinite(c.h) && Number.isFinite(c.l));
-
-    if (tf === '4h') cs = aggregate(cs, 4);
-    if (!cs.length) throw new Error(`Aucune bougie pour ${symbol} en ${tf}`);
-    return cs.slice(-count);
-  }
-};
-
-/** Regroupe des bougies en paquets de `n` (pour fabriquer du 4 h depuis du 1 h). */
-function aggregate(candles, n) {
-  const out = [];
-  for (const c of candles) {
-    const last = out[out.length - 1];
-    if (last && c.t - last.t < n * 3600e3) {
-      last.h = Math.max(last.h, c.h);
-      last.l = Math.min(last.l, c.l);
-      last.c = c.c;
-      last.v += c.v;
-    } else {
-      out.push({ ...c });
-    }
-  }
-  return out;
-}
-
-const PROVIDERS = { binance, deriv, yahoo, twelvedata };
+const PROVIDERS = { binance, deriv, twelvedata };
 
 const activeProvider = () => {
   const id = (process.env.MARKET_PROVIDER || 'binance').toLowerCase();

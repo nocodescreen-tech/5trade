@@ -1830,7 +1830,9 @@ function LiveMarket({ onToJournal }) {
           }, {})).map(([label, list]) => (
             <optgroup key={label} label={label}>
               {list.map(s => (
-                <option key={`${s.provider}|${s.symbol}`} value={`${s.provider}|${s.symbol}`}>{s.label}</option>
+                <option key={`${s.provider}|${s.symbol}`} value={`${s.provider}|${s.symbol}`}>
+                  {s.tv ? `${s.tv} — ${s.label}` : s.label}
+                </option>
               ))}
             </optgroup>
           ))}
@@ -1852,8 +1854,9 @@ function LiveMarket({ onToJournal }) {
         {(() => {
           const cur = meta.symbols.find(s => s.symbol === symbol && s.provider === provider);
           return cur ? (
-            <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--muted)' }}>
-              <i className="fas fa-server"></i>{cur.providerLabel}
+            <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--muted)' }}
+              title={cur.tv ? `Identique a ${cur.tv} sur TradingView` : cur.providerLabel}>
+              <i className="fas fa-server"></i>{cur.tv || cur.providerLabel}
             </span>
           ) : null;
         })()}
@@ -1864,6 +1867,17 @@ function LiveMarket({ onToJournal }) {
           </span>
         )}
         <span style={{ flex:'1 1 auto' }}></span>
+        {(() => {
+          const cur = meta.symbols.find(s => s.symbol === symbol && s.provider === provider);
+          if (!cur || !cur.tv) return null;
+          return (
+            <a className="btn ghost sm" target="_blank" rel="noopener noreferrer"
+              href={`https://fr.tradingview.com/chart/?symbol=${encodeURIComponent(cur.tv)}`}
+              title={`Ouvrir ${cur.tv} sur TradingView et comparer les prix`}>
+              <i className="fas fa-arrow-up-right-from-square"></i>TradingView
+            </a>
+          );
+        })()}
         <button className="btn ghost sm" onClick={()=>setBig(b => !b)}
           title={big ? 'Réduire le graphique' : 'Agrandir le graphique'}>
           <i className={`fas ${big ? 'fa-compress' : 'fa-expand'}`}></i>{big ? 'Réduire' : 'Agrandir'}

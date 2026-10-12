@@ -462,15 +462,24 @@ function tinyPng(W = 64, H = 40) {
       (casZone({ position: 'discount', type: 'bearish', low: 102, high: 104, prev: 101, close: 105 }) || {}).direction === 'BUY');
   }
 
-  // ── Marchés cotés (COMEX/NYMEX) : la source qui colle à TradingView ──
+  // ── Chaque marché porte le ticker TradingView correspondant ──
+  // L'utilisateur cherche « DERIV:XAUUSD » sur TradingView : l'app doit proposer
+  // le MÊME instrument, nommé pareil, et pas un équivalent approximatif.
   const Mk = require('./market.js');
-  const yh = Mk.listSymbols().filter(s => s.provider === 'yahoo');
-  ok('fournisseur « marchés cotés » déclaré', yh.length >= 8, `${yh.length} symboles`);
-  ok('or COMEX (GC1!) présent', yh.some(s => s.symbol === 'GC=F'), 'GC=F');
+  const sansTicker = Mk.listSymbols().filter(s => !s.tv);
+  ok('chaque marché porte son ticker TradingView', sansTicker.length === 0,
+    sansTicker.length ? `${sansTicker.length} sans ticker : ${sansTicker.map(s => s.symbol).join(',')}` : 'tous');
+  ok('l\'or spot est bien DERIV:XAUUSD',
+    Mk.listSymbols().some(s => s.tv === 'DERIV:XAUUSD' && s.provider === 'deriv'));
+  ok('le futures COMEX a été retiré (ce n\'est pas l\'instrument demandé)',
+    !Mk.listSymbols().some(s => s.provider === 'yahoo' || s.symbol === 'GC=F'));
+  ok('les tickers DERIV: sont déclarés',
+    Mk.listSymbols().filter(s => /^DERIV:/.test(s.tv || '')).length >= 10,
+    `${Mk.listSymbols().filter(s => /^DERIV:/.test(s.tv || '')).length} tickers DERIV:`);
   ok('chaque fournisseur porte sa source',
     Mk.listSymbols().every(s => s.provider && s.providerLabel));
   ok('plusieurs plateformes cumulables',
-    new Set(Mk.listSymbols().map(s => s.provider)).size >= 3,
+    new Set(Mk.listSymbols().map(s => s.provider)).size >= 2,
     [...new Set(Mk.listSymbols().map(s => s.provider))].join(', '));
 
   // ── Le direct doit S'EMBOÎTER dans l'historique ──
@@ -506,6 +515,68 @@ function tinyPng(W = 64, H = 40) {
         { pair: 'R_75', direction: 'SELL', entry: 43000, timeframe: '5m', provider: 'deriv',
           status: 'closed', result: 'loss' }
       ]).byMarket.length === 2);
+  }
+
+  // ── Alertes : prévenir hors de la page quand un signal se confirme ──
+  {
+    const Al = require('./alerts.js');
+    const serie = () => {
+      const out = []; let ts = 0;
+      const push = (o, h, l, c) => out.push({ t: ts += 60000, o, h, l, c, v: 1, closed: true });
+      push(104,105,103,104); push(103,104,102,103); push(102,103,101,102);
+      push(101,102,100,100.5); push(100.5,102,100.5,101.5); push(101.5,103,101,102.5);
+      push(102.5,103.5,102,103); push(103,104,102.5,102.8); push(102.8,103,100.2,100.4);
+      push(100.4,102,100.3,101.8); push(101.8,103,101.5,102.9); push(102.9,104,102.6,103.8);
+      push(103.8,104.5,103.5,104.2); push(104.2,105,104,104.8); push(104.8,105.5,104.5,105.2);
+      push(105.2,106,105,105.8); push(105.8,106.5,105.5,106.2); push(106.2,107,106,106.8);
+      push(106.8,107.2,106.5,107); push(107,108,106.8,107.5); push(107.5,108.5,107.2,108.2);
+      push(108.2,109,108,108.8); push(108.8,109.5,108.5,109.2);
+      push(99.5,101.5,98,101);
+      return out;
+    };
+    const faux = { getCandles: async () => ({ candles: serie(), provider: 'test' }),
+      listSymbols: () => [{ provider: 'test', providerLabel: 'test' }] };
+    Al.load();
+    Al.update({ actif: false, email: null });
+
+    ok('alertes : email invalide refusé',
+      (() => { try { Al.update({ email: 'nope' }); return false; } catch { return true; } })());
+    ok('alertes : force hors bornes refusée',
+      (() => { try { Al.update({ forceMin: 9 }); return false; } catch { return true; } })());
+    ok('alertes : marchés dédupliqués et incomplets écartés',
+      Al.update({ marches: [{ symbol: 'A', tf: '1m', provider: 'x' },
+        { symbol: 'A', tf: '1m', provider: 'x' }, { symbol: 'B' }] }).marches.length === 1);
+
+    const envois = [];
+    Al.update({ actif: false, email: 'a@b.co', marches: [{ symbol: 'R_75', tf: '15m', provider: 'test' }] });
+    Al.start({ market: faux, signals: Sig, sendMail: async m => envois.push(m), labelOf: () => 'test' });
+    let rr = await Al.verifier(false);
+    ok('alertes : désactivées → aucun contrôle', rr.controle === false && envois.length === 0);
+
+    Al.update({ actif: true, email: 'a@b.co', forceMin: 0.3 });
+    Al.resetDedup();
+    rr = await Al.verifier(true);
+    ok('alertes : un signal confirmé part par email', rr.envoyes === 1 && envois.length === 1,
+      `${rr.envoyes} envoi(s)`);
+    if (envois.length) {
+      ok('alertes : objet et contenu exploitables',
+        /5trade\].*(ACHAT|VENTE) confirmé/i.test(envois[0].subject)
+          && /Entrée/.test(envois[0].html) && /Invalidation/.test(envois[0].html),
+        envois[0].subject);
+    }
+    const avant = envois.length;
+    rr = await Al.verifier(true);
+    ok('alertes : le même signal ne repart pas', rr.envoyes === 0 && envois.length === avant,
+      rr.marches[0] ? rr.marches[0].verdict : '');
+
+    Al.resetDedup();
+    Al.update({ forceMin: 0.99 });
+    rr = await Al.verifier(true);
+    ok('alertes : seuil de force respecté', rr.envoyes === 0);
+    Al.update({ actif: false, email: null });
+    Al.resetDedup();
+    Al.stop();
+    ok('alertes : désactivées après les tests (aucun envoi non voulu)', Al.get().actif === false);
   }
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);

@@ -187,6 +187,7 @@ const Structure = require('./structure');
 
 // ─── Signaux (stratégie appliquée + confirmation achat/vente) ───
 const Signals = require('./signals');
+const Alerts = require('./alerts');
 
 // Données de marché mises en cache sur disque : l'analyse doit rester
 // possible même sans réseau (et après un redémarrage).
@@ -1511,6 +1512,51 @@ app.get('/api/market/ticks', requireAuth, (req, res) => {
   req.on('close', () => { if (stop) stop(); });
 });
 
+/**
+ * Alertes : prévenir HORS de la page quand un signal se confirme.
+ * L'utilisateur ne peut pas rester devant l'onglet : sans ça, un signal
+ * confirmé passe inaperçu.
+ */
+app.get('/api/alerts', requireAuth, (req, res) => {
+  const c = Alerts.get();
+  res.json({ success: true, config: c, historique: c.derniers || [] });
+});
+
+app.put('/api/alerts', requireAuth, (req, res) => {
+  try {
+    const c = Alerts.update(req.body || {});
+    Alerts.start();                    // applique tout de suite le nouvel intervalle
+    res.json({ success: true, config: c });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+/** Contrôle immédiat, sans attendre le prochain cycle. */
+app.post('/api/alerts/verifier', requireAuth, async (req, res) => {
+  try {
+    const r = await Alerts.verifier(true);
+    res.json({ success: true, ...r });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/** Email de test : vérifie que la chaîne SMTP fonctionne vraiment. */
+app.post('/api/alerts/test', requireAuth, async (req, res) => {
+  try {
+    const c = Alerts.get();
+    const to = c.email || (req.account && req.account.email) || (account && account.email);
+    if (!to) return res.status(400).json({ error: 'Aucun destinataire : renseigne une adresse email' });
+    await sendMail({
+      to,
+      subject: '[5trade] Test d\'alerte',
+      html: `<div style="font-family:system-ui,sans-serif;background:#0b1017;color:#e2e8f0;padding:20px;border-radius:12px">
+        <h2 style="margin:0 0 8px;color:#34d399">Alertes opérationnelles</h2>
+        <p style="color:#94a3b8;font-size:13.5px;margin:0">
+          Ce message confirme que 5trade peut te prévenir par email quand un signal
+          se confirme sur les marchés surveillés. Aucune action requise.</p></div>`
+    });
+    res.json({ success: true, to });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/market/candles', requireAuth, async (req, res) => {
   try {
     const symbol = String(req.query.symbol || '').trim();
@@ -1777,6 +1823,18 @@ async function start() {
   await ensureDirs();
   await DB.init();
   await loadSessions();
+
+  // Alertes : config chargée du disque, surveillance périodique démarrée.
+  Alerts.load();
+  Alerts.start({
+    market: Market,
+    signals: Signals,
+    sendMail,
+    labelOf: id => {
+      const s = Market.listSymbols().find(x => x.provider === id);
+      return s ? s.providerLabel : id;
+    }
+  });
   app.listen(PORT, () => {
     console.log('═══════════════════════════════════════');
     console.log('  5trade — plateforme de trading IA');
