@@ -213,32 +213,72 @@ function levelsFor(report, direction) {
 }
 
 /**
- * Les DEUX scénarios chiffrés, quel que soit le verdict en cours.
- * Savoir quoi faire si ça monte ET si ça descend est plus utile qu'un
- * « neutre » sec : c'est le plan, pas seulement le constat.
+ * Les DEUX scénarios, avec leur PRIORITÉ et des chiffres concrets.
+ *
+ * Avant, c'étaient deux blocs symétriques toujours formulés pareil : même
+ * phrase, même structure, seule la valeur changeait. Ici le scénario est
+ * rattaché à ce qui existe réellement sur le graphique — la zone la plus proche
+ * du prix, le pool de liquidité le plus proche, la distance en % et en ATR —
+ * et l'un des deux est désigné comme privilégié, avec sa raison.
  */
-function scenarios(report) {
+function scenarios(report, verdict) {
+  const prix = report.lastPrice;
+  const atr = report.atr14 || Math.abs(prix) * 0.001;
+  const st = report.structure;
+  const pd = report.premiumDiscount;
   const zones = [...(report.orderBlocks || []), ...(report.fvgs || [])];
-  const support = zones.filter(z => z.type === 'bullish').sort((a, b) => b.high - a.high)[0];
-  const resistance = zones.filter(z => z.type === 'bearish').sort((a, b) => a.low - b.low)[0];
-  const hi = report.structure.lastSwingHigh;
-  const lo = report.structure.lastSwingLow;
-  const zoneTxt = z => (z ? `réaction depuis ${z.low}–${z.high} (${z.kind || (z.type === 'bullish' ? 'zone haussière' : 'zone baissière')})` : null);
+  const liq = report.liquidity || [];
 
-  return {
-    bullish: {
-      direction: 'BUY',
-      trigger: hi ? `clôture au-dessus de ${num(hi.price)}` : 'clôture au-dessus du dernier sommet',
-      context: zoneTxt(support) || 'réaction sur un support',
-      ...levelsFor(report, 'BUY')
-    },
-    bearish: {
-      direction: 'SELL',
-      trigger: lo ? `clôture sous ${num(lo.price)}` : 'clôture sous le dernier creux',
-      context: zoneTxt(resistance) || 'rejet sous une résistance',
-      ...levelsFor(report, 'SELL')
-    }
+  const distPct = n => (Number.isFinite(n) ? +Math.abs((n - prix) / prix * 100).toFixed(2) : null);
+  const distAtr = n => (Number.isFinite(n) ? +(Math.abs(n - prix) / atr).toFixed(1) : null);
+  const ou = (n, t) => (Number.isFinite(n) ? `${num(n)} (${distPct(n)} %${t ? `, ${distAtr(n)}× ATR` : ''})` : null);
+
+  // Ce qui est réellement en face : zone la plus proche de chaque côté,
+  // et pool de liquidité le plus proche (les cibles naturelles du marché).
+  const support = zones.filter(z => z.type === 'bullish' && z.high <= prix)
+    .sort((a, b) => b.high - a.high)[0];
+  const resistance = zones.filter(z => z.type === 'bearish' && z.low >= prix)
+    .sort((a, b) => a.low - b.low)[0];
+  const liqHaut = liq.filter(p => p.price > prix).sort((a, b) => a.price - b.price)[0];
+  const liqBas = liq.filter(p => p.price < prix).sort((a, b) => b.price - a.price)[0];
+
+  // Biais : la tendance ET la position dans le range. C'est ce qui départage les
+  // deux scénarios — sinon ils auraient toujours le même poids.
+  let biais = 'neutre', raisonBiais = 'range sans direction nette : attendre une cassure';
+  if (st.trend === 'bullish' && pd && pd.position === 'discount') {
+    biais = 'haussier'; raisonBiais = 'tendance haussière et prix en discount : contexte d\'achat complet';
+  } else if (st.trend === 'bearish' && pd && pd.position === 'premium') {
+    biais = 'baissier'; raisonBiais = 'tendance baissière et prix en premium : contexte de vente complet';
+  } else if (st.trend === 'bullish') {
+    biais = 'haussier'; raisonBiais = 'tendance haussière mais prix en premium : acheter sur repli, pas au sommet';
+  } else if (st.trend === 'bearish') {
+    biais = 'baissier'; raisonBiais = 'tendance baissière mais prix en discount : vendre sur rebond, pas au creux';
+  }
+
+  const acheteur = {
+    direction: 'BUY',
+    priorite: biais === 'haussier' ? 'principale' : 'alternative',
+    trigger: st.lastSwingHigh ? `clôture au-dessus de ${num(st.lastSwingHigh.price)}` : 'clôture au-dessus du dernier sommet',
+    context: support
+      ? `repli dans ${num(support.low)}–${num(support.high)} (${support.kind || 'zone de demande'}), à ${distPct(support.high)} % du prix`
+      : 'repli sur le support le plus proche',
+    // La cible la plus proche au-dessus : c'est là que le marché va chercher.
+    objectifProche: liqHaut ? `${liqHaut.type} à ${ou(liqHaut.price, true)}` : null,
+    ...levelsFor(report, 'BUY')
   };
+
+  const vendeur = {
+    direction: 'SELL',
+    priorite: biais === 'baissier' ? 'principale' : 'alternative',
+    trigger: st.lastSwingLow ? `clôture sous ${num(st.lastSwingLow.price)}` : 'clôture sous le dernier creux',
+    context: resistance
+      ? `rejet de ${num(resistance.low)}–${num(resistance.high)} (${resistance.kind || 'zone d\'offre'}), à ${distPct(resistance.low)} % du prix`
+      : 'rejet sous la résistance la plus proche',
+    objectifProche: liqBas ? `${liqBas.type} à ${ou(liqBas.price, true)}` : null,
+    ...levelsFor(report, 'SELL')
+  };
+
+  return { bullish: acheteur, bearish: vendeur, biais, raisonBiais };
 }
 
 /** Conditions évaluées une par une : on montre ce qui est rempli et ce qui manque. */
@@ -378,6 +418,7 @@ function detect(candles, meta = {}, options = {}) {
     ? `[${options.strategie.titre}] ` : '';
   const summary = status === 'neutre'
     ? `${entete}Aucun signal confirmé : ${missing.join(' ; ') || 'conditions insuffisantes'}.`
+      + ` Biais ${sc.biais} (${sc.raisonBiais}).`
       + ` Scénarios : achat si ${sc.bullish.trigger}, vente si ${sc.bearish.trigger}.`
     : `${entete}${direction === 'BUY' ? 'ACHAT' : 'VENTE'} ${status === 'confirme' ? 'CONFIRMÉ' : 'à surveiller'}`
       + ` — ${independent} règle(s) : ${winner.map(r => r.name).join(' + ')}`
@@ -401,6 +442,10 @@ function detect(candles, meta = {}, options = {}) {
     // Traçabilité : quelles règles ont été appliquées, et au nom de quoi.
     reglesActives: actives,
     seuils: { regles: seuilRegles, force: seuilForce },
+    // Biais d'ensemble et sa justification : quel scénario est privilégié, et
+    // pourquoi. Sans ça, les deux scénarios auraient toujours le même poids.
+    biais: sc.biais,
+    raisonBiais: sc.raisonBiais,
     strategie: options.strategie || null,
     context: {
       trend: report.structure.trend,

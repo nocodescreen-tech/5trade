@@ -1811,6 +1811,18 @@ function LiveMarket({ onToJournal }) {
     })();
   }, []);
 
+  // Changement de marché : on VIDE la série immédiatement.
+  // Sans ça, le graphique recevait les bougies du symbole PRÉCÉDENT avec la
+  // nouvelle étiquette (BTC à 84 200 affiché sous « Or / USD »), puis un simple
+  // update() au lieu d'un rechargement complet — le graphique semblait donc
+  // « ne pas bouger » alors qu'il montrait l'ancien marché.
+  useEffect(() => {
+    setCandles([]);
+    setReport(null);
+    setSignal(null);
+    setTicks(0);
+  }, [symbol, tf, provider]);
+
   const load = useCallback(async () => {
     setErr('');
     try {
@@ -2110,16 +2122,35 @@ function LiveMarket({ onToJournal }) {
               </div>
             )}
 
+            {signal.biais && (
+              <div style={{ fontSize:12.5, color:'var(--muted)' }}>
+                <i className="fas fa-compass" style={{ marginRight:6,
+                  color: signal.biais === 'haussier' ? '#34d399' : signal.biais === 'baissier' ? '#f87171' : 'var(--dim)' }}></i>
+                Biais <b style={{ color: signal.biais === 'haussier' ? '#34d399'
+                  : signal.biais === 'baissier' ? '#f87171' : '#e2e8f0' }}>{signal.biais}</b> — {signal.raisonBiais}
+              </div>
+            )}
+
             {signal.scenarios && (
               <div style={{ display:'grid', gap:8, gridTemplateColumns:'repeat(auto-fit,minmax(270px,1fr))' }}>
                 {[['bullish', 'ACHAT', '#34d399', 'fa-arrow-trend-up'],
                   ['bearish', 'VENTE', '#f87171', 'fa-arrow-trend-down']].map(([k, lab, col, ico]) => {
                   const s = signal.scenarios[k];
                   if (!s) return null;
+                  const privilegie = s.priorite === 'principale';
                   return (
-                    <div key={k} style={{ border:'1px solid rgba(27,36,51,.7)', borderRadius:8, padding:'10px 12px' }}>
-                      <div style={{ fontSize:12.5, color:col, fontWeight:600, marginBottom:6 }}>
-                        <i className={`fas ${ico}`} style={{ marginRight:6 }}></i>Scénario {lab}
+                    <div key={k} style={{ border: privilegie ? `1px solid ${col}55` : '1px solid rgba(27,36,51,.7)',
+                      background: privilegie ? `${col}0d` : 'transparent',
+                      borderRadius:8, padding:'10px 12px', opacity: privilegie ? 1 : 0.75 }}>
+                      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+                        fontSize:12.5, color:col, fontWeight:600, marginBottom:6 }}>
+                        <span><i className={`fas ${ico}`} style={{ marginRight:6 }}></i>Scénario {lab}</span>
+                        <span className="tag" style={{ fontSize:10.5,
+                          background: privilegie ? `${col}22` : 'rgba(148,163,184,.1)',
+                          color: privilegie ? col : 'var(--dim)',
+                          borderColor: privilegie ? `${col}55` : 'rgba(148,163,184,.25)' }}>
+                          {privilegie ? 'privilégié' : 'alternatif'}
+                        </span>
                       </div>
                       <div style={{ fontSize:12, color:'var(--muted)', lineHeight:1.6 }}>
                         <div><b style={{ color:'#cbd5e1' }}>Déclencheur</b> : {s.trigger}</div>
@@ -2129,6 +2160,12 @@ function LiveMarket({ onToJournal }) {
                           {' · '}invalidation <b style={{ color:'#f87171' }}>{fmt(s.stop)}</b>
                           {' · '}objectifs <b style={{ color:'#34d399' }}>{fmt(s.target1)}</b> / {fmt(s.target2)}
                         </div>
+                        {s.objectifProche && (
+                          <div style={{ marginTop:5, color:'#fbbf24', fontSize:11.5 }}>
+                            <i className="fas fa-bullseye" style={{ marginRight:5 }}></i>
+                            cible la plus proche : {s.objectifProche}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
