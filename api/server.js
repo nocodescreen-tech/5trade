@@ -2084,11 +2084,14 @@ async function optionsAnalyse(src) {
   const timeframes = listes.length ? [...new Set(listes.flat())].slice(0, 5) : null;
   const seuilAlignes = Math.max(...profils.map(p => p.seuilAlignes || 0)) || null;
   const style = profils.map(p => p.style).find(Boolean) || null;
+  // Filtres exigés : l'union de ceux des stratégies choisies (un filtre demandé
+  // par une stratégie reste exigé même si l'autre ne le demande pas).
+  const filtres = [...new Set(profils.flatMap(p => p.filtres || []))];
 
   return {
     mode: 'manuel',
     regles, seuilForce, seuilRegles, parametres,
-    timeframes, seuilAlignes, style,
+    timeframes, seuilAlignes, style, filtres,
     strategies: profils.map(p => ({ id: p.id, titre: p.titre, regles: p.regles })),
     strategie: {
       titre: titres.join(' + '),

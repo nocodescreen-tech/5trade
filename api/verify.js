@@ -598,7 +598,11 @@ function tinyPng(W = 64, H = 40) {
     const p3 = Sig.profilDepuisStrategie({ id:'c', title:'Fibonacci Premium Discount', content:'OTE et retracement du range', tags:[] });
     ok('profil : une stratégie Fibonacci surveille la position', p3.regles.includes('R4'), p3.regles.join('+'));
     const p4 = Sig.profilDepuisStrategie({ id:'d', title:'zzz', content:'xyz', tags:[] });
-    ok('profil : texte sans indication → toutes les règles (rien d\'omis)', p4.regles.length === 4 && !p4.deduitDuTexte);
+    // Le nombre de règles n'est pas fige : il grandit avec le moteur. On verifie
+    // donc que TOUTES les regles declarees sont bien reprises, sans en coder 4.
+    const nbRegles = Object.keys(Sig.TOUTES_REGLES).length;
+    ok('profil : texte sans indication → toutes les règles (rien d\'omis)',
+      p4.regles.length === nbRegles && !p4.deduitDuTexte, `${p4.regles.length}/${nbRegles}`);
     ok('profil : une stratégie mono-règle relève son seuil de force',
       p3.seuilRegles === 1 && p3.seuilForce > 0.35, JSON.stringify({ r: p3.seuilRegles, f: p3.seuilForce }));
     ok('profil : une stratégie multi-règles garde le seuil standard',
@@ -618,7 +622,7 @@ function tinyPng(W = 64, H = 40) {
     push(99.5,101.5,98,101);
 
     const vAuto = Sig.detect(serie, { symbol:'T', timeframe:'1m' });
-    ok('mode auto : toutes les règles sont évaluées', vAuto.reglesActives.length === 4,
+    ok('mode auto : toutes les règles sont évaluées', vAuto.reglesActives.length === nbRegles,
       vAuto.reglesActives.join('+'));
 
     const vManuel = Sig.detect(serie, { symbol:'T', timeframe:'1m' },
@@ -943,6 +947,76 @@ function tinyPng(W = 64, H = 40) {
     // Et le front rafraîchit bien les bougies, pas seulement les zones.
     ok('le front recharge les bougies toutes seules',
       /setCandles\(cb\.candles\)/.test(jsx) && /Promise\.all\(\[/.test(jsx));
+  }
+
+  // ── Le nombre de critères n'est PAS figé à 4 ──
+  // Question posée par l'utilisateur : « est-ce obligatoire que chaque stratégie
+  // ait 4 ou 3 étapes ? » Non. Le moteur expose des règles (qui votent) et des
+  // filtres (qui bloquent), et une stratégie en choisit autant qu'elle veut.
+  {
+    const nb = Object.keys(Sig.TOUTES_REGLES).length;
+    ok('le moteur propose plus de quatre règles', nb >= 5, `${nb} règles`);
+    ok('chaque règle a un libellé lisible',
+      Object.keys(Sig.TOUTES_REGLES).every(r => Sig.REGLES_INFO[r]));
+    ok('le seuil de règles suit le nombre réel de règles',
+      Sig.normaliserMoteur({ regles: ['R1', 'R2', 'R3', 'R4', 'R5'], seuilRegles: 99 }).seuilRegles === nb,
+      `borne a ${nb}`);
+    ok('une stratégie mono-règle reste possible',
+      Sig.profilDepuisStrategie({ id: 'x', title: 't', moteur: { regles: ['R1'], seuilRegles: 1 } })
+        .regles.length === 1);
+    ok('R5 (sens de la structure) produit un avis directionnel', (() => {
+      // On interroge la règle elle-même : sur une série lisse, la structure peut
+      // rester « range » et la règle est alors muette — ce qui est correct.
+      const haussier = Sig.ruleTendance({ structure: { trend: 'bullish' } });
+      const baissier = Sig.ruleTendance({ structure: { trend: 'bearish' } });
+      const range = Sig.ruleTendance({ structure: { trend: 'range' } });
+      return !!haussier && haussier.rule === 'R5' && haussier.direction === 'BUY'
+        && !!baissier && baissier.direction === 'SELL'
+        && range === null;
+    })());
+
+    ok('les filtres existent et sont calculés', (() => {
+      const St = require('./structure.js');
+      const s = [];
+      for (let i = 0; i < 80; i++) { const p = 100 + Math.sin(i / 5) * 4; s.push({ t: i * 60000, o: p, h: p + 1, l: p - 1, c: p + 0.3, v: 10 }); }
+      const f = Sig.filtresDisponibles(St.analyze(s, { symbol: 'T', timeframe: '5m' }));
+      return f.length >= 3 && f.every(x => ['volatilite', 'session', 'range'].includes(x.cle)
+        && typeof x.ok === 'boolean' && x.label && x.detail);
+    })());
+    ok('un filtre exigé non rempli interdit la confirmation', (() => {
+      const St = require('./structure.js');
+      const s = [];
+      // Marché plat : la volatilité relative est nulle et il n'y a pas de déplacement.
+      for (let i = 0; i < 80; i++) s.push({ t: i * 60000, o: 100, h: 100.02, l: 99.98, c: 100, v: 1 });
+      const rapport = St.analyze(s, { symbol: 'T', timeframe: '5m' });
+      const v = Sig.detect(s, { symbol: 'T', timeframe: '5m' }, { filtres: ['volatilite'] });
+      const filtre = (v.filtres || []).find(f => f.cle === 'volatilite');
+      return !filtre || filtre.ok === false ? v.status !== 'confirme' : true;
+    })());
+    ok('les filtres sont exposés dans le verdict',
+      /filtres: tousFiltres/.test(SIGSRC) && /filtresExiges/.test(SIGSRC));
+    ok('une stratégie transmet ses filtres au direct',
+      /profils\.flatMap\(p => p\.filtres/.test(fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8')));
+  }
+
+  // ── Mobile : le direct doit être utilisable au pouce ──
+  {
+    ok('barre de navigation mobile en bas d\'écran',
+      /\.mobile-nav\{[\s\S]{0,200}position:fixed;bottom:0/.test(htmlSrc));
+    ok('la navigation d\'ordinateur est masquée sur mobile', /\.nav\{display:none\}/.test(htmlSrc));
+    ok('au plus cinq cibles au pouce (le reste dans « Plus »)',
+      /NAV_PRINCIPAL = \['live', 'analyze', 'strategies', 'journal'\]/.test(jsx)
+      && /NAV_SECONDAIRE = \['add', 'history', 'termes', 'alerts'\]/.test(jsx));
+    ok('cibles tactiles d\'au moins 44 px', /min-height:44px/.test(htmlSrc));
+    ok('encoche et barre gestuelle respectées (safe-area)',
+      /env\(safe-area-inset-bottom\)/.test(htmlSrc));
+    ok('les champs font 16 px (empêche le zoom automatique iOS)',
+      /\.fld, input, select, textarea\{font-size:16px\}/.test(htmlSrc));
+    ok('les tableaux larges défilent au lieu de casser la page',
+      /table\{display:block;overflow-x:auto/.test(htmlSrc));
+    ok('le graphique s\'adapte en hauteur sur petit écran',
+      /\.chart-mobile\{height:\d+px!important\}/.test(htmlSrc) && /className="chart-mobile"/.test(jsx));
+    ok('le défilement au doigt est fluide', /-webkit-overflow-scrolling:touch/.test(htmlSrc));
   }
 
   // ── Décrire une stratégie : le trader explique, le moteur structure ──

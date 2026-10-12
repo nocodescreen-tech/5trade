@@ -317,15 +317,88 @@ function checklist(report) {
   ];
 }
 
-/** Les quatre familles de règles, adressables par identifiant. */
+/**
+ * R5 — Sens de la structure.
+ *
+ * Les règles R1 à R4 disent « il se passe quelque chose ici ». Celle-ci dit
+ * « et ce quelque chose va dans le sens du marché ». Une tendance haussière ne
+ * rend pas tout achat bon, mais elle rend les achats plus fiables que les
+ * ventes — et l'inverse.
+ */
+function ruleTendance(report) {
+  const t = (report.structure || {}).trend;
+  if (t !== 'bullish' && t !== 'bearish') return null;
+  const achat = t === 'bullish';
+  return {
+    rule: 'R5',
+    name: `Sens de la structure : ${achat ? 'haussier' : 'baissier'}`,
+    direction: achat ? 'BUY' : 'SELL',
+    strength: 0.45,
+    detail: `structure en ${t} — un signal dans ce sens est favorisé`
+  };
+}
+
+/**
+ * Filtres — les conditions qui ne votent pas mais qui bloquent.
+ *
+ * Un critère comme « la volatilité est suffisante » n'a pas de sens : il ne dit
+ * ni achat ni vente. Mais s'il est faux, le signal n'a rien à payer en frais.
+ * Ces filtres sont donc exigibles par une stratégie, et leur échec interdit la
+ * confirmation sans toucher au vote des règles.
+ */
+function filtresDisponibles(report) {
+  const pd = report.premiumDiscount || {};
+  const se = report.sessions || {};
+  const atr = report.atr14, prix = report.lastPrice;
+  const atrPct = (Number.isFinite(atr) && Number.isFinite(prix) && prix) ? atr / prix : 0;
+  const deplacements = (report.displacements || []).length;
+  const sessionActive = /londres|new ?york|overlap/i.test(String(se.sessionCourante || ''));
+  const killZone = se.killZone && se.killZone !== 'aucune en ce moment';
+
+  return [
+    {
+      cle: 'volatilite', label: 'Volatilité exploitable',
+      ok: atrPct >= 0.0005 || deplacements > 0,
+      detail: `ATR ${(atrPct * 100).toFixed(3)} % du prix · ${deplacements} déplacement(s)`,
+      lecture: 'sans amplitude, un signal ne couvre pas ses frais'
+    },
+    {
+      cle: 'session', label: 'Session active (liquidité)',
+      ok: sessionActive || !!killZone,
+      detail: `${se.sessionCourante || '—'}${killZone ? ' · ' + se.killZone : ''}`,
+      lecture: 'les mouvements les plus francs arrivent sur Londres et New York'
+    },
+    {
+      cle: 'range', label: 'Range défini (bornes nettes)',
+      ok: Number.isFinite(pd.high) && Number.isFinite(pd.low) && Number.isFinite(pd.equilibrium)
+        && pd.high > pd.low,
+      detail: pd.high ? `${pd.low} / ${pd.equilibrium} / ${pd.high}` : 'range indéterminé',
+      lecture: 'premium/discount n\'a de sens que si le range est identifié'
+    }
+  ];
+}
+
 const TOUTES_REGLES = {
   R1: (candles, report) => ruleSweep(candles, report),
   R2: (candles, report) => ruleBreak(candles, report),
   R3: (candles, report) => ruleZone(candles, report),
-  R4: (candles, report) => rulePosition(report)
+  R4: (candles, report) => rulePosition(report),
+  R5: (candles, report) => ruleTendance(report)
+};
+
+/** Ce que chaque règle veut dire, pour l'interface et les messages. */
+const REGLES_INFO = {
+  R1: 'Balayage de liquidité',
+  R2: 'Rupture de structure (BOS / CHoCH)',
+  R3: 'Zone réactive (order block / FVG)',
+  R4: 'Position dans le range (premium / discount)',
+  R5: 'Sens de la structure (tendance)'
 };
 
 const sansAccents = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+/** Identifiants des filtres exigibles par une stratégie (voir filtresDisponibles). */
+const CLES_FILTRES = ['volatilite', 'session', 'range'];
 
 /** Unités de temps connues (les sources les acceptent toutes). */
 const TF_VALIDES = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
@@ -385,7 +458,13 @@ function normaliserMoteur(m = {}) {
   return {
     regles: brutes.length ? [...new Set(brutes)] : [],
     seuilForce: borner(m.seuilForce, 0, 1, MOTEUR_DEFAUT.seuilForce),
-    seuilRegles: Math.round(borner(m.seuilRegles, 1, 4, MOTEUR_DEFAUT.seuilRegles)),
+    // Le nombre de règles disponibles n'est pas fixe : une stratégie peut croiser
+    // 1, 2, 3… critères. Le seuil suit le nombre réel de règles du moteur.
+    seuilRegles: Math.round(borner(m.seuilRegles, 1,
+      Object.keys(TOUTES_REGLES).length, MOTEUR_DEFAUT.seuilRegles)),
+    // Filtres exigés : des conditions qui ne votent pas mais qui bloquent.
+    filtres: Array.isArray(m.filtres)
+      ? [...new Set(m.filtres.filter(f => CLES_FILTRES.includes(f)))].slice(0, 5) : [],
     style,
     timeframes: tf.length ? tf : null,
     seuilAlignes,
@@ -430,6 +509,8 @@ function profilDepuisStrategie(doc) {
       style: m.style,
       timeframes: m.timeframes,
       seuilAlignes: m.seuilAlignes,
+      // Filtres exigés par la stratégie (volatilité, session, range).
+      filtres: Array.isArray(m.filtres) ? m.filtres : [],
       parametres: {
         swingsWindow: m.swingsWindow,
         toleranceLiquidite: m.toleranceLiquidite,
@@ -462,6 +543,10 @@ function profilDepuisStrategie(doc) {
     style,
     timeframes: dStyle ? dStyle.timeframes : null,
     seuilAlignes: dStyle ? dStyle.seuilAlignes : null,
+    // Un style suppose aussi des exigences : un scalpeur a besoin de volatilité
+    // et d'une session active, un suivi de tendance non.
+    filtres: style === 'scalping' ? ['volatilite', 'session']
+      : style === 'intraday' ? ['volatilite'] : [],
     parametres: dStyle ? { atrStop: dStyle.atrStop } : undefined,
     deduitDuTexte: trouvees.length > 0,
     motif: trouvees.length
@@ -522,10 +607,19 @@ function detect(candles, meta = {}, options = {}) {
   // Une stratégie mono-règle (ex. « order blocks ») ne peut pas croiser deux
   // confirmations : son profil relève alors le seuil de force (voir plus haut).
   // Un désaccord franc interdit la confirmation, quelle que soit la force.
+  // FILTRES exigés par la stratégie : ce ne sont pas des avis directionnels, donc
+  // ils ne votent pas — mais s'ils ne sont pas remplis, la confirmation est
+  // interdite. C'est ainsi qu'une stratégie dit « il me faut de la volatilité et
+  // une session active » sans déformer le vote des règles.
+  const tousFiltres = filtresDisponibles(report);
+  const filtresExiges = Array.isArray(options.filtres) ? options.filtres : [];
+  const filtresKO = tousFiltres.filter(f => filtresExiges.includes(f.cle) && !f.ok);
+
   const seuilRegles = Number.isFinite(options.seuilRegles) ? options.seuilRegles : 2;
   const seuilForce = Number.isFinite(options.seuilForce) ? options.seuilForce : 0.35;
   const seuilSurveiller = Math.max(0.3, seuilForce - 0.05);
-  const status = (!desaccordFranc && independent >= seuilRegles && strength >= seuilForce) ? 'confirme'
+  const status = (!desaccordFranc && !filtresKO.length
+    && independent >= seuilRegles && strength >= seuilForce) ? 'confirme'
     : (independent >= 1 && strength >= seuilSurveiller) ? 'surveiller' : 'neutre';
 
   // Ce que chaque camp avance, pour que le désaccord soit lisible.
@@ -546,6 +640,7 @@ function detect(candles, meta = {}, options = {}) {
   const missing = [];
   if (status !== 'confirme') {
     if (desaccordFranc) missing.push(contradiction.lecture);
+    for (const f of filtresKO) missing.push(`filtre non rempli — ${f.label} : ${f.detail}`);
     if (independent < seuilRegles) {
       missing.push(`il faut ${seuilRegles} règle(s) concordante(s) (${independent} pour l'instant)`);
     }
@@ -594,6 +689,9 @@ function detect(candles, meta = {}, options = {}) {
     // Le désaccord entre règles est exposé tel quel : on ne masque pas un
     // « 1 pour / 1 contre » derrière une direction choisie arbitrairement.
     contradiction,
+    // Filtres : ce que la stratégie exigeait, et ce que le marché en dit.
+    filtres: tousFiltres,
+    filtresExiges,
     // Traçabilité : quelles règles ont été appliquées, et au nom de quoi.
     reglesActives: actives,
     seuils: { regles: seuilRegles, force: seuilForce },
@@ -736,5 +834,6 @@ function verdictAvecConfluence(parTF, options = {}) {
 module.exports = {
   detect, scenarios, checklist, levelsFor, profilDepuisStrategie, TOUTES_REGLES,
   confluence, verdictAvecConfluence, TF_SUPERIEURS, normaliserMoteur, STYLES, MOTEUR_DEFAUT,
-  ruleSweep, ruleBreak, ruleZone, rulePosition
+  filtresDisponibles, CLES_FILTRES, REGLES_INFO,
+  ruleSweep, ruleBreak, ruleZone, rulePosition, ruleTendance
 };
