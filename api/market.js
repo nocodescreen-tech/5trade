@@ -139,7 +139,13 @@ const deriv = {
   },
   _toCandles(list) {
     return (list || []).map(c => ({
-      t: c.epoch * 1000, o: +c.open, h: +c.high, l: +c.low, c: +c.close, v: 0, closed: true
+      // Temps d'OUVERTURE de la bougie — le seul repère cohérent avec le flux
+      // temps réel, qui envoie « open_time ». Utiliser « epoch » ici produisait
+      // des bougies décalées d'une période : le direct arrivait avec un
+      // horodatage antérieur au dernier point affiché, le graphique l'ignorait
+      // et semblait donc FIGÉ (alors que les données arrivaient bien).
+      t: (c.open_time !== undefined ? c.open_time : c.epoch) * 1000,
+      o: +c.open, h: +c.high, l: +c.low, c: +c.close, v: 0, closed: true
     }));
   },
   async candles(symbol, tf, count) {

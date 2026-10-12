@@ -2064,12 +2064,80 @@ function LiveMarket() {
                     {report.premiumDiscount.position}</b>
                 </div>
               </>)}
+              {report.sessions && (<>
+                <div style={{ display:'flex', justifyContent:'space-between' }}>
+                  <span style={{ color:'var(--muted)' }}>Session</span>
+                  <b>{report.sessions.sessionCourante}</b>
+                </div>
+                <div style={{ display:'flex', justifyContent:'space-between' }}>
+                  <span style={{ color:'var(--muted)' }}>Kill zone</span>
+                  <b style={{ color: report.sessions.killZone === 'aucune en ce moment' ? 'var(--muted)' : '#fbbf24' }}>
+                    {report.sessions.killZone}</b>
+                </div>
+              </>)}
               <div style={{ display:'flex', justifyContent:'space-between' }}>
                 <span style={{ color:'var(--muted)' }}>Récent</span>
                 <span style={{ fontSize:12 }}>
                   {(report.structure.recent || []).map(r => `${r.label} ${fmt(r.price)}`).join(' · ') || '—'}
                 </span>
               </div>
+              {(report.displacements || []).length > 0 && (
+                <div style={{ display:'flex', justifyContent:'space-between' }}>
+                  <span style={{ color:'var(--muted)' }}>Déplacements</span>
+                  <span style={{ fontSize:12 }}>
+                    {report.displacements.slice(-3).map(d => `${d.direction} ${d.multiple}×`).join(' · ')}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="panel" style={{ padding:18 }}>
+            <h3 style={{ margin:'0 0 10px', fontSize:14 }}>
+              <i className="fas fa-wave-square" style={{ color:'#f472b6', marginRight:8 }}></i>
+              Fibonacci &amp; périodes de référence
+            </h3>
+            <div style={{ fontSize:12.5, display:'grid', gap:6 }}>
+              {report.fibLevels ? (
+                <>
+                  <div style={{ color:'var(--muted)', fontSize:12, marginBottom:2 }}>
+                    dernier swing {report.fibLevels.sens}
+                  </div>
+                  {Object.entries(report.fibLevels.levels).map(([k, v]) => (
+                    <div key={k} style={{ display:'flex', justifyContent:'space-between' }}>
+                      <span style={{ color:'var(--muted)' }}>Retracement {k}</span>
+                      <b>{fmt(v)}</b>
+                    </div>
+                  ))}
+                </>
+              ) : <span style={{ color:'var(--dim)' }}>Swing insuffisant</span>}
+              {report.previousLevels && Object.entries(report.previousLevels).map(([k, v]) => (
+                <div key={k} style={{ display:'flex', justifyContent:'space-between' }}>
+                  <span style={{ color:'var(--muted)' }}>{k}</span><b>{fmt(v)}</b>
+                </div>
+              ))}
+              {(report.breakers || []).length > 0 && (
+                <div style={{ marginTop:6 }}>
+                  <div style={{ color:'var(--muted)', fontSize:12, marginBottom:3 }}>Breakers (zones retournées)</div>
+                  {report.breakers.slice(-3).map((b, i) => (
+                    <div key={i} style={{ display:'flex', justifyContent:'space-between' }}>
+                      <span style={{ color:'var(--muted)' }}>{b.type}</span>
+                      <b>{fmt(b.low)}–{fmt(b.high)}</b>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(report.sweeps || []).length > 0 && (
+                <div style={{ marginTop:6 }}>
+                  <div style={{ color:'var(--muted)', fontSize:12, marginBottom:3 }}>Balayages de liquidité</div>
+                  {report.sweeps.slice(-3).map((s, i) => (
+                    <div key={i} style={{ display:'flex', justifyContent:'space-between' }}>
+                      <span style={{ color:'var(--muted)' }}>{s.type} ({s.depth} %)</span>
+                      <b>{fmt(s.level)}</b>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -2091,6 +2159,45 @@ function LiveMarket() {
               ))}
             </div>
           </div>
+
+          {report.inventory && (
+            <div className="panel" style={{ padding:18, gridColumn:'1 / -1' }}>
+              <h3 style={{ margin:'0 0 10px', fontSize:14 }}>
+                <i className="fas fa-list-check" style={{ color:'#34d399', marginRight:8 }}></i>
+                {report.inventory.total} éléments identifiés sur le graphique
+              </h3>
+              <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:12 }}>
+                {Object.entries(report.inventory.parFamille).map(([k, v]) => (
+                  <span key={k} className="tag" style={{ background:'rgba(96,165,250,.1)',
+                    borderColor:'rgba(96,165,250,.3)', color:'#93c5fd' }}>
+                    {k} · {v}
+                  </span>
+                ))}
+              </div>
+              <div style={{ display:'grid', gap:16, gridTemplateColumns:'repeat(auto-fit,minmax(250px,1fr))',
+                maxHeight:340, overflowY:'auto' }}>
+                {Object.entries(report.inventory.items.reduce((acc, it) => {
+                  (acc[it.famille] = acc[it.famille] || []).push(it); return acc;
+                }, {})).map(([fam, list]) => (
+                  <div key={fam}>
+                    <div style={{ fontSize:12, color:'#93c5fd', fontWeight:600, marginBottom:6 }}>{fam}</div>
+                    {list.map((it, i) => (
+                      <div key={i} title={it.etat}
+                        style={{ display:'flex', justifyContent:'space-between', gap:8, fontSize:12,
+                          paddingBottom:4, borderBottom:'1px solid rgba(27,36,51,.4)' }}>
+                        <span style={{ color:'var(--muted)' }}>{it.label}</span>
+                        <span><b>{it.prix !== null ? fmt(it.prix) : '—'}</b></span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <p style={{ margin:'10px 0 0', fontSize:11.5, color:'var(--dim)' }}>
+                Chaque ligne est calculée depuis les bougies réelles. Survolez pour voir l'état
+                (ouvert, valide, cassé, balayé…). Aucun élément deviné.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

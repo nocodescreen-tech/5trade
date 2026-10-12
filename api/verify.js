@@ -473,6 +473,14 @@ function tinyPng(W = 64, H = 40) {
     new Set(Mk.listSymbols().map(s => s.provider)).size >= 3,
     [...new Set(Mk.listSymbols().map(s => s.provider))].join(', '));
 
+  // ── Le direct doit S'EMBOÎTER dans l'historique ──
+  // Vécu : l'historique Deriv utilisait « epoch » et le flux « open_time » (deux
+  // champs décalés d'une période). Le direct arrivait donc avec un horodatage
+  // antérieur au dernier point affiché, le graphique l'ignorait et semblait figé
+  // — alors que les données arrivaient. Ici on compare les deux horodatages.
+  ok('marché : historique et flux partagent le même horodatage',
+    /open_time !== undefined \? c\.open_time : c\.epoch/.test(fs.readFileSync(path.join(__dirname, 'market.js'), 'utf8')));
+
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
   if (skip) console.log(`  (${skip} test(s) non exécuté(s) : dépendance externe absente — voir les lignes « • »)`);
   process.exit(fail ? 1 : 0);
