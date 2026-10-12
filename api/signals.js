@@ -242,6 +242,22 @@ function scenarios(report, verdict) {
   const liqHaut = liq.filter(p => p.price > prix).sort((a, b) => a.price - b.price)[0];
   const liqBas = liq.filter(p => p.price < prix).sort((a, b) => b.price - a.price)[0];
 
+  // Repli quand aucune zone n'est en face : un swing, l'OTE, puis l'ATR.
+  // Il faut TOUJOURS un chiffre — « repli sur le support le plus proche » sans
+  // valeur ne dit rien et rendait tous les scénarios identiques.
+  const repli = st.lastSwingLow ? st.lastSwingLow.price : (pd ? pd.ote.deep : prix - atr * 1.5);
+  const repliHaut = st.lastSwingHigh ? st.lastSwingHigh.price : (pd ? pd.ote.shallow : prix + atr * 1.5);
+
+  const contexteAchat = support
+    ? `repli dans ${num(support.low)}–${num(support.high)} (${support.kind || 'zone de demande'}), à ${distPct(support.high)} % du prix`
+    : `repli vers ${num(repli)} (${distPct(repli)} %, ${distAtr(repli)}× ATR)`
+      + (st.lastSwingLow ? ' — dernier creux' : pd ? ' — niveau OTE' : ' — repli d\'un ATR et demi');
+
+  const contexteVente = resistance
+    ? `rejet de ${num(resistance.low)}–${num(resistance.high)} (${resistance.kind || 'zone d\'offre'}), à ${distPct(resistance.low)} % du prix`
+    : `montée vers ${num(repliHaut)} (${distPct(repliHaut)} %, ${distAtr(repliHaut)}× ATR)`
+      + (st.lastSwingHigh ? ' — dernier sommet' : pd ? ' — niveau OTE' : ' — extension d\'un ATR et demi');
+
   // Biais : la tendance ET la position dans le range. C'est ce qui départage les
   // deux scénarios — sinon ils auraient toujours le même poids.
   let biais = 'neutre', raisonBiais = 'range sans direction nette : attendre une cassure';
@@ -259,9 +275,7 @@ function scenarios(report, verdict) {
     direction: 'BUY',
     priorite: biais === 'haussier' ? 'principale' : 'alternative',
     trigger: st.lastSwingHigh ? `clôture au-dessus de ${num(st.lastSwingHigh.price)}` : 'clôture au-dessus du dernier sommet',
-    context: support
-      ? `repli dans ${num(support.low)}–${num(support.high)} (${support.kind || 'zone de demande'}), à ${distPct(support.high)} % du prix`
-      : 'repli sur le support le plus proche',
+    context: contexteAchat,
     // La cible la plus proche au-dessus : c'est là que le marché va chercher.
     objectifProche: liqHaut ? `${liqHaut.type} à ${ou(liqHaut.price, true)}` : null,
     ...levelsFor(report, 'BUY')
@@ -271,9 +285,7 @@ function scenarios(report, verdict) {
     direction: 'SELL',
     priorite: biais === 'baissier' ? 'principale' : 'alternative',
     trigger: st.lastSwingLow ? `clôture sous ${num(st.lastSwingLow.price)}` : 'clôture sous le dernier creux',
-    context: resistance
-      ? `rejet de ${num(resistance.low)}–${num(resistance.high)} (${resistance.kind || 'zone d\'offre'}), à ${distPct(resistance.low)} % du prix`
-      : 'rejet sous la résistance la plus proche',
+    context: contexteVente,
     objectifProche: liqBas ? `${liqBas.type} à ${ou(liqBas.price, true)}` : null,
     ...levelsFor(report, 'SELL')
   };

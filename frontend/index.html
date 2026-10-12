@@ -1775,6 +1775,8 @@ function LiveMarket({ onToJournal }) {
   // Mode d'analyse : 'auto' (l'app combine toutes les règles) ou 'manuel'
   // (uniquement les règles d'une stratégie choisie dans la base).
   const [mode, setMode] = useState('auto');
+  // Vue du graphique : 'app' (nos niveaux calculés) ou 'tradingview' (widget officiel).
+  const [vue, setVue] = useState('app');
   const [strategyId, setStrategyId] = useState('');
   const [profils, setProfils] = useState([]);
 
@@ -2000,11 +2002,20 @@ function LiveMarket({ onToJournal }) {
           const cur = meta.symbols.find(s => s.symbol === symbol && s.provider === provider);
           if (!cur || !cur.tv) return null;
           return (
-            <a className="btn ghost sm" target="_blank" rel="noopener noreferrer"
-              href={`https://fr.tradingview.com/chart/?symbol=${encodeURIComponent(cur.tv)}`}
-              title={`Ouvrir ${cur.tv} sur TradingView et comparer les prix`}>
-              <i className="fas fa-arrow-up-right-from-square"></i>TradingView
-            </a>
+            <>
+              <button className="btn ghost sm" onClick={() => setVue(v => v === 'app' ? 'tradingview' : 'app')}
+                title={vue === 'app'
+                  ? `Afficher ${cur.tv} avec le graphique TradingView officiel`
+                  : 'Revenir au graphique de l\'app (niveaux calculés et signal)'}>
+                <i className={`fas ${vue === 'app' ? 'fa-tv' : 'fa-chart-line'}`}></i>
+                {vue === 'app' ? 'Vue TradingView' : 'Vue app'}
+              </button>
+              <a className="btn ghost sm" target="_blank" rel="noopener noreferrer"
+                href={`https://fr.tradingview.com/chart/?symbol=${encodeURIComponent(cur.tv)}`}
+                title={`Ouvrir ${cur.tv} sur le site TradingView`}>
+                <i className="fas fa-arrow-up-right-from-square"></i>Site
+              </a>
+            </>
           );
         })()}
         <button className="btn ghost sm" onClick={()=>setBig(b => !b)}
@@ -2271,12 +2282,21 @@ function LiveMarket({ onToJournal }) {
           </div>
         )}
 
-        <PriceChart candles={candles} levels={report ? report.levels : []} signal={signal}
-          height={big ? 620 : 430} symbol={symbol} tf={tf} />
+        {vue === 'app' ? (
+          <PriceChart candles={candles} levels={report ? report.levels : []} signal={signal}
+            height={big ? 620 : 430} symbol={symbol} tf={tf} />
+        ) : (
+          <TradingViewChart
+            symbole={(meta.symbols.find(s => s.symbol === symbol && s.provider === provider) || {}).tv}
+            tf={tf} height={big ? 620 : 430} />
+        )}
         <p style={{ margin:'8px 0 0', fontSize:11.5, color:'var(--dim)' }}>
-          Graphique TradingView Lightweight Charts — molette = zoom, glisser = déplacer, double-clic = revenir au prix.
-          {' '}Bougies horodatées en UTC : un autre fuseau (comme celui de ton navigateur) décale l'alignement
-          des bougies, jamais les prix. Zones vertes = support/OB/FVG haussier, rouges = baissier, orange = liquidité.
+          {vue === 'app'
+            ? <>Vue app — molette = zoom, glisser = déplacer, double-clic = revenir au prix. Bougies en UTC.
+                Zones vertes = support/OB/FVG haussier, rouges = baissier, orange = liquidité.
+                Les niveaux tracés sont calculés par l'app.</>
+            : <>Vue TradingView officielle — tous leurs outils (dessin, indicateurs, fuseaux, comparaison).
+                Le signal et les niveaux de l'app restent affichés au-dessus.</>}
         </p>
       </div>
 
@@ -2879,6 +2899,47 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * Graphique TradingView OFFICIEL, par iframe.
+ *
+ * Pourquoi : afficher des cotations est leur métier, pas le mien. Leur graphique
+ * rend n'importe quel symbole — DERIV:XAUUSD compris — exactement comme sur leur
+ * site : zoom, outils de dessin, indicateurs, fuseaux, comparaison.
+ *
+ * L'iframe est préférée au widget JavaScript : rien à charger ni à maintenir de
+ * notre côté, le navigateur de l'utilisateur va chercher le graphique directement,
+ * et c'est la méthode que TradingView recommande pour une intégration simple.
+ *
+ * Les deux vues sont complémentaires : celle-ci pour LIRE le marché,
+ * la vue « app » pour voir NOS niveaux calculés et le signal.
+ */
+function TradingViewChart({ symbole, tf, height }) {
+  if (!symbole) {
+    return (
+      <div className="panel" style={{ padding:24, textAlign:'center', color:'var(--muted)', fontSize:13 }}>
+        <i className="fas fa-circle-info" style={{ marginRight:7 }}></i>
+        Ce marché n'a pas d'équivalent TradingView.
+      </div>
+    );
+  }
+  const intervalle = ({ '1m':'1', '5m':'5', '15m':'15', '30m':'30', '1h':'60', '4h':'240', '1d':'D' })[tf] || '5';
+  const src = 'https://s.tradingview.com/widgetembed/'
+    + `?symbol=${encodeURIComponent(symbole)}`
+    + `&interval=${intervalle}`
+    + '&theme=dark&style=1&locale=fr&timezone=Etc%2FUTC'
+    + '&withdateranges=1&hide_side_toolbar=0&allow_symbol_change=0&save_image=1'
+    + '&studies=Volume%40tv-basicstudies';
+
+  return (
+    <iframe
+      src={src}
+      title={`Graphique TradingView ${symbole}`}
+      style={{ width:'100%', height, border:0, borderRadius:10, background:'#080c14' }}
+      allowFullScreen
+    />
   );
 }
 
