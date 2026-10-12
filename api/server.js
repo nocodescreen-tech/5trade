@@ -1618,10 +1618,84 @@ app.post('/api/alerts/verifier', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-/** Email de test : vérifie que la chaîne SMTP fonctionne vraiment. */
+/**
+ * Trouve l'identifiant de la conversation Telegram.
+ *
+ * L'utilisateur n'a qu'à écrire à son bot : on lit getUpdates et on renvoie la
+ * conversation qui vient de lui parler. Sans cela il devrait pêcher cet
+ * identifiant à la main dans une URL d'API — ce que personne ne fait.
+ */
+app.post('/api/alerts/telegram/trouver', requireAuth, async (req, res) => {
+  try {
+    const jeton = String((req.body && req.body.token) || Alerts.get().telegramToken || '').trim();
+    if (!jeton) return res.status(400).json({ error: 'Donne d\'abord le jeton du bot (donné par BotFather).' });
+
+    const r = await fetch(`https://api.telegram.org/bot${jeton}/getUpdates?timeout=0`);
+    const d = await r.json().catch(() => ({}));
+    if (!d.ok) {
+      return res.status(400).json({
+        error: `Telegram refuse ce jeton (${d.description || 'HTTP ' + r.status}). Vérifie qu'il est complet et sans espace.`
+      });
+    }
+
+    const chats = [];
+    for (const maj of (d.result || [])) {
+      const msg = maj.message || maj.edited_message || maj.channel_post;
+      if (msg && msg.chat && !chats.some(x => String(x.id) === String(msg.chat.id))) {
+        chats.push({
+          id: msg.chat.id,
+          nom: msg.chat.title || [msg.chat.first_name, msg.chat.last_name].filter(Boolean).join(' ')
+            || (msg.chat.username ? '@' + msg.chat.username : '') || 'conversation'
+        });
+      }
+    }
+    if (!chats.length) {
+      return res.json({
+        success: true, trouve: false,
+        aide: 'Aucune conversation pour l\'instant. Ouvre Telegram, cherche ton bot, envoie-lui « salut », puis clique à nouveau.'
+      });
+    }
+    res.json({ success: true, trouve: true, chats });
+  } catch (e) {
+    res.status(500).json({ error: `Impossible de joindre Telegram : ${e.message}` });
+  }
+});
+
+/** Test d'envoi : vérifie que les canaux configurés fonctionnent vraiment. */
 app.post('/api/alerts/test', requireAuth, async (req, res) => {
   try {
     const c = Alerts.get();
+    const canal = String((req.body && req.body.canal) || 'email');
+
+    // Telegram : un vrai message. Un jeton valide ne prouve rien — il faut que le
+    // message arrive sur le téléphone.
+    if (canal === 'telegram') {
+      if (!c.telegramToken) return res.status(400).json({ error: 'Jeton du bot manquant.' });
+      if (!c.telegramChat) {
+        return res.status(400).json({ error: 'Conversation manquante : clique d\'abord sur « Trouver ma conversation ».' });
+      }
+      const r = await fetch(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: c.telegramChat,
+          text: '<b>5trade — test</b>\n\nSi tu lis ce message, les alertes Telegram '
+            + 'fonctionnent. Tu recevras ici chaque signal confirmé, une seule fois par signal.',
+          parse_mode: 'HTML',
+          disable_web_page_preview: true
+        })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!d.ok) {
+        return res.status(400).json({
+          error: `Telegram refuse l'envoi (${d.description || 'HTTP ' + r.status}). `
+            + 'Vérifie le jeton et la conversation.'
+        });
+      }
+      return res.json({ success: true, canal: 'telegram',
+        message: 'Message envoyé : regarde ton téléphone.' });
+    }
+
     const to = c.email || (req.account && req.account.email) || (account && account.email);
     if (!to) return res.status(400).json({ error: 'Aucun destinataire : renseigne une adresse email' });
     await sendMail({

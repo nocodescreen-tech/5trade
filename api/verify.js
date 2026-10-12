@@ -1150,6 +1150,45 @@ function tinyPng(W = 64, H = 40) {
       && /typeTrade/.test(jsx) && /Pour avancer/.test(jsx));
   }
 
+  // ── Telegram : branché de bout en bout, réglable depuis l'écran ──
+  // Le backend existait mais AUCUN champ ne l'exposait : impossible de configurer
+  // le bot depuis l'application. Le « chat id » se trouve maintenant tout seul.
+  {
+    const aSrc = fs.readFileSync(path.join(__dirname, 'alerts.js'), 'utf8');
+    ok('les réglages portent le jeton du bot et la conversation',
+      /telegramToken: null/.test(aSrc) && /telegramChat: null/.test(aSrc));
+    ok('le jeton et la conversation sont validés à l\'enregistrement',
+      /'telegramToken' in patch/.test(aSrc) && /'telegramChat' in patch/.test(aSrc));
+    ok('l\'envoi Telegram est branché dans la surveillance',
+      /if \(c\.telegramToken && c\.telegramChat\)/.test(aSrc) && /envoyerTelegram/.test(aSrc));
+    ok('le message Telegram part en HTML (gras lisible)',
+      /parse_mode: 'HTML'/.test(aSrc) && /disable_web_page_preview: true/.test(aSrc));
+
+    ok('une route retrouve la conversation automatiquement',
+      /app\.post\('\/api\/alerts\/telegram\/trouver'/.test(srv2)
+      && /getUpdates/.test(srv2));
+    ok('la route nomme la conversation trouvée',
+      /msg\.chat\.title \|\| \[msg\.chat\.first_name/.test(srv2));
+    ok('un jeton refusé est expliqué clairement',
+      /Telegram refuse ce jeton/.test(srv2));
+    ok('sans conversation, la route explique quoi faire',
+      /envoie-lui « salut »/.test(srv2));
+    ok('le test d\'envoi gère le canal Telegram',
+      /canal === 'telegram'/.test(srv2) && /regarde ton téléphone/.test(srv2));
+    ok('le test refuse un envoi sans jeton ni conversation',
+      /Jeton du bot manquant/.test(srv2) && /Conversation manquante/.test(srv2));
+
+    ok('l\'écran propose le jeton, la conversation et les deux boutons',
+      /Alertes Telegram/.test(jsx) && /Jeton du bot \(donné par BotFather\)/.test(jsx)
+      && /Trouver ma conversation/.test(jsx) && /Envoyer un message d'essai/.test(jsx));
+    ok('l\'écran explique comment créer le bot',
+      /@BotFather/.test(jsx) && /\/newbot/.test(jsx));
+    ok('l\'écran dit que les deux canaux fonctionnent ensemble',
+      /email et Telegram\) fonctionnent ensemble/.test(jsx));
+    ok('plusieurs conversations sont proposées au choix',
+      /chatsTg\.map/.test(jsx));
+  }
+
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
   if (skip) console.log(`  (${skip} test(s) non exécuté(s) : dépendance externe absente — voir les lignes « • »)`);
   process.exit(fail ? 1 : 0);

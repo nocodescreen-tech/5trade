@@ -3795,6 +3795,50 @@ function Alertes() {
   const [err, setErr] = useState('');
   const [nouveau, setNouveau] = useState({ symbol: 'frxXAUUSD', tf: '15m', provider: 'deriv' });
   const [compte, setCompte] = useState(null);
+  // Telegram : conversations trouvées automatiquement à partir du jeton du bot.
+  const [chatsTg, setChatsTg] = useState([]);
+  const [aideTg, setAideTg] = useState('');
+  const [tgBusy, setTgBusy] = useState(false);
+
+  /**
+   * Cherche la conversation Telegram à partir du jeton du bot.
+   * L'utilisateur n'a pas à connaître son « chat id » : il écrit à son bot, et
+   * l'app le retrouve. Sinon, il faudrait aller le pêcher dans une URL d'API.
+   */
+  const trouverTelegram = async () => {
+    setTgBusy(true); setErr(''); setMsg(''); setAideTg(''); setChatsTg([]);
+    try {
+      const r = await api('/alerts/telegram/trouver', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: (cfg && cfg.telegramToken) || '' })
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      if (d.trouve) {
+        setChatsTg(d.chats || []);
+        setMsg(`Conversation${(d.chats || []).length > 1 ? 's' : ''} trouvée${(d.chats || []).length > 1 ? 's' : ''} : ` +
+          (d.chats || []).map(c => `${c.nom} (${c.id})`).join(' · '));
+      } else {
+        setAideTg(d.aide || 'Aucune conversation trouvée.');
+      }
+    } catch (e) { setErr(e.message); }
+    finally { setTgBusy(false); }
+  };
+
+  /** Envoie un vrai message Telegram : si ça arrive sur le téléphone, c'est branché. */
+  const testerTelegram = async () => {
+    setTgBusy(true); setErr(''); setMsg('');
+    try {
+      const r = await api('/alerts/test', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ canal: 'telegram' })
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      setMsg(d.message || 'Message envoyé : regarde ton Telegram.');
+    } catch (e) { setErr(e.message); }
+    finally { setTgBusy(false); }
+  };
 
   const load = async () => {
     try {
@@ -3940,6 +3984,79 @@ function Alertes() {
               ))}
             </div>
           )}
+        </div>
+      </Reveal>
+
+      {/* Telegram : le signal confirmé part sur le téléphone, sans ouvrir sa boîte
+          mail. Le « chat id » est trouvé automatiquement — c'est la seule chose
+          que les utilisateurs ne savent jamais où chercher. */}
+      <Reveal>
+        <div className="panel" style={{ padding:20 }}>
+          <h2 style={{ fontSize:17, fontWeight:800, margin:'0 0 6px' }}>
+            <i className="fab fa-telegram" style={{ color:'#29b6f6', marginRight:9 }}></i>Alertes Telegram
+          </h2>
+          <p style={{ margin:'0 0 16px', fontSize:12.5, color:'var(--muted)' }}>
+            Le signal confirmé arrive sur ton téléphone, tout de suite. Les deux canaux
+            (email et Telegram) fonctionnent ensemble : ce n'est pas l'un ou l'autre.
+          </p>
+
+          <ol style={{ margin:'0 0 16px', paddingLeft:20, fontSize:12.5, color:'var(--muted)', display:'grid', gap:5 }}>
+            <li>Ouvre Telegram et cherche <b style={{ color:'#e2e8f0' }}>@BotFather</b></li>
+            <li>Envoie-lui <b style={{ color:'#e2e8f0' }}>/newbot</b> et suis ses deux questions (nom, puis identifiant finissant par « bot »)</li>
+            <li>Il te donne un <b style={{ color:'#e2e8f0' }}>jeton</b> (une longue suite de chiffres et de lettres) : colle-le ci-dessous</li>
+            <li>Cherche ton bot par son nom et envoie-lui <b style={{ color:'#e2e8f0' }}>salut</b>, puis clique sur « Trouver ma conversation »</li>
+          </ol>
+
+          <div style={{ display:'grid', gap:12, gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))' }}>
+            <label style={{ display:'grid', gap:5 }}>
+              <span style={{ fontSize:12, color:'var(--muted)' }}>Jeton du bot (donné par BotFather)</span>
+              <input className="fld" style={{ margin:0 }} value={(cfg && cfg.telegramToken) || ''}
+                placeholder="123456789:AAE…"
+                onChange={e => setCfg({ ...cfg, telegramToken: e.target.value })}
+                onBlur={() => sauver({ telegramToken: (cfg && cfg.telegramToken) || '' })} />
+            </label>
+            <label style={{ display:'grid', gap:5 }}>
+              <span style={{ fontSize:12, color:'var(--muted)' }}>Conversation (remplie automatiquement)</span>
+              <input className="fld" style={{ margin:0 }} value={(cfg && cfg.telegramChat) || ''}
+                placeholder="trouvé par le bouton ci-dessous"
+                onChange={e => setCfg({ ...cfg, telegramChat: e.target.value })}
+                onBlur={() => sauver({ telegramChat: (cfg && cfg.telegramChat) || '' })} />
+            </label>
+          </div>
+
+          {chatsTg.length > 1 && (
+            <div style={{ marginTop:12, display:'grid', gap:6 }}>
+              <span style={{ fontSize:12, color:'var(--muted)' }}>Plusieurs conversations : choisis la bonne</span>
+              <div style={{ display:'flex', gap:7, flexWrap:'wrap' }}>
+                {chatsTg.map((c, i) => (
+                  <button key={i} className="btn ghost sm"
+                    onClick={() => sauver({ telegramChat: String(c.id) })}>
+                    <i className="fas fa-comment"></i>{c.nom} · {c.id}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {aideTg && (
+            <div style={{ marginTop:12, padding:'9px 12px', borderRadius:8, fontSize:12.5,
+              background:'rgba(251,191,36,.1)', color:'#fcd34d' }}>
+              <i className="fas fa-circle-info" style={{ marginRight:7 }}></i>{aideTg}
+            </div>
+          )}
+
+          <div style={{ display:'flex', gap:9, flexWrap:'wrap', marginTop:16 }}>
+            <button className="btn ghost" onClick={trouverTelegram} disabled={tgBusy || !cfg || !cfg.telegramToken}>
+              <i className="fas fa-magnifying-glass"></i>Trouver ma conversation
+            </button>
+            <button className="btn ok" onClick={testerTelegram}
+              disabled={tgBusy || !cfg || !cfg.telegramToken || !cfg.telegramChat}>
+              <i className="fab fa-telegram"></i>Envoyer un message d'essai
+            </button>
+            <span style={{ alignSelf:'center', fontSize:12, color: (cfg && cfg.telegramToken && cfg.telegramChat) ? '#6ee7b7' : 'var(--dim)' }}>
+              {(cfg && cfg.telegramToken && cfg.telegramChat) ? 'Telegram est configuré' : 'à configurer'}
+            </span>
+          </div>
         </div>
       </Reveal>
 
