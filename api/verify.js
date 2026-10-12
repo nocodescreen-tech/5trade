@@ -980,6 +980,30 @@ function tinyPng(W = 64, H = 40) {
       /decrire\.trim\(\)\.length < 30/.test(jsx));
   }
 
+  // ── Mobile : la barre du bas et les cibles tactiles ──
+  // 8 onglets entassés dans une grille de 4, c'était deux rangées serrées ; la
+  // norme est cinq cibles au maximum, et 44 px minimum pour ne pas rater son
+  // bouton au pouce.
+  {
+    ok('la barre mobile se limite à cinq cibles', /repeat\(5,1fr\)/.test(htmlSrc));
+    ok('les onglets secondaires passent dans « Plus »',
+      /NAV_PRINCIPAL/.test(jsx) && /NAV_SECONDAIRE/.test(jsx) && /mobile-plus/.test(jsx));
+    ok('les onglets rangés sont bien les quatre secondaires',
+      /\['add', 'history', 'termes', 'alerts'\]/.test(jsx));
+    ok('cibles tactiles de 44 px minimum', (htmlSrc.match(/min-height:44px/g) || []).length >= 2);
+    ok('le bug de la virgule est corrigé (couleur et police des boutons)',
+      !/color:var\(--muted\),font-family/.test(htmlSrc)
+      && /color:var\(--muted\);font-family:inherit/.test(htmlSrc));
+    ok('l\'animation respecte prefers-reduced-motion', /prefers-reduced-motion/.test(htmlSrc));
+    ok('le graphique s\'adapte à la largeur de l\'écran',
+      /window\.innerWidth < 820/.test(jsx) && /etroi \? 300 : 430/.test(jsx));
+    ok('la zone sûre iOS est respectée (encoche en bas)',
+      /env\(safe-area-inset-bottom\)/.test(htmlSrc));
+    ok('les points de rupture du design system sont couverts',
+      /max-width:820px/.test(htmlSrc) && /max-width:430px/.test(htmlSrc)
+      && /min-width:1360px/.test(htmlSrc));
+  }
+
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
   if (skip) console.log(`  (${skip} test(s) non exécuté(s) : dépendance externe absente — voir les lignes « • »)`);
   process.exit(fail ? 1 : 0);
