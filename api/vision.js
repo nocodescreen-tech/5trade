@@ -30,34 +30,58 @@ function visionInfo() {
     : { provider: 'gemini', model: geminiModel() };
 }
 
+/** Les modèles à essayer, dans l'ordre : le principal puis les secours. */
+function modelesGemini() {
+  const liste = [geminiModel()];
+  for (const m of String(process.env.GEMINI_VISION_SECOURS || '').split(',')) {
+    const t = m.trim();
+    if (t && !liste.includes(t)) liste.push(t);
+  }
+  return liste;
+}
+
 async function geminiAnalyze(images, prompt) {
   const parts = [{ text: prompt }];
   for (const img of images) {
     parts.push({ inline_data: { mime_type: img.mimeType || 'image/png', data: img.base64 } });
   }
-
-  const res = await fetch(`${GEMINI_API}/${geminiModel()}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: 8192 }
-    })
+  const corps = JSON.stringify({
+    contents: [{ parts }],
+    generationConfig: { temperature: 0.3, maxOutputTokens: 8192 }
   });
-  if (!res.ok) {
-    throw new Error(`Gemini ${res.status} — ${(await res.text().catch(() => '')).slice(0, 300)}`);
-  }
 
-  const data = await res.json();
-  const cand = data.candidates && data.candidates[0];
-  if (!cand) {
-    const why = data.promptFeedback && data.promptFeedback.blockReason;
-    throw new Error(why ? `Gemini a bloqué la requête (${why})` : 'Gemini : réponse vide');
+  // Chaque modèle a son PROPRE quota gratuit. Quand celui du modèle courant est
+  // épuisé (429 — cas rencontré : gemini-3.8-flash), l'analyse d'images tombait
+  // entièrement en panne. On bascule donc sur un modèle de secours.
+  const essais = modelesGemini();
+  let derniere = '';
+  for (const modele of essais) {
+    const res = await fetch(`${GEMINI_API}/${modele}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+      body: corps
+    });
+
+    if (!res.ok) {
+      derniere = `Gemini ${res.status} (${modele}) — ${(await res.text().catch(() => '')).slice(0, 200)}`;
+      // Seuls le quota épuisé et le modèle inconnu justifient un autre essai ;
+      // une clé refusée échouerait aussi sur les suivants.
+      if (res.status !== 429 && res.status !== 404) throw new Error(derniere);
+      continue;
+    }
+
+    const data = await res.json();
+    const cand = data.candidates && data.candidates[0];
+    if (!cand) {
+      const why = data.promptFeedback && data.promptFeedback.blockReason;
+      throw new Error(why ? `Gemini a bloqué la requête (${why})` : 'Gemini : réponse vide');
+    }
+    const text = ((cand.content && cand.content.parts) || [])
+      .map(p => p.text).filter(Boolean).join('\n').trim();
+    if (!text) throw new Error(`Gemini : aucun texte (finishReason=${cand.finishReason || '?'})`);
+    return text;
   }
-  const text = ((cand.content && cand.content.parts) || [])
-    .map(p => p.text).filter(Boolean).join('\n').trim();
-  if (!text) throw new Error(`Gemini : aucun texte (finishReason=${cand.finishReason || '?'})`);
-  return text;
+  throw new Error(derniere || 'Gemini : aucun modèle disponible (quota épuisé partout)');
 }
 
 async function deepseekAnalyze(images, prompt) {
