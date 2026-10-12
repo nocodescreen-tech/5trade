@@ -1483,6 +1483,34 @@ app.get('/api/market/symbols', requireAuth, (req, res) => {
 });
 
 // Bougies OHLCV exactes (REST puis buffer live)
+/**
+ * Flux de TICKS bruts : chaque prix, dès qu'il est publié.
+ * Distinct de /api/market/stream, qui n'envoie que des bougies (un OHLC en
+ * cours de constitution). Ici on transmet la transaction telle quelle.
+ */
+app.get('/api/market/ticks', requireAuth, (req, res) => {
+  const symbol = String(req.query.symbol || '').trim();
+  const provider = String(req.query.provider || '').trim() || undefined;
+  if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  if (res.flushHeaders) res.flushHeaders();
+
+  let stop;
+  try {
+    stop = Market.watchTicks(symbol, tick => {
+      res.write(`event: tick\ndata: ${JSON.stringify(tick)}\n\n`);
+    }, provider);
+  } catch (e) {
+    // Source sans flux de ticks : on le dit, plutôt que de laisser un flux muet.
+    res.write(`event: error\ndata: ${JSON.stringify({ error: e.message })}\n\n`);
+    return res.end();
+  }
+  req.on('close', () => { if (stop) stop(); });
+});
+
 app.get('/api/market/candles', requireAuth, async (req, res) => {
   try {
     const symbol = String(req.query.symbol || '').trim();

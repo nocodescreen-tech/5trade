@@ -1689,6 +1689,9 @@ function LiveMarket() {
   const [ticks, setTicks] = useState(0);          // preuve visible que ça bouge
   const [lastUpdate, setLastUpdate] = useState(null);
   const [signal, setSignal] = useState(null);      // verdict en direct
+  const [tick, setTick] = useState(null);          // dernier tick BRUT (prix réel)
+  const [tickRate, setTickRate] = useState(0);     // ticks par seconde
+  const tickPrec = useRef(null);                   // pour la couleur (hausse/baisse)
   const [alerts, setAlerts] = useState([]);        // derniers signaux reçus
   const [big, setBig] = useState(false);           // graphique agrandi
   const [offline, setOffline] = useState(false);   // données servies du cache
@@ -1751,6 +1754,29 @@ function LiveMarket() {
     es.addEventListener('error', () => setLive(false));
     return () => es.close();
   }, [symbol, tf, provider]);
+
+  // Flux de TICKS bruts : le prix réel, transaction par transaction. Le flux de
+  // bougies ne dit qu'un OHLC en cours ; ici on voit le marché battre.
+  useEffect(() => {
+    if (!symbol) return;
+    setTick(null); setTickRate(0); tickPrec.current = null;
+    const es = new EventSource(`/api/market/ticks?symbol=${encodeURIComponent(symbol)}&provider=${provider}`);
+    let recus = 0;
+    es.addEventListener('tick', ev => {
+      try {
+        const t = JSON.parse(ev.data);
+        // On fige le prix précédent DANS le tick : comparer avec une référence
+        // déjà écrasée donnait une couleur toujours neutre.
+        setTick({ ...t, prec: tickPrec.current });
+        tickPrec.current = t.prix;
+        recus++;
+      } catch (e) {}
+    });
+    // Toute source n'a pas de flux de ticks (COMEX par exemple) : on n'affiche rien.
+    es.addEventListener('error', () => {});
+    const compteur = setInterval(() => { setTickRate(recus); recus = 0; }, 1000);
+    return () => { clearInterval(compteur); es.close(); };
+  }, [symbol, provider]);
 
   // Signaux en direct : le serveur n'émet que sur CHANGEMENT de verdict,
   // donc un signal reçu = un vrai changement, pas du bruit.
@@ -2026,6 +2052,25 @@ function LiveMarket() {
             {report ? `${report.candles} bougies · ATR ${report.atr14}` : ''}
           </span>
         </div>
+        {tick && (
+          <div style={{ display:'flex', alignItems:'baseline', gap:12, margin:'4px 0 10px', flexWrap:'wrap' }}>
+            <span style={{ fontSize:24, fontWeight:800, letterSpacing:'-0.5px',
+              fontVariantNumeric:'tabular-nums',
+              color: tick.prec === null || tick.prec === undefined ? '#e2e8f0'
+                : tick.prix > tick.prec ? '#34d399'
+                : tick.prix < tick.prec ? '#f87171' : '#e2e8f0' }}>
+              {fmt(tick.prix)}
+            </span>
+            <span className="badge" style={{ background:'rgba(16,185,129,.12)', color:'#34d399' }}
+              title="Ticks bruts reçus de la source, par seconde. C'est le marché qui bat, pas une bougie reconstruite.">
+              <span className="dot-live"></span>{tickRate} tick/s
+            </span>
+            <span style={{ fontSize:11.5, color:'var(--dim)' }}>
+              tick réel · {new Date(tick.t).toLocaleTimeString('fr-FR')} · source {tick.source}
+            </span>
+          </div>
+        )}
+
         <PriceChart candles={candles} levels={report ? report.levels : []} signal={signal}
           height={big ? 620 : 430} symbol={symbol} tf={tf} />
         <p style={{ margin:'8px 0 0', fontSize:11.5, color:'var(--dim)' }}>

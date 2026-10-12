@@ -76,7 +76,31 @@ const binance = {
       symbol: msg.data.s,
       candle: { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, closed: !!k.x }
     };
-  }
+  },
+
+  /**
+   * Ticks BRUTS : chaque transaction, telle qu'elle est exécutée.
+   * Le flux de bougies n'annonce qu'un OHLC en cours de constitution ; ici on a
+   * le prix réel tick par tick (flux « aggTrade » de Binance, gratuit).
+   */
+  ticks(symbol, onTick) {
+    let sock = null, ferme = false;
+    const ouvrir = () => {
+      if (ferme) return;
+      sock = new WebSocket(`wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@aggTrade`);
+      sock.on('message', raw => {
+        let d; try { d = JSON.parse(raw); } catch { return; }
+        if (d && d.e === 'aggTrade' && d.p) {
+          onTick({ t: d.T, prix: +d.p, symbole: symbol, source: 'binance', quantite: +d.q });
+        }
+      });
+      sock.on('error', () => {});
+      sock.on('close', () => { if (!ferme) setTimeout(ouvrir, 3000); });
+    };
+    ouvrir();
+    return () => { ferme = true; try { if (sock) sock.close(); } catch {} };
+  },
+  hasTicks: true
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -170,7 +194,34 @@ const deriv = {
       symbol: o.symbol,
       candle: { t: o.open_time * 1000, o: +o.open, h: +o.high, l: +o.low, c: +o.close, v: 0, closed: false }
     };
-  }
+  },
+
+  /**
+   * Ticks BRUTS de Deriv : l'abonnement « ticks » livre chaque cotation dès
+   * qu'elle est publiée, sans passer par une bougie. C'est le temps réel le
+   * plus fin que la source expose.
+   */
+  ticks(symbol, onTick) {
+    let sock = null, ferme = false;
+    const ouvrir = () => {
+      if (ferme) return;
+      sock = new WebSocket(this.ws);
+      sock.on('open', () => {
+        try { sock.send(JSON.stringify({ ticks: symbol, subscribe: 1 })); } catch {}
+      });
+      sock.on('message', raw => {
+        let d; try { d = JSON.parse(raw); } catch { return; }
+        if (d && d.msg_type === 'tick' && d.tick) {
+          onTick({ t: d.tick.epoch * 1000, prix: +d.tick.quote, symbole: d.tick.symbol, source: 'deriv' });
+        }
+      });
+      sock.on('error', () => {});
+      sock.on('close', () => { if (!ferme) setTimeout(ouvrir, 3000); });
+    };
+    ouvrir();
+    return () => { ferme = true; try { if (sock) sock.close(); } catch {} };
+  },
+  hasTicks: true
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -302,7 +353,7 @@ const providerStatus = () => {
     configured: !p.needsKey || !!process.env.TWELVEDATA_API_KEY,
     note: p.note,
     timeframes: TIMEFRAMES,
-    available: Object.values(PROVIDERS).map(x => ({ id: x.id, label: x.label, needsKey: x.needsKey }))
+    available: Object.values(PROVIDERS).map(x => ({ id: x.id, label: x.label, needsKey: x.needsKey, ticks: !!x.ticks }))
   };
 };
 
@@ -442,6 +493,20 @@ function watch(symbol, tf, onCandle, providerId) {
   };
 }
 
+/**
+ * Flux de TICKS réels : le prix transaction par transaction, distinct du flux
+ * de bougies (qui n'annonce qu'un OHLC en cours de constitution).
+ * Toutes les sources ne l'exposent pas — on le dit au lieu de faire semblant.
+ * @returns {function} arrêt du flux
+ */
+function watchTicks(symbol, onTick, providerId) {
+  const p = providerId ? providerById(providerId) : activeProvider();
+  if (typeof p.ticks !== 'function') {
+    throw new Error(`${p.label} n'expose pas de flux de ticks — utilisez le graphique en bougies.`);
+  }
+  return p.ticks(symbol, onTick);
+}
+
 function ensureStream(p, symbol, tf) {
   const sameTf = ws && wsProvider === p.id && wsTf === tf;
   if (sameTf) {
@@ -541,7 +606,7 @@ async function probe(id) {
 
 module.exports = {
   TIMEFRAMES, TF_MS,
-  listSymbols, getCandles, watch, probe, providerStatus,
+  listSymbols, getCandles, watch, watchTicks, probe, providerStatus,
   activeProvider: () => activeProvider().id,
   closeStream,
   loadCache, cacheInfo
