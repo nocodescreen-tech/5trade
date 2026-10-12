@@ -365,8 +365,13 @@ function tinyPng(W = 64, H = 40) {
     ok('onglet « Direct » déclaré', /id:'live'/.test(jsx));
     ok('graphique TradingView (PriceChart)', /function PriceChart\(/.test(jsx));
     ok('Lightweight Charts v4 servi localement',
-      /<script src="lightweight-charts\.js">/.test(htmlSrc) &&
+      /<script src="lightweight-charts\.js\?v=[\d.]+">/.test(htmlSrc) &&
       fs.existsSync(path.join(FRONT, 'lightweight-charts.js')));
+    // Le repli CDN évite un cadre vide si le fichier local manque ou reste en cache.
+    ok('graphique : repli CDN si le fichier local fait défaut',
+      /unpkg\.com\/lightweight-charts/.test(htmlSrc) && /lwc-pret/.test(htmlSrc));
+    ok('graphique : la taille nulle est corrigée (onglet en arrière-plan)',
+      /clearTimeout\(t1\)/.test(htmlSrc) && /clientWidth/.test(htmlSrc));
     ok('sélecteur multi-plateformes (optgroup par source)', /optgroup/.test(jsx));
     ok('zoom et déplacement actifs', /handleScroll: true, handleScale: true/.test(jsx));
   }
@@ -637,6 +642,70 @@ function tinyPng(W = 64, H = 40) {
     ok('interface : garde-fou contre les erreurs d\'affichage', /class Garde extends React\.Component/.test(htmlMode));
     ok('interface : le graphique tolère une bougie plus ancienne',
       /Cannot update oldest data|lastTime !== undefined && t < api\.current\.lastTime/.test(htmlMode));
+  }
+
+  // ── Alignement multi-timeframes (« sniper ») ──
+  // Un signal isolé sur une seule unité de temps est du bruit : il n'est
+  // confirmé que si le contexte supérieur va dans le même sens.
+  {
+    const faux = (tf, tendance, status, direction, force) =>
+      ({ tf, verdict: { trend: tendance, status, direction, strength: force, rules: [] } });
+
+    const trois = Sig.confluence([
+      faux('5m', 'bullish', 'confirme', 'BUY', 0.8),
+      faux('15m', 'bullish', 'confirme', 'BUY', 0.7),
+      faux('1h', 'bullish', 'surveiller', 'BUY', 0.5)
+    ]);
+    ok('confluence : 3 unités d\'accord → aligné', trois.aligne === true, trois.motif);
+    ok('confluence : direction retenue', trois.direction === 'BUY');
+
+    const desaccord = Sig.confluence([
+      faux('5m', 'bullish', 'confirme', 'BUY', 0.9),
+      faux('15m', 'bearish', 'confirme', 'SELL', 0.8),
+      faux('1h', 'bearish', 'surveiller', 'SELL', 0.6)
+    ]);
+    ok('confluence : désaccord → non aligné', desaccord.aligne === false, desaccord.motif);
+    ok('confluence : le désaccord est chiffré', desaccord.nbContraires > 0);
+
+    const degrade = Sig.verdictAvecConfluence([
+      faux('5m', 'bullish', 'confirme', 'BUY', 0.9),
+      faux('15m', 'range', 'neutre', 'NEUTRE', 0),
+      faux('1h', 'range', 'neutre', 'NEUTRE', 0)
+    ], { seuilAlignes: 2 });
+    ok('un signal isolé n\'est PAS confirmé (dégradé en « à surveiller »)',
+      degrade.verdict.status === 'surveiller' && degrade.verdict.alignementManquant === true,
+      degrade.verdict.status);
+    ok('le résumé explique le refus', /Alignement insuffisant/.test(degrade.verdict.summary));
+
+    const garde = Sig.verdictAvecConfluence([
+      faux('5m', 'bullish', 'confirme', 'BUY', 0.9),
+      faux('15m', 'bullish', 'confirme', 'BUY', 0.8),
+      faux('1h', 'bullish', 'surveiller', 'BUY', 0.5)
+    ], { seuilAlignes: 2 });
+    ok('un signal aligné reste confirmé', garde.verdict.status === 'confirme', garde.verdict.status);
+
+    // La stratégie décide de ses unités de temps et de son style.
+    const scalpeur = Sig.profilDepuisStrategie({
+      id: 's', title: 'Scalping rapide', content: 'scalping en 1 minute',
+      moteur: { style: 'scalping', regles: ['R1'], seuilAlignes: 2 }
+    });
+    ok('une stratégie de scalping impose 1m/5m/15m',
+      Array.isArray(scalpeur.timeframes) && scalpeur.timeframes.join(',') === '1m,5m,15m',
+      JSON.stringify(scalpeur.timeframes));
+    ok('le seuil d\'alignement vient de la stratégie', scalpeur.seuilAlignes === 2);
+    ok('le stop s\'adapte au style (scalping = serré)', scalpeur.parametres.atrStop === 1);
+
+    const swing = Sig.profilDepuisStrategie({
+      id: 'w', title: 'Suivi de tendance long terme', content: 'swing sur plusieurs jours',
+      moteur: { style: 'swing', regles: ['R2'] }
+    });
+    ok('une stratégie swing impose 1h/4h/1d',
+      swing.timeframes.join(',') === '1h,4h,1d', JSON.stringify(swing.timeframes));
+    ok('le seuil ne peut pas dépasser le nombre d\'unités',
+      Sig.normaliserMoteur({ timeframes: ['1m', '5m'], seuilAlignes: 9 }).seuilAlignes === 2,
+      String(Sig.normaliserMoteur({ timeframes: ['1m', '5m'], seuilAlignes: 9 }).seuilAlignes));
+    ok('les unités inconnues sont écartées',
+      (Sig.normaliserMoteur({ timeframes: ['1m', '7s', 'zz'] }).timeframes || []).join(',') === '1m');
   }
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);

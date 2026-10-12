@@ -391,10 +391,16 @@ function inventory(r) {
  * @param {Array} candles bougies OHLCV (ordre chronologique)
  * @param {{symbol?:string, timeframe?:string}} meta
  */
-function analyze(candles, meta = {}) {
+function analyze(candles, meta = {}, options = {}) {
   const clean = (candles || []).filter(isCandle);
   if (clean.length < 20) throw new Error('Pas assez de bougies pour analyser (20 minimum)');
   const last = clean[clean.length - 1];
+
+  // Réglages du moteur : ils changent RÉELLEMENT le calcul, pas seulement le
+  // texte affiché. C'est ce qui permet à une stratégie de fonctionner à sa façon.
+  const w = Number.isFinite(options.swingsWindow) ? Math.round(options.swingsWindow) : 2;
+  const tol = Number.isFinite(options.toleranceLiquidite) ? options.toleranceLiquidite : 0.0008;
+  const imp = Number.isFinite(options.impulsion) ? Math.round(options.impulsion) : 3;
 
   const r = {
     symbol: meta.symbol || null,
@@ -403,17 +409,18 @@ function analyze(candles, meta = {}) {
     from: clean[0].t, to: last.t,
     lastPrice: last.c,
     atr14: atr(clean, 14),
-    structure: marketStructure(clean),
+    parametresUtilises: { swingsWindow: w, toleranceLiquidite: tol, impulsion: imp },
+    structure: marketStructure(clean, w),
     fvgs: fvgs(clean),
-    orderBlocks: orderBlocks(clean),
-    breakers: breakers(clean),
-    liquidity: liquidityPools(clean),
-    sweeps: sweeps(clean),
+    orderBlocks: orderBlocks(clean, imp),
+    breakers: breakers(clean, imp),
+    liquidity: liquidityPools(clean, tol, w),
+    sweeps: sweeps(clean, w),
     displacements: displacements(clean),
     previousLevels: previousLevels(clean),
-    fibLevels: fibLevels(clean),
+    fibLevels: fibLevels(clean, w),
     sessions: sessions(clean),
-    premiumDiscount: premiumDiscount(clean),
+    premiumDiscount: premiumDiscount(clean, w),
     lastCandle: lastCandleInfo(clean),
     range20: {
       high: +Math.max(...clean.slice(-20).map(c => c.h)).toFixed(6),

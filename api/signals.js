@@ -174,9 +174,12 @@ function rulePosition(report) {
 }
 
 /** Niveaux d'entrée / invalidation / objectif à partir du verdict. */
-function levelsFor(report, direction) {
+function levelsFor(report, direction, atrStop) {
   const price = report.lastPrice;
   const atr = report.atr14 || Math.abs(price) * 0.001;
+  // Multiplicateur de stop réglable par la stratégie (défaut 1,5 × ATR) : un
+  // scalpeur veut un stop serré, un suiveur de tendance un stop large.
+  const k = Number.isFinite(atrStop) ? atrStop : 1.5;
   // Attention : pour un achat l'invalidation se place sous un CREUX, pour une
   // vente au-dessus d'un SOMMET. (Une première version prenait le sommet dans
   // les deux cas : le stop se retrouvait du mauvais côté.)
@@ -184,7 +187,7 @@ function levelsFor(report, direction) {
   const high = report.structure.lastSwingHigh;
 
   if (direction === 'BUY') {
-    const structural = low && Number.isFinite(low.price) ? low.price : price - atr * 1.5;
+    const structural = low && Number.isFinite(low.price) ? low.price : price - atr * k;
     const stop = Math.min(structural, price - atr * 0.5);         // jamais trop près
     const targets = [
       report.structure.lastSwingHigh && report.structure.lastSwingHigh.price,
@@ -197,7 +200,7 @@ function levelsFor(report, direction) {
     };
   }
   if (direction === 'SELL') {
-    const structural = high && Number.isFinite(high.price) ? high.price : price + atr * 1.5;
+    const structural = high && Number.isFinite(high.price) ? high.price : price + atr * k;
     const stop = Math.max(structural, price + atr * 0.5);
     const targets = [
       report.structure.lastSwingLow && report.structure.lastSwingLow.price,
@@ -221,7 +224,10 @@ function levelsFor(report, direction) {
  * du prix, le pool de liquidité le plus proche, la distance en % et en ATR —
  * et l'un des deux est désigné comme privilégié, avec sa raison.
  */
-function scenarios(report, verdict) {
+function scenarios(report, atrStop) {
+  // Même multiplicateur que levelsFor : le repli ATR doit rester cohérent avec
+  // le stop réellement proposé.
+  const k = Number.isFinite(atrStop) ? atrStop : 1.5;
   const prix = report.lastPrice;
   const atr = report.atr14 || Math.abs(prix) * 0.001;
   const st = report.structure;
@@ -245,8 +251,8 @@ function scenarios(report, verdict) {
   // Repli quand aucune zone n'est en face : un swing, l'OTE, puis l'ATR.
   // Il faut TOUJOURS un chiffre — « repli sur le support le plus proche » sans
   // valeur ne dit rien et rendait tous les scénarios identiques.
-  const repli = st.lastSwingLow ? st.lastSwingLow.price : (pd ? pd.ote.deep : prix - atr * 1.5);
-  const repliHaut = st.lastSwingHigh ? st.lastSwingHigh.price : (pd ? pd.ote.shallow : prix + atr * 1.5);
+  const repli = st.lastSwingLow ? st.lastSwingLow.price : (pd ? pd.ote.deep : prix - atr * k);
+  const repliHaut = st.lastSwingHigh ? st.lastSwingHigh.price : (pd ? pd.ote.shallow : prix + atr * k);
 
   const contexteAchat = support
     ? `repli dans ${num(support.low)}–${num(support.high)} (${support.kind || 'zone de demande'}), à ${distPct(support.high)} % du prix`
@@ -321,6 +327,75 @@ const TOUTES_REGLES = {
 
 const sansAccents = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
+/** Unités de temps connues (les sources les acceptent toutes). */
+const TF_VALIDES = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
+
+/**
+ * Profils de style : chaque façon de trader regarde des unités de temps
+ * différentes. Un scalpeur travaille en 1m/5m, un suiveur de tendance en
+ * 1h/4h. C'est la stratégie qui décide, pas l'application.
+ */
+const STYLES = {
+  scalping: { label: 'Scalping', timeframes: ['1m', '5m', '15m'], seuilAlignes: 2, atrStop: 1 },
+  intraday: { label: 'Intraday', timeframes: ['5m', '15m', '1h'], seuilAlignes: 2, atrStop: 1.5 },
+  swing: { label: 'Swing', timeframes: ['1h', '4h', '1d'], seuilAlignes: 2, atrStop: 2 }
+};
+
+/** Réglages par défaut d'un moteur d'analyse (valeurs éprouvées). */
+const MOTEUR_DEFAUT = {
+  regles: ['R1', 'R2', 'R3', 'R4'],
+  seuilForce: 0.35,
+  seuilRegles: 2,
+  style: null,
+  timeframes: null,          // null = déduits du style ou de l'unité de travail
+  seuilAlignes: null,        // null = majorité des unités examinées
+  swingsWindow: 2,
+  toleranceLiquidite: 0.0008,
+  impulsion: 3,
+  atrStop: 1.5
+};
+
+/** Borne une valeur, avec repli si elle est absurde. Un réglage hors bornes
+ *  ne doit jamais faire planter une analyse : il est ramené dans le domaine. */
+function borner(v, min, max, defaut) {
+  const x = Number(v);
+  return Number.isFinite(x) ? Math.min(Math.max(x, min), max) : defaut;
+}
+
+/** Nettoie un moteur reçu du client : aucune valeur de confiance n'est gardée telle quelle. */
+function normaliserMoteur(m = {}) {
+  const brutes = Array.isArray(m.regles) ? m.regles.filter(r => TOUTES_REGLES[r]) : [];
+  // Style de trading : il fixe les unités de temps par défaut.
+  const style = (m.style && STYLES[m.style]) ? m.style : null;
+  const dStyle = style ? STYLES[style] : null;
+
+  // Unités de temps propres à la stratégie. Si elle n'en déclare pas, on prend
+  // celles de son style, sinon l'analyse retombera sur l'unité de travail.
+  let tf = Array.isArray(m.timeframes) ? m.timeframes.filter(t => TF_VALIDES.includes(t)) : [];
+  if (!tf.length && dStyle) tf = [...dStyle.timeframes];
+  tf = [...new Set(tf)].slice(0, 5);
+
+  // Combien d'unités doivent être d'accord pour valider (jamais plus que le
+  // nombre d'unités examinées, sinon la confirmation serait impossible).
+  const seuilAlignes = tf.length
+    ? Math.round(borner(m.seuilAlignes, 1, tf.length,
+      (dStyle && dStyle.seuilAlignes) || Math.ceil(tf.length / 2)))
+    : null;
+
+  return {
+    regles: brutes.length ? [...new Set(brutes)] : [],
+    seuilForce: borner(m.seuilForce, 0, 1, MOTEUR_DEFAUT.seuilForce),
+    seuilRegles: Math.round(borner(m.seuilRegles, 1, 4, MOTEUR_DEFAUT.seuilRegles)),
+    style,
+    timeframes: tf.length ? tf : null,
+    seuilAlignes,
+    swingsWindow: Math.round(borner(m.swingsWindow, 1, 5, MOTEUR_DEFAUT.swingsWindow)),
+    toleranceLiquidite: borner(m.toleranceLiquidite, 0.0001, 0.01, MOTEUR_DEFAUT.toleranceLiquidite),
+    impulsion: Math.round(borner(m.impulsion, 1, 6, MOTEUR_DEFAUT.impulsion)),
+    atrStop: borner(m.atrStop, 0.5, 5, (dStyle && dStyle.atrStop) || MOTEUR_DEFAUT.atrStop)
+  };
+}
+
 /**
  * Ce qu'une stratégie de la base demande de surveiller, déduit de son texte.
  * Une stratégie « Liquidity Sweep » n'a pas à être jugée sur les Fibonacci :
@@ -338,21 +413,60 @@ const MOTIFS_REGLE = [
 ];
 
 function profilDepuisStrategie(doc) {
+  // Un moteur défini explicitement prime sur toute déduction : l'utilisateur a
+  // écrit comment sa stratégie fonctionne, on l'applique tel quel (borné).
+  if (doc.moteur && typeof doc.moteur === 'object') {
+    const m = normaliserMoteur(doc.moteur);
+    const regles = m.regles.length ? m.regles : Object.keys(TOUTES_REGLES);
+    return {
+      id: doc.id || null,
+      titre: doc.title || null,
+      regles,
+      seuilForce: m.seuilForce,
+      seuilRegles: m.seuilRegles,
+      // La stratégie décide de SON nombre d'unités de temps et du seuil
+      // d'alignement : une stratégie de scalping n'exige pas les mêmes que
+      // celles d'un suivi de tendance.
+      style: m.style,
+      timeframes: m.timeframes,
+      seuilAlignes: m.seuilAlignes,
+      parametres: {
+        swingsWindow: m.swingsWindow,
+        toleranceLiquidite: m.toleranceLiquidite,
+        impulsion: m.impulsion,
+        atrStop: m.atrStop
+      },
+      deduitDuTexte: false,
+      motif: 'moteur défini explicitement'
+    };
+  }
+
   const texte = sansAccents(`${doc.title || ''} ${doc.content || ''} ${(doc.tags || []).join(' ')}`);
   const trouvees = [...new Set(MOTIFS_REGLE.filter(m => m.motifs.test(texte)).flatMap(m => m.regles))];
   const tous = Object.keys(TOUTES_REGLES);
   const regles = trouvees.length ? trouvees : tous;
+
+  // Style déduit du texte : c'est lui qui décide des unités de temps à croiser
+  // et de la largeur du stop. Une stratégie « scalping » ne se juge pas en 4 h.
+  const style = /scalp|1 ?min|\bm1\b|tres court|court terme|rapide/.test(texte) ? 'scalping'
+    : /swing|long terme|journalier|daily|\bh4\b|4 ?h/.test(texte) ? 'swing'
+      : /intraday|journee|day ?trading|\bh1\b|1 ?h/.test(texte) ? 'intraday' : null;
+  const dStyle = style ? STYLES[style] : null;
+
   return {
     id: doc.id || null,
     titre: doc.title || null,
     regles,
-    // Une stratégie mono-règle ne peut pas croiser deux confirmations : on exige
-    // alors davantage de force, sinon elle ne confirmerait jamais rien.
     seuilRegles: regles.length >= 2 ? 2 : 1,
     seuilForce: regles.length >= 2 ? 0.35 : 0.6,
+    style,
+    timeframes: dStyle ? dStyle.timeframes : null,
+    seuilAlignes: dStyle ? dStyle.seuilAlignes : null,
+    parametres: dStyle ? { atrStop: dStyle.atrStop } : undefined,
     deduitDuTexte: trouvees.length > 0,
-    motif: trouvees.length ? 'règles déduites du texte de la stratégie'
-      : 'texte sans indication : toutes les règles appliquées'
+    motif: trouvees.length
+      ? `règles déduites du texte${style ? ` · style ${dStyle.label}` : ''}`
+      : `texte sans indication : toutes les règles appliquées${style ? ` · style ${dStyle.label}` : ''}`
   };
 }
 
@@ -371,7 +485,7 @@ function detect(candles, meta = {}, options = {}) {
   const clean = (candles || []).filter(c => c && Number.isFinite(c.c));
   if (clean.length < 20) throw new Error('Pas assez de bougies (20 minimum)');
 
-  const report = S.analyze(clean, meta);
+  const report = S.analyze(clean, meta, options.parametres || {});
 
   // Règles actives : celles demandées, sinon toutes.
   const demandees = Array.isArray(options.regles) ? options.regles.filter(r => TOUTES_REGLES[r]) : [];
@@ -417,13 +531,13 @@ function detect(candles, meta = {}, options = {}) {
     if (!winner.length) missing.push('aucune règle déclenchée sur la dernière bougie clôturée');
   }
 
-  const sc = scenarios(report);
+  const sc = scenarios(report, options.parametres && options.parametres.atrStop);
   const chk = checklist(report);
   // Niveaux « du jour » : ceux du sens détecté, sinon les deux scénarios restent
   // consultables (on ne cache plus l'information sous prétexte d'incertitude).
   const levels = status === 'neutre'
     ? { entry: null, stop: null, target1: null, target2: null }
-    : levelsFor(report, direction);
+    : levelsFor(report, direction, options.parametres && options.parametres.atrStop);
   const fmt = v => (v === null || v === undefined ? '—' : v);
 
   const entete = options.strategie && options.strategie.titre
@@ -468,7 +582,130 @@ function detect(candles, meta = {}, options = {}) {
   };
 }
 
+/**
+ * Unités de temps à examiner ensemble pour un alignement. On regarde toujours
+ * l'unité de travail, puis deux unités supérieures : c'est le contexte qui
+ * décide si un signal local mérite d'être pris.
+ */
+const TF_SUPERIEURS = {
+  '1m': ['1m', '5m', '15m'],
+  '5m': ['5m', '15m', '1h'],
+  '15m': ['15m', '1h', '4h'],
+  '30m': ['30m', '1h', '4h'],
+  '1h': ['1h', '4h', '1d'],
+  '4h': ['4h', '1d'],
+  '1d': ['1d']
+};
+
+/**
+ * Alignement multi-timeframes (« confluence »).
+ *
+ * Un signal confirmé sur une seule unité de temps n'est pas un signal : c'est du
+ * bruit. Ici on compare les verdicts de plusieurs unités et on refuse de
+ * confirmer tant qu'elles ne racontent pas la même histoire.
+ *
+ * @param {Array<{tf:string, verdict:object}>} parTF du plus petit au plus grand
+ * @param {{seuilAlignes?:number, exigerConfirmation?:boolean}} [options]
+ */
+function confluence(parTF, options = {}) {
+  const listes = (parTF || []).filter(x => x && x.tf && x.verdict);
+  if (!listes.length) {
+    return { aligne: false, score: 0, direction: 'NEUTRE', detail: [], motif: 'aucune donnée' };
+  }
+
+  const seuil = Number.isFinite(options.seuilAlignes) ? options.seuilAlignes
+    : Math.max(1, Math.ceil(listes.length / 2));
+
+  const achats = listes.filter(x => x.verdict.direction === 'BUY');
+  const ventes = listes.filter(x => x.verdict.direction === 'SELL');
+
+  // La direction vient de l'unité de TRAVAIL (la plus petite, celle sur laquelle
+  // on agirait). Une première version prenait la majorité : elle pouvait annoncer
+  // « VENTE » alors que l'unité de travail disait ACHAT — un signal incohérent
+  // avec le graphique qu'on a sous les yeux. Les unités supérieures confirment ou
+  // infirment, elles ne renversent pas la décision.
+  const travail = listes[0];
+  const dirTravail = travail.verdict.direction && travail.verdict.direction !== 'NEUTRE'
+    ? travail.verdict.direction : null;
+  const direction = dirTravail
+    || (achats.length > ventes.length ? 'BUY' : ventes.length > achats.length ? 'SELL' : 'NEUTRE');
+
+  const alignes = direction === 'NEUTRE' ? [] : listes.filter(x => x.verdict.direction === direction);
+  const contraires = listes.filter(x => x.verdict.direction && x.verdict.direction !== direction);
+  const confirmees = alignes.filter(x => x.verdict.status === 'confirme');
+  const superieure = listes[listes.length - 1];    // le contexte large
+
+  const tendances = listes.map(x => x.verdict.trend).filter(Boolean);
+  const nbBull = tendances.filter(t => t === 'bullish').length;
+  const nbBear = tendances.filter(t => t === 'bearish').length;
+  const tendanceDominante = nbBull === nbBear ? 'range' : (nbBull > nbBear ? 'bullish' : 'bearish');
+
+  // Deux exigences pour « aligné » : assez d'unités d'accord ET l'unité de
+  // travail ne doit pas contredire le contexte supérieur.
+  const coherentAvecContexte = !superieure || superieure.verdict.trend === 'range'
+    || superieure.verdict.trend === tendanceDominante
+    || (direction === 'BUY' && superieure.verdict.trend === 'bullish')
+    || (direction === 'SELL' && superieure.verdict.trend === 'bearish');
+  const aligne = alignes.length >= seuil && direction !== 'NEUTRE' && coherentAvecContexte;
+
+  // Le signal du dessus doit lui aussi aller dans le bon sens, sinon c'est un
+  // contre-tendance déguisé : on le dit franchement.
+  const contreTendance = direction !== 'NEUTRE' && !coherentAvecContexte;
+
+  return {
+    aligne,
+    contreTendance,
+    score: +(alignes.length / listes.length).toFixed(3),
+    direction,
+    seuilAlignes: seuil,
+    nbAlignes: alignes.length,
+    nbContraires: contraires.length,
+    nbConfirmees: confirmees.length,
+    tendanceDominante,
+    tendanceSuperieure: superieure ? superieure.verdict.trend : null,
+    tfTravail: travail ? travail.tf : null,
+    tfSuperieure: superieure ? superieure.tf : null,
+    detail: listes.map(x => ({
+      tf: x.tf,
+      tendance: x.verdict.trend,
+      status: x.verdict.status,
+      direction: x.verdict.direction,
+      strength: x.verdict.strength,
+      confirme: x.verdict.status === 'confirme',
+      regles: (x.verdict.rules || []).map(r => r.rule)
+    })),
+    motif: direction === 'NEUTRE'
+      ? 'aucune direction ne se dégage sur les unités de temps'
+      : contreTendance
+        ? `signal ${direction === 'BUY' ? 'acheteur' : 'vendeur'} mais contexte ${superieure ? superieure.tf : ''} ${superieure ? superieure.verdict.trend : ''} : contre-tendance`
+        : aligne
+          ? `${alignes.length}/${listes.length} unités d'accord sur ${direction === 'BUY' ? 'l\'achat' : 'la vente'} (seuil ${seuil})`
+          : `seulement ${alignes.length}/${listes.length} unité(s) d'accord : il en faut ${seuil}`
+  };
+}
+
+/**
+ * Verdict final : le signal de l'unité de travail, mais confirmé SEULEMENT si
+ * l'alignement multi-timeframes le permet. C'est ce qui évite de valider un
+ * signal isolé qui va se retourner.
+ */
+function verdictAvecConfluence(parTF, options = {}) {
+  const conf = confluence(parTF, options);
+  const base = parTF && parTF[0] ? parTF[0].verdict : null;
+  if (!base) return { verdict: null, confluence: conf };
+
+  const v = { ...base };
+  v.confluence = conf;
+  if (!conf.aligne && v.status === 'confirme' && options.exigerAlignement !== false) {
+    v.status = 'surveiller';
+    v.alignementManquant = true;
+    v.summary = `Alignement insuffisant — ${conf.motif}. ` + v.summary;
+  }
+  return { verdict: v, confluence: conf };
+}
+
 module.exports = {
   detect, scenarios, checklist, levelsFor, profilDepuisStrategie, TOUTES_REGLES,
+  confluence, verdictAvecConfluence, TF_SUPERIEURS, normaliserMoteur, STYLES, MOTEUR_DEFAUT,
   ruleSweep, ruleBreak, ruleZone, rulePosition
 };

@@ -1803,29 +1803,137 @@ app.get('/api/strategies/profiles', requireAuth, async (req, res) => {
 
 /**
  * Détermine comment analyser :
- *   mode=auto   → toutes les règles (l'app combine tout ce qu'elle sait)
- *   mode=manuel + strategyId → uniquement les règles de cette stratégie
+ *   mode=auto → toutes les règles (l'app combine tout ce qu'elle sait)
+ *   mode=manuel + strategies=id1,id2,… → l'UNION des règles de ces stratégies.
+ * On peut donc en choisir UNE SEULE ou PLUSIEURS : deux stratégies choisies
+ * ensemble ne s'excluent pas, leurs règles se cumulent.
  */
 async function optionsAnalyse(src) {
   const mode = String(src.mode || 'auto').toLowerCase();
-  const strategyId = String(src.strategyId || '').trim();
-  if (mode === 'manuel' && strategyId) {
-    const strategies = await loadAllStrategies().catch(() => []);
-    const doc = (strategies || []).find(x => x.id === strategyId);
-    if (doc) {
-      const profil = Signals.profilDepuisStrategie(doc);
-      return {
-        mode: 'manuel',
-        regles: profil.regles,
-        seuilForce: profil.seuilForce,
-        seuilRegles: profil.seuilRegles,
-        strategie: { id: profil.id, titre: profil.titre, regles: profil.regles, motif: profil.motif }
-      };
+
+  // Accepte ?strategies=id1,id2 (le format courant), strategyIds[] et l'ancien
+  // ?strategyId= pour ne pas casser un appel existant.
+  const brut = src.strategies !== undefined ? src.strategies
+    : (src.strategyIds !== undefined ? src.strategyIds : src.strategyId);
+  let ids = [];
+  if (Array.isArray(brut)) ids = brut.map(String);
+  else if (typeof brut === 'string' && brut.trim()) ids = brut.split(',').map(x => x.trim());
+  ids = [...new Set(ids.filter(Boolean))];
+
+  if (mode !== 'manuel' || !ids.length) return { mode: 'auto' };
+
+  const strategies = await loadAllStrategies().catch(() => []);
+  const profils = ids
+    .map(id => (strategies || []).find(x => x.id === id))
+    .filter(Boolean)
+    .map(doc => Signals.profilDepuisStrategie(doc));
+
+  if (!profils.length) return { mode: 'manuel', strategiesIntrouvables: ids };
+
+  // Union des règles : choisir deux stratégies ne doit pas en écarter une.
+  const regles = [...new Set(profils.flatMap(p => p.regles))];
+  // Seuils : on garde le plus exigeant de ce que l'utilisateur a choisi.
+  const seuilForce = Math.max(...profils.map(p => p.seuilForce || 0.35));
+  const seuilRegles = Math.min(Math.max(...profils.map(p => p.seuilRegles || 2)), regles.length);
+  // Paramètres de calcul : le premier profil qui en définit.
+  const parametres = profils.map(p => p.parametres).find(Boolean) || undefined;
+  const titres = profils.map(p => p.titre || p.id);
+
+  // Unités de temps exigées par la ou les stratégies choisies. On retient la
+  // liste la plus complète : c'est la stratégie qui décide de son cadre.
+  const listes = profils.map(p => p.timeframes).filter(Boolean);
+  const timeframes = listes.length ? [...new Set(listes.flat())].slice(0, 5) : null;
+  const seuilAlignes = Math.max(...profils.map(p => p.seuilAlignes || 0)) || null;
+  const style = profils.map(p => p.style).find(Boolean) || null;
+
+  return {
+    mode: 'manuel',
+    regles, seuilForce, seuilRegles, parametres,
+    timeframes, seuilAlignes, style,
+    strategies: profils.map(p => ({ id: p.id, titre: p.titre, regles: p.regles })),
+    strategie: {
+      titre: titres.join(' + '),
+      regles,
+      nombre: profils.length,
+      timeframes: timeframes || [],
+      seuilAlignes,
+      style
     }
-    return { mode: 'manuel', strategieManquante: strategyId };
-  }
-  return { mode: 'auto' };
+  };
 }
+
+/**
+ * Analyse multi-timeframes : le « tir de sniper ». On examine plusieurs unités
+ * de temps, on exige leur alignement, et le signal n'est confirmé que si le
+ * contexte supérieur va dans le même sens.
+ * Le NOMBRE d'unités vient de la stratégie choisie (ou de son style) ; sinon on
+ * prend le contexte naturel de l'unité de travail. C'est ce qui rend le moteur
+ * adaptatif : une stratégie de scalping ne croise pas les mêmes unités qu'un
+ * suivi de tendance.
+ */
+app.get('/api/signals/confluence', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').trim();
+    const tfBase = String(req.query.tf || '5m').trim();
+    const provider = String(req.query.provider || '').trim() || undefined;
+    if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+
+    const options = await optionsAnalyse(req.query);
+    const tfs = ((options.timeframes && options.timeframes.length)
+      ? options.timeframes
+      : (Signals.TF_SUPERIEURS[tfBase] || [tfBase])).slice(0, 5);
+
+    const parTF = [];
+    for (const tf of tfs) {
+      try {
+        const r = await Market.getCandles(symbol, tf, 300, provider);
+        const closes = (r.candles || []).filter(c => c.closed !== false);
+        parTF.push(closes.length < 20
+          ? { tf, verdict: null }
+          : { tf, verdict: Signals.detect(closes, { symbol, timeframe: tf }, options) });
+      } catch (e) {
+        parTF.push({ tf, verdict: null, erreur: e.message });
+      }
+    }
+
+    const exploitables = parTF.filter(x => x.verdict);
+    if (!exploitables.length) {
+      return res.json({
+        success: true, symbol, timeframes: tfs, mode: options.mode,
+        strategieAppliquee: options.strategie || null,
+        verdict: null, confluence: null,
+        note: 'Aucune unité de temps ne fournit assez de bougies (marché fermé ou historique trop court).'
+      });
+    }
+
+    const resultat = Signals.verdictAvecConfluence(exploitables, {
+      seuilAlignes: options.seuilAlignes || undefined
+    });
+    if (resultat.verdict) {
+      resultat.verdict.strategies = await strategiesForSignal(resultat.verdict);
+    }
+
+    res.json({
+      success: true,
+      symbol,
+      mode: options.mode,
+      strategieAppliquee: options.strategie || null,
+      timeframes: tfs,
+      seuilAlignes: resultat.confluence.seuilAlignes,
+      verdict: resultat.verdict,
+      confluence: resultat.confluence,
+      parTimeframe: exploitables.map(x => ({
+        tf: x.tf,
+        status: x.verdict.status,
+        direction: x.verdict.direction,
+        strength: x.verdict.strength,
+        tendance: x.verdict.trend,
+        regles: (x.verdict.rules || []).map(r => r.rule)
+      })),
+      insuffisants: parTF.filter(x => !x.verdict).map(x => x.tf)
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 app.get('/api/signals', requireAuth, async (req, res) => {
   try {

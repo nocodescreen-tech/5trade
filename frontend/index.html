@@ -12,7 +12,38 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <!-- TradingView Lightweight Charts (Apache 2.0) : chandeliers professionnels,
      zoom et déplacement natifs. Servi localement pour rester utilisable hors ligne. -->
-<script src="lightweight-charts.js"></script>
+<script src="lightweight-charts.js?v=4.2.3"></script>
+<script>
+  // Filet de sécurité : si la bibliothèque locale n'a pas pu être chargée
+  // (cache incomplet, fichier absent après un déploiement), on la prend sur un
+  // CDN. Sans ce repli, l'écran affiche un cadre vide sans que rien n'explique
+  // pourquoi — l'utilisateur croit alors que l'application est cassée.
+  (function () {
+    if (window.LightweightCharts) return;
+    var sources = [
+      'https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js',
+      'https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js'
+    ];
+    var i = 0;
+    (function charger() {
+      if (window.LightweightCharts || i >= sources.length) {
+        if (!window.LightweightCharts) console.error('Graphique : bibliothèque introuvable (local et CDN).');
+        return;
+      }
+      var s = document.createElement('script');
+      s.src = sources[i++];
+      s.onload = function () {
+        if (window.LightweightCharts) {
+          // Prévient l'interface : le graphique peut maintenant se dessiner.
+          window.dispatchEvent(new Event('lwc-pret'));
+          console.info('Graphique : bibliothèque chargée depuis le CDN.');
+        } else { charger(); }
+      };
+      s.onerror = charger;
+      document.head.appendChild(s);
+    })();
+  })();
+</script>
 <script>
   // Runtime React "classic" : évite l'injection d'un import ESM dans les scripts inline.
   Babel.registerPreset('react-classic', {
@@ -1609,6 +1640,22 @@ function PriceChart({ candles, levels, signal, height, symbol, tf }) {
   const keyRef = useRef(null);
   // Sans la bibliothèque, mieux vaut le dire que laisser un cadre vide.
   const [libMissing, setLibMissing] = useState(!window.LightweightCharts);
+  // La bibliothèque peut arriver APRÈS le premier rendu (repli CDN) : on guette
+  // sa disponibilité pour dessiner dès qu'elle est là, au lieu de rester sur un
+  // cadre vide jusqu'au prochain rechargement de page.
+  const [libPrete, setLibPrete] = useState(!!window.LightweightCharts);
+
+  useEffect(() => {
+    if (window.LightweightCharts) { setLibPrete(true); setLibMissing(false); return; }
+    const reveil = () => {
+      if (window.LightweightCharts) { setLibPrete(true); setLibMissing(false); }
+    };
+    window.addEventListener('lwc-pret', reveil);
+    const veille = setInterval(() => {
+      if (window.LightweightCharts) { setLibPrete(true); setLibMissing(false); clearInterval(veille); }
+    }, 500);
+    return () => { window.removeEventListener('lwc-pret', reveil); clearInterval(veille); };
+  }, []);
 
   useEffect(() => {
     const box = boxRef.current;
@@ -1656,7 +1703,7 @@ function PriceChart({ candles, levels, signal, height, symbol, tf }) {
       clearTimeout(t1); clearTimeout(t2); ro.disconnect(); chart.remove();
       api.current = { chart: null, series: null, vol: null, lines: [], full: true };
     };
-  }, []);
+  }, [libPrete]);
 
   // setData au premier chargement (ou après changement de symbole/timeframe),
   // puis update du seul dernier point : c'est ce qui rend le direct fluide.
@@ -1780,8 +1827,15 @@ function LiveMarket({ onToJournal }) {
   const [profondeur, setProfondeur] = useState(300);
   // Vue du graphique : 'app' (nos niveaux calculés) ou 'tradingview' (widget officiel).
   const [vue, setVue] = useState('app');
-  const [strategyId, setStrategyId] = useState('');
+  // Une ou PLUSIEURS stratégies choisies : leurs règles se cumulent.
+  const [strategiesChoisies, setStrategiesChoisies] = useState([]);
+  const [choixOuvert, setChoixOuvert] = useState(false);
+  const [filtreProfil, setFiltreProfil] = useState('');
   const [profils, setProfils] = useState([]);
+
+  // Alignement multi-timeframes : le verdict n'est confirmé que si les unités
+  // de temps racontent la même histoire. C'est la vue « sniper ».
+  const [confluence, setConfluence] = useState(null);
 
   // Profils : quelles règles chaque stratégie de la base active. Sert au mode
   // manuel (on choisit sa stratégie) et affiche le détail des seuils.
@@ -1794,6 +1848,28 @@ function LiveMarket({ onToJournal }) {
       } catch (e) {}
     })();
   }, []);
+
+  // Alignement multi-timeframes : interrogé au chargement, au changement de
+  // marché ou de stratégie, puis rafraîchi régulièrement. Le nombre d'unités
+  // examinées vient de la stratégie choisie quand il y en a une.
+  useEffect(() => {
+    if (!symbol) return;
+    let vivant = true;
+    const charger = async () => {
+      try {
+        const params = `symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}&mode=${mode}`
+          + (mode === 'manuel' && strategiesChoisies.length
+            ? '&strategies=' + encodeURIComponent(strategiesChoisies.join(',')) : '');
+        const r = await api(`/signals/confluence?${params}`);
+        const d = await r.json();
+        if (vivant && d.success) setConfluence(d);
+      } catch (e) { /* l'absence d'alignement ne doit jamais casser la page */ }
+    };
+    setConfluence(null);
+    charger();
+    const it = setInterval(charger, 60000);
+    return () => { vivant = false; clearInterval(it); };
+  }, [symbol, tf, provider, mode, strategiesChoisies.join(',')]);
 
   const [tick, setTick] = useState(null);          // dernier tick BRUT (prix réel)
   const [tickRate, setTickRate] = useState(0);     // ticks par seconde
@@ -1846,7 +1922,7 @@ function LiveMarket({ onToJournal }) {
         ? `${m} — ce marché est probablement FERMÉ (week-end ou hors séance). Les indices synthétiques (Volatility) et les cryptos cotent 24 h/24 : essayez-en un.`
         : m);
     }
-  }, [symbol, tf, provider, mode, strategyId, profondeur]);
+  }, [symbol, tf, provider, mode, strategiesChoisies.join(','), profondeur]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1901,7 +1977,7 @@ function LiveMarket({ onToJournal }) {
   useEffect(() => {
     setSignal(null);
     const es = new EventSource(`/api/signals/stream?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`
-      + `&mode=${mode}${mode === 'manuel' && strategyId ? '&strategyId=' + encodeURIComponent(strategyId) : ''}`);
+      + `&mode=${mode}${mode === 'manuel' && strategiesChoisies.length ? '&strategies=' + encodeURIComponent(strategiesChoisies.join(',')) : ''}`);
     es.addEventListener('signal', ev => {
       try {
         const v = JSON.parse(ev.data);
@@ -1970,14 +2046,47 @@ function LiveMarket({ onToJournal }) {
           <option value="manuel">Ma stratégie</option>
         </select>
         {mode === 'manuel' && (
-          <select className="fld" style={{ width:250 }} value={strategyId}
-            onChange={e=>setStrategyId(e.target.value)}
-            title="La stratégie appliquée : seules ses règles compteront pour la confirmation.">
-            <option value="">— choisir une stratégie —</option>
-            {profils.map(p => (
-              <option key={p.id} value={p.id}>{p.titre} · {p.regles.join('+')}</option>
-            ))}
-          </select>
+          <div style={{ position:'relative' }}>
+            <button className="btn ghost sm" onClick={() => setChoixOuvert(o => !o)}
+              title="Choisir une ou plusieurs stratégies : leurs règles se cumulent.">
+              <i className="fas fa-list-check"></i>
+              Stratégies ({strategiesChoisies.length})
+            </button>
+            {choixOuvert && (
+              <div className="panel" style={{ position:'absolute', zIndex:60, top:'115%', left:0, width:360,
+                maxHeight:340, overflowY:'auto', padding:12, boxShadow:'0 12px 30px rgba(0,0,0,.5)' }}>
+                <input className="fld" placeholder="Filtrer…" value={filtreProfil}
+                  onChange={e => setFiltreProfil(e.target.value)}
+                  style={{ width:'100%', marginBottom:8 }} />
+                <div style={{ display:'flex', gap:6, marginBottom:8 }}>
+                  <button className="btn ghost sm" onClick={() => setStrategiesChoisies(profils.map(p => p.id))}>
+                    Tout
+                  </button>
+                  <button className="btn ghost sm" onClick={() => setStrategiesChoisies([])}>Aucune</button>
+                  <span style={{ marginLeft:'auto', fontSize:11.5, color:'var(--dim)', alignSelf:'center' }}>
+                    {profils.length} disponible(s)
+                  </span>
+                </div>
+                {profils
+                  .filter(p => !filtreProfil || String(p.titre || '').toLowerCase().includes(filtreProfil.toLowerCase()))
+                  .map(p => (
+                    <label key={p.id} style={{ display:'flex', gap:8, alignItems:'center',
+                      padding:'5px 2px', fontSize:12.5, cursor:'pointer' }}>
+                      <input type="checkbox" checked={strategiesChoisies.includes(p.id)}
+                        onChange={() => setStrategiesChoisies(l =>
+                          l.includes(p.id) ? l.filter(x => x !== p.id) : [...l, p.id])} />
+                      <span style={{ flex:1 }}>{p.titre}</span>
+                      <span className="tag" style={{ fontSize:10.5 }} title={p.motif}>
+                        {p.regles.join('+')}
+                      </span>
+                    </label>
+                  ))}
+                {!profils.length && (
+                  <div style={{ fontSize:12, color:'var(--dim)' }}>Aucune stratégie dans la base.</div>
+                )}
+              </div>
+            )}
+          </div>
         )}
         <span className="badge" style={{ background: live ? 'rgba(16,185,129,.13)' : 'rgba(245,158,11,.13)',
           color: live ? '#34d399' : '#f59e0b' }}>
@@ -2220,6 +2329,51 @@ function LiveMarket({ onToJournal }) {
                 </span>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Alignement multi-timeframes : le signal n'est confirmé que si les
+            unités de temps racontent la même histoire. C'est la vue « sniper ». */}
+        {confluence && confluence.confluence && (
+          <div className="panel" style={{ padding:'12px 14px', marginTop:12 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8, flexWrap:'wrap' }}>
+              <b style={{ fontSize:13 }}>
+                <i className="fas fa-crosshairs" style={{ marginRight:6, color:'#fbbf24' }}></i>
+                Alignement des unités de temps
+              </b>
+              <span className="badge" style={{
+                background: confluence.confluence.aligne ? 'rgba(16,185,129,.14)' : 'rgba(245,158,11,.14)',
+                color: confluence.confluence.aligne ? '#34d399' : '#fbbf24' }}>
+                {confluence.confluence.aligne ? 'ALIGNÉ' : 'NON ALIGNÉ'}
+                {' · '}{confluence.confluence.nbAlignes}/{confluence.confluence.detail.length}
+                {' · seuil '}{confluence.confluence.seuilAlignes}
+              </span>
+              {confluence.strategieAppliquee && (
+                <span className="badge" style={{ background:'rgba(96,165,250,.1)', color:'#93c5fd' }}
+                  title={confluence.strategieAppliquee.titre}>
+                  {(confluence.strategieAppliquee.nombre || 1)} stratégie(s)
+                  {confluence.strategieAppliquee.style ? ` · ${confluence.strategieAppliquee.style}` : ''}
+                </span>
+              )}
+            </div>
+            <div style={{ display:'grid', gap:6 }}>
+              {confluence.confluence.detail.map(t => (
+                <div key={t.tf} style={{ display:'flex', alignItems:'center', gap:10, fontSize:12.5 }}>
+                  <b style={{ width:46 }}>{t.tf}</b>
+                  <span style={{ width:70, color: t.tendance === 'bullish' ? '#34d399'
+                    : t.tendance === 'bearish' ? '#f87171' : '#f59e0b' }}>{t.tendance}</span>
+                  <span style={{ flex:1, color:'var(--muted)' }}>
+                    {t.status}{t.direction && t.direction !== 'NEUTRE' ? ' · ' + t.direction : ''}
+                    {t.regles && t.regles.length ? ' · ' + t.regles.join('+') : ''}
+                  </span>
+                  <i className={`fas ${t.confirme ? 'fa-circle-check' : 'fa-circle-minus'}`}
+                    style={{ color: t.confirme ? '#34d399' : 'var(--muted)' }}></i>
+                </div>
+              ))}
+            </div>
+            <p style={{ margin:'8px 0 0', fontSize:11.5, color:'var(--dim)' }}>
+              {confluence.confluence.motif} — le signal n'est confirmé que si ce seuil est atteint.
+            </p>
           </div>
         )}
 
