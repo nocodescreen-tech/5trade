@@ -1918,19 +1918,60 @@ app.get('/api/concepts', requireAuth, (req, res) => {
 // « Je lui explique une stratégie, il analyse, rassemble les infos et me la
 //  rend en la sauvegardant. » Le résultat n'est pas un texte : c'est une fiche
 // exploitable, avec le moteur qui décide comment analyser.
-app.post('/api/strategies/decrire', requireAuth, async (req, res) => {
-  try {
-    const texte = String((req.body && req.body.texte) || '').trim();
-    if (texte.length < 30) {
-      return res.status(400).json({ error: 'Décris ta stratégie en quelques phrases (30 caractères minimum).' });
-    }
-    // 8000 caractères refusaient une vraie note de stratégie (document colle,
-    // plusieurs pages de regles). La limite suit ce qu'un trader ecrit vraiment.
-    if (texte.length > 40000) {
-      return res.status(400).json({ error: 'Description trop longue (40000 caractères maximum). Découpe-la en deux fiches.' });
-    }
+// Un trader colle un cours complet, pas trois lignes. La limite précédente
+// (40 000) refusait un document pourtant légitime et obligeait l'utilisateur à
+// découper à la main — ce que la machine doit faire elle-même.
+const LIMITE_DESCRIPTION = 200000;
 
-    const consigne = `Tu transformes la description d'un trader en FICHE DE STRATÉGIE exploitable par un moteur d'analyse.
+/**
+ * Découpe un document trop long en sections autonomes.
+ *
+ * Un cours entier mélange plusieurs stratégies : en tirer UN seul profil donne un
+ * moteur bâtard qui ne correspond à rien. On coupe donc aux titres — lignes
+ * courtes, numérotations, « Étape », « Setup », majuscules — et chaque section
+ * devient une fiche. Les sections encore trop grosses sont recoupées par paquets.
+ */
+function decouperEnSections(texte, maxParFiche = 15000) {
+  const estTitre = l => {
+    const t = String(l || '').trim();
+    if (!t || t.length > 90) return false;
+    if (/^(#{1,4}\s|chapitre|section|partie|module|etape|étape|setup|strategie|stratégie)/i.test(t)) return true;
+    if (/^\d+[.)]\s+\S/.test(t)) return true;
+    return t.length < 60 && t === t.toUpperCase() && /[A-ZÀ-Ý]{4}/.test(t);
+  };
+  const sections = [];
+  let bloc = [];
+  for (const ligne of String(texte).split(/\r?\n/)) {
+    if (estTitre(ligne) && bloc.join('\n').trim().length > 400) {
+      sections.push(bloc.join('\n').trim());
+      bloc = [];
+    }
+    bloc.push(ligne);
+  }
+  if (bloc.join('\n').trim()) sections.push(bloc.join('\n').trim());
+
+  const sorties = [];
+  for (const s of sections) {
+    if (s.length <= maxParFiche) { sorties.push(s); continue; }
+    // Section encore trop longue : on coupe sur les mots, jamais au milieu d'un.
+    const mots = s.split(/\s+/);
+    let paquet = [];
+    for (const m of mots) {
+      if (paquet.join(' ').length + m.length + 1 > maxParFiche) { sorties.push(paquet.join(' ')); paquet = []; }
+      paquet.push(m);
+    }
+    if (paquet.length) sorties.push(paquet.join(' '));
+  }
+  return sorties.filter(s => s.length >= 300);
+}
+
+/**
+ * Transforme UN texte de strategie en fiche exploitable, sans l'enregistrer.
+ * Sortie de la route pour pouvoir traiter plusieurs sections d'un document.
+ */
+async function structurerTexte(texte) {
+  try {
+  const consigne = `Tu transformes la description d'un trader en FICHE DE STRATÉGIE exploitable par un moteur d'analyse.
 
 DESCRIPTION DU TRADER :
 """${texte}"""
@@ -1940,6 +1981,12 @@ RÈGLES DISPONIBLES (choisis uniquement celles qui correspondent réellement à 
   R2 = rupture de structure (BOS / CHoCH, cassure confirmée par la clôture)
   R3 = zone réactive (order block, FVG, breaker : le prix réagit sur une zone)
   R4 = position dans le range (premium pour vendre, discount pour acheter)
+  R5 = sens de la structure (tendance haussière ou baissière confirmée)
+
+FILTRES (conditions qui ne donnent pas de sens mais dont l'absence invalide) :
+  volatilite = la stratégie exige une amplitude exploitable
+  session    = elle exige une session active (Londres / New York)
+  range      = elle exige un range clairement borné
 
 STYLES (choisis-en un si c'est indiqué, sinon null) :
   scalping = quelques minutes (1m / 5m / 15m)
@@ -1951,6 +1998,7 @@ Réponds en JSON strict, sans texte autour :
   "titre": "titre court et parlant, 60 caractères max",
   "resume": "2 ou 3 phrases qui résument la logique de la stratégie",
   "regles": ["R1","R3"],
+  "filtres": ["volatilite"],
   "style": "scalping" | "intraday" | "swing" | null,
   "timeframes": ["1m","5m","15m"],
   "seuilAlignes": 2,
@@ -1964,79 +2012,145 @@ Réponds en JSON strict, sans texte autour :
 }
 N'invente rien : si une information n'est pas dans la description, mets null ou une liste vide.`;
 
-    let fiche;
-    try {
-      const out = await deepseek([{ role: 'user', content: consigne }], { maxTokens: 2000, json: true });
-      fiche = JSON.parse(out);
-    } catch (e) {
-      return res.status(502).json({
-        error: `L'analyse du texte a échoué (${e.message}). Vérifie que le service d'IA répond, puis réessaie.`
+  let fiche;
+  try {
+    const out = await deepseek([{ role: 'user', content: consigne }], { maxTokens: 2000, json: true });
+    fiche = JSON.parse(out);
+  } catch (e) {
+    throw new Error(`L'analyse du texte a échoué (${e.message}).`)
+  }
+
+  // Le moteur est normalisé : aucune valeur hors bornes n'entre en base.
+  const reglesConnues = Array.isArray(fiche.regles)
+    ? fiche.regles.map(r => String(r).toUpperCase()).filter(r => Signals.TOUTES_REGLES[r]) : [];
+  // Un style déclaré impose ses unités de temps si le trader n'en a pas donné
+  // assez : « scalping » sur une seule unité ne produirait aucun alignement,
+  // donc aucun signal fiable — exactement ce qu'on cherche à éviter.
+  const tfIA = Array.isArray(fiche.timeframes) ? fiche.timeframes.filter(t => /^\d+[mhd]$/.test(String(t))) : [];
+  const tfStyle = (fiche.style && Signals.STYLES[fiche.style])
+    ? Signals.STYLES[fiche.style].timeframes : [];
+  const timeframes = (tfIA.length >= 2 ? tfIA : (tfIA.length && tfStyle.length ? tfStyle : tfIA)) || null;
+  const moteur = Signals.normaliserMoteur({
+    regles: reglesConnues,
+    // Filtres proposes par l'IA : conditions exigees par la strategie.
+    filtres: Array.isArray(fiche.filtres) ? fiche.filtres : [],
+    style: fiche.style || null,
+    timeframes,
+    seuilAlignes: fiche.seuilAlignes,
+    seuilForce: fiche.seuilForce
+  });
+
+  const titre = String(fiche.titre || 'Stratégie décrite').slice(0, 90);
+  const contenu = [
+    fiche.resume || '',
+    fiche.entree ? `Entrée : ${fiche.entree}` : '',
+    fiche.invalidation ? `Invalidation : ${fiche.invalidation}` : '',
+    fiche.objectif ? `Objectif : ${fiche.objectif}` : '',
+    fiche.contexte ? `À éviter : ${fiche.contexte}` : '',
+    '',
+    '--- description d\'origine ---',
+    texte
+  ].filter(Boolean).join('\n');
+
+  const strategy = {
+    id: newId('man_'),
+    title: titre,
+    content: contenu,
+    type: 'strategy',
+    source: 'decrite',
+    tags: (Array.isArray(fiche.motsCles) ? fiche.motsCles : []).map(String).slice(0, 12),
+    structured: {
+      summary: fiche.resume || '',
+      concepts: Array.isArray(fiche.concepts) ? fiche.concepts.map(String).slice(0, 12) : [],
+      conditions: fiche.contexte || '',
+      rules: { entree: fiche.entree || null, invalidation: fiche.invalidation || null, objectif: fiche.objectif || null }
+    },
+    moteur,
+    createdAt: new Date().toISOString()
+  };
+
+
+  const profil = Signals.profilDepuisStrategie(strategy);
+  return {
+    success: true,
+    // C'est l'appelant qui decide d'enregistrer : la fonction ne fait que
+    // structurer le texte, elle ne touche ni a la requete ni a la base.
+    enregistree: true,
+    strategy,
+    moteur,
+    profil,
+    fiche,
+    lecture: `Règles ${(profil.regles || []).join(' + ') || 'toutes'}`
+      + (profil.style ? ` · style ${profil.style}` : '')
+      + (profil.timeframes ? ` · unités ${profil.timeframes.join('/')}` : '')
+      + (profil.seuilAlignes ? ` · alignement sur ${profil.seuilAlignes}` : '')
+  };
+  } catch (e) { throw e; }
+}
+
+app.post('/api/strategies/decrire', requireAuth, async (req, res) => {
+  try {
+    const texte = String((req.body && req.body.texte) || '').trim();
+    if (texte.length < 30) {
+      return res.status(400).json({ error: 'Décris ta stratégie en quelques phrases (30 caractères minimum).' });
+    }
+    // Un cours complet, un PDF collé, plusieurs pages de règles : c'est ce qu'un
+    // trader apporte réellement. On accepte donc un document, pas seulement une
+    // note de trois paragraphes.
+    if (texte.length > LIMITE_DESCRIPTION) {
+      return res.status(400).json({
+        error: `Document trop long : ${texte.length} caractères, maximum ${LIMITE_DESCRIPTION}.`
+          + ' Réessaie avec la partie qui t\'intéresse, ou découpe-le en deux documents.'
       });
     }
 
-    // Le moteur est normalisé : aucune valeur hors bornes n'entre en base.
-    const reglesConnues = Array.isArray(fiche.regles)
-      ? fiche.regles.map(r => String(r).toUpperCase()).filter(r => Signals.TOUTES_REGLES[r]) : [];
-    // Un style déclaré impose ses unités de temps si le trader n'en a pas donné
-    // assez : « scalping » sur une seule unité ne produirait aucun alignement,
-    // donc aucun signal fiable — exactement ce qu'on cherche à éviter.
-    const tfIA = Array.isArray(fiche.timeframes) ? fiche.timeframes.filter(t => /^\d+[mhd]$/.test(String(t))) : [];
-    const tfStyle = (fiche.style && Signals.STYLES[fiche.style])
-      ? Signals.STYLES[fiche.style].timeframes : [];
-    const timeframes = (tfIA.length >= 2 ? tfIA : (tfIA.length && tfStyle.length ? tfStyle : tfIA)) || null;
-    const moteur = Signals.normaliserMoteur({
-      regles: reglesConnues,
-      style: fiche.style || null,
-      timeframes,
-      seuilAlignes: fiche.seuilAlignes,
-      seuilForce: fiche.seuilForce
-    });
 
-    const titre = String(fiche.titre || 'Stratégie décrite').slice(0, 90);
-    const contenu = [
-      fiche.resume || '',
-      fiche.entree ? `Entrée : ${fiche.entree}` : '',
-      fiche.invalidation ? `Invalidation : ${fiche.invalidation}` : '',
-      fiche.objectif ? `Objectif : ${fiche.objectif}` : '',
-      fiche.contexte ? `À éviter : ${fiche.contexte}` : '',
-      '',
-      '--- description d\'origine ---',
-      texte
-    ].filter(Boolean).join('\n');
+    // Un document long est découpé : chaque section devient SA propre fiche.
+    // Un cours entier mélange plusieurs stratégies ; en tirer un seul profil
+    // donnerait un moteur qui ne correspond à aucune d'elles.
+    const sections = texte.length > 25000 ? decouperEnSections(texte) : [texte];
+    const liste = sections.length ? sections : [texte];
 
-    const strategy = {
-      id: newId('man_'),
-      title: titre,
-      content: contenu,
-      type: 'strategy',
-      source: 'decrite',
-      tags: (Array.isArray(fiche.motsCles) ? fiche.motsCles : []).map(String).slice(0, 12),
-      structured: {
-        summary: fiche.resume || '',
-        concepts: Array.isArray(fiche.concepts) ? fiche.concepts.map(String).slice(0, 12) : [],
-        conditions: fiche.contexte || '',
-        rules: { entree: fiche.entree || null, invalidation: fiche.invalidation || null, objectif: fiche.objectif || null }
-      },
-      moteur,
-      createdAt: new Date().toISOString()
-    };
+    const resultats = [];
+    const echecs = [];
+    for (const section of liste) {
+      try {
+        resultats.push(await structurerTexte(section));
+      } catch (e) {
+        // Une section en échec ne doit pas faire perdre les autres.
+        echecs.push({ extrait: section.slice(0, 70) + '…', erreur: e.message });
+      }
+    }
+    if (!resultats.length) {
+      return res.status(502).json({
+        error: `L'analyse du texte a échoué (${echecs[0] ? echecs[0].erreur : 'service d\'IA indisponible'}).`
+          + ' Vérifie que le service d\'IA répond, puis réessaie.'
+      });
+    }
 
     // Sauvegarde : ce que le trader a expliqué devient utilisable tout de suite.
-    if (req.body.enregistrer !== false) await saveStrategy(strategy);
+    const enregistrer = req.body.enregistrer !== false;
+    if (enregistrer) for (const r of resultats) await saveStrategy(r.strategy);
 
-    const profil = Signals.profilDepuisStrategie(strategy);
+    const premier = resultats[0];
     res.json({
       success: true,
-      enregistree: req.body.enregistrer !== false,
-      strategy,
-      moteur,
-      profil,
-      fiche,
-      lecture: `Règles ${(profil.regles || []).join(' + ') || 'toutes'}`
-        + (profil.style ? ` · style ${profil.style}` : '')
-        + (profil.timeframes ? ` · unités ${profil.timeframes.join('/')}` : '')
-        + (profil.seuilAlignes ? ` · alignement sur ${profil.seuilAlignes}` : '')
+      enregistree: enregistrer,
+      // Document long : on annonce combien de fiches en sont sorties, et pourquoi.
+      nombre: resultats.length,
+      decoupe: resultats.length > 1,
+      echecs,
+      // La première fiche reste exposée à la racine : l'écran n'en affiche qu'une.
+      strategy: premier.strategy,
+      moteur: premier.moteur,
+      profil: premier.profil,
+      fiche: premier.fiche,
+      lecture: premier.lecture,
+      fiches: resultats.map(r => ({
+        strategy: r.strategy, moteur: r.moteur, profil: r.profil, fiche: r.fiche, lecture: r.lecture
+      }))
     });
+
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

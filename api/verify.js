@@ -1026,7 +1026,29 @@ function tinyPng(W = 64, H = 40) {
     const srv2 = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
     ok('la route de description existe', /app\.post\('\/api\/strategies\/decrire'/.test(srv2));
     ok('une description trop courte est refusée', /30 caractères minimum/.test(srv2));
-    ok('une description trop longue est refusée', /40000 caractères maximum/.test(srv2));
+    // La limite a changé : un trader colle un cours complet, pas trois lignes.
+    // On verifie donc que la limite est bien plus large, et surtout que la
+    // machine decoupe elle-meme au lieu de renvoyer l'utilisateur a la tache.
+    ok('les documents longs sont acceptes (limite large)',
+      /const LIMITE_DESCRIPTION = (\d{6,})/.test(srv2)
+      && Number(/const LIMITE_DESCRIPTION = (\d+)/.exec(srv2)[1]) >= 100000,
+      /const LIMITE_DESCRIPTION = (\d+)/.exec(srv2)[1] + ' caracteres');
+    ok('un document tres au-dela reste refuse avec un message clair',
+      /Document trop long/.test(srv2) && /maximum/.test(srv2));
+    ok('l app decoupe elle-meme un document long',
+      /function decouperEnSections/.test(srv2)
+      && /decouperEnSections\(texte\)/.test(srv2));
+    ok('chaque section devient une fiche (boucle sur les sections)',
+      /for \(const section of liste\)/.test(srv2) && /structurerTexte\(section\)/.test(srv2));
+    ok('une section en echec ne fait pas perdre les autres',
+      /echecs\.push\(/.test(srv2) && /if \(!resultats\.length\)/.test(srv2));
+    ok('la structure du texte est sortie de la route (req/res interdits)',
+      !/async function structurerTexte[\s\S]*?req\./.test(srv2.slice(srv2.indexOf('async function structurerTexte'),
+        srv2.indexOf("app.post('/api/strategies/decrire'"))));
+    ok('la reponse annonce le nombre de fiches',
+      /nombre: resultats\.length/.test(srv2) && /decoupe: resultats\.length > 1/.test(srv2));
+    ok('la premiere fiche reste exposee a la racine (ecran inchange)',
+      /strategy: premier\.strategy/.test(srv2) && /fiches: resultats\.map/.test(srv2));
     ok('le texte est envoyé au modèle d\'analyse', /DESCRIPTION DU TRADER/.test(srv2));
     ok('les 4 règles sont expliquées au modèle', /R1 = balayage de liquidité/.test(srv2)
       && /R2 = rupture de structure/.test(srv2) && /R3 = zone réactive/.test(srv2)
