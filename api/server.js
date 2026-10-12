@@ -47,7 +47,18 @@ app.use(express.json({ limit: '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 app.use('/uploads', express.static(UPLOADS_DIR));
 // Frontend servi sur la même origine (évite les soucis de CORS)
-app.use(express.static(path.join(ROOT, 'frontend')));
+// Les fichiers statiques. La page HTML ne doit JAMAIS être mise en cache : le
+// navigateur gardait l'ancienne version et l'utilisateur ne voyait pas les
+// nouveautés (zones du graphique comprises) malgré un serveur à jour.
+app.use(express.static(path.join(ROOT, 'frontend'), {
+  setHeaders: (res, chemin) => {
+    if (/\.html?$/i.test(chemin)) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }
+}));
 
 const upload = multer({
   dest: UPLOADS_DIR,

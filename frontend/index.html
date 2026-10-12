@@ -1753,6 +1753,10 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
   // sa disponibilité pour dessiner dès qu'elle est là, au lieu de rester sur un
   // cadre vide jusqu'au prochain rechargement de page.
   const [libPrete, setLibPrete] = useState(!!window.LightweightCharts);
+  // Compteur de ce qui est REELLEMENT dessine : la preuve visible que le calque
+  // tourne. Sans lui, un calque inactif et un graphique sans zones se
+  // ressemblent (un cadre vide).
+  const [zonesTracees, setZonesTracees] = useState(null);
 
   useEffect(() => {
     if (window.LightweightCharts) { setLibPrete(true); setLibMissing(false); return; }
@@ -1910,6 +1914,7 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
       ctx.clearRect(0, 0, w, h);
       const rep = api.current.report;
       if (!rep) return;
+      const compte = { ob: 0, fvg: 0, liq: 0, sweep: 0 };
 
       // Conversion temps → pixel, prix → pixel. null si hors de la vue.
       const X = t => { try { const v = chart.timeScale().timeToCoordinate(t); return Number.isFinite(v) ? v : null; } catch (e) { return null; } };
@@ -1956,6 +1961,7 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
         const t0 = Math.floor((ob.t || 0) / 1000);
         if (!t0 || !Number.isFinite(ob.low) || !Number.isFinite(ob.high)) continue;
         const haussier = /bull|haus/i.test(String(ob.type || ''));
+        compte.ob++;
         zone(t0, tFin, ob.low, ob.high,
           haussier ? 'rgba(34,211,138,.10)' : 'rgba(242,84,91,.10)',
           haussier ? 'rgba(34,211,138,.42)' : 'rgba(242,84,91,.42)',
@@ -1966,6 +1972,7 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
         const t0 = Math.floor((f.t || 0) / 1000);
         if (!t0 || !Number.isFinite(f.low) || !Number.isFinite(f.high)) continue;
         const haussier = /bull|haus/i.test(String(f.type || ''));
+        compte.fvg++;
         zone(t0, tFin, f.low, f.high,
           haussier ? 'rgba(96,165,250,.10)' : 'rgba(251,191,36,.10)',
           haussier ? 'rgba(96,165,250,.40)' : 'rgba(251,191,36,.40)',
@@ -1989,6 +1996,7 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
         ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(0, y + .5); ctx.lineTo(w, y + .5); ctx.stroke();
         ctx.setLineDash([]);
+        compte.liq++;
         ctx.fillStyle = 'rgba(245,158,11,.9)';
         ctx.fillText((l.type || 'liquidite') + (l.touches ? ' (' + l.touches + ')' : ''), 6, y - 3);
       }
@@ -1997,8 +2005,17 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
         const x = X(Math.floor((s.at || 0) / 1000));
         const y = Y(s.extreme || s.level);
         if (x === null || y === null) continue;
+        compte.sweep++;
         ctx.strokeStyle = 'rgba(167,139,250,.85)'; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.stroke();
+      }
+
+      // On ne declenche un rendu que si le compte change : redessiner au zoom ne
+      // doit pas provoquer une cascade de rendus React.
+      const cle = `${compte.ob}-${compte.fvg}-${compte.liq}-${compte.sweep}`;
+      if (api.current.cleZones !== cle) {
+        api.current.cleZones = cle;
+        setZonesTracees(compte);
       }
     };
 
@@ -2030,7 +2047,19 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
           temps en pixels. Le calque suit le zoom et le déplacement. */}
       <canvas ref={overlayRef}
         style={{ position:'absolute', inset:0, width:'100%', height:'100%',
-          pointerEvents:'none', borderRadius:10 }} />
+          pointerEvents:'none', borderRadius:10, zIndex:3 }} />
+      {/* Preuve visible que le calque tourne : si ce compteur est absent, le
+          navigateur affiche encore l'ancienne page (cache). S'il affiche 0
+          partout, les données ne sont pas arrivées. */}
+      {zonesTracees && (
+        <div style={{ position:'absolute', left:10, bottom:8, zIndex:4, pointerEvents:'none',
+          fontSize:11, color:'#94a3b8', background:'rgba(8,12,20,.78)',
+          padding:'3px 9px', borderRadius:6, border:'1px solid rgba(148,163,184,.2)' }}>
+          <i className="fas fa-layer-group" style={{ marginRight:6, color:'#60a5fa' }}></i>
+          zones tracées : {zonesTracees.ob} OB · {zonesTracees.fvg} FVG ·
+          {' '}{zonesTracees.liq} liquidité · {zonesTracees.sweep} balayage(s)
+        </div>
+      )}
       {libMissing && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center', gap: 8, textAlign: 'center',

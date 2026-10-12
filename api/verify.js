@@ -902,6 +902,16 @@ function tinyPng(W = 64, H = 40) {
     ok('les zones se rechargent toutes seules', /setInterval\(recharger, 15000\)/.test(jsx));
     ok('le rechargement met bien à jour rapport ET vocabulaire',
       /setReport\(st\.report\)/.test(jsx) && /setVocabulaire\(st\.vocabulaire\)/.test(jsx));
+    // Deux causes possibles pour « les zones n'apparaissent pas » : le calque
+    // passe sous le graphique, ou le navigateur sert l'ancienne page en cache.
+    ok('le calque est AU-DESSUS du graphique', /pointerEvents:'none', borderRadius:10, zIndex:3/.test(jsx));
+    ok('un compteur visible prouve que le calque tourne',
+      /zonesTracees/.test(jsx) && /zones tracées :/.test(jsx));
+    ok('le compteur ne déclenche pas un rendu à chaque redessin',
+      /api\.current\.cleZones !== cle/.test(jsx));
+    const srvSrc = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('la page HTML n\'est jamais mise en cache',
+      /no-store, no-cache, must-revalidate/.test(srvSrc) && /Pragma/.test(srvSrc));
   }
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
