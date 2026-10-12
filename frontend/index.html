@@ -1738,8 +1738,9 @@ function History({ history }) {
 
 /* Graphique TradingView Lightweight Charts : chandeliers + volume + niveaux.
    Zoom, déplacement et échelle de prix sont natifs (molette, glisser-déposer). */
-function PriceChart({ candles, levels, signal, height, symbol, tf }) {
+function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
   const boxRef = useRef(null);
+  const overlayRef = useRef(null);
   const api = useRef({ chart: null, series: null, vol: null, lines: [], full: true });
   // Suit le couple symbole/unité de temps : tout changement impose un
   // rechargement COMPLET de la série. Sans cela, un simple update() sur un
@@ -1887,11 +1888,149 @@ function PriceChart({ candles, levels, signal, height, symbol, tf }) {
     } catch (e) {}
   }, [signal]);
 
+  // ── Calque de zones : OB, FVG, liquidité, premium/discount, OTE ──
+  // Tout est redessiné quand les données changent, quand on zoome ou qu'on
+  // déplace le graphique, et quand la taille change. C'est ce qui fait bouger
+  // les zones AVEC le prix au lieu d'afficher un dessin figé.
+  useEffect(() => {
+    const { chart, series } = api.current;
+    const cvs = overlayRef.current;
+    if (!chart || !series || !cvs) return;
+    // Le rapport courant est stocké ici : dessiner() le relit à chaque redessin.
+    api.current.report = report;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    const dessiner = () => {
+      const w = cvs.clientWidth, h = cvs.clientHeight;
+      if (!w || !h) return;
+      const cw = Math.round(w * dpr), chh = Math.round(h * dpr);
+      if (cvs.width !== cw || cvs.height !== chh) { cvs.width = cw; cvs.height = chh; }
+      const ctx = cvs.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      const rep = api.current.report;
+      if (!rep) return;
+
+      // Conversion temps → pixel, prix → pixel. null si hors de la vue.
+      const X = t => { try { const v = chart.timeScale().timeToCoordinate(t); return Number.isFinite(v) ? v : null; } catch (e) { return null; } };
+      const Y = p => { try { const v = series.priceToCoordinate(p); return Number.isFinite(v) ? v : null; } catch (e) { return null; } };
+      const tFin = api.current.lastTime;
+      if (!Number.isFinite(tFin)) return;
+
+      const zone = (t0, t1, p1, p2, fond, bord, etiquette) => {
+        const x0 = X(t0), x1 = X(t1), y0 = Y(p1), y1 = Y(p2);
+        if (x0 === null || x1 === null || y0 === null || y1 === null) return;
+        const g = Math.min(x0, x1), d = Math.max(x0, x1);
+        const ht = Math.min(y0, y1), bs = Math.max(y0, y1);
+        if (d < 0 || g > w || bs < 0 || ht > h) return;
+        const lg = Math.max(2, d - g), hh = Math.max(1.5, bs - ht);
+        ctx.fillStyle = fond; ctx.fillRect(g, ht, lg, hh);
+        if (bord) { ctx.strokeStyle = bord; ctx.lineWidth = 1; ctx.strokeRect(g + .5, ht + .5, lg - 1, hh - 1); }
+        if (etiquette && hh > 11) {
+          ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+          ctx.fillStyle = bord || 'rgba(226,232,240,.75)';
+          ctx.fillText(etiquette, g + 4, ht + 10);
+        }
+      };
+
+      const bande = (p1, p2, fond, bord, etiquette) => {
+        const y0 = Y(p1), y1 = Y(p2);
+        if (y0 === null || y1 === null) return;
+        const ht = Math.min(y0, y1), bs = Math.max(y0, y1);
+        if (bs < 0 || ht > h) return;
+        ctx.fillStyle = fond; ctx.fillRect(0, ht, w, Math.max(1.5, bs - ht));
+        if (bord) {
+          ctx.strokeStyle = bord; ctx.setLineDash([5, 4]); ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(0, ht + .5); ctx.lineTo(w, ht + .5);
+          ctx.moveTo(0, bs - .5); ctx.lineTo(w, bs - .5); ctx.stroke(); ctx.setLineDash([]);
+        }
+        if (etiquette && bs - ht > 12) {
+          ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+          ctx.fillStyle = bord || 'rgba(226,232,240,.7)';
+          ctx.fillText(etiquette, 6, ht + 11);
+        }
+      };
+
+      // Order blocks : de leur bougie d'origine jusqu'à maintenant.
+      for (const ob of (rep.orderBlocks || [])) {
+        const t0 = Math.floor((ob.t || 0) / 1000);
+        if (!t0 || !Number.isFinite(ob.low) || !Number.isFinite(ob.high)) continue;
+        const haussier = /bull|haus/i.test(String(ob.type || ''));
+        zone(t0, tFin, ob.low, ob.high,
+          haussier ? 'rgba(34,211,138,.10)' : 'rgba(242,84,91,.10)',
+          haussier ? 'rgba(34,211,138,.42)' : 'rgba(242,84,91,.42)',
+          'OB ' + (haussier ? 'haussier' : 'baissier'));
+      }
+      // Déséquilibres (FVG)
+      for (const f of (rep.fvgs || [])) {
+        const t0 = Math.floor((f.t || 0) / 1000);
+        if (!t0 || !Number.isFinite(f.low) || !Number.isFinite(f.high)) continue;
+        const haussier = /bull|haus/i.test(String(f.type || ''));
+        zone(t0, tFin, f.low, f.high,
+          haussier ? 'rgba(96,165,250,.10)' : 'rgba(251,191,36,.10)',
+          haussier ? 'rgba(96,165,250,.40)' : 'rgba(251,191,36,.40)',
+          'FVG ' + (haussier ? 'haussier' : 'baissier'));
+      }
+      // Premium / discount et zone d'entrée optimale : bandes de fond.
+      const pd = rep.premiumDiscount;
+      if (pd && Number.isFinite(pd.equilibrium) && Number.isFinite(pd.high) && Number.isFinite(pd.low)) {
+        bande(pd.equilibrium, pd.high, 'rgba(242,84,91,.045)', 'rgba(242,84,91,.35)', 'PREMIUM');
+        bande(pd.low, pd.equilibrium, 'rgba(34,211,138,.045)', 'rgba(34,211,138,.35)', 'DISCOUNT');
+        if (pd.ote && Number.isFinite(pd.ote.deep) && Number.isFinite(pd.ote.shallow)) {
+          bande(pd.ote.deep, pd.ote.shallow, 'rgba(245,158,11,.10)', 'rgba(245,158,11,.5)', 'OTE 0,618-0,786');
+        }
+      }
+      // Liquidité : là où sont posés les stops.
+      ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+      for (const l of (rep.liquidity || [])) {
+        const y = Y(l.price);
+        if (y === null || y < 0 || y > h) continue;
+        ctx.strokeStyle = 'rgba(245,158,11,.55)';
+        ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, y + .5); ctx.lineTo(w, y + .5); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(245,158,11,.9)';
+        ctx.fillText((l.type || 'liquidite') + (l.touches ? ' (' + l.touches + ')' : ''), 6, y - 3);
+      }
+      // Balayages : l'extrême atteint est entouré.
+      for (const s of (rep.sweeps || [])) {
+        const x = X(Math.floor((s.at || 0) / 1000));
+        const y = Y(s.extreme || s.level);
+        if (x === null || y === null) continue;
+        ctx.strokeStyle = 'rgba(167,139,250,.85)'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.stroke();
+      }
+    };
+
+    api.current.dessiner = dessiner;
+    dessiner();
+    // Redessin à chaque déplacement, zoom ou redimensionnement : sans ces
+    // abonnements les zones resteraient collées à leur position d'origine.
+    let sub = null;
+    try { sub = chart.timeScale().subscribeVisibleLogicalRangeChange(dessiner); } catch (e) {}
+    const ro = new ResizeObserver(dessiner);
+    ro.observe(cvs);
+    const t1 = setTimeout(dessiner, 120);
+    const t2 = setTimeout(dessiner, 700);
+    return () => {
+      clearTimeout(t1); clearTimeout(t2); ro.disconnect();
+      try { if (sub) chart.timeScale().unsubscribeVisibleLogicalRangeChange(sub); } catch (e) {}
+      api.current.dessiner = null;
+    };
+  }, [candles, report, levels]);
+
   const reset = () => { try { api.current.chart.timeScale().fitContent(); } catch (e) {} };
 
   return (
     <div style={{ position: 'relative' }}>
       <div ref={boxRef} style={{ width: '100%', height, borderRadius: 10, overflow: 'hidden' }} />
+      {/* Calque de ZONES par-dessus les bougies : order blocks, FVG, premium /
+          discount, OTE, liquidité. Lightweight Charts ne propose pas de
+          rectangles — on dessine donc nous-mêmes, en convertissant le prix et le
+          temps en pixels. Le calque suit le zoom et le déplacement. */}
+      <canvas ref={overlayRef}
+        style={{ position:'absolute', inset:0, width:'100%', height:'100%',
+          pointerEvents:'none', borderRadius:10 }} />
       {libMissing && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center', gap: 8, textAlign: 'center',
@@ -1981,6 +2120,25 @@ function LiveMarket({ onToJournal }) {
     const it = setInterval(charger, 60000);
     return () => { vivant = false; clearInterval(it); };
   }, [symbol, tf, provider, mode, strategiesChoisies.join(',')]);
+
+  // Les zones (OB, FVG, liquidité, premium/discount) et le vocabulaire se
+  // rafraîchissent tout seuls. Sans cet appel, les rectangles resteraient
+  // figés aux niveaux du chargement pendant que le prix, lui, continue de
+  // bouger — le graphique mentirait.
+  useEffect(() => {
+    if (!symbol) return;
+    const recharger = async () => {
+      try {
+        const st = await (await api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`)).json();
+        if (st.success && st.report) {
+          setReport(st.report);
+          if (st.vocabulaire) setVocabulaire(st.vocabulaire);
+        }
+      } catch (e) { /* réseau absent : on garde l'état précédent */ }
+    };
+    const it = setInterval(recharger, 15000);
+    return () => clearInterval(it);
+  }, [symbol, tf, provider]);
 
   const [tick, setTick] = useState(null);          // dernier tick BRUT (prix réel)
   const [tickRate, setTickRate] = useState(0);     // ticks par seconde
@@ -2645,7 +2803,7 @@ function LiveMarket({ onToJournal }) {
         )}
 
         {vue === 'app' ? (
-          <PriceChart candles={candles} levels={report ? report.levels : []} signal={signal}
+          <PriceChart candles={candles} report={report} levels={report ? report.levels : []} signal={signal}
             height={big ? 620 : 430} symbol={symbol} tf={tf} />
         ) : (
           <TradingViewChart

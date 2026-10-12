@@ -876,6 +876,34 @@ function tinyPng(W = 64, H = 40) {
       avecDuel ? avecDuel.summary.slice(0, 96) : 'aucun désaccord');
   }
 
+  // ── Zones dessinées SUR le graphique et vivantes ──
+  // L'utilisateur veut que les OB ne soient pas de simples lignes à côté : il
+  // faut des zones sur le graphique, qui suivent le prix quand ça bouge.
+  {
+    ok('calque de dessin par-dessus le graphique', /<canvas ref=\{overlayRef\}/.test(jsx));
+    ok('le calque ne capte pas les clics (zoom encore possible)',
+      /pointerEvents:'none'/.test(jsx));
+    ok('les zones sont dessinées : OB et FVG en rectangles',
+      /for \(const ob of \(rep\.orderBlocks/.test(jsx) && /for \(const f of \(rep\.fvgs/.test(jsx)
+      && /ctx\.fillRect\(g, ht, lg, hh\)/.test(jsx));
+    ok('premium, discount et OTE en bandes', /'PREMIUM'/.test(jsx) && /'DISCOUNT'/.test(jsx)
+      && /OTE 0,618-0,786/.test(jsx));
+    ok('la liquidité est tracée sur le graphique', /for \(const l of \(rep\.liquidity/.test(jsx));
+    ok('balayages marqués', /for \(const s of \(rep\.sweeps/.test(jsx));
+    // Le point clé : les zones suivent le zoom et le déplacement.
+    ok('conversion prix et temps en pixels',
+      /timeToCoordinate/.test(jsx) && /priceToCoordinate/.test(jsx));
+    ok('redessin au déplacement et au zoom',
+      /subscribeVisibleLogicalRangeChange\(dessiner\)/.test(jsx));
+    ok('redessin au redimensionnement', /new ResizeObserver\(dessiner\)/.test(jsx));
+    ok('netteté sur écran haute densité', /devicePixelRatio/.test(jsx));
+    ok('le rapport est transmis au graphique', /<PriceChart candles=\{candles\} report=\{report\}/.test(jsx));
+    // Et les zones se rafraîchissent : sinon elles resteraient figées.
+    ok('les zones se rechargent toutes seules', /setInterval\(recharger, 15000\)/.test(jsx));
+    ok('le rechargement met bien à jour rapport ET vocabulaire',
+      /setReport\(st\.report\)/.test(jsx) && /setVocabulaire\(st\.vocabulaire\)/.test(jsx));
+  }
+
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
   if (skip) console.log(`  (${skip} test(s) non exécuté(s) : dépendance externe absente — voir les lignes « • »)`);
   process.exit(fail ? 1 : 0);
