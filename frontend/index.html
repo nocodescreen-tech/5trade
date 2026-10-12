@@ -10,6 +10,9 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<!-- TradingView Lightweight Charts (Apache 2.0) : chandeliers professionnels,
+     zoom et déplacement natifs. Servi localement pour rester utilisable hors ligne. -->
+<script src="lightweight-charts.js"></script>
 <script>
   // Runtime React "classic" : évite l'injection d'un import ESM dans les scripts inline.
   Babel.registerPreset('react-classic', {
@@ -1528,129 +1531,117 @@ function History({ history }) {
 
 /* ══════════════ MARCHÉ EN DIRECT ══════════════ */
 
-/** Graphique en chandeliers net + niveaux calculés (canvas, aucune lib). */
-function drawCandles(canvas, candles, levels, opts) {
-  const o = opts || {};
-  const visible = o.count || 90;
-  const dpr = window.devicePixelRatio || 1;
-  const W = canvas.clientWidth || 820;
-  const H = canvas.clientHeight || 320;
-  canvas.width = Math.round(W * dpr);
-  canvas.height = Math.round(H * dpr);
-  const g = canvas.getContext('2d');
-  g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  g.clearRect(0, 0, W, H);
-  if (!candles || !candles.length) return;
+/* Graphique TradingView Lightweight Charts : chandeliers + volume + niveaux.
+   Zoom, déplacement et échelle de prix sont natifs (molette, glisser-déposer). */
+function PriceChart({ candles, levels, signal, height, symbol, tf }) {
+  const boxRef = useRef(null);
+  const api = useRef({ chart: null, series: null, vol: null, lines: [], full: true });
 
-  // Marge droite élargie : l'axe des prix doit se lire sans plisser les yeux.
-  const padL = 10, padR = 86, padT = 16, padB = 26;
-  const view = candles.slice(-visible);
-  const hi = Math.max(...view.map(c => c.h));
-  const lo = Math.min(...view.map(c => c.l));
-  const span = (hi - lo) || Math.max(hi * 0.001, 1e-6);
-  const plotW = W - padL - padR;
-  const plotH = H - padT - padB;
-  const y = p => padT + ((hi - p) / span) * plotH;
-  const step = plotW / view.length;
-  const bw = Math.max(3, step * 0.72);            // corps large et net
+  useEffect(() => {
+    const box = boxRef.current;
+    const LC = window.LightweightCharts;
+    if (!box || !LC) return;
+    const chart = LC.createChart(box, {
+      layout: { background: { type: 'solid', color: '#080c14' }, textColor: '#cbd5e1', fontSize: 11,
+        fontFamily: 'ui-sans-serif, system-ui, sans-serif' },
+      grid: { vertLines: { color: 'rgba(148,163,184,.07)' }, horzLines: { color: 'rgba(148,163,184,.07)' } },
+      crosshair: {
+        mode: LC.CrosshairMode.Normal,
+        vertLine: { color: 'rgba(148,163,184,.55)', width: 1, style: LC.LineStyle.Dashed, labelBackgroundColor: '#1e293b' },
+        horzLine: { color: 'rgba(148,163,184,.55)', width: 1, style: LC.LineStyle.Dashed, labelBackgroundColor: '#1e293b' }
+      },
+      rightPriceScale: { borderColor: 'rgba(148,163,184,.18)', scaleMargins: { top: 0.08, bottom: 0.24 } },
+      timeScale: { borderColor: 'rgba(148,163,184,.18)', timeVisible: true, secondsVisible: false, rightOffset: 4 },
+      localization: { locale: 'fr-FR' },
+      handleScroll: true, handleScale: true
+    });
+    const series = chart.addCandlestickSeries({
+      upColor: '#22d38a', downColor: '#f2545b',
+      borderUpColor: '#22d38a', borderDownColor: '#f2545b',
+      wickUpColor: '#22d38a', wickDownColor: '#f2545b',
+      priceLineVisible: true, priceLineColor: 'rgba(255,255,255,.4)', priceLineStyle: LC.LineStyle.Dashed
+    });
+    const vol = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol',
+      lastValueVisible: false, priceLineVisible: false });
+    chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    api.current = { chart, series, vol, lines: [], full: true };
 
-  // Fond
-  g.fillStyle = 'rgba(7,10,17,.9)';
-  g.fillRect(0, 0, W, H);
+    const fit = () => chart.applyOptions({ width: box.clientWidth, height: box.clientHeight });
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(box);
+    return () => { ro.disconnect(); chart.remove(); api.current = { chart: null, series: null, vol: null, lines: [], full: true }; };
+  }, []);
 
-  // Grille + axe des prix (5 repères lisibles)
-  g.font = '11px ui-sans-serif, system-ui, sans-serif';
-  g.textBaseline = 'middle';
-  for (let i = 0; i <= 5; i++) {
-    const p = lo + span * i / 5, yy = y(p);
-    g.strokeStyle = 'rgba(148,163,184,.13)';
-    g.beginPath(); g.moveTo(padL, yy); g.lineTo(W - padR, yy); g.stroke();
-    const label = p >= 1000 ? p.toFixed(2) : p.toFixed(5);
-    const tw = g.measureText(label).width;
-    g.fillStyle = 'rgba(9,13,20,.92)';
-    g.fillRect(W - padR + 4, yy - 8, tw + 10, 16);
-    g.fillStyle = 'rgba(203,213,225,.95)';
-    g.fillText(label, W - padR + 9, yy);
-  }
-
-  // Zones (order blocks / FVG) en fond
-  for (const l of levels || []) {
-    if (l.zone && l.zone.length === 2 && Number.isFinite(l.zone[0]) && Number.isFinite(l.zone[1])) {
-      const y1 = y(l.zone[1]), y2 = y(l.zone[0]);
-      g.fillStyle = l.side === 'support' ? 'rgba(16,185,129,.16)' : 'rgba(239,68,68,.16)';
-      g.fillRect(padL, Math.min(y1, y2), plotW, Math.max(1, Math.abs(y2 - y1)));
+  // setData au premier chargement (ou après changement de symbole/timeframe),
+  // puis update du seul dernier point : c'est ce qui rend le direct fluide.
+  useEffect(() => {
+    const { chart, series, vol } = api.current;
+    if (!series || !candles || !candles.length) return;
+    const key = c => Math.floor(c.t / 1000);
+    const point = c => ({ time: key(c), open: c.o, high: c.h, low: c.l, close: c.c });
+    const bar = c => ({ time: key(c), value: c.v || 0, color: c.c >= c.o ? 'rgba(34,211,138,.32)' : 'rgba(242,84,91,.32)' });
+    if (api.current.full) {
+      series.setData(candles.map(point));
+      if (vol) vol.setData(candles.map(bar));
+      try { chart.timeScale().fitContent(); } catch (e) {}
+      api.current.full = false;
+    } else {
+      const last = candles[candles.length - 1];
+      series.update(point(last));
+      if (vol) vol.update(bar(last));
     }
-  }
+  }, [candles]);
 
-  // Chandeliers : corps pleins + mèches nettes
-  g.lineWidth = 1.5;
-  view.forEach((c, i) => {
-    const x = padL + i * step + step / 2;
-    const up = c.c >= c.o;
-    const col = up ? '#22d38a' : '#f2545b';
-    const top = y(Math.max(c.o, c.c));
-    const bot = y(Math.min(c.o, c.c));
-    g.strokeStyle = col;
-    g.beginPath();
-    g.moveTo(Math.round(x) + 0.5, y(c.h));
-    g.lineTo(Math.round(x) + 0.5, y(c.l));
-    g.stroke();
-    g.fillStyle = col;
-    // Un doji garde 2 px de haut : sinon la bougie est invisible.
-    g.fillRect(x - bw / 2, top, bw, Math.max(2, bot - top));
-    if (!up) {                                   // contour : baissière plus lisible
-      g.strokeStyle = 'rgba(0,0,0,.35)';
-      g.lineWidth = 1;
-      g.strokeRect(x - bw / 2 + 0.5, top + 0.5, bw - 1, Math.max(2, bot - top) - 1);
-      g.lineWidth = 1.5;
-    }
-  });
+  // Un changement de symbole ou d'unité de temps impose un rechargement complet.
+  // (PriceChart ne connaît pas la plateforme : elle lui arrive via les données.)
+  useEffect(() => { api.current.full = true; }, [symbol, tf]);
 
-  // Niveaux ponctuels (swings, liquidité, OTE)
-  for (const l of levels || []) {
-    if (Number.isFinite(l.price)) {
-      const yy = y(l.price);
-      g.strokeStyle = l.side === 'support' ? 'rgba(34,211,138,.55)'
-        : l.side === 'resistance' ? 'rgba(242,84,91,.55)'
-        : l.side === 'liquidité' ? 'rgba(245,158,11,.5)' : 'rgba(96,165,250,.55)';
-      g.setLineDash([5, 4]);
-      g.beginPath(); g.moveTo(padL, yy); g.lineTo(W - padR, yy); g.stroke();
-      g.setLineDash([]);
-    }
-  }
+  // Niveaux calculés (FVG, order blocks, swings, liquidité) en lignes de prix
+  useEffect(() => {
+    const { series } = api.current;
+    if (!series) return;
+    api.current.lines.forEach(l => { try { series.removePriceLine(l); } catch (e) {} });
+    api.current.lines = (levels || []).filter(l => Number.isFinite(l.price)).map(l => {
+      const color = l.side === 'support' ? 'rgba(34,211,138,.8)'
+        : l.side === 'resistance' ? 'rgba(242,84,91,.8)'
+        : l.side === 'liquidité' ? 'rgba(245,158,11,.75)' : 'rgba(96,165,250,.75)';
+      return series.createPriceLine({ price: l.price, color, lineWidth: 1,
+        lineStyle: window.LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: l.kind });
+    });
+  }, [levels]);
 
-  // Dernier prix : repère immédiat (on voit tout de suite où on est)
-  const lastC = view[view.length - 1];
-  if (lastC) {
-    const yy = y(lastC.c);
-    g.strokeStyle = 'rgba(255,255,255,.75)';
-    g.setLineDash([2, 3]);
-    g.beginPath(); g.moveTo(padL, yy); g.lineTo(W - padR, yy); g.stroke();
-    g.setLineDash([]);
-    const label = lastC.c >= 1000 ? lastC.c.toFixed(2) : lastC.c.toFixed(5);
-    const tw = g.measureText(label).width;
-    g.fillStyle = '#e2e8f0';
-    g.fillRect(W - padR + 4, yy - 9, tw + 12, 18);
-    g.fillStyle = '#0b0f16';
-    g.font = 'bold 11px ui-sans-serif, system-ui, sans-serif';
-    g.fillText(label, W - padR + 10, yy);
-  }
+  // Repère du signal sur la bougie concernée
+  useEffect(() => {
+    const { series } = api.current;
+    if (!series || !signal || !signal.at) return;
+    const buy = signal.direction === 'BUY';
+    try {
+      series.setMarkers([{ time: Math.floor(signal.at / 1000),
+        position: buy ? 'belowBar' : 'aboveBar',
+        color: signal.status === 'confirme' ? (buy ? '#22d38a' : '#f2545b') : '#64748b',
+        shape: buy ? 'arrowUp' : 'arrowDown',
+        text: buy ? 'ACHAT' : 'VENTE' }]);
+    } catch (e) {}
+  }, [signal]);
 
-  // Heure de la première et de la dernière bougie (on sait ce qu'on regarde)
-  g.font = '10px ui-sans-serif, system-ui, sans-serif';
-  g.fillStyle = 'rgba(148,163,184,.75)';
-  const fmtT = t => new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  g.textBaseline = 'bottom';
-  if (view[0]) g.fillText(fmtT(view[0].t), padL, H - 6);
-  if (lastC) {
-    const s = fmtT(lastC.t);
-    g.fillText(s, W - padR - g.measureText(s).width, H - 6);
-  }
+  const reset = () => { try { api.current.chart.timeScale().fitContent(); } catch (e) {} };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <div ref={boxRef} style={{ width: '100%', height, borderRadius: 10, overflow: 'hidden' }} />
+      <button className="btn ghost sm" onClick={reset} title="Revenir au prix actuel"
+        style={{ position: 'absolute', top: 8, right: 92, zIndex: 5 }}>
+        <i className="fas fa-crosshairs"></i>
+      </button>
+    </div>
+  );
 }
 
 function LiveMarket() {
   const [meta, setMeta] = useState({ symbols: [], timeframes: ['1m', '5m', '15m', '1h'] });
   const [symbol, setSymbol] = useState('BTCUSDT');
+  const [provider, setProvider] = useState('binance');
   const [tf, setTf] = useState('5m');
   const [candles, setCandles] = useState([]);
   const [status, setStatus] = useState(null);
@@ -1665,7 +1656,6 @@ function LiveMarket() {
   const [alerts, setAlerts] = useState([]);        // derniers signaux reçus
   const [big, setBig] = useState(false);           // graphique agrandi
   const [offline, setOffline] = useState(false);   // données servies du cache
-  const canvasRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -1684,22 +1674,22 @@ function LiveMarket() {
   const load = useCallback(async () => {
     setErr('');
     try {
-      const r = await (await api(`/market/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&count=240`)).json();
+      const r = await (await api(`/market/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&count=240&provider=${provider}`)).json();
       if (!r.success) throw new Error(r.error || 'chargement impossible');
       setCandles(r.candles);
       setOffline(!!r.offline);
-      const st = await (await api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}`)).json();
+      const st = await (await api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`)).json();
       if (st.success) setReport(st.report);
       if (st.offline) setOffline(true);
     } catch (e) { setErr(e.message); }
-  }, [symbol, tf]);
+  }, [symbol, tf, provider]);
 
   useEffect(() => { load(); }, [load]);
 
   // Suivi en direct (SSE) : la bougie en cours est mise à jour en continu
   useEffect(() => {
     setLive(false);
-    const es = new EventSource(`/api/market/stream?symbol=${encodeURIComponent(symbol)}&tf=${tf}`);
+    const es = new EventSource(`/api/market/stream?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`);
     es.addEventListener('hello', () => setLive(true));
     es.addEventListener('candle', ev => {
       try {
@@ -1717,13 +1707,13 @@ function LiveMarket() {
     });
     es.addEventListener('error', () => setLive(false));
     return () => es.close();
-  }, [symbol, tf]);
+  }, [symbol, tf, provider]);
 
   // Signaux en direct : le serveur n'émet que sur CHANGEMENT de verdict,
   // donc un signal reçu = un vrai changement, pas du bruit.
   useEffect(() => {
     setSignal(null);
-    const es = new EventSource(`/api/signals/stream?symbol=${encodeURIComponent(symbol)}&tf=${tf}`);
+    const es = new EventSource(`/api/signals/stream?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`);
     es.addEventListener('signal', ev => {
       try {
         const v = JSON.parse(ev.data);
@@ -1735,31 +1725,14 @@ function LiveMarket() {
       } catch {}
     });
     return () => es.close();
-  }, [symbol, tf]);
-
-  useEffect(() => {
-    if (canvasRef.current) {
-      drawCandles(canvasRef.current, candles, report ? report.levels : [], { count: big ? 150 : 90 });
-    }
-  }, [candles, report, big]);
-
-  // Le canvas ne se redessine pas quand la fenêtre change de taille : on écoute.
-  useEffect(() => {
-    const redraw = () => {
-      if (canvasRef.current) {
-        drawCandles(canvasRef.current, candles, report ? report.levels : [], { count: big ? 150 : 90 });
-      }
-    };
-    window.addEventListener('resize', redraw);
-    return () => window.removeEventListener('resize', redraw);
-  }, [candles, report, big]);
+  }, [symbol, tf, provider]);
 
   const analyser = async () => {
     setBusy(true); setErr('');
     try {
       const r = await (await api('/market/analyze', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol, tf, maxStrategies: 3 })
+        body: JSON.stringify({ symbol, tf, provider, maxStrategies: 3 })
       })).json();
       if (!r.success) throw new Error(r.error || 'analyse impossible');
       setResult(r);
@@ -1779,8 +1752,19 @@ function LiveMarket() {
     <>
       <div className="panel" style={{ padding:'14px 16px', marginBottom:16, display:'flex',
         gap:10, alignItems:'center', flexWrap:'wrap' }}>
-        <select className="fld" style={{ width:210 }} value={symbol} onChange={e=>setSymbol(e.target.value)}>
-          {meta.symbols.map(s => <option key={s.symbol} value={s.symbol}>{s.label}</option>)}
+        <select className="fld" style={{ width:250 }} value={`${provider}|${symbol}`}
+          onChange={e=>{ const [pv, sy] = e.target.value.split('|'); setProvider(pv); setSymbol(sy); }}>
+          {Object.entries(meta.symbols.reduce((acc, s) => {
+            const k = s.providerLabel || 'Marchés';
+            (acc[k] = acc[k] || []).push(s);
+            return acc;
+          }, {})).map(([label, list]) => (
+            <optgroup key={label} label={label}>
+              {list.map(s => (
+                <option key={`${s.provider}|${s.symbol}`} value={`${s.provider}|${s.symbol}`}>{s.label}</option>
+              ))}
+            </optgroup>
+          ))}
         </select>
         <select className="fld" style={{ width:100 }} value={tf} onChange={e=>setTf(e.target.value)}>
           {meta.timeframes.map(t => <option key={t} value={t}>{t}</option>)}
@@ -1795,9 +1779,15 @@ function LiveMarket() {
             {ticks} maj · {new Date(lastUpdate).toLocaleTimeString('fr-FR')}
           </span>
         )}
-        {status && <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--muted)' }}>
-          <i className="fas fa-server"></i>{status.label}
-        </span>}
+        {/* Source du symbole AFFICHÉ, pas du fournisseur par défaut */}
+        {(() => {
+          const cur = meta.symbols.find(s => s.symbol === symbol && s.provider === provider);
+          return cur ? (
+            <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--muted)' }}>
+              <i className="fas fa-server"></i>{cur.providerLabel}
+            </span>
+          ) : null;
+        })()}
         {offline && (
           <span className="badge" style={{ background:'rgba(245,158,11,.15)', color:'#fbbf24' }}
             title="Réseau indisponible : les bougies proviennent du cache local. L'analyse reste utilisable.">
@@ -1939,11 +1929,12 @@ function LiveMarket() {
             {report ? `${report.candles} bougies · ATR ${report.atr14}` : ''}
           </span>
         </div>
-        <canvas ref={canvasRef} style={{ width:'100%', height: big ? 620 : 430, display:'block',
-          borderRadius:10, background:'rgba(7,10,17,.9)' }} />
+        <PriceChart candles={candles} levels={report ? report.levels : []} signal={signal}
+          height={big ? 620 : 430} symbol={symbol} tf={tf} />
         <p style={{ margin:'8px 0 0', fontSize:11.5, color:'var(--dim)' }}>
-          Chandeliers réels ({meta.symbols.find(s=>s.symbol===symbol)?.label || symbol} {tf}).
-          Zones vertes = support/OB/FVG haussier, rouges = résistance/OB/FVG baissier, pointillés orange = liquidité.
+          Graphique TradingView Lightweight Charts — molette = zoom, glisser = déplacer, double-clic = revenir au prix.
+          {' '}Bougies horodatées en UTC : un autre fuseau (comme celui de ton navigateur) décale l'alignement
+          des bougies, jamais les prix. Zones vertes = support/OB/FVG haussier, rouges = baissier, orange = liquidité.
         </p>
       </div>
 

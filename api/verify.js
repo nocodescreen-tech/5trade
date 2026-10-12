@@ -359,7 +359,12 @@ function tinyPng(W = 64, H = 40) {
     compile('reactbits.jsx', fs.readFileSync(path.join(FRONT, 'reactbits.jsx'), 'utf8'));
     ok('composant LiveMarket présent', /function LiveMarket\(\)/.test(jsx));
     ok('onglet « Direct » déclaré', /id:'live'/.test(jsx));
-    ok('graphique chandeliers (drawCandles)', /function drawCandles/.test(jsx));
+    ok('graphique TradingView (PriceChart)', /function PriceChart\(/.test(jsx));
+    ok('Lightweight Charts v4 servi localement',
+      /<script src="lightweight-charts\.js">/.test(htmlSrc) &&
+      fs.existsSync(path.join(FRONT, 'lightweight-charts.js')));
+    ok('sélecteur multi-plateformes (optgroup par source)', /optgroup/.test(jsx));
+    ok('zoom et déplacement actifs', /handleScroll: true, handleScale: true/.test(jsx));
   }
 
   // ── 10. Signaux : verdicts déterministes ──

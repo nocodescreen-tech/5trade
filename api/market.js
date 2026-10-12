@@ -84,55 +84,81 @@ const binance = {
 // ─────────────────────────────────────────────────────────────
 const deriv = {
   id: 'deriv',
-  label: 'Deriv (indices synthétiques)',
+  label: 'Deriv (Volatility, or, forex)',
   needsKey: false,
-  note: 'R_75 = Volatility 75. API actuellement en 520 depuis ce réseau.',
+  note: 'API v1 (api.derivws.com) — indices synthétiques 24/7, or, forex, crypto. Lecture seule.',
   symbols: [
-    { symbol: 'R_75', label: 'Volatility 75', kind: 'synthetic' },
+    { symbol: 'R_10', label: 'Volatility 10', kind: 'synthetic' },
     { symbol: 'R_25', label: 'Volatility 25', kind: 'synthetic' },
+    { symbol: 'R_50', label: 'Volatility 50', kind: 'synthetic' },
+    { symbol: 'R_75', label: 'Volatility 75', kind: 'synthetic' },
     { symbol: 'R_100', label: 'Volatility 100', kind: 'synthetic' },
+    { symbol: '1HZ100V', label: 'Volatility 100 (1 s)', kind: 'synthetic' },
     { symbol: 'frxXAUUSD', label: 'Or / USD (XAUUSD)', kind: 'metal' },
-    { symbol: 'frxEURUSD', label: 'EUR / USD', kind: 'forex' }
+    { symbol: 'frxXAGUSD', label: 'Argent / USD', kind: 'metal' },
+    { symbol: 'frxEURUSD', label: 'EUR / USD', kind: 'forex' },
+    { symbol: 'frxGBPUSD', label: 'GBP / USD', kind: 'forex' },
+    { symbol: 'frxUSDJPY', label: 'USD / JPY', kind: 'forex' },
+    { symbol: 'cryBTCUSD', label: 'BTC / USD', kind: 'crypto' },
+    { symbol: 'cryETHUSD', label: 'ETH / USD', kind: 'crypto' }
   ],
-  url() { return `wss://ws.derivws.com/websockets/v3?app_id=${process.env.DERIV_APP_ID || 1089}`; },
-  async candles(symbol, tf, count) {
-    // L'API Deriv v3 est WebSocket-only : on demande l'historique par WS.
+  // L'ancien point d'entrée ws.derivws.com/websockets/v3 est obsolète (520).
+  // L'API v1 expose un WebSocket public pour les données de marché : aucune
+  // clé, aucune authentification. (Le trading, lui, exige un token via OTP.)
+  ws: 'wss://api.derivws.com/trading/v1/options/ws/public',
+  granularity: tf => Math.round(TF_MS[tf] / 1000),
+  /** Un aller-retour sur le WebSocket public, en attendant `want`. */
+  _askOnce(payload, want, ms = 12000) {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(this.url());
-      const to = setTimeout(() => { try { ws.terminate(); } catch {} reject(new Error('Deriv : délai dépassé')); }, 12000);
-      ws.on('open', () => ws.send(JSON.stringify({
-        ticks_history: symbol, adjust_start_time: 1, count,
-        end: 'latest', style: 'candles', granularity: Math.round(TF_MS[tf] / 1000)
-      })));
-      ws.on('message', m => {
-        const d = JSON.parse(m);
-        if (d.error) { clearTimeout(to); try { ws.close(); } catch {} return reject(new Error('Deriv : ' + d.error.message)); }
-        if (d.msg_type === 'candles') {
-          clearTimeout(to); try { ws.close(); } catch {}
-          resolve((d.candles || []).map(c => ({
-            t: c.epoch * 1000, o: +c.open, h: +c.high, l: +c.low, c: +c.close, v: 0, closed: true
-          })));
-        }
+      const socket = new WebSocket(this.ws);
+      const done = (fn, arg) => { clearTimeout(timer); try { socket.close(); } catch {} fn(arg); };
+      const timer = setTimeout(() => done(reject, new Error('Deriv : délai dépassé')), ms);
+      socket.on('open', () => socket.send(JSON.stringify(payload)));
+      socket.on('message', raw => {
+        let d; try { d = JSON.parse(raw); } catch { return; }
+        if (d.error) return done(reject, new Error('Deriv : ' + d.error.message));
+        if (d.msg_type === want) done(resolve, d);
       });
-      ws.on('error', e => { clearTimeout(to); reject(new Error('Deriv : ' + e.message)); });
+      socket.on('error', e => done(reject, new Error('Deriv : ' + e.message)));
     });
   },
-  streamUrl() { return this.url(); },
-  onOpen(ws, symbols, tf) {
-    // Si un token en LECTURE SEULE est fourni, on s'authentifie pour pouvoir
-    // lire le compte (solde, positions). Le token se crée soi-même dans le
-    // tableau de bord Deriv en cochant UNIQUEMENT « Read » : jamais le mot de
-    // passe, et aucune capacité d'ordre ni de retrait.
-    const token = process.env.DERIV_API_TOKEN;
-    if (token) {
-      ws.send(JSON.stringify({ authorize: token }));
-    }
-    for (const s of symbols) {
-      ws.send(JSON.stringify({ ticks_history: s, adjust_start_time: 1, count: 1, end: 'latest', style: 'candles', granularity: Math.round(TF_MS[tf] / 1000), subscribe: 1 }));
+  /**
+   * Deriv ferme parfois la toute première connexion (ECONNRESET observé en
+   * pratique). Comme c'est transitoire et sans gravité, on retente une fois
+   * plutôt que de faire échouer l'affichage du graphique.
+   */
+  async _ask(payload, want, ms = 12000, essais = 2) {
+    for (let i = 1; i <= essais; i++) {
+      try { return await this._askOnce(payload, want, ms); }
+      catch (e) {
+        const transitoire = /ECONNRESET|ECONNREFUSED|socket hang|délai dépassé|timeout/i.test(e.message);
+        if (i === essais || !transitoire) throw e;
+        await new Promise(r => setTimeout(r, 800));
+      }
     }
   },
+  _toCandles(list) {
+    return (list || []).map(c => ({
+      t: c.epoch * 1000, o: +c.open, h: +c.high, l: +c.low, c: +c.close, v: 0, closed: true
+    }));
+  },
+  async candles(symbol, tf, count) {
+    const d = await this._ask({
+      ticks_history: symbol, adjust_start_time: 1, count,
+      end: 'latest', style: 'candles', granularity: this.granularity(tf), req_id: 1
+    }, 'candles');
+    return this._toCandles(d.candles);
+  },
+  streamUrl() { return this.ws; },
+  onOpen(ws, symbols, tf) {
+    symbols.forEach((s, i) => ws.send(JSON.stringify({
+      ticks_history: s, adjust_start_time: 1, count: 1, end: 'latest',
+      style: 'candles', granularity: this.granularity(tf), subscribe: 1, req_id: i + 1
+    })));
+  },
+  /** Le direct arrive en msg_type « ohlc » (la bougie en cours se met à jour). */
   parse(msg) {
-    if (msg.msg_type !== 'ohlc') return null;
+    if (msg.msg_type !== 'ohlc' || !msg.ohlc) return null;
     const o = msg.ohlc;
     return {
       symbol: o.symbol,
@@ -191,7 +217,17 @@ const providerStatus = () => {
   };
 };
 
-const listSymbols = () => activeProvider().symbols;
+const providerById = id => PROVIDERS[id] || activeProvider();
+
+/**
+ * Tous les symboles de TOUS les fournisseurs, chacun étiqueté de sa source :
+ * un même écran peut ainsi suivre R_75 (Deriv) et BTCUSDT (Binance).
+ */
+const listSymbols = () => Object.values(PROVIDERS).flatMap(p =>
+  p.symbols
+    .filter(s => !(p.needsKey && !process.env.TWELVEDATA_API_KEY))
+    .map(s => ({ ...s, provider: p.id, providerLabel: p.label }))
+);
 
 // ─────────────────────────────────────────────────────────────
 // Cache de bougies + flux temps réel
@@ -249,9 +285,9 @@ function cacheInfo() {
  * Si le réseau échoue, on sert le cache : l'analyse reste possible hors ligne.
  * @returns {Promise<{candles:Array, provider:string, source:string, offline?:boolean}>}
  */
-async function getCandles(symbol, tf, count = 300) {
+async function getCandles(symbol, tf, count = 300, providerId) {
   if (!TF_MS[tf]) throw new Error(`Timeframe inconnu : ${tf} (attendu ${TIMEFRAMES.join(', ')})`);
-  const p = activeProvider();
+  const p = providerId ? providerById(providerId) : activeProvider();
   const k = keyOf(p.id, symbol, tf);
   const buf = buffers.get(k);
 
@@ -295,8 +331,8 @@ function applyCandle(providerId, symbol, tf, candle) {
  * Ouvre (ou réutilise) le flux temps réel et notifie à chaque bougie.
  * @returns {function} arrêt de l'abonnement de cet appelant
  */
-function watch(symbol, tf, onCandle) {
-  const p = activeProvider();
+function watch(symbol, tf, onCandle, providerId) {
+  const p = providerId ? providerById(providerId) : activeProvider();
   if (!TF_MS[tf]) throw new Error(`Timeframe inconnu : ${tf}`);
   const sub = { provider: p.id, symbol, tf, onCandle };
   subscribers.add(sub);

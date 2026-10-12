@@ -1489,7 +1489,8 @@ app.get('/api/market/candles', requireAuth, async (req, res) => {
     const tf = String(req.query.tf || '5m').trim();
     const count = Math.min(parseInt(req.query.count || '300', 10) || 300, 1000);
     if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
-    const r = await Market.getCandles(symbol, tf, count);
+    const provider = String(req.query.provider || '').trim() || undefined;
+    const r = await Market.getCandles(symbol, tf, count, provider);
     res.json({ success: true, symbol, timeframe: tf, ...r });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -1501,7 +1502,8 @@ app.get('/api/market/structure', requireAuth, async (req, res) => {
     const tf = String(req.query.tf || '5m').trim();
     const count = Math.min(parseInt(req.query.count || '300', 10) || 300, 1000);
     if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
-    const { candles, provider, source, offline } = await Market.getCandles(symbol, tf, count);
+    const prov = String(req.query.provider || '').trim() || undefined;
+    const { candles, provider, source, offline } = await Market.getCandles(symbol, tf, count, prov);
     const report = Structure.analyze(candles, { symbol, timeframe: tf });
     res.json({ success: true, symbol, timeframe: tf, provider, source, offline: !!offline, report });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -1516,6 +1518,7 @@ app.get('/api/market/cache', requireAuth, (req, res) => {
 app.get('/api/market/stream', requireAuth, (req, res) => {
   const symbol = String(req.query.symbol || '').trim();
   const tf = String(req.query.tf || '5m').trim();
+  const provider = String(req.query.provider || '').trim() || undefined;
   if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
 
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -1527,7 +1530,7 @@ app.get('/api/market/stream', requireAuth, (req, res) => {
   try {
     stop = Market.watch(symbol, tf, candle => {
       res.write(`event: candle\ndata: ${JSON.stringify(candle)}\n\n`);
-    });
+    }, provider);
   } catch (e) {
     res.write(`event: error\ndata: ${JSON.stringify({ error: e.message })}\n\n`);
     return res.end();
@@ -1547,7 +1550,8 @@ app.post('/api/market/analyze', requireAuth, async (req, res) => {
     const maxStrategies = parseInt(req.body.maxStrategies || '3', 10);
     if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
 
-    const { candles, provider, source, offline } = await Market.getCandles(symbol, tf, 300);
+    const prov = String(req.body.provider || '').trim() || undefined;
+    const { candles, provider, source, offline } = await Market.getCandles(symbol, tf, 300, prov);
     const report = Structure.analyze(candles, { symbol, timeframe: tf });
 
     const all = await loadAllStrategies();
@@ -1622,7 +1626,8 @@ app.get('/api/signals', requireAuth, async (req, res) => {
     const symbol = String(req.query.symbol || '').trim();
     const tf = String(req.query.tf || '5m').trim();
     if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
-    const { candles, provider, offline } = await Market.getCandles(symbol, tf, 300);
+    const prov = String(req.query.provider || '').trim() || undefined;
+    const { candles, provider, offline } = await Market.getCandles(symbol, tf, 300, prov);
     const closed = candles.filter(c => c.closed !== false);
     const verdict = Signals.detect(closed, { symbol, timeframe: tf });
     verdict.strategies = await strategiesForSignal(verdict);
@@ -1634,6 +1639,7 @@ app.get('/api/signals', requireAuth, async (req, res) => {
 app.get('/api/signals/stream', requireAuth, (req, res) => {
   const symbol = String(req.query.symbol || '').trim();
   const tf = String(req.query.tf || '5m').trim();
+  const provider = String(req.query.provider || '').trim() || undefined;
   if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
   if (!Market.TF_MS[tf]) return res.status(400).json({ error: `Timeframe inconnu : ${tf}` });
 
@@ -1646,7 +1652,7 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
   let closed = true;
   let evaluate = async () => {
     try {
-      const { candles } = await Market.getCandles(symbol, tf, 300);
+      const { candles } = await Market.getCandles(symbol, tf, 300, provider);
       // On n'analyse QUE des bougies terminées : sinon le verdict clignote
       // à chaque tick et ne veut rien dire.
       const done = candles.filter(c => c.closed !== false);
@@ -1667,7 +1673,7 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
 
   let stop = () => {};
   try {
-    stop = Market.watch(symbol, tf, (candle) => { if (candle.closed) evaluate(); });
+    stop = Market.watch(symbol, tf, (candle) => { if (candle.closed) evaluate(); }, provider);
   } catch (e) {
     res.write(`event: error\ndata: ${JSON.stringify({ error: e.message })}\n\n`);
     return res.end();
