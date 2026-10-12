@@ -77,34 +77,73 @@ function ruleBreak(candles, report) {
   };
 }
 
-/** R3 — réaction dans un order block / FVG (le prix y entre puis rejette). */
+/**
+ * R3 — réaction dans un order block / FVG.
+ *
+ * Deux corrections par rapport à la première version, révélées par la lecture
+ * d'un vrai graphique :
+ *  1. La POSITION dans le range décide. Une zone de demande (haussier) touchée
+ *     en PREMIUM est un piège : le prix vient d'en haut, la réaction naturelle
+ *     est baissière. Confirmer un achat là-dessus est l'erreur la plus coûteuse.
+ *     On achète une zone de demande quand le prix vient d'en bas (discount), et
+ *     on vend une zone d'offre quand le prix vient d'en haut (premium).
+ *  2. Une zone touchée puis CASSÉE est une information, pas un non-événement :
+ *     l'échec d'une zone haussière en premium est un signal de VENTE.
+ */
 function ruleZone(candles, report) {
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2];
+  if (!prev) return null;
+  const pd = report.premiumDiscount;
+  const position = pd ? pd.position : null;   // 'premium' | 'discount' | null
   const zones = [
     ...(report.orderBlocks || []).map(z => ({ ...z, kind: 'order block' })),
     ...(report.fvgs || []).map(z => ({ ...z, kind: 'FVG' }))
   ];
+  const range = Math.max(last.h - last.l, 1e-9);
+  const body = Math.abs(last.c - last.o) / range;
+  const strength = +(0.5 + Math.min(body, 0.5) * 0.6).toFixed(3);
+  const where = position || 'zone neutre';
+
   for (const z of zones) {
-    const touched = prev && prev.l <= z.high && prev.h >= z.low;   // on est entré dans la zone
+    const touched = prev.l <= z.high && prev.h >= z.low;   // on est entré dans la zone
     if (!touched) continue;
-    const range = Math.max(last.h - last.l, 1e-9);
-    const body = Math.abs(last.c - last.o) / range;
-    if (z.type === 'bullish' && last.c > z.high) {
-      return {
-        rule: 'R3', name: `Rejet sur ${z.kind} haussier`, direction: 'BUY',
-        strength: +(0.5 + Math.min(body, 0.5) * 0.6).toFixed(3),
-        detail: `zone ${num(z.low)}–${num(z.high)} touchée puis clôture au-dessus`,
-        level: num(z.high)
-      };
+
+    if (z.type === 'bullish') {
+      // Zone de demande : achat seulement si le prix vient d'en bas.
+      if (last.c > z.high && position !== 'premium') {
+        return {
+          rule: 'R3', name: `Rejet sur ${z.kind} haussier`, direction: 'BUY', strength,
+          detail: `zone ${num(z.low)}–${num(z.high)} touchée puis clôture au-dessus (prix en ${where})`,
+          level: num(z.high)
+        };
+      }
+      // Piège : zone de demande prise par le haut, puis cédée → vente.
+      if (last.c < z.low && position === 'premium') {
+        return {
+          rule: 'R3', name: `Échec de ${z.kind} haussier en premium`, direction: 'SELL', strength,
+          detail: `zone ${num(z.low)}–${num(z.high)} atteinte en premium puis cassée vers le bas`,
+          level: num(z.low)
+        };
+      }
     }
-    if (z.type === 'bearish' && last.c < z.low) {
-      return {
-        rule: 'R3', name: `Rejet sur ${z.kind} baissier`, direction: 'SELL',
-        strength: +(0.5 + Math.min(body, 0.5) * 0.6).toFixed(3),
-        detail: `zone ${num(z.low)}–${num(z.high)} touchée puis clôture en dessous`,
-        level: num(z.low)
-      };
+
+    if (z.type === 'bearish') {
+      // Zone d'offre : vente seulement si le prix vient d'en haut.
+      if (last.c < z.low && position !== 'discount') {
+        return {
+          rule: 'R3', name: `Rejet sur ${z.kind} baissier`, direction: 'SELL', strength,
+          detail: `zone ${num(z.low)}–${num(z.high)} touchée puis clôture en dessous (prix en ${where})`,
+          level: num(z.low)
+        };
+      }
+      if (last.c > z.high && position === 'discount') {
+        return {
+          rule: 'R3', name: `Échec de ${z.kind} baissier en discount`, direction: 'BUY', strength,
+          detail: `zone ${num(z.low)}–${num(z.high)} atteinte en discount puis cassée vers le haut`,
+          level: num(z.high)
+        };
+      }
     }
   }
   return null;

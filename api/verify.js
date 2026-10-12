@@ -435,6 +435,44 @@ function tinyPng(W = 64, H = 40) {
   catch { ok('signaux : refuse < 20 bougies', true); }
   ok('signaux : règles nommées', ['R1','R2','R3','R4'].every(r => typeof Sig[r === 'R1' ? 'ruleSweep' : r === 'R2' ? 'ruleBreak' : r === 'R3' ? 'ruleZone' : 'rulePosition'] === 'function'));
 
+  // ── R3 : la position dans le range décide du sens ──
+  // Cas vécu : sur XAUUSD, une zone de demande atteinte AU-DESSUS de l'équilibre
+  // (premium) puis cédée était lue comme un ACHAT. C'est un piège, et la cassure
+  // de la zone est un signal de VENTE.
+  const b1 = (o, h, l, c) => ({ t: 0, o, h, l, c, v: 1 });
+  const casZone = ({ position, type, low, high, prev, close }) => Sig.ruleZone(
+    [b1(prev, prev + 1, prev, prev), b1(close, close + 0.3, close - 0.3, close)],
+    {
+      premiumDiscount: { position, equilibrium: 105, premium: 110, discount: 100 },
+      orderBlocks: [{ low, high, type, kind: 'order block' }], fvgs: [], atr14: 1
+    }
+  );
+  {
+    const r = casZone({ position: 'premium', type: 'bullish', low: 106, high: 108, prev: 107, close: 105 });
+    ok('R3 : zone de demande cédée en premium → VENTE (jamais un achat)',
+      !!r && r.direction === 'SELL', r ? `${r.name} → ${r.direction}` : 'aucune règle');
+    ok('R3 : le détail dit la position', !!r && /premium/i.test(r.detail), r ? r.detail : '—');
+    ok('R3 : zone de demande tenue en premium → pas de nouvel achat',
+      (casZone({ position: 'premium', type: 'bullish', low: 106, high: 108, prev: 107, close: 109 }) || {}).direction !== 'BUY');
+    ok('R3 : zone de demande tenue en discount → ACHAT',
+      (casZone({ position: 'discount', type: 'bullish', low: 101, high: 103, prev: 102, close: 104 }) || {}).direction === 'BUY');
+    ok('R3 : zone d\'offre rejetée en premium → VENTE',
+      (casZone({ position: 'premium', type: 'bearish', low: 108, high: 110, prev: 107, close: 106 }) || {}).direction === 'SELL');
+    ok('R3 : zone d\'offre cédée en discount → ACHAT',
+      (casZone({ position: 'discount', type: 'bearish', low: 102, high: 104, prev: 101, close: 105 }) || {}).direction === 'BUY');
+  }
+
+  // ── Marchés cotés (COMEX/NYMEX) : la source qui colle à TradingView ──
+  const Mk = require('./market.js');
+  const yh = Mk.listSymbols().filter(s => s.provider === 'yahoo');
+  ok('fournisseur « marchés cotés » déclaré', yh.length >= 8, `${yh.length} symboles`);
+  ok('or COMEX (GC1!) présent', yh.some(s => s.symbol === 'GC=F'), 'GC=F');
+  ok('chaque fournisseur porte sa source',
+    Mk.listSymbols().every(s => s.provider && s.providerLabel));
+  ok('plusieurs plateformes cumulables',
+    new Set(Mk.listSymbols().map(s => s.provider)).size >= 3,
+    [...new Set(Mk.listSymbols().map(s => s.provider))].join(', '));
+
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
   if (skip) console.log(`  (${skip} test(s) non exécuté(s) : dépendance externe absente — voir les lignes « • »)`);
   process.exit(fail ? 1 : 0);
