@@ -1154,6 +1154,9 @@ function tinyPng(W = 64, H = 40) {
   // Le backend existait mais AUCUN champ ne l'exposait : impossible de configurer
   // le bot depuis l'application. Le « chat id » se trouve maintenant tout seul.
   {
+    // server.js est relu ici : les variables des autres blocs ne sont pas
+    // visibles d'un bloc a l'autre, et srvTg n'existait donc pas dans ce scope.
+    const srvTg = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
     const aSrc = fs.readFileSync(path.join(__dirname, 'alerts.js'), 'utf8');
     ok('les réglages portent le jeton du bot et la conversation',
       /telegramToken: null/.test(aSrc) && /telegramChat: null/.test(aSrc));
@@ -1165,18 +1168,18 @@ function tinyPng(W = 64, H = 40) {
       /parse_mode: 'HTML'/.test(aSrc) && /disable_web_page_preview: true/.test(aSrc));
 
     ok('une route retrouve la conversation automatiquement',
-      /app\.post\('\/api\/alerts\/telegram\/trouver'/.test(srv2)
-      && /getUpdates/.test(srv2));
+      /app\.post\('\/api\/alerts\/telegram\/trouver'/.test(srvTg)
+      && /getUpdates/.test(srvTg));
     ok('la route nomme la conversation trouvée',
-      /msg\.chat\.title \|\| \[msg\.chat\.first_name/.test(srv2));
+      /msg\.chat\.title \|\| \[msg\.chat\.first_name/.test(srvTg));
     ok('un jeton refusé est expliqué clairement',
-      /Telegram refuse ce jeton/.test(srv2));
+      /Telegram refuse ce jeton/.test(srvTg));
     ok('sans conversation, la route explique quoi faire',
-      /envoie-lui « salut »/.test(srv2));
+      /envoie-lui « salut »/.test(srvTg));
     ok('le test d\'envoi gère le canal Telegram',
-      /canal === 'telegram'/.test(srv2) && /regarde ton téléphone/.test(srv2));
+      /canal === 'telegram'/.test(srvTg) && /regarde ton téléphone/.test(srvTg));
     ok('le test refuse un envoi sans jeton ni conversation',
-      /Jeton du bot manquant/.test(srv2) && /Conversation manquante/.test(srv2));
+      /Jeton du bot manquant/.test(srvTg) && /Conversation manquante/.test(srvTg));
 
     ok('l\'écran propose le jeton, la conversation et les deux boutons',
       /Alertes Telegram/.test(jsx) && /Jeton du bot \(donné par BotFather\)/.test(jsx)
