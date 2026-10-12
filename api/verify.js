@@ -233,13 +233,17 @@ function tinyPng(W = 64, H = 40) {
         );
       } catch (e) {
         lastErr = e.message;
-        if (essai === 1 && /50\d|UNAVAILABLE/.test(e.message)) {
+        // 429 = quota atteint, 5xx = service indisponible : dans les deux cas
+        // ce n'est pas une erreur du code, on retente puis on marque « non testé ».
+        if (essai === 1 && /429|50\d|UNAVAILABLE|RESOURCE_EXHAUSTED/i.test(e.message)) {
           await new Promise(r => setTimeout(r, 2500));
         }
       }
     }
     if (txt) ok('appel vision → texte non vide', txt.length > 3, JSON.stringify(txt.slice(0, 70)));
-    else if (/50\d|UNAVAILABLE/.test(lastErr || '')) skipped('appel vision', 'service indisponible (503) — réessayez plus tard');
+    else if (/429|50\d|UNAVAILABLE|RESOURCE_EXHAUSTED/i.test(lastErr || '')) {
+      skipped('appel vision', /429|RESOURCE_EXHAUSTED/i.test(lastErr) ? 'quota atteint (429) — réessayez plus tard' : 'service indisponible (503) — réessayez plus tard');
+    }
     else ok('appel vision', false, lastErr);
   }
 

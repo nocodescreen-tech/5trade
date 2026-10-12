@@ -1504,6 +1504,18 @@ app.get('/api/market/structure', requireAuth, async (req, res) => {
     if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
     const prov = String(req.query.provider || '').trim() || undefined;
     const { candles, provider, source, offline } = await Market.getCandles(symbol, tf, count, prov);
+    // Marché fermé (week-end, hors séance) = quelques bougies seulement. Ce n'est
+    // pas une erreur : on renvoie 200 avec l'information, sinon le graphique
+    // restait vide alors que les bougies existent.
+    if (candles.length < 20) {
+      return res.json({
+        success: true, symbol, timeframe: tf, provider, source, offline: !!offline,
+        insufficient: true, candles: candles.length, report: null,
+        note: `Seulement ${candles.length} bougie(s) : marché fermé ou hors séance. `
+          + `L'analyse demande 20 bougies minimum. Les indices synthétiques (Volatility) `
+          + `et les cryptos cotent 24 h/24.`
+      });
+    }
     const report = Structure.analyze(candles, { symbol, timeframe: tf });
     res.json({ success: true, symbol, timeframe: tf, provider, source, offline: !!offline, report });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -1629,6 +1641,13 @@ app.get('/api/signals', requireAuth, async (req, res) => {
     const prov = String(req.query.provider || '').trim() || undefined;
     const { candles, provider, offline } = await Market.getCandles(symbol, tf, 300, prov);
     const closed = candles.filter(c => c.closed !== false);
+    if (closed.length < 20) {
+      return res.json({
+        success: true, provider, offline: !!offline, dataPoints: closed.length,
+        insufficient: true, verdict: null,
+        note: `Seulement ${closed.length} bougie(s) clôturée(s) : signal impossible pour l'instant (20 minimum).`
+      });
+    }
     const verdict = Signals.detect(closed, { symbol, timeframe: tf });
     verdict.strategies = await strategiesForSignal(verdict);
     res.json({ success: true, provider, offline: !!offline, dataPoints: closed.length, verdict });
@@ -1656,7 +1675,15 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
       // On n'analyse QUE des bougies terminées : sinon le verdict clignote
       // à chaque tick et ne veut rien dire.
       const done = candles.filter(c => c.closed !== false);
-      if (done.length < 20) return;
+      if (done.length < 20) {
+        if (lastKey !== 'insuffisant') {
+          lastKey = 'insuffisant';
+          res.write(`event: signal\ndata: ${JSON.stringify({ status: 'indisponible', direction: 'NEUTRE',
+            insufficient: true, candles: done.length, at: done.length ? done[done.length - 1].t : null,
+            summary: `Données insuffisantes (${done.length} bougie(s)) : marché fermé ou hors séance.` })}\n\n`);
+        }
+        return;
+      }
       const verdict = Signals.detect(done, { symbol, timeframe: tf });
       const key = [verdict.status, verdict.direction, (verdict.rules || []).map(r => r.rule).sort().join(',')].join('|');
       if (key !== lastKey) {

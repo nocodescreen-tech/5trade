@@ -334,6 +334,9 @@ const { SplashCursor, SpotlightCard, GradientText, ShinyText, LatticeLoader, Cou
 const API_BASE = (window.location.port === '5173' || window.location.protocol === 'file:')
   ? 'http://localhost:3001/api' : '/api';
 
+// Version de l'interface (affichée en en-tête) : permet de voir d'un coup d'œil
+// si la page ouverte est bien la dernière, ou une version restée en cache.
+const UI_VERSION = 'r2026-10-12a';
 const api = (path, opts = {}) =>
   fetch(`${API_BASE}${path}`, { credentials: 'include', ...opts });
 
@@ -1536,11 +1539,19 @@ function History({ history }) {
 function PriceChart({ candles, levels, signal, height, symbol, tf }) {
   const boxRef = useRef(null);
   const api = useRef({ chart: null, series: null, vol: null, lines: [], full: true });
+  // Suit le couple symbole/unité de temps : tout changement impose un
+  // rechargement COMPLET de la série. Sans cela, un simple update() sur un
+  // symbole dont l'échelle de prix est très différente (BTC ≈ 83 000 →
+  // Volatility 75 ≈ 43 000) laissait un graphique vide.
+  const keyRef = useRef(null);
+  // Sans la bibliothèque, mieux vaut le dire que laisser un cadre vide.
+  const [libMissing, setLibMissing] = useState(!window.LightweightCharts);
 
   useEffect(() => {
     const box = boxRef.current;
     const LC = window.LightweightCharts;
-    if (!box || !LC) return;
+    if (!box || !LC) { setLibMissing(true); return; }
+    setLibMissing(false);
     const chart = LC.createChart(box, {
       layout: { background: { type: 'solid', color: '#080c14' }, textColor: '#cbd5e1', fontSize: 11,
         fontFamily: 'ui-sans-serif, system-ui, sans-serif' },
@@ -1566,11 +1577,22 @@ function PriceChart({ candles, levels, signal, height, symbol, tf }) {
     chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     api.current = { chart, series, vol, lines: [], full: true };
 
-    const fit = () => chart.applyOptions({ width: box.clientWidth, height: box.clientHeight });
+    // La taille ne doit jamais rester à zéro : dans un onglet en arrière-plan
+    // ou un panneau pas encore disposé, clientWidth vaut 0 et le graphique
+    // resterait invisible. On remesure à plusieurs moments.
+    const fit = () => {
+      const w = box.clientWidth, h = box.clientHeight;
+      if (w > 0 && h > 0) chart.applyOptions({ width: w, height: h });
+    };
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(box);
-    return () => { ro.disconnect(); chart.remove(); api.current = { chart: null, series: null, vol: null, lines: [], full: true }; };
+    const t1 = setTimeout(fit, 250);
+    const t2 = setTimeout(fit, 1200);
+    return () => {
+      clearTimeout(t1); clearTimeout(t2); ro.disconnect(); chart.remove();
+      api.current = { chart: null, series: null, vol: null, lines: [], full: true };
+    };
   }, []);
 
   // setData au premier chargement (ou après changement de symbole/timeframe),
@@ -1578,9 +1600,11 @@ function PriceChart({ candles, levels, signal, height, symbol, tf }) {
   useEffect(() => {
     const { chart, series, vol } = api.current;
     if (!series || !candles || !candles.length) return;
-    const key = c => Math.floor(c.t / 1000);
-    const point = c => ({ time: key(c), open: c.o, high: c.h, low: c.l, close: c.c });
-    const bar = c => ({ time: key(c), value: c.v || 0, color: c.c >= c.o ? 'rgba(34,211,138,.32)' : 'rgba(242,84,91,.32)' });
+    const sigKey = `${symbol}|${tf}`;
+    if (keyRef.current !== sigKey) { api.current.full = true; keyRef.current = sigKey; }
+    const toTime = c => Math.floor(c.t / 1000);
+    const point = c => ({ time: toTime(c), open: c.o, high: c.h, low: c.l, close: c.c });
+    const bar = c => ({ time: toTime(c), value: c.v || 0, color: c.c >= c.o ? 'rgba(34,211,138,.32)' : 'rgba(242,84,91,.32)' });
     if (api.current.full) {
       series.setData(candles.map(point));
       if (vol) vol.setData(candles.map(bar));
@@ -1591,11 +1615,11 @@ function PriceChart({ candles, levels, signal, height, symbol, tf }) {
       series.update(point(last));
       if (vol) vol.update(bar(last));
     }
-  }, [candles]);
+  }, [candles, symbol, tf]);
 
-  // Un changement de symbole ou d'unité de temps impose un rechargement complet.
-  // (PriceChart ne connaît pas la plateforme : elle lui arrive via les données.)
-  useEffect(() => { api.current.full = true; }, [symbol, tf]);
+  // (Le rechargement complet au changement de symbole/timeframe est géré
+  //  dans l'effet des données via keyRef — un effet séparé s'exécutait dans
+  //  le mauvais ordre et laissait la série précédente à l'écran.)
 
   // Niveaux calculés (FVG, order blocks, swings, liquidité) en lignes de prix
   useEffect(() => {
@@ -1630,6 +1654,18 @@ function PriceChart({ candles, levels, signal, height, symbol, tf }) {
   return (
     <div style={{ position: 'relative' }}>
       <div ref={boxRef} style={{ width: '100%', height, borderRadius: 10, overflow: 'hidden' }} />
+      {libMissing && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 8, textAlign: 'center',
+          background: 'rgba(8,12,20,.92)', borderRadius: 10, fontSize: 13, color: '#fbbf24' }}>
+          <i className="fas fa-triangle-exclamation" style={{ fontSize: 20 }}></i>
+          <b>Bibliothèque de graphique non chargée</b>
+          <span style={{ color: 'var(--muted)', maxWidth: 380 }}>
+            La page vient d'une version en cache. Rechargez-la en forçant :
+            <b> Ctrl + Maj + R</b> (ou Ctrl + F5).
+          </span>
+        </div>
+      )}
       <button className="btn ghost sm" onClick={reset} title="Revenir au prix actuel"
         style={{ position: 'absolute', top: 8, right: 92, zIndex: 5 }}>
         <i className="fas fa-crosshairs"></i>
@@ -1681,7 +1717,14 @@ function LiveMarket() {
       const st = await (await api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`)).json();
       if (st.success) setReport(st.report);
       if (st.offline) setOffline(true);
-    } catch (e) { setErr(e.message); }
+    } catch (e) {
+      const m = String(e.message || e);
+      // « Pas assez de bougies » = presque toujours un marché fermé (week-end,
+      // hors séance). Un message technique ne sert à rien : on explique quoi faire.
+      setErr(/Pas assez de bougies/i.test(m)
+        ? `${m} — ce marché est probablement FERMÉ (week-end ou hors séance). Les indices synthétiques (Volatility) et les cryptos cotent 24 h/24 : essayez-en un.`
+        : m);
+    }
   }, [symbol, tf, provider]);
 
   useEffect(() => { load(); }, [load]);
@@ -2510,6 +2553,10 @@ function Dashboard({ user, onLogout }) {
             </span>
             <span className="badge" style={{ background:'rgba(16,185,129,.12)', color:'#34d399' }}>
               <span className="dot-live"></span>en ligne
+            </span>
+            <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--dim)' }}
+              title="Version de l'interface. Si elle ne correspond pas à la dernière livrée, rechargez avec Ctrl+Maj+R.">
+              {UI_VERSION}
             </span>
             {stats && (
               <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--muted)' }}>
