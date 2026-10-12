@@ -1412,12 +1412,35 @@ function Strategies({ strategies, onDelete, onSaved }) {
   // Édition en place : on modifie une stratégie sans quitter la liste.
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ title:'', content:'', type:'strategy' });
+  // Fonctionnement de la stratégie : règles, style, unités de temps, seuils et
+  // réglages de calcul. C'est ce qui décide COMMENT elle analyse le marché.
+  const [moteur, setMoteur] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+
+  const MOTEUR_VIDE = {
+    style: '', regles: ['R1','R2','R3','R4'], seuilForce: 0.35, seuilRegles: 2,
+    timeframes: [], seuilAlignes: 2, swingsWindow: 2, toleranceLiquidite: 0.0008,
+    impulsion: 3, atrStop: 1.5
+  };
+  const REGLES_INFO = [
+    { id:'R1', label:'Balayage de liquidité' },
+    { id:'R2', label:'Rupture de structure' },
+    { id:'R3', label:'Zone réactive (OB / FVG)' },
+    { id:'R4', label:'Position premium / discount' }
+  ];
+  const TF_INFO = ['1m','5m','15m','30m','1h','4h','1d'];
+  const STYLES_INFO = [
+    { id:'', label:'— aucun (déduit du texte) —' },
+    { id:'scalping', label:'Scalping (1m / 5m / 15m, stop serré)' },
+    { id:'intraday', label:'Intraday (5m / 15m / 1h)' },
+    { id:'swing', label:'Swing (1h / 4h / 1d, stop large)' }
+  ];
 
   const ouvrirEdition = (s) => {
     setEditing(s.id);
     setForm({ title: s.title || '', content: s.content || s.structured?.summary || '', type: s.type || 'strategy' });
+    setMoteur(s.moteur ? { ...MOTEUR_VIDE, ...s.moteur } : null);
     setErr('');
   };
 
@@ -1426,7 +1449,7 @@ function Strategies({ strategies, onDelete, onSaved }) {
     try {
       const r = await api('/knowledge/' + encodeURIComponent(editing), {
         method:'PUT', headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify(form)
+        body: JSON.stringify({ ...form, moteur })
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Modification refusée');
@@ -1525,6 +1548,91 @@ function Strategies({ strategies, onDelete, onSaved }) {
                     <p style={{ margin:0, fontSize:11.5, color:'var(--dim)' }}>
                       Les étiquettes et les règles d'analyse sont recalculées depuis ce texte.
                     </p>
+
+                    {/* Fonctionnement : décider COMMENT la stratégie analyse,
+                        au lieu de le déduire du texte. */}
+                    <div style={{ border:'1px solid rgba(27,36,51,.7)', borderRadius:8, padding:'10px 12px', display:'grid', gap:9 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                        <b style={{ fontSize:12.5 }}>Fonctionnement</b>
+                        <span style={{ fontSize:11, color: moteur ? '#34d399' : 'var(--dim)' }}>
+                          {moteur ? 'défini explicitement' : 'déduit du texte'}
+                        </span>
+                        <button onClick={() => setMoteur(m => m ? null : { ...MOTEUR_VIDE })}
+                          style={{ marginLeft:'auto', background:'none', border:'none', color:'#60a5fa', cursor:'pointer', fontSize:12 }}>
+                          {moteur ? 'Revenir à la déduction' : 'Définir le fonctionnement'}
+                        </button>
+                      </div>
+
+                      {moteur && (<>
+                        <div>
+                          <div style={{ fontSize:11.5, color:'var(--muted)', marginBottom:4 }}>Style de trading (fixe les unités de temps)</div>
+                          <select className="fld" style={{ margin:0, width:'100%' }} value={moteur.style || ''}
+                            onChange={e => setMoteur(m => ({ ...m, style: e.target.value, timeframes: [] }))}>
+                            {STYLES_INFO.map(x => <option key={x.id} value={x.id}>{x.label}</option>)}
+                          </select>
+                        </div>
+
+                        <div>
+                          <div style={{ fontSize:11.5, color:'var(--muted)', marginBottom:4 }}>Règles appliquées</div>
+                          <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+                            {REGLES_INFO.map(r => (
+                              <label key={r.id} style={{ display:'flex', gap:5, alignItems:'center', fontSize:12, cursor:'pointer' }}>
+                                <input type="checkbox" checked={(moteur.regles || []).includes(r.id)}
+                                  onChange={() => setMoteur(m => ({ ...m,
+                                    regles: (m.regles || []).includes(r.id)
+                                      ? (m.regles || []).filter(x => x !== r.id)
+                                      : [...(m.regles || []), r.id] }))} />
+                                {r.id} · {r.label}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div style={{ fontSize:11.5, color:'var(--muted)', marginBottom:4 }}>
+                            Unités de temps examinées ensemble (alignement)
+                          </div>
+                          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                            {TF_INFO.map(t => (
+                              <label key={t} style={{ display:'flex', gap:4, alignItems:'center', fontSize:12, cursor:'pointer' }}>
+                                <input type="checkbox" checked={(moteur.timeframes || []).includes(t)}
+                                  onChange={() => setMoteur(m => ({ ...m,
+                                    timeframes: (m.timeframes || []).includes(t)
+                                      ? (m.timeframes || []).filter(x => x !== t)
+                                      : [...(m.timeframes || []), t] }))} />
+                                {t}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))', gap:8 }}>
+                          <label style={{ fontSize:12 }}>
+                            <div style={{ color:'var(--muted)', marginBottom:3 }}>
+                              Force mini {((moteur.seuilForce || 0) * 100).toFixed(0)} %
+                            </div>
+                            <input type="range" min="0" max="1" step="0.05" value={moteur.seuilForce || 0}
+                              onChange={e => setMoteur(m => ({ ...m, seuilForce: Number(e.target.value) }))}
+                              style={{ width:'100%' }} />
+                          </label>
+                          <label style={{ fontSize:12 }}>
+                            <div style={{ color:'var(--muted)', marginBottom:3 }}>Unités à aligner</div>
+                            <input className="fld" type="number" min="1" max="5" value={moteur.seuilAlignes || 2}
+                              onChange={e => setMoteur(m => ({ ...m, seuilAlignes: Number(e.target.value) }))} />
+                          </label>
+                          <label style={{ fontSize:12 }}>
+                            <div style={{ color:'var(--muted)', marginBottom:3 }}>Stop (× ATR)</div>
+                            <input className="fld" type="number" min="0.5" max="5" step="0.5" value={moteur.atrStop || 1.5}
+                              onChange={e => setMoteur(m => ({ ...m, atrStop: Number(e.target.value) }))} />
+                          </label>
+                          <label style={{ fontSize:12 }}>
+                            <div style={{ color:'var(--muted)', marginBottom:3 }}>Fenêtre des swings</div>
+                            <input className="fld" type="number" min="1" max="5" value={moteur.swingsWindow || 2}
+                              onChange={e => setMoteur(m => ({ ...m, swingsWindow: Number(e.target.value) }))} />
+                          </label>
+                        </div>
+                      </>)}
+                    </div>
                   </div>
                 ) : (
                   <p style={{ fontSize:12.5, color:'var(--muted)', lineHeight:1.6, margin:'9px 0 11px', flex:1 }}>

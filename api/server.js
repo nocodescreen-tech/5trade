@@ -834,6 +834,12 @@ app.put('/api/knowledge/:id', requireAuth, async (req, res) => {
       // dont on réécrit le texte ne doit pas garder les anciennes.
       tags: Array.isArray(tags) ? tags.map(String).slice(0, 20)
         : (content !== undefined ? extractTags(contenuFinal) : (existante.tags || [])),
+      // Fonctionnement : normalisé avant enregistrement, aucune valeur hors
+      // bornes n'entre en base. Un moteur vide (null) garde la déduction
+      // automatique depuis le texte.
+      moteur: 'moteur' in (req.body || {})
+        ? (req.body.moteur ? Signals.normaliserMoteur(req.body.moteur) : null)
+        : (existante.moteur || null),
       updatedAt: new Date().toISOString()
     };
 
@@ -858,6 +864,9 @@ app.post('/api/knowledge', requireAuth, async (req, res) => {
       type: type || 'strategy',
       source: source || 'manual',
       tags: extractTags(content),
+      // Fonctionnement défini à la création (facultatif) : la stratégie sait
+      // alors exactement comment analyser, sans dépendre du texte.
+      moteur: (req.body && req.body.moteur) ? Signals.normaliserMoteur(req.body.moteur) : null,
       createdAt: new Date().toISOString()
     };
     await saveStrategy(strategy);
