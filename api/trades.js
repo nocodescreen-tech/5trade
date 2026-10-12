@@ -53,6 +53,14 @@ function normalize(input = {}) {
   return {
     pair, direction, entry, sl, tp,
     size: num(input.size),
+    // Origine du marché : sans elle, les statistiques mélangent des marchés qui
+    // n'ont rien à voir (R_75 en 5m chez Deriv et BTC en 1h chez Binance). C'est
+    // ce qui permet de répondre à « est-ce que je gagne SUR R_75 ? ».
+    timeframe: input.timeframe ? String(input.timeframe).slice(0, 8) : null,
+    provider: input.provider ? String(input.provider).slice(0, 24) : null,
+    providerLabel: input.providerLabel ? String(input.providerLabel).slice(0, 60) : null,
+    signalStatus: input.signalStatus ? String(input.signalStatus).slice(0, 16) : null,
+    signalStrength: num(input.signalStrength),
     risk, reward,
     plannedRR: risk && reward ? +(reward / risk).toFixed(2) : null,
     strategyIds: Array.isArray(input.strategyIds) ? input.strategyIds.map(String) : [],
@@ -184,6 +192,11 @@ function computeStats(trades, titles = {}) {
     openRisk: +sum(trades.filter(t => t.status === 'open' && t.risk != null), t => t.risk).toFixed(6) || null,
     byStrategy: group(t => (t.strategyIds || [])[0], id => titles[id] || id),
     byPair: group(t => t.pair),
+    // Marché = instrument + unité de temps. C'est la question utile :
+    // « sur quel marché est-ce que je gagne vraiment ? »
+    byMarket: group(t => [t.pair, t.timeframe].filter(Boolean).join(' · ')),
+    bySource: group(t => t.providerLabel || t.provider || '—'),
+    byTimeframe: group(t => t.timeframe || '—'),
     byDirection: group(t => t.direction)
   };
 }

@@ -1674,7 +1674,7 @@ function PriceChart({ candles, levels, signal, height, symbol, tf }) {
   );
 }
 
-function LiveMarket() {
+function LiveMarket({ onToJournal }) {
   const [meta, setMeta] = useState({ symbols: [], timeframes: ['1m', '5m', '15m', '1h'] });
   const [symbol, setSymbol] = useState('BTCUSDT');
   const [provider, setProvider] = useState('binance');
@@ -1871,6 +1871,26 @@ function LiveMarket() {
         <button className="btn ghost sm" onClick={load} title="Recharger l'historique">
           <i className="fas fa-rotate"></i>
         </button>
+        {signal && signal.status !== 'neutre' && (
+          <button className="btn ghost sm" onClick={() => onToJournal && onToJournal({
+            pair: symbol,
+            direction: signal.direction === 'BUY' ? 'BUY' : 'SELL',
+            entry: signal.levels && signal.levels.entry !== null ? signal.levels.entry
+              : (tick ? tick.prix : null),
+            sl: signal.levels ? signal.levels.stop : null,
+            tp: signal.levels ? signal.levels.target1 : null,
+            timeframe: tf,
+            provider,
+            providerLabel: (meta.symbols.find(s => s.symbol === symbol && s.provider === provider) || {}).providerLabel || provider,
+            signalStatus: signal.status,
+            signalStrength: signal.strength,
+            strategyIds: (signal.strategies || []).map(s => s.id).filter(Boolean),
+            notes: `Signal ${signal.status} ${signal.direction} — ${signal.summary}`
+          })}
+            title="Ouvrir le journal avec ce signal déjà rempli : marché, entrée, invalidation, objectif, stratégies">
+            <i className="fas fa-floppy-disk"></i>Enregistrer ce signal
+          </button>
+        )}
         <button className="btn" onClick={analyser} disabled={busy}>
           {busy ? <Spinner/> : <><i className="fas fa-bolt"></i>Analyser maintenant</>}
         </button>
@@ -2280,16 +2300,46 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
   const [picked, setPicked] = useState([]);            // stratégies liées au trade
   const [originId, setOriginId] = useState(null);      // analyse d'origine
   const [filter, setFilter] = useState({ q:'', result:'all' });
+  // Contexte de marché attaché au trade : d'où vient le prix, sur quelle unité
+  // de temps, et quel signal était en cours. Sans ça, les statistiques ne
+  // peuvent pas dire sur QUEL marché on gagne.
+  const [market, setMarket] = useState({ timeframe:'', provider:'', providerLabel:'', signalStatus:'', signalStrength:null });
 
-  // Report d'un plan d'analyse vers le journal (bouton « Enregistrer ce trade »)
+  // Une seule façon de dessiner une ligne de statistique : barre de réussite,
+  // compte et PnL. Évite que chaque tableau réinvente la sienne.
+  const StatRow = ({ s }) => (
+    <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+      <span style={{ flex:'1 1 220px', fontSize:13, color:'#fff' }}>{s.label}</span>
+      <span style={{ width:160, height:8, background:'rgba(148,163,184,.18)', borderRadius:99, overflow:'hidden' }}>
+        <span style={{ display:'block', height:'100%', width:`${s.winRate || 0}%`,
+          background: (s.winRate || 0) >= 50 ? '#10b981' : '#f59e0b' }}></span>
+      </span>
+      <span style={{ fontSize:12.5, color:'var(--muted)', minWidth:150, textAlign:'right' }}>
+        {s.wins}/{s.trades} · {s.winRate === null ? '—' : s.winRate + ' %'}
+        {s.pnl ? <> · PnL {n6(s.pnl)}</> : null}
+      </span>
+    </div>
+  );
+
+  // Report d'un plan vers le journal (bouton « Enregistrer ce trade » / « ce signal »)
   useEffect(() => {
     if (!prefill) return;
     setForm(f => ({
       ...f,
       pair: prefill.pair || f.pair,
       direction: prefill.direction || f.direction,
+      entry: prefill.entry !== undefined && prefill.entry !== null ? String(prefill.entry) : f.entry,
+      sl: prefill.sl !== undefined && prefill.sl !== null ? String(prefill.sl) : f.sl,
+      tp: prefill.tp !== undefined && prefill.tp !== null ? String(prefill.tp) : f.tp,
       notes: prefill.notes || f.notes
     }));
+    setMarket({
+      timeframe: prefill.timeframe || '',
+      provider: prefill.provider || '',
+      providerLabel: prefill.providerLabel || '',
+      signalStatus: prefill.signalStatus || '',
+      signalStrength: prefill.signalStrength !== undefined ? prefill.signalStrength : null
+    });
     setPicked(prefill.strategyIds || []);
     setOriginId(prefill.originAnalysisId || null);
     setFilter({ q:'', result:'all' });
@@ -2314,12 +2364,16 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
     try {
       const r = await api('/trades', {
         method:'POST', headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ ...form, strategyIds: picked, originAnalysisId: originId })
+        body: JSON.stringify({ ...form, strategyIds: picked, originAnalysisId: originId,
+          timeframe: market.timeframe, provider: market.provider,
+          providerLabel: market.providerLabel, signalStatus: market.signalStatus,
+          signalStrength: market.signalStrength })
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Création refusée');
       setForm({ pair:'', direction:'BUY', entry:'', sl:'', tp:'', size:'', notes:'' });
       setPicked([]); setOriginId(null);
+      setMarket({ timeframe:'', provider:'', providerLabel:'', signalStatus:'', signalStrength:null });
       await load();
     } catch (e) { setErr(e.message); }
     finally { setBusy(false); }
@@ -2516,6 +2570,13 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
                   justifyContent:'space-between' }}>
                   <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
                     <b style={{ color:'#fff' }}>{t.pair}</b>
+                    {(t.timeframe || t.provider) && (
+                      <span className="badge" style={{ background:'rgba(96,165,250,.1)', color:'#93c5fd' }}
+                        title={`Marché d'origine : ${t.pair}${t.timeframe ? ' en ' + t.timeframe : ''}${t.providerLabel ? ' · ' + t.providerLabel : ''}`}>
+                        <i className="fas fa-crosshairs"></i>
+                        {[t.timeframe, t.provider].filter(Boolean).join(' · ')}
+                      </span>
+                    )}
                     <span className="badge" style={{ background: t.direction==='BUY' ? 'rgba(16,185,129,.13)' : 'rgba(239,68,68,.13)',
                       color: t.direction==='BUY' ? '#34d399' : '#f87171' }}>{t.direction}</span>
                     <span style={{ fontSize:12.5, color:'var(--muted)' }}>
@@ -2612,20 +2673,29 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
         <div className="panel" style={{ padding:20 }}>
           <h3 style={{ margin:'0 0 14px', fontSize:15 }}>Réussite par stratégie</h3>
           <div style={{ display:'grid', gap:10 }}>
-            {stats.byStrategy.map(s => (
-              <div key={s.key} style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-                <span style={{ flex:'1 1 220px', fontSize:13, color:'#fff' }}>{s.label}</span>
-                <span style={{ width:160, height:8, background:'rgba(148,163,184,.18)', borderRadius:99, overflow:'hidden' }}>
-                  <span style={{ display:'block', height:'100%', width:`${s.winRate || 0}%`,
-                    background: (s.winRate||0) >= 50 ? '#10b981' : '#f59e0b' }}></span>
-                </span>
-                <span style={{ fontSize:12.5, color:'var(--muted)', minWidth:150, textAlign:'right' }}>
-                  {s.wins}/{s.trades} · {s.winRate === null ? '—' : s.winRate + ' %'}
-                  {s.pnl ? <> · PnL {n6(s.pnl)}</> : null}
-                </span>
-              </div>
-            ))}
+            {stats.byStrategy.map(s => <StatRow key={s.key} s={s} />)}
           </div>
+        </div>
+      )}
+
+      {stats && stats.byMarket && stats.byMarket.length > 0 && (
+        <div className="panel" style={{ padding:20 }}>
+          <h3 style={{ margin:'0 0 6px', fontSize:15 }}>Réussite par marché</h3>
+          <p style={{ margin:'0 0 14px', fontSize:12, color:'var(--dim)' }}>
+            Instrument et unité de temps : sur QUOI la performance est réellement réalisée.
+            Un trade sans marché renseigné apparaît sous « — ».
+          </p>
+          <div style={{ display:'grid', gap:10 }}>
+            {stats.byMarket.map(s => <StatRow key={s.key} s={s} />)}
+          </div>
+          {stats.bySource && stats.bySource.length > 0 && (
+            <>
+              <h3 style={{ margin:'20px 0 10px', fontSize:15 }}>Par source de données</h3>
+              <div style={{ display:'grid', gap:10 }}>
+                {stats.bySource.map(s => <StatRow key={s.key} s={s} />)}
+              </div>
+            </>
+          )}
         </div>
       )}
     </>
@@ -2766,7 +2836,7 @@ function Dashboard({ user, onLogout }) {
             {result && <Result result={result} onToJournal={sendToJournal} />}
           </>)}
 
-          {tab === 'live' && <LiveMarket />}
+          {tab === 'live' && <LiveMarket onToJournal={sendToJournal} />}
           {tab === 'add' && <AddKnowledge refresh={load} />}
           {tab === 'strategies' && <Strategies strategies={strategies} onDelete={del} />}
           {tab === 'journal' && <Journal prefill={prefill} onPrefillUsed={()=>setPrefill(null)} strategies={strategies} />}

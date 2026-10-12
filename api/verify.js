@@ -361,7 +361,7 @@ function tinyPng(W = 64, H = 40) {
     };
     compile('app (JSX inline)', jsx);
     compile('reactbits.jsx', fs.readFileSync(path.join(FRONT, 'reactbits.jsx'), 'utf8'));
-    ok('composant LiveMarket présent', /function LiveMarket\(\)/.test(jsx));
+    ok('composant LiveMarket présent', /function LiveMarket\(/.test(jsx));
     ok('onglet « Direct » déclaré', /id:'live'/.test(jsx));
     ok('graphique TradingView (PriceChart)', /function PriceChart\(/.test(jsx));
     ok('Lightweight Charts v4 servi localement',
@@ -480,6 +480,33 @@ function tinyPng(W = 64, H = 40) {
   // — alors que les données arrivaient. Ici on compare les deux horodatages.
   ok('marché : historique et flux partagent le même horodatage',
     /open_time !== undefined \? c\.open_time : c\.epoch/.test(fs.readFileSync(path.join(__dirname, 'market.js'), 'utf8')));
+
+  // ── Journal : le marché fait partie du trade ──
+  // Demande : « savoir si je gagne sur R_75 plutôt que BTC ». Sans unité de
+  // temps ni source, les statistiques mélangent des marchés incomparables.
+  {
+    const Tr = require('./trades.js');
+    const t1 = Tr.normalize({ pair: 'GC=F', direction: 'BUY', entry: 4230, sl: 4200, tp: 4300,
+      timeframe: '1h', provider: 'yahoo', providerLabel: 'Marchés cotés',
+      signalStatus: 'confirme', signalStrength: 0.72 });
+    ok('le trade retient son unité de temps', t1.timeframe === '1h', String(t1.timeframe));
+    ok('le trade retient sa source', t1.provider === 'yahoo' && !!t1.providerLabel);
+    ok('le trade retient le contexte du signal',
+      t1.signalStatus === 'confirme' && t1.signalStrength === 0.72);
+    ok('un trade sans marché reste accepté (rétrocompatibilité)',
+      !!Tr.normalize({ pair: 'XAUUSD', direction: 'BUY', entry: 1 }));
+    const st2 = Tr.computeStats([{ ...t1, status: 'closed', result: 'win', closedAt: new Date().toISOString() }]);
+    ok('statistiques par marché', st2.byMarket.length === 1 && st2.byMarket[0].key === 'GC=F · 1h',
+      st2.byMarket[0] ? st2.byMarket[0].key : 'aucune');
+    ok('statistiques par source', st2.bySource.length === 1, st2.bySource[0] ? st2.bySource[0].key : 'aucune');
+    ok('statistiques par unité de temps', st2.byTimeframe.length === 1);
+    ok('deux marchés restent séparés',
+      Tr.computeStats([
+        { ...t1, status: 'closed', result: 'win' },
+        { pair: 'R_75', direction: 'SELL', entry: 43000, timeframe: '5m', provider: 'deriv',
+          status: 'closed', result: 'loss' }
+      ]).byMarket.length === 2);
+  }
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
   if (skip) console.log(`  (${skip} test(s) non exécuté(s) : dépendance externe absente — voir les lignes « • »)`);
