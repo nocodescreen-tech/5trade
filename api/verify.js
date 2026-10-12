@@ -81,7 +81,7 @@ function tinyPng(W = 64, H = 40) {
 (async () => {
   // ── 1. Syntaxe ──
   section('[1] Syntaxe');
-  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'market.js', 'structure.js', 'signals.js', 'reset-password.js', 'bootstrap-db.js', 'alerts.js', 'lexique.js', 'expliquer.js', 'concepts.js']) {
+  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'market.js', 'structure.js', 'signals.js', 'reset-password.js', 'bootstrap-db.js', 'alerts.js', 'lexique.js', 'expliquer.js', 'concepts.js', 'playbooks.js']) {
     try {
       require('child_process').execFileSync(process.execPath, ['--check', path.join(__dirname, f)]);
       ok(f, true);
@@ -952,7 +952,7 @@ function tinyPng(W = 64, H = 40) {
     const srv2 = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
     ok('la route de description existe', /app\.post\('\/api\/strategies\/decrire'/.test(srv2));
     ok('une description trop courte est refusée', /30 caractères minimum/.test(srv2));
-    ok('une description trop longue est refusée', /8000 caractères maximum/.test(srv2));
+    ok('une description trop longue est refusée', /40000 caractères maximum/.test(srv2));
     ok('le texte est envoyé au modèle d\'analyse', /DESCRIPTION DU TRADER/.test(srv2));
     ok('les 4 règles sont expliquées au modèle', /R1 = balayage de liquidité/.test(srv2)
       && /R2 = rupture de structure/.test(srv2) && /R3 = zone réactive/.test(srv2)
@@ -1002,6 +1002,56 @@ function tinyPng(W = 64, H = 40) {
     ok('les points de rupture du design system sont couverts',
       /max-width:820px/.test(htmlSrc) && /max-width:430px/.test(htmlSrc)
       && /min-width:1360px/.test(htmlSrc));
+  }
+
+  // ── Playbooks : un type de trade = ses prérequis et ses étapes ──
+  // Un scalp, une chasse à la liquidité, un intraday et un swing n'ont ni les
+  // mêmes prérequis ni les mêmes étapes. Les mélanger produit des signaux
+  // contradictoires — c'est exactement ce qu'on veut empêcher.
+  {
+    const Pb = require('./playbooks.js');
+    ok('les quatre types de trade sont déclarés',
+      ['scalping', 'liquidite', 'intraday', 'swing'].every(t => Pb.TYPES[t]));
+    ok('chaque type annonce ses unités, sa durée et son risque',
+      Object.values(Pb.TYPES).every(t => Array.isArray(t.timeframes) && t.timeframes.length >= 2
+        && t.duree && t.risque && t.quand));
+    ok('les unités de temps diffèrent selon le type',
+      Pb.TYPES.scalping.timeframes[0] === '1m' && Pb.TYPES.swing.timeframes[0] === '1h');
+
+    // Évaluation sur une série construite : chaque terme doit être chiffré.
+    const serie = [];
+    for (let i = 0; i < 80; i++) {
+      const b = 100 + Math.sin(i / 5) * 4;
+      serie.push({ t: i * 60000, o: b, h: b + 1.1, l: b - 1.1, c: b + 0.3, v: 10 });
+    }
+    const St2 = require('./structure.js');
+    const rep = St2.analyze(serie, { symbol: 'T', timeframe: '5m' });
+    const tous = Pb.tous(rep);
+    ok('les quatre playbooks sont évalués', tous.length === 4);
+    ok('chacun a ses prérequis et ses étapes',
+      tous.every(p => p.prerequis.length >= 3 && p.etapes.length >= 4));
+    ok('chaque prérequis porte un verdict et un détail chiffré',
+      tous.every(p => p.prerequis.every(x => typeof x.ok === 'boolean' && x.label && x.detail)));
+    ok('chaque étape est numérotée et évaluée',
+      tous.every(p => p.etapes.every((e, i) => e.numero === i + 1 && (e.ok === null || typeof e.ok === 'boolean'))));
+    ok('l\'avancement est annoncé',
+      tous.every(p => typeof p.avancement === 'string' && p.avancement.length > 3));
+    ok('un blocage est nommé quand le type n\'est pas valable',
+      tous.every(p => p.pret || p.blocage));
+    ok('aucune valeur « null » ou « NaN » dans les détails',
+      !tous.some(p => [...p.prerequis, ...p.etapes].some(x => /NaN|undefined/.test(String(x.detail || '')))));
+
+    // Le bug corrigé : une session composée ne doit pas être vue comme fermée.
+    const src = fs.readFileSync(path.join(__dirname, 'playbooks.js'), 'utf8');
+    ok('une session composée n\'est pas vue comme fermée',
+      /Londres\|New York\|Chevauchement/.test(src) && !/\['Londres', 'New York'\]\.includes/.test(src));
+
+    // Le serveur expose l'avancement, et l'interface l'affiche.
+    const srv3 = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('le rapport de structure porte les playbooks', /playbooks: Playbooks\.tous\(report\)/.test(srv3));
+    ok('une route dédiée existe', /app\.get\('\/api\/playbooks'/.test(srv3));
+    ok('l\'interface affiche le cheminement', /Cheminement du signal/.test(jsx)
+      && /typeTrade/.test(jsx) && /Pour avancer/.test(jsx));
   }
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);

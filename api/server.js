@@ -202,6 +202,9 @@ const Alerts = require('./alerts');
 const Lexique = require('./lexique');
 // Base de concepts : les définitions des termes, injectées dans l'analyse IA.
 const Concepts = require('./concepts');
+// Playbooks : les types de trade (scalping, chasse à la liquidité, intraday,
+// swing), chacun avec ses prérequis et ses étapes évalués sur le graphique.
+const Playbooks = require('./playbooks');
 
 // Données de marché mises en cache sur disque : l'analyse doit rester
 // possible même sans réseau (et après un redémarrage).
@@ -1673,9 +1676,36 @@ app.get('/api/market/structure', requireAuth, async (req, res) => {
     res.json({
       success: true, symbol, timeframe: tf, provider, source, offline: !!offline,
       report,
-      vocabulaire: Structure.vocabulaire(report)
+      vocabulaire: Structure.vocabulaire(report),
+      // Avancement de chaque type de trade : prérequis remplis, étapes
+      // franchies, et le point exact qui bloque. C'est la réponse à « qu'est-ce
+      // qui manque pour un signal », au lieu d'un verdict opaque.
+      playbooks: Playbooks.tous(report)
     });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Avancement d'un type de trade précis (ou des quatre)
+app.get('/api/playbooks', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').trim();
+    if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+    const tf = String(req.query.tf || '5m').trim();
+    const type = String(req.query.type || '').trim();
+    const provider = String(req.query.provider || '').trim() || undefined;
+    const { candles, provider: p } = await Market.getCandles(symbol, tf, 300, provider);
+    const closes = (candles || []).filter(c => c.closed !== false);
+    if (closes.length < 20) {
+      return res.json({ success: true, symbol, type: type || null, playbooks: [],
+        note: 'Pas assez de bougies (marché fermé ou historique trop court).' });
+    }
+    const report = Structure.analyze(closes, { symbol, timeframe: tf });
+    const playbooks = type && Playbooks.TYPES[type]
+      ? [Playbooks.evaluer(report, type)]
+      : Playbooks.tous(report);
+    res.json({ success: true, symbol, timeframe: tf, provider: p,
+      types: Object.values(Playbooks.TYPES), playbooks });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Séries disponibles hors ligne (issue de secours quand le réseau tombe)
@@ -1894,8 +1924,10 @@ app.post('/api/strategies/decrire', requireAuth, async (req, res) => {
     if (texte.length < 30) {
       return res.status(400).json({ error: 'Décris ta stratégie en quelques phrases (30 caractères minimum).' });
     }
-    if (texte.length > 8000) {
-      return res.status(400).json({ error: 'Description trop longue (8000 caractères maximum).' });
+    // 8000 caractères refusaient une vraie note de stratégie (document colle,
+    // plusieurs pages de regles). La limite suit ce qu'un trader ecrit vraiment.
+    if (texte.length > 40000) {
+      return res.status(400).json({ error: 'Description trop longue (40000 caractères maximum). Découpe-la en deux fiches.' });
     }
 
     const consigne = `Tu transformes la description d'un trader en FICHE DE STRATÉGIE exploitable par un moteur d'analyse.
@@ -1934,7 +1966,7 @@ N'invente rien : si une information n'est pas dans la description, mets null ou 
 
     let fiche;
     try {
-      const out = await deepseek([{ role: 'user', content: consigne }], { maxTokens: 1400, json: true });
+      const out = await deepseek([{ role: 'user', content: consigne }], { maxTokens: 2000, json: true });
       fiche = JSON.parse(out);
     } catch (e) {
       return res.status(502).json({

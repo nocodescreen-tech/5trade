@@ -2212,6 +2212,11 @@ function LiveMarket({ onToJournal }) {
   // Vocabulaire évalué : chaque terme SMC avec ce que CE graphique montre.
   // Le moteur nomme ce qu'il mesure avant de conclure.
   const [vocabulaire, setVocabulaire] = useState(null);
+  // Avancement des types de trade : prérequis remplis, étapes franchies, et le
+  // point exact qui bloque. Un scalp, une chasse à la liquidité, un intraday et
+  // un swing n'ont ni les mêmes prérequis ni les mêmes étapes.
+  const [playbooks, setPlaybooks] = useState(null);
+  const [typeTrade, setTypeTrade] = useState('auto');
   const [result, setResult] = useState(null);
   const [live, setLive] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -2293,6 +2298,7 @@ function LiveMarket({ onToJournal }) {
         if (st && st.success && st.report) {
           setReport(st.report);
           if (st.vocabulaire) setVocabulaire(st.vocabulaire);
+          if (st.playbooks) setPlaybooks(st.playbooks);
         }
       } catch (e) { /* réseau absent : on garde l'état précédent */ }
     };
@@ -2349,7 +2355,7 @@ function LiveMarket({ onToJournal }) {
       setCandles(r.candles);
       setOffline(!!r.offline);
       const st = await (await api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`)).json();
-      if (st.success) { setReport(st.report); setVocabulaire(st.vocabulaire || null); }
+      if (st.success) { setReport(st.report); setVocabulaire(st.vocabulaire || null); setPlaybooks(st.playbooks || null); }
       if (st.offline) setOffline(true);
     } catch (e) {
       const m = String(e.message || e);
@@ -2870,6 +2876,87 @@ function LiveMarket({ onToJournal }) {
             </p>
           </div>
         )}
+
+        {/* Cheminement par type de trade : prérequis, étapes, point de blocage.
+            Un scalp, une chasse à la liquidité, un intraday et un swing n'ont ni
+            les mêmes prérequis ni les mêmes étapes : les mélanger produit des
+            signaux contradictoires. */}
+        {playbooks && playbooks.length > 0 && (() => {
+          const liste = typeTrade === 'auto' ? playbooks : playbooks.filter(p => p.type === typeTrade);
+          if (!liste.length) return null;
+          return (
+            <div className="panel" style={{ padding:'12px 14px', marginTop:12 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:9, flexWrap:'wrap' }}>
+                <b style={{ fontSize:13 }}>
+                  <i className="fas fa-route" style={{ marginRight:6, color:'#a78bfa' }}></i>
+                  Cheminement du signal
+                </b>
+                <select className="fld" style={{ width:'auto', margin:0, padding:'3px 8px', fontSize:12 }}
+                  value={typeTrade} onChange={e=>setTypeTrade(e.target.value)}>
+                  <option value="auto">Tous les types</option>
+                  {playbooks.map(p => <option key={p.type} value={p.type}>{p.nom}</option>)}
+                </select>
+              </div>
+              <div style={{ display:'grid', gap:10 }}>
+                {liste.map(pb => (
+                  <div key={pb.type} className="panel"
+                    style={{ padding:'10px 12px', background:'rgba(7,10,17,.45)' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:6 }}>
+                      <b style={{ fontSize:12.5 }}>{pb.nom}</b>
+                      <span className="badge" style={{
+                        background: pb.pret ? 'rgba(16,185,129,.14)' : 'rgba(245,158,11,.12)',
+                        color: pb.pret ? '#34d399' : '#fbbf24' }}>
+                        {pb.pret ? 'signal valable' : pb.avancement}
+                      </span>
+                      <span style={{ fontSize:11.5, color:'var(--dim)' }}>
+                        prérequis {pb.prerequisOk}/{pb.prerequisTotal}
+                        {' · '}étapes {pb.etapesOk}/{pb.etapesTotal}
+                      </span>
+                      <span style={{ fontSize:11.5, color:'var(--dim)', marginLeft:'auto' }}>
+                        {pb.duree} · {pb.timeframes.join('/')}
+                      </span>
+                    </div>
+                    <div style={{ display:'grid', gap:3, fontSize:12 }}>
+                      {pb.prerequis.map((p, i) => (
+                        <div key={'p'+i} style={{ color: p.ok ? 'var(--muted)' : 'var(--dim)' }}>
+                          <i className={`fas ${p.ok ? 'fa-circle-check' : 'fa-circle-xmark'}`}
+                            style={{ marginRight:6, fontSize:10, color: p.ok ? '#34d399' : '#f87171' }}></i>
+                          {p.label}{p.detail ? ` — ${p.detail}` : ''}
+                        </div>
+                      ))}
+                      {pb.etapes.map(e => (
+                        <div key={'e'+e.numero}
+                          style={{ marginLeft:6, color: e.ok ? 'var(--muted)' : 'var(--dim)' }}>
+                          <i className={`fas ${e.ok === null ? 'fa-ellipsis' : (e.ok ? 'fa-check' : 'fa-xmark')}`}
+                            style={{ marginRight:6, fontSize:10,
+                              color: e.ok === null ? '#64748b' : (e.ok ? '#34d399' : '#f87171') }}></i>
+                          {e.numero}. {e.label}{e.detail ? ` — ${e.detail}` : ''}
+                        </div>
+                      ))}
+                    </div>
+                    {!pb.pret && pb.blocage && (
+                      <div style={{ fontSize:11.5, color:'#fbbf24', marginTop:7 }}>
+                        <i className="fas fa-arrow-right" style={{ marginRight:6 }}></i>
+                        Pour avancer : {pb.blocage}{pb.detailBlocage ? ` (${pb.detailBlocage})` : ''}
+                      </div>
+                    )}
+                    {pb.pret && (
+                      <div style={{ fontSize:11.5, color:'#34d399', marginTop:7 }}>
+                        <i className="fas fa-circle-check" style={{ marginRight:6 }}></i>
+                        Tous les prérequis remplis et toutes les étapes franchies.
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p style={{ margin:'9px 0 0', fontSize:11.5, color:'var(--dim)' }}>
+                Chaque étape est mesurée sur CE graphique. Un type n'est « valable » que si ses
+                prérequis sont remplis et ses étapes franchies : c'est ce qui empêche un scalp
+                et un swing de donner des signaux contradictoires.
+              </p>
+            </div>
+          );
+        })()}
 
         {/* Termes évalués : chaque terme vérifié sur CE graphique avec sa valeur.
             Le moteur expose son raisonnement au lieu de l'affirmer. */}
