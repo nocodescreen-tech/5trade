@@ -1854,15 +1854,69 @@ function LiveMarket() {
           </div>
         )}
 
-        {signal && signal.status !== 'neutre' && signal.levels && (
-          <div style={{ display:'flex', gap:18, flexWrap:'wrap', marginTop:12, fontSize:13 }}>
-            <span><span style={{ color:'var(--muted)' }}>Entrée </span><b>{fmt(signal.levels.entry)}</b></span>
-            <span><span style={{ color:'var(--muted)' }}>Invalidation </span>
-              <b style={{ color:'#f87171' }}>{fmt(signal.levels.stop)}</b></span>
-            <span><span style={{ color:'var(--muted)' }}>Objectif 1 </span>
-              <b style={{ color:'#34d399' }}>{fmt(signal.levels.target1)}</b></span>
-            <span><span style={{ color:'var(--muted)' }}>Objectif 2 </span>
-              <b style={{ color:'#34d399' }}>{fmt(signal.levels.target2)}</b></span>
+        {/* Détails du signal : niveaux, scénarios des deux sens, conditions.
+            Rien n'est masqué sous prétexte que le verdict n'est pas encore
+            confirmé — c'est justement là qu'on a besoin du plan. */}
+        {signal && (
+          <div style={{ marginTop:12, display:'grid', gap:10 }}>
+            {signal.levels && Number.isFinite(signal.levels.entry) && (
+              <div style={{ display:'flex', gap:18, flexWrap:'wrap', fontSize:13 }}>
+                <span><span style={{ color:'var(--muted)' }}>Entrée </span><b>{fmt(signal.levels.entry)}</b></span>
+                <span><span style={{ color:'var(--muted)' }}>Invalidation </span>
+                  <b style={{ color:'#f87171' }}>{fmt(signal.levels.stop)}</b></span>
+                <span><span style={{ color:'var(--muted)' }}>Objectif 1 </span>
+                  <b style={{ color:'#34d399' }}>{fmt(signal.levels.target1)}</b></span>
+                <span><span style={{ color:'var(--muted)' }}>Objectif 2 </span>
+                  <b style={{ color:'#34d399' }}>{fmt(signal.levels.target2)}</b></span>
+              </div>
+            )}
+
+            {signal.missing && signal.missing.length > 0 && (
+              <div style={{ fontSize:12.5, color:'#fbbf24' }}>
+                <i className="fas fa-circle-info" style={{ marginRight:6 }}></i>
+                Pour confirmer : {signal.missing.join(' · ')}
+              </div>
+            )}
+
+            {signal.scenarios && (
+              <div style={{ display:'grid', gap:8, gridTemplateColumns:'repeat(auto-fit,minmax(270px,1fr))' }}>
+                {[['bullish', 'ACHAT', '#34d399', 'fa-arrow-trend-up'],
+                  ['bearish', 'VENTE', '#f87171', 'fa-arrow-trend-down']].map(([k, lab, col, ico]) => {
+                  const s = signal.scenarios[k];
+                  if (!s) return null;
+                  return (
+                    <div key={k} style={{ border:'1px solid rgba(27,36,51,.7)', borderRadius:8, padding:'10px 12px' }}>
+                      <div style={{ fontSize:12.5, color:col, fontWeight:600, marginBottom:6 }}>
+                        <i className={`fas ${ico}`} style={{ marginRight:6 }}></i>Scénario {lab}
+                      </div>
+                      <div style={{ fontSize:12, color:'var(--muted)', lineHeight:1.6 }}>
+                        <div><b style={{ color:'#cbd5e1' }}>Déclencheur</b> : {s.trigger}</div>
+                        <div><b style={{ color:'#cbd5e1' }}>Contexte</b> : {s.context}</div>
+                        <div style={{ marginTop:6 }}>
+                          entrée <b style={{ color:'#e2e8f0' }}>{fmt(s.entry)}</b>
+                          {' · '}invalidation <b style={{ color:'#f87171' }}>{fmt(s.stop)}</b>
+                          {' · '}objectifs <b style={{ color:'#34d399' }}>{fmt(s.target1)}</b> / {fmt(s.target2)}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {signal.checklist && (
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', fontSize:12 }}>
+                {signal.checklist.map(c => (
+                  <span key={c.key} className="tag" title={c.detail}
+                    style={{ background: c.ok ? 'rgba(34,211,138,.1)' : 'rgba(148,163,184,.08)',
+                      borderColor: c.ok ? 'rgba(34,211,138,.35)' : 'rgba(148,163,184,.25)',
+                      color: c.ok ? '#6ee7b7' : 'var(--muted)' }}>
+                    <i className={`fas ${c.ok ? 'fa-circle-check' : 'fa-circle-minus'}`} style={{ marginRight:5 }}></i>
+                    {c.label}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

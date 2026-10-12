@@ -174,9 +174,57 @@ function levelsFor(report, direction) {
 }
 
 /**
+ * Les DEUX scénarios chiffrés, quel que soit le verdict en cours.
+ * Savoir quoi faire si ça monte ET si ça descend est plus utile qu'un
+ * « neutre » sec : c'est le plan, pas seulement le constat.
+ */
+function scenarios(report) {
+  const zones = [...(report.orderBlocks || []), ...(report.fvgs || [])];
+  const support = zones.filter(z => z.type === 'bullish').sort((a, b) => b.high - a.high)[0];
+  const resistance = zones.filter(z => z.type === 'bearish').sort((a, b) => a.low - b.low)[0];
+  const hi = report.structure.lastSwingHigh;
+  const lo = report.structure.lastSwingLow;
+  const zoneTxt = z => (z ? `réaction depuis ${z.low}–${z.high} (${z.kind || (z.type === 'bullish' ? 'zone haussière' : 'zone baissière')})` : null);
+
+  return {
+    bullish: {
+      direction: 'BUY',
+      trigger: hi ? `clôture au-dessus de ${num(hi.price)}` : 'clôture au-dessus du dernier sommet',
+      context: zoneTxt(support) || 'réaction sur un support',
+      ...levelsFor(report, 'BUY')
+    },
+    bearish: {
+      direction: 'SELL',
+      trigger: lo ? `clôture sous ${num(lo.price)}` : 'clôture sous le dernier creux',
+      context: zoneTxt(resistance) || 'rejet sous une résistance',
+      ...levelsFor(report, 'SELL')
+    }
+  };
+}
+
+/** Conditions évaluées une par une : on montre ce qui est rempli et ce qui manque. */
+function checklist(report) {
+  const st = report.structure;
+  const pd = report.premiumDiscount;
+  const zones = [...(report.orderBlocks || []), ...(report.fvgs || [])];
+  return [
+    { key: 'tendance', label: 'Tendance définie', ok: st.trend !== 'range', detail: st.trend },
+    { key: 'rupture', label: 'Rupture de structure (clôture)', ok: !!st.event,
+      detail: st.event ? `${st.event.type} ${st.event.direction} à ${num(st.event.level)}` : 'aucune cassure de clôture' },
+    { key: 'liquidite', label: 'Liquidité prise', ok: (report.liquidity || []).length > 0,
+      detail: (report.liquidity || []).map(p => `${p.type} ${num(p.price)}`).join(', ') || 'aucun pool de liquidité' },
+    { key: 'zone', label: 'Zone réactive (order block / FVG)', ok: zones.length > 0,
+      detail: zones.length ? `${zones.length} zone(s) ouverte(s)` : 'aucune zone valide' },
+    { key: 'position', label: 'Position favorable dans le range', ok: !!pd && pd.position !== null,
+      detail: pd ? `${pd.position} (équilibre ${num(pd.equilibrium)})` : 'range indéterminé' }
+  ];
+}
+
+/**
  * Verdict sur la dernière bougie clôturée.
  * @returns {{status:'confirme'|'surveiller'|'neutre', direction:string,
  *            strength:number, rules:Array, confirmations:number,
+ *            scenarios:object, checklist:Array, missing:Array,
  *            levels:object, summary:string, at:number}}
  */
 function detect(candles, meta = {}) {
@@ -207,11 +255,26 @@ function detect(candles, meta = {}) {
   const status = (independent >= 2 && strength >= 0.35) ? 'confirme'
     : (independent >= 1 && strength >= 0.3) ? 'surveiller' : 'neutre';
 
-  const levels = levelsFor(report, status === 'neutre' ? 'NEUTRE' : direction);
-  const fmt = v => (v === null ? '—' : v);
+  // Pourquoi ce n'est pas confirmé : on l'écrit au lieu de laisser deviner.
+  const missing = [];
+  if (status !== 'confirme') {
+    if (independent < 2) missing.push(`il faut 2 règles concordantes (${independent} pour l'instant)`);
+    if (strength < 0.35) missing.push(`force ${(strength * 100).toFixed(0)} % < 35 % requis`);
+    if (!winner.length) missing.push('aucune règle déclenchée sur la dernière bougie clôturée');
+  }
+
+  const sc = scenarios(report);
+  const chk = checklist(report);
+  // Niveaux « du jour » : ceux du sens détecté, sinon les deux scénarios restent
+  // consultables (on ne cache plus l'information sous prétexte d'incertitude).
+  const levels = status === 'neutre'
+    ? { entry: null, stop: null, target1: null, target2: null }
+    : levelsFor(report, direction);
+  const fmt = v => (v === null || v === undefined ? '—' : v);
 
   const summary = status === 'neutre'
-    ? `Aucun signal : les règles ne concordent pas (${rules.length} détectée(s)).`
+    ? `Aucun signal confirmé : ${missing.join(' ; ') || 'conditions insuffisantes'}.`
+      + ` Scénarios : achat si ${sc.bullish.trigger}, vente si ${sc.bearish.trigger}.`
     : `${direction === 'BUY' ? 'ACHAT' : 'VENTE'} ${status === 'confirme' ? 'CONFIRMÉ' : 'à surveiller'}`
       + ` — ${independent} règle(s) : ${winner.map(r => r.name).join(' + ')}`
       + ` · force ${(strength * 100).toFixed(0)} %`
@@ -225,6 +288,9 @@ function detect(candles, meta = {}) {
     confirmations: independent,
     rules,
     levels,
+    scenarios: sc,
+    checklist: chk,
+    missing,
     price: report.lastPrice,
     trend: report.structure.trend,
     summary,
@@ -237,4 +303,4 @@ function detect(candles, meta = {}) {
   };
 }
 
-module.exports = { detect, ruleSweep, ruleBreak, ruleZone, rulePosition, levelsFor };
+module.exports = { detect, scenarios, checklist, ruleSweep, ruleBreak, ruleZone, rulePosition, levelsFor };
