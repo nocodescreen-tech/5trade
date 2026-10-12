@@ -27,7 +27,7 @@ const path = require('path');
 // Cache disque : permet d'analyser même sans réseau (le buffer mémoire seul
 // disparaît à chaque redémarrage du serveur).
 const CACHE_FILE = path.join(__dirname, '..', 'data', 'market-cache.json');
-const CACHE_KEEP = 400;
+const CACHE_KEEP = 1500;   // de quoi servir une demande de 1000 bougies
 
 const TF_MS = {
   '1m': 60e3, '5m': 300e3, '15m': 900e3, '30m': 1800e3,

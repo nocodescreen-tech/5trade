@@ -1775,6 +1775,9 @@ function LiveMarket({ onToJournal }) {
   // Mode d'analyse : 'auto' (l'app combine toutes les règles) ou 'manuel'
   // (uniquement les règles d'une stratégie choisie dans la base).
   const [mode, setMode] = useState('auto');
+  // Profondeur d'historique affichée. 1000 est le plafond réel des sources
+  // (vérifié : Binance et Deriv R_75 en fournissent 1000, soit 83 h en 5 min).
+  const [profondeur, setProfondeur] = useState(300);
   // Vue du graphique : 'app' (nos niveaux calculés) ou 'tradingview' (widget officiel).
   const [vue, setVue] = useState('app');
   const [strategyId, setStrategyId] = useState('');
@@ -1828,7 +1831,7 @@ function LiveMarket({ onToJournal }) {
   const load = useCallback(async () => {
     setErr('');
     try {
-      const r = await (await api(`/market/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&count=240&provider=${provider}`)).json();
+      const r = await (await api(`/market/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&count=${profondeur}&provider=${provider}`)).json();
       if (!r.success) throw new Error(r.error || 'chargement impossible');
       setCandles(r.candles);
       setOffline(!!r.offline);
@@ -1843,7 +1846,7 @@ function LiveMarket({ onToJournal }) {
         ? `${m} — ce marché est probablement FERMÉ (week-end ou hors séance). Les indices synthétiques (Volatility) et les cryptos cotent 24 h/24 : essayez-en un.`
         : m);
     }
-  }, [symbol, tf, provider, mode, strategyId]);
+  }, [symbol, tf, provider, mode, strategyId, profondeur]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1955,6 +1958,11 @@ function LiveMarket({ onToJournal }) {
         </select>
         <select className="fld" style={{ width:100 }} value={tf} onChange={e=>setTf(e.target.value)}>
           {meta.timeframes.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <select className="fld" style={{ width:118 }} value={profondeur}
+          onChange={e=>setProfondeur(Number(e.target.value))}
+          title="Nombre de bougies chargées. 1000 est le maximum que les sources fournissent (83 h en 5 min).">
+          {[150, 300, 500, 1000].map(n => <option key={n} value={n}>{n} bougies</option>)}
         </select>
         <select className="fld" style={{ width:150 }} value={mode} onChange={e=>setMode(e.target.value)}
           title="Auto : l'app combine toutes les règles. Manuel : uniquement les règles d'une stratégie de ta base.">
