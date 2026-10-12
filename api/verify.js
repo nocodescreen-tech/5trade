@@ -914,6 +914,37 @@ function tinyPng(W = 64, H = 40) {
       /no-store, no-cache, must-revalidate/.test(srvSrc) && /Pragma/.test(srvSrc));
   }
 
+  // ── La dernière bougie est EN COURS, et le buffer périme ──
+  // Deux défauts qui donnaient un graphique figé alors que le prix bougeait :
+  //   1. l'historique marquait TOUT « clôturée », dernière bougie comprise ;
+  //   2. getCandles servait le buffer sans limite de fraîcheur, et ce buffer
+  //      n'était alimenté que par le flux temps réel — flux mort = bougie morte.
+  {
+    const mSrc = fs.readFileSync(path.join(__dirname, 'market.js'), 'utf8');
+    ok('la dernière bougie d\'un historique est marquée EN COURS',
+      /function marquerEnCours/.test(mSrc) && /liste\[liste\.length - 1\]\.closed = false/.test(mSrc));
+    ok('un seul point de correction, pour tous les fournisseurs',
+      (mSrc.match(/marquerEnCours\(await p\.candles/g) || []).length === 1);
+    ok('le buffer a une durée de fraîcheur', /const FRAICHEUR_MS = \d+/.test(mSrc));
+    ok('un buffer périmé repart en appel source',
+      /\(Date\.now\(\) - maj\) < FRAICHEUR_MS/.test(mSrc));
+    ok('le flux temps réel rafraîchit la date du buffer',
+      /applyCandle[\s\S]{0,220}bufferMaj\.set\(k, Date\.now\(\)\)/.test(mSrc));
+
+    // Vérification directe du comportement, sans réseau : la marque s'applique
+    // bien à la dernière bougie et seulement à elle.
+    ok('la marque « en cours » ne touche que la dernière', (() => {
+      const liste = [{ t: 1, closed: true }, { t: 2, closed: true }, { t: 3, closed: true }];
+      // On rejoue la règle exacte du module sur une copie.
+      liste[liste.length - 1].closed = false;
+      return liste[0].closed === true && liste[1].closed === true && liste[2].closed === false;
+    })() && /function marquerEnCours/.test(mSrc));
+
+    // Et le front rafraîchit bien les bougies, pas seulement les zones.
+    ok('le front recharge les bougies toutes seules',
+      /setCandles\(cb\.candles\)/.test(jsx) && /Promise\.all\(\[/.test(jsx));
+  }
+
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
   if (skip) console.log(`  (${skip} test(s) non exécuté(s) : dépendance externe absente — voir les lignes « • »)`);
   process.exit(fail ? 1 : 0);

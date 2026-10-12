@@ -323,6 +323,11 @@ const listSymbols = () => Object.values(PROVIDERS).flatMap(p =>
 // Cache de bougies + flux temps réel
 // ─────────────────────────────────────────────────────────────
 const buffers = new Map();          // "provider|symbol|tf" -> candles[]
+// Date de derniere mise a jour de chaque buffer. Un buffer trop vieux ne doit
+// plus etre servi : sinon une lecture repete la meme bougie morte.
+const bufferMaj = new Map();
+// Au-dela de ce delai, on redemande la source plutot que de servir le buffer.
+const FRAICHEUR_MS = 3000;
 const subscribers = new Set();      // {provider, symbol, tf, onCandle}
 let ws = null, wsProvider = null, wsSymbols = [], wsTf = null, pingTimer = null;
 
@@ -375,18 +380,35 @@ function cacheInfo() {
  * Si le réseau échoue, on sert le cache : l'analyse reste possible hors ligne.
  * @returns {Promise<{candles:Array, provider:string, source:string, offline?:boolean}>}
  */
+/**
+ * La DERNIÈRE bougie d'une série historique est en cours de formation, pas
+ * clôturée. Les sources renvoient pourtant « closed: true » partout, et le front
+ * en conclut que la série est complète — le graphique restait alors immobile
+ * pendant que le prix, lui, bougeait. On corrige une fois pour tous les
+ * fournisseurs plutôt que dans chacun.
+ */
+function marquerEnCours(liste) {
+  if (Array.isArray(liste) && liste.length) liste[liste.length - 1].closed = false;
+  return liste;
+}
+
 async function getCandles(symbol, tf, count = 300, providerId) {
   if (!TF_MS[tf]) throw new Error(`Timeframe inconnu : ${tf} (attendu ${TIMEFRAMES.join(', ')})`);
   const p = providerId ? providerById(providerId) : activeProvider();
   const k = keyOf(p.id, symbol, tf);
   const buf = buffers.get(k);
 
-  if (buf && buf.length >= Math.min(count, 500)) {
+  // Le buffer n'est utilisable que s'il est FRAIS. Sans cette péremption, il
+  // n'était alimenté que par le flux temps réel : flux mort = buffer figé pour
+  // toujours, et toutes les lectures suivantes servaient la même bougie morte.
+  const maj = bufferMaj.get(k) || 0;
+  if (buf && buf.length >= Math.min(count, 500) && (Date.now() - maj) < FRAICHEUR_MS) {
     return { candles: buf.slice(-count), provider: p.id, source: 'live' };
   }
   try {
-    const candles = await p.candles(symbol, tf, count);
+    const candles = marquerEnCours(await p.candles(symbol, tf, count));
     buffers.set(k, candles);
+    bufferMaj.set(k, Date.now());
     saveCacheSoon();
     return { candles, provider: p.id, source: 'rest' };
   } catch (e) {
@@ -406,7 +428,10 @@ async function getCandles(symbol, tf, count = 300, providerId) {
 /** Applique une bougie live au buffer (remplace la dernière si même ouverture). */
 function applyCandle(providerId, symbol, tf, candle) {
   const k = keyOf(providerId, symbol, tf);
-  let buf = buffers.get(k);
+  const buf2 = buffers.get(k);
+  // Une bougie du flux vaut mise a jour : le buffer est frais.
+  bufferMaj.set(k, Date.now());
+  let buf = buf2;
   if (!buf || !buf.length) { buffers.set(k, [candle]); saveCacheSoon(); return; }
   const last = buf[buf.length - 1];
   if (last.t === candle.t) buf[buf.length - 1] = candle;

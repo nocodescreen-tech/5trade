@@ -2150,24 +2150,34 @@ function LiveMarket({ onToJournal }) {
     return () => { vivant = false; clearInterval(it); };
   }, [symbol, tf, provider, mode, strategiesChoisies.join(',')]);
 
-  // Les zones (OB, FVG, liquidité, premium/discount) et le vocabulaire se
-  // rafraîchissent tout seuls. Sans cet appel, les rectangles resteraient
-  // figés aux niveaux du chargement pendant que le prix, lui, continue de
-  // bouger — le graphique mentirait.
+  // Les bougies ET les zones se rafraîchissent toutes seules. Deux raisons :
+  //   1. le flux temps réel peut mourir (le serveur redémarre, le réseau saute)
+  //      et un flux mort ne se relève pas toujours — le graphique restait alors
+  //      figé alors que le prix, lui, continuait de bouger sur les ticks ;
+  //   2. les zones (OB, FVG, liquidité) doivent suivre le prix : sinon les
+  //      rectangles restent aux niveaux du chargement et le graphique ment.
   useEffect(() => {
     if (!symbol) return;
+    let vivant = true;
     const recharger = async () => {
       try {
-        const st = await (await api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`)).json();
-        if (st.success && st.report) {
+        const [cb, st] = await Promise.all([
+          api(`/market/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&count=${profondeur}&provider=${provider}`)
+            .then(r => r.json()).catch(() => null),
+          api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`)
+            .then(r => r.json()).catch(() => null)
+        ]);
+        if (!vivant) return;
+        if (cb && cb.success && Array.isArray(cb.candles) && cb.candles.length) setCandles(cb.candles);
+        if (st && st.success && st.report) {
           setReport(st.report);
           if (st.vocabulaire) setVocabulaire(st.vocabulaire);
         }
       } catch (e) { /* réseau absent : on garde l'état précédent */ }
     };
     const it = setInterval(recharger, 5000);
-    return () => clearInterval(it);
-  }, [symbol, tf, provider]);
+    return () => { vivant = false; clearInterval(it); };
+  }, [symbol, tf, provider, profondeur]);
 
   const [tick, setTick] = useState(null);          // dernier tick BRUT (prix réel)
   const [tickRate, setTickRate] = useState(0);     // ticks par seconde
