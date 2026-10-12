@@ -2358,6 +2358,42 @@ function LiveMarket({ onToJournal }) {
           </div>
         )}
 
+        {/* Désaccord entre règles : le montrer franchement plutôt que choisir un
+            camp en silence. Deux règles opposées ne sont pas une confirmation. */}
+        {signal && signal.contradiction && signal.contradiction.active && (
+          <div style={{ marginTop:10, padding:'9px 12px', borderRadius:8,
+            background: signal.contradiction.franche ? 'rgba(242,84,91,.10)' : 'rgba(245,158,11,.09)',
+            border: `1px solid ${signal.contradiction.franche ? 'rgba(242,84,91,.4)' : 'rgba(245,158,11,.35)'}` }}>
+            <div style={{ fontSize:12.5, fontWeight:600,
+              color: signal.contradiction.franche ? '#fca5a5' : '#fbbf24' }}>
+              <i className="fas fa-scale-unbalanced" style={{ marginRight:7 }}></i>
+              {signal.contradiction.franche ? 'Règles en désaccord' : 'Désaccord partiel'}
+            </div>
+            <div style={{ fontSize:12, color:'var(--muted)', marginTop:5 }}>
+              {signal.contradiction.lecture}
+            </div>
+            <div style={{ display:'grid', gap:3, marginTop:7, fontSize:12 }}>
+              {signal.contradiction.pour.map((r, i) => (
+                <div key={'p' + i} style={{ color:'#34d399' }}>
+                  <i className="fas fa-check" style={{ marginRight:6, fontSize:10 }}></i>
+                  {r.rule} · {r.name} → {r.direction} ({(r.strength * 100).toFixed(0)} %)
+                </div>
+              ))}
+              {signal.contradiction.contre.map((r, i) => (
+                <div key={'c' + i} style={{ color:'#f87171' }}>
+                  <i className="fas fa-xmark" style={{ marginRight:6, fontSize:10 }}></i>
+                  {r.rule} · {r.name} → {r.direction} ({(r.strength * 100).toFixed(0)} %)
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize:11.5, color:'var(--dim)', marginTop:7 }}>
+              {signal.contradiction.franche
+                ? 'Aucune confirmation ne peut être donnée : attends que les règles se rejoignent, ou choisis toi-même le camp qui a le contexte pour lui.'
+                : 'La direction retenue subit une pénalité de force pour tenir compte de la contradiction.'}
+            </div>
+          </div>
+        )}
+
         {/* Détails du signal : niveaux, scénarios des deux sens, conditions.
             Rien n'est masqué sous prétexte que le verdict n'est pas encore
             confirmé — c'est justement là qu'on a besoin du plan. */}
@@ -3606,23 +3642,51 @@ function Termes() {
   const [famille, setFamille] = useState('Toutes');
   // Termes ajoutés par l'utilisateur : ils complètent le vocabulaire du moteur.
   const [persos, setPersos] = useState([]);
+  const [concepts, setConcepts] = useState([]);   // base de concepts du moteur (32)
   const [edition, setEdition] = useState(null);
   const [ouvert, setOuvert] = useState(false);
   const [form, setForm] = useState({ sigle:'', nom:'', fr:'', famille:'Autre', def:'', ou:'' });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
+  // Deux sources : le lexique personnel (modifiable) et la base de concepts du
+  // moteur — celle-la meme qui est injectee dans l'analyse IA avant qu'elle conclue.
   const charger = async () => {
     try {
       const d = await (await api('/termes')).json();
       if (d.success) setPersos(d.termes || []);
     } catch (e) { /* le lexique du moteur reste disponible */ }
+    try {
+      const d = await (await api('/concepts')).json();
+      if (d.success) setConcepts(d.concepts || []);
+    } catch (e) { /* les termes du moteur restent affiches */ }
   };
   useEffect(() => { charger(); }, []);
 
   const VIDE = { sigle:'', nom:'', fr:'', famille:'Autre', def:'', ou:'' };
+  // Familles de la base de concepts, alignees sur celles du lexique.
+  const CAT_FAMILLE = { structure:'Structure', zones:'Zones', liquidite:'Liquidité',
+    prix:'Prix', temps:'Temps', momentum:'Momentum', base:'Base', gestion:'Risque' };
+  // Un sigle deja couvert par le lexique n'est pas repete : on ajoute seulement
+  // ce que la base de concepts apporte en plus.
+  const siglesCouverts = new Set(LEXIQUE.map(t => String(t.sigle).toLowerCase()));
+  const duMoteur = concepts.filter(c => {
+    const s = String(c.terme || '').split('—')[0].trim().toLowerCase();
+    return s && !siglesCouverts.has(s);
+  }).map(c => ({
+    f: CAT_FAMILLE[c.categorie] || 'Autre',
+    sigle: String(c.terme || '').split('—')[0].trim(),
+    nom: String(c.terme || '').split('—')[1] ? String(c.terme).split('—')[1].trim() : String(c.terme || ''),
+    fr: '',
+    def: c.definition,
+    ou: (c.identification || [])[0] || 'injecté dans l\'analyse IA',
+    piege: (c.pieges || [])[0] || '',
+    moteur: true,
+    id: 'mc_' + c.id
+  }));
   const tous = [
     ...LEXIQUE,
+    ...duMoteur,
     ...persos.map(t => ({ f: t.famille, sigle: t.sigle, nom: t.nom, fr: t.fr, def: t.def,
       ou: t.ou || 'terme ajouté par vous', id: t.id, perso: true }))
   ];

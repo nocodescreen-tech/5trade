@@ -189,6 +189,8 @@ const Structure = require('./structure');
 const Signals = require('./signals');
 const Alerts = require('./alerts');
 const Lexique = require('./lexique');
+// Base de concepts : les définitions des termes, injectées dans l'analyse IA.
+const Concepts = require('./concepts');
 
 // Données de marché mises en cache sur disque : l'analyse doit rester
 // possible même sans réseau (et après un redémarrage).
@@ -1363,6 +1365,17 @@ Conditions défavorables: ${s.structured?.conditions || 'non précisé'}`;
       }).join('\n\n')
     : 'AUCUNE stratégie correspondante dans la base de connaissance.';
 
+  // Définitions des termes réellement en jeu, injectées dans la consigne. Sans
+  // elles, le modèle emploie « order block » ou « premium » à tort et à travers ;
+  // avec elles, il sait qu'une zone de demande prise par le haut en premium
+  // n'est pas un achat. On n'injecte QUE les concepts convoqués (8 au plus) :
+  // les 32 définitions d'un coup noieraient le modèle.
+  const texteAnalyse = [
+    visionAnalysis,
+    ...strategies.map(s => `${s.title} ${(s.structured?.concepts || []).join(' ')} ${(s.content || '').slice(0, 400)}`)
+  ].join(' ');
+  const conceptsBlock = Concepts.pourConsigne(texteAnalyse, 8);
+
   const prompt = `Tu es un analyste trading senior. Tu dois combiner les stratégies de la base avec l'analyse visuelle actuelle et produire un PLAN D'ACTION concret.
 
 PAIRE: ${pair}
@@ -1374,7 +1387,11 @@ ${visionAnalysis}
 === STRATÉGIES DISPONIBLES DANS LA BASE ===
 ${strategiesBlock}
 
+=== DÉFINITIONS DES TERMES EN JEU (à respecter à la lettre) ===
+${conceptsBlock || 'aucune définition particulière'}
+
 === CONSIGNES ===
+- N'emploie un terme technique que s'il figure dans les définitions ci-dessus, et seulement s'il est présent dans l'analyse visuelle.
 - Combine 2 à 3 stratégies maximum (intersection des conditions favorables, pas addition naïve).
 - Donne un plan étape par étape : QUOI faire, QUAND, AVANT QUOI, et QUOI faire ensuite.
 - Sois précis sur les prix/niveaux quand l'analyse visuelle les fournit.
@@ -1836,6 +1853,24 @@ app.put('/api/termes/:id', requireAuth, (req, res) => {
 app.delete('/api/termes/:id', requireAuth, (req, res) => {
   try { res.json({ success: true, ...Lexique.supprimer(req.params.id) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ─── Base de concepts du moteur : les définitions injectées dans l'analyse ───
+// Elles ne sont pas décoratives : l'analyse IA les reçoit avant de conclure.
+app.get('/api/concepts', requireAuth, (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (q) {
+      return res.json({ success: true, concepts: Concepts.chercher(q), categories: Concepts.CATEGORIES });
+    }
+    const cat = String(req.query.categorie || '').trim() || undefined;
+    res.json({
+      success: true,
+      concepts: Concepts.tous(cat),
+      categories: Concepts.CATEGORIES,
+      total: Concepts.CONCEPTS.length
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 /**

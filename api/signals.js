@@ -502,6 +502,14 @@ function detect(candles, meta = {}, options = {}) {
 
   const independent = new Set(winner.map(r => r.rule)).size;
 
+  // CONTRADICTION : des règles qui tirent en sens opposés. C'est le cas piégeux —
+  // une moyenne masquerait le désaccord et produirait une confirmation qui ne
+  // repose sur rien. Deux règles qui se contredisent ne sont pas une confirmation.
+  //   • désaccord simple  : les deux camps existent, un domine nettement
+  //   • désaccord franc   : les deux camps sont à égalité (1 contre 1, 2 contre 2)
+  const contradictionActive = buy.length > 0 && sell.length > 0;
+  const desaccordFranc = contradictionActive && Math.abs(buy.length - sell.length) <= 1;
+
   // Force = moyenne des voix gagnantes, RENFORCÉE par la concordance et
   // affaiblie par la contradiction. Deux règles d'accord valent mieux que
   // chacune prise seule — sinon une confirmation ne vaudrait rien de plus.
@@ -513,15 +521,31 @@ function detect(candles, meta = {}, options = {}) {
   // Confirmation = règles indépendantes du même côté, au seuil demandé.
   // Une stratégie mono-règle (ex. « order blocks ») ne peut pas croiser deux
   // confirmations : son profil relève alors le seuil de force (voir plus haut).
+  // Un désaccord franc interdit la confirmation, quelle que soit la force.
   const seuilRegles = Number.isFinite(options.seuilRegles) ? options.seuilRegles : 2;
   const seuilForce = Number.isFinite(options.seuilForce) ? options.seuilForce : 0.35;
   const seuilSurveiller = Math.max(0.3, seuilForce - 0.05);
-  const status = (independent >= seuilRegles && strength >= seuilForce) ? 'confirme'
+  const status = (!desaccordFranc && independent >= seuilRegles && strength >= seuilForce) ? 'confirme'
     : (independent >= 1 && strength >= seuilSurveiller) ? 'surveiller' : 'neutre';
+
+  // Ce que chaque camp avance, pour que le désaccord soit lisible.
+  const camp = r => ({ rule: r.rule, name: r.name, direction: r.direction, strength: r.strength });
+  const contradiction = {
+    active: contradictionActive,
+    franche: desaccordFranc,
+    pour: winner.map(camp),
+    contre: loser.map(camp),
+    lecture: !contradictionActive
+      ? 'les règles vont dans le même sens'
+      : desaccordFranc
+        ? `Désaccord : ${buy.length} règle(s) haussière(s) contre ${sell.length} baissière(s) — aucune confirmation possible`
+        : `${loser.length} règle(s) ${loser[0].direction === 'BUY' ? 'haussière(s)' : 'baissière(s)'} contredisent la direction retenue (pénalité de force appliquée)`
+  };
 
   // Pourquoi ce n'est pas confirmé : on l'écrit au lieu de laisser deviner.
   const missing = [];
   if (status !== 'confirme') {
+    if (desaccordFranc) missing.push(contradiction.lecture);
     if (independent < seuilRegles) {
       missing.push(`il faut ${seuilRegles} règle(s) concordante(s) (${independent} pour l'instant)`);
     }
@@ -548,6 +572,8 @@ function detect(candles, meta = {}, options = {}) {
       + ` Scénarios : achat si ${sc.bullish.trigger}, vente si ${sc.bearish.trigger}.`
     : `${entete}${direction === 'BUY' ? 'ACHAT' : 'VENTE'} ${status === 'confirme' ? 'CONFIRMÉ' : 'à surveiller'}`
       + ` — ${independent} règle(s) : ${winner.map(r => r.name).join(' + ')}`
+      + (contradiction.franche ? ` · DÉSACCORD : ${contradiction.lecture}`
+        : (contradiction.active ? ` · ${contradiction.lecture}` : ''))
       + ` · force ${(strength * 100).toFixed(0)} %`
       + ` · entrée ${fmt(levels.entry)} / invalidation ${fmt(levels.stop)} / objectifs ${fmt(levels.target1)} puis ${fmt(levels.target2)}`;
 
@@ -565,6 +591,9 @@ function detect(candles, meta = {}, options = {}) {
     price: report.lastPrice,
     trend: report.structure.trend,
     summary,
+    // Le désaccord entre règles est exposé tel quel : on ne masque pas un
+    // « 1 pour / 1 contre » derrière une direction choisie arbitrairement.
+    contradiction,
     // Traçabilité : quelles règles ont été appliquées, et au nom de quoi.
     reglesActives: actives,
     seuils: { regles: seuilRegles, force: seuilForce },

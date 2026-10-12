@@ -81,7 +81,7 @@ function tinyPng(W = 64, H = 40) {
 (async () => {
   // ── 1. Syntaxe ──
   section('[1] Syntaxe');
-  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'market.js', 'structure.js', 'signals.js', 'reset-password.js', 'bootstrap-db.js', 'alerts.js', 'lexique.js', 'expliquer.js']) {
+  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'market.js', 'structure.js', 'signals.js', 'reset-password.js', 'bootstrap-db.js', 'alerts.js', 'lexique.js', 'expliquer.js', 'concepts.js']) {
     try {
       require('child_process').execFileSync(process.execPath, ['--check', path.join(__dirname, f)]);
       ok(f, true);
@@ -787,6 +787,93 @@ function tinyPng(W = 64, H = 40) {
     ok('suppression et retour à l\'état initial', Lx.lister().length === n0, `n0=${n0}`);
     ok('le lexique personnel est séparé du lexique du moteur',
       !/const LEXIQUE/.test(fs.readFileSync(path.join(__dirname, 'lexique.js'), 'utf8')));
+  }
+
+  // ── Base de concepts : elle n'est utile que si elle est VRAIMENT branchée ──
+  // Ces 364 lignes dormaient, jamais importées. On vérifie qu'elles sont
+  // complètes et qu'elles alimentent l'analyse.
+  {
+    const Cp = require('./concepts.js');
+    ok('la base de concepts est chargée', Cp.CONCEPTS.length >= 30, `${Cp.CONCEPTS.length} concepts`);
+    ok('chaque concept a définition, repérage et pièges',
+      Cp.CONCEPTS.every(c => c.id && c.terme && c.definition
+        && Array.isArray(c.identification) && c.identification.length
+        && Array.isArray(c.pieges) && c.pieges.length));
+    ok('les catégories sont déclarées', Object.keys(Cp.CATEGORIES).length >= 7);
+    ok('la recherche trouve un terme',
+      Cp.chercher('order block').some(c => /ob|order/i.test(c.terme)));
+    ok('la recherche par alias fonctionne',
+      Cp.chercher('changement de caractere').some(c => c.id === 'choch'));
+    const consigne = Cp.pourConsigne('rejet sur un order block haussier en premium avec balayage de liquidite', 8);
+    ok('la consigne injecte les définitions convoquées', consigne.length > 100 && consigne.includes('•'),
+      consigne.split('\n').length + ' concepts retenus');
+    ok('la consigne ne dépasse pas la limite demandée',
+      Cp.pourConsigne('order block fvg bos choch mss premium discount ote sweep liquidity breaker displacement', 3)
+        .split('\n').length <= 3);
+    // Le point qui compte : concepts.js est réellement appelé par le serveur.
+    const srv = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('concepts.js est IMPORTÉ par le serveur', /require\('\.\/concepts'\)/.test(srv));
+    ok('les définitions entrent dans le prompt d\'analyse', /Concepts\.pourConsigne\(/.test(srv));
+    ok('l\'interface peut lister les concepts', /app\.get\('\/api\/concepts'/.test(srv));
+  }
+
+  // ── Contradiction entre règles : jamais de confirmation sur un désaccord franc ──
+  {
+    // Invariant fondamental : si les règles se contredisent à égalité, aucune
+    // confirmation ne doit sortir. C'est le cas où un score moyen mentirait.
+    const seriesTest = [];
+    // Série D — range en sinusoïde puis fausse cassure haute refermée en bas :
+    // R1 (balayage) part à la vente, R3 (zone réactive) part à l'achat.
+    {
+      const s = []; let t = 0;
+      for (let i = 0; i < 24; i++) {
+        const c = 100 + Math.sin(i / 2) * 3;
+        s.push({ t: t += 60000, o: c, h: c + 1.2, l: c - 1.2, c, v: 1 });
+      }
+      s.push({ t: t += 60000, o: 100, h: 108, l: 99, c: 99.5, v: 1 });
+      seriesTest.push(s);
+    }
+    // Série F — grand range puis balayage bas refermé très haut : R1 (balayage)
+    // part à l'achat, R4 (premium) part à la vente. Les deux cas produisent un
+    // désaccord FRANC : c'est ce qui donne sa valeur au test.
+    {
+      const s = []; let t = 0;
+      for (let i = 0; i < 30; i++) {
+        const c = 100 + (i % 6) * 4;
+        s.push({ t: t += 60000, o: c, h: c + 1, l: c - 1, c, v: 1 });
+      }
+      s.push({ t: t += 60000, o: 118, h: 122, l: 96, c: 121, v: 1 });
+      seriesTest.push(s);
+    }
+
+    let francs = 0, confirmesEnDesaccord = 0, champsOk = 0, partiels = 0;
+    for (const s of seriesTest) {
+      const v = Sig.detect(s, { symbol: 'T', timeframe: '5m' });
+      if (!v.contradiction || typeof v.contradiction.active !== 'boolean'
+        || !Array.isArray(v.contradiction.pour) || !Array.isArray(v.contradiction.contre)
+        || typeof v.contradiction.lecture !== 'string') continue;
+      champsOk++;
+      if (v.contradiction.active) partiels++;
+      if (v.contradiction.franche) {
+        francs++;
+        if (v.status === 'confirme') confirmesEnDesaccord++;
+        // Les deux camps doivent être nommés : c'est ce que l'écran affiche.
+        if (!v.contradiction.pour.length || !v.contradiction.contre.length) confirmesEnDesaccord++;
+      }
+    }
+    ok('le verdict expose toujours l\'état du désaccord', champsOk === seriesTest.length,
+      `${champsOk}/${seriesTest.length} séries`);
+    // Ces séries créent volontairement un désaccord : le test doit le CONFIRMER,
+    // sinon il passerait à vide et ne prouverait rien.
+    ok('les séries de test produisent bien un désaccord', partiels >= 2, `${partiels} cas`);
+    ok('un désaccord franc n\'est JAMAIS confirmé et nomme les deux camps',
+      confirmesEnDesaccord === 0 && francs >= 2, `${francs} cas franc(s) examiné(s)`);
+    // Et le désaccord est annoncé dans le résumé quand il existe.
+    const avecDuel = seriesTest
+      .map(s => Sig.detect(s, { symbol: 'T', timeframe: '5m' }))
+      .find(v => v.contradiction && v.contradiction.franche);
+    ok('le résumé annonce le désaccord', !!avecDuel && /DÉSACCORD/.test(avecDuel.summary),
+      avecDuel ? avecDuel.summary.slice(0, 96) : 'aucun désaccord');
   }
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
