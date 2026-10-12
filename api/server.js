@@ -188,6 +188,7 @@ const Structure = require('./structure');
 // ─── Signaux (stratégie appliquée + confirmation achat/vente) ───
 const Signals = require('./signals');
 const Alerts = require('./alerts');
+const Lexique = require('./lexique');
 
 // Données de marché mises en cache sur disque : l'analyse doit rester
 // possible même sans réseau (et après un redémarrage).
@@ -1639,7 +1640,13 @@ app.get('/api/market/structure', requireAuth, async (req, res) => {
       });
     }
     const report = Structure.analyze(candles, { symbol, timeframe: tf });
-    res.json({ success: true, symbol, timeframe: tf, provider, source, offline: !!offline, report });
+    // Le vocabulaire évalué accompagne le rapport : chaque terme avec ce que CE
+    // graphique montre, pour que le raisonnement soit vérifiable brique par brique.
+    res.json({
+      success: true, symbol, timeframe: tf, provider, source, offline: !!offline,
+      report,
+      vocabulaire: Structure.vocabulaire(report)
+    });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -1808,6 +1815,27 @@ app.get('/api/strategies/profiles', requireAuth, async (req, res) => {
       }
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Lexique personnalisé : les termes que l'utilisateur ajoute lui-même ───
+app.get('/api/termes', requireAuth, (req, res) => {
+  try { res.json({ success: true, termes: Lexique.lister(), familles: Lexique.FAMILLES }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/termes', requireAuth, (req, res) => {
+  try { res.json({ success: true, terme: Lexique.ajouter(req.body || {}) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.put('/api/termes/:id', requireAuth, (req, res) => {
+  try { res.json({ success: true, terme: Lexique.modifier(req.params.id, req.body || {}) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/termes/:id', requireAuth, (req, res) => {
+  try { res.json({ success: true, ...Lexique.supprimer(req.params.id) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 /**

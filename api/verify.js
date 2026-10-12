@@ -331,6 +331,9 @@ function tinyPng(W = 64, H = 40) {
   const vm = require('vm');
   const FRONT = path.join(__dirname, '..', 'frontend');
   const htmlSrc = fs.readFileSync(path.join(FRONT, 'index.html'), 'utf8');
+  // Source du moteur : sert à vérifier que les termes ne vivent pas seulement
+  // dans un lexique décoratif mais sont bien ceux que le verdict emploie.
+  const SIGSRC = fs.readFileSync(path.join(__dirname, 'signals.js'), 'utf8');
   // Tous les <script type="text/babel"> sans attribut src = notre application
   const jsx = [...htmlSrc.matchAll(/<script([^>]*type="text\/babel"[^>]*)>([\s\S]*?)<\/script>/g)]
     .filter(m => !/\bsrc=/.test(m[1])).map(m => m[2]).join('\n');
@@ -706,6 +709,84 @@ function tinyPng(W = 64, H = 40) {
       String(Sig.normaliserMoteur({ timeframes: ['1m', '5m'], seuilAlignes: 9 }).seuilAlignes));
     ok('les unités inconnues sont écartées',
       (Sig.normaliserMoteur({ timeframes: ['1m', '7s', 'zz'] }).timeframes || []).join(',') === '1m');
+  }
+
+  // ── Page « Termes » : le vocabulaire doit être visible et explicité ──
+  // L'utilisateur voyait « OB », « FVG » sans savoir ce que l'app mesurait.
+  {
+    ok('onglet « Termes » déclaré', /id:'termes'/.test(jsx));
+    ok('le lexique est présent', /const LEXIQUE = \[/.test(jsx));
+    ok('chaque terme porte un sigle, un nom, une définition et son lieu',
+      (jsx.match(/sigle:'[^']+'/g) || []).length >= 20 &&
+      (jsx.match(/def:"[^"]{20,}"/g) || []).length >= 20 &&
+      (jsx.match(/ou:"[^"]{10,}"/g) || []).length >= 20,
+      `${(jsx.match(/sigle:'[^']+'/g) || []).length} termes`);
+    const sigles = ['BOS', 'CHoCH', 'MSS', 'FVG', 'EQH / EQL', 'OTE', 'Premium', 'Discount',
+      'Sweep', 'Displacement', 'Kill zone', 'ATR', 'OB'];
+    const absents = sigles.filter(s => !jsx.includes(`sigle:'${s}'`));
+    ok('tous les termes demandés sont documentés', !absents.length, absents.join(', ') || 'tous');
+    // Les sigles doivent aussi apparaître dans le moteur, pas seulement dans le lexique.
+    ok('le verdict nomme BOS et CHoCH', /BOS \(rupture de structure\)/.test(SIGSRC) &&
+      /CHoCH \(changement de caractère\)/.test(SIGSRC));
+    ok('le verdict nomme Sweep et OB/FVG', /Sweep \(balayage de liquidité\)/.test(SIGSRC) &&
+      /OB\/FVG/.test(SIGSRC));
+    ok('le verdict nomme Premium et Discount', /Premium \(zone haute du range\)/.test(SIGSRC) &&
+      /Discount \(zone basse du range\)/.test(SIGSRC));
+    ok('la checklist nomme ses sigles', /HH-HL \/ LH-LL/.test(SIGSRC) && /EQH\/EQL/.test(SIGSRC));
+  }
+
+  // ── Vocabulaire évalué : chaque terme doit être MESURÉ, pas décoré ──
+  // L'utilisateur voulait que l'IA comprenne les termes avant d'analyser. On
+  // vérifie donc que chaque terme présent porte une valeur réelle et que les
+  // clés utilisées existent bien (un « null » signalerait une clé inventée).
+  {
+    const St = require('./structure.js');
+    // Série régulière : suffisamment de bougies pour que le vocabulaire ait de
+    // quoi mesurer, sans dépendre d'un réseau.
+    const serie = [];
+    for (let i = 0; i < 80; i++) {
+      const b = 100 + i * 0.4;
+      serie.push({ t: i * 60000, o: b, h: b + 0.9, l: b - 0.5, c: b + 0.6, v: 10 });
+    }
+    const r = St.analyze(serie, { symbol: 'TEST', timeframe: '5m' });
+    const voc = St.vocabulaire(r);
+    ok('le vocabulaire couvre au moins 18 termes', voc.length >= 18, `${voc.length} termes`);
+    ok('chaque terme a sigle, famille, present et lecture',
+      voc.every(t => t.sigle && t.famille && typeof t.present === 'boolean' && t.lecture));
+    const avecValeur = voc.filter(t => t.present);
+    ok('chaque terme détecté porte une valeur chiffrée',
+      avecValeur.every(t => t.valeur && String(t.valeur).length > 3),
+      `${avecValeur.length}/${voc.length} présents`);
+    ok('aucune valeur ne contient « null » (signe d\'une clé inventée)',
+      !voc.some(t => /null|undefined|NaN/.test(String(t.valeur || ''))),
+      (voc.find(t => /null|undefined|NaN/.test(String(t.valeur || ''))) || {}).sigle || 'aucune');
+    ok('les niveaux de période portent leurs vraies clés (PDH/PDL)',
+      /pl\.PDH/.test(St.vocabulaire.toString()) && /pl\.PWH/.test(St.vocabulaire.toString()));
+    ok('les pools portent « price » et le nombre de touches',
+      /touches/.test(St.vocabulaire.toString()) && /p\.price/.test(St.vocabulaire.toString()));
+  }
+
+  // ── Lexique personnalisé : l'utilisateur doit pouvoir ajouter ses termes ──
+  {
+    const Lx = require('./lexique.js');
+    const n0 = Lx.lister().length;
+    const t = Lx.ajouter({ sigle: 'ZZTEST', nom: 'Terme de vérification', famille: 'Zones', def: 'Créé par la vérification.' });
+    ok('ajout d\'un terme personnel', Lx.lister().length === n0 + 1 && !!t.id);
+    ok('doublon refusé (insensible à la casse)', (() => {
+      try { Lx.ajouter({ sigle: 'zztest', nom: 'Doublon' }); return false; } catch { return true; }
+    })());
+    ok('sigle manquant refusé', (() => {
+      try { Lx.ajouter({ nom: 'Sans sigle' }); return false; } catch { return true; }
+    })());
+    ok('famille inconnue rangée dans « Autre »',
+      Lx.ajouter({ sigle: 'ZZFAM', nom: 'Famille inconnue', famille: 'Inexistante' }).famille === 'Autre');
+    ok('modification d\'un terme', Lx.modifier(t.id, { def: 'Définition corrigée par la vérification.' }).def.includes('corrigée'));
+    Lx.supprimer(t.id);
+    const resta = Lx.lister().filter(x => x.sigle === 'ZZFAM')[0];
+    if (resta) Lx.supprimer(resta.id);
+    ok('suppression et retour à l\'état initial', Lx.lister().length === n0, `n0=${n0}`);
+    ok('le lexique personnel est séparé du lexique du moteur',
+      !/const LEXIQUE/.test(fs.readFileSync(path.join(__dirname, 'lexique.js'), 'utf8')));
   }
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);

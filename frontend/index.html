@@ -1920,6 +1920,9 @@ function LiveMarket({ onToJournal }) {
   const [candles, setCandles] = useState([]);
   const [status, setStatus] = useState(null);
   const [report, setReport] = useState(null);
+  // Vocabulaire évalué : chaque terme SMC avec ce que CE graphique montre.
+  // Le moteur nomme ce qu'il mesure avant de conclure.
+  const [vocabulaire, setVocabulaire] = useState(null);
   const [result, setResult] = useState(null);
   const [live, setLive] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -2007,7 +2010,7 @@ function LiveMarket({ onToJournal }) {
   // « ne pas bouger » alors qu'il montrait l'ancien marché.
   useEffect(() => {
     setCandles([]);
-    setReport(null);
+    setReport(null); setVocabulaire(null);
     setSignal(null);
     setTicks(0);
   }, [symbol, tf, provider]);
@@ -2020,7 +2023,7 @@ function LiveMarket({ onToJournal }) {
       setCandles(r.candles);
       setOffline(!!r.offline);
       const st = await (await api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`)).json();
-      if (st.success) setReport(st.report);
+      if (st.success) { setReport(st.report); setVocabulaire(st.vocabulaire || null); }
       if (st.offline) setOffline(true);
     } catch (e) {
       const m = String(e.message || e);
@@ -2158,7 +2161,9 @@ function LiveMarket({ onToJournal }) {
             <button className="btn ghost sm" onClick={() => setChoixOuvert(o => !o)}
               title="Choisir une ou plusieurs stratégies : leurs règles se cumulent.">
               <i className="fas fa-list-check"></i>
-              Stratégies ({strategiesChoisies.length})
+              {strategiesChoisies.length
+                ? `Stratégies à combiner : ${strategiesChoisies.length}`
+                : 'Choisir mes stratégies'}
             </button>
             {choixOuvert && (
               <div className="panel" style={{ position:'absolute', zIndex:60, top:'115%', left:0, width:360,
@@ -2194,6 +2199,25 @@ function LiveMarket({ onToJournal }) {
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Les stratégies combinées, nommées : un compteur ne dit pas LESQUELLES. */}
+        {mode === 'manuel' && strategiesChoisies.length > 0 && (
+          <div style={{ display:'flex', gap:5, flexWrap:'wrap', alignItems:'center', maxWidth:460 }}>
+            {strategiesChoisies.map(id => {
+              const p = profils.find(x => x.id === id);
+              const tf = p && p.timeframes && p.timeframes.length ? ` · ${p.timeframes.join('/')}` : '';
+              return (
+                <span key={id} className="tag"
+                  style={{ fontSize:10.5, background:'rgba(96,165,250,.12)', color:'#93c5fd', cursor:'pointer' }}
+                  title="Cliquer pour retirer cette stratégie"
+                  onClick={() => setStrategiesChoisies(l => l.filter(x => x !== id))}>
+                  {(p ? p.titre : id).slice(0, 34)}{tf}
+                  <i className="fas fa-xmark" style={{ marginLeft:5 }}></i>
+                </span>
+              );
+            })}
           </div>
         )}
         <span className="badge" style={{ background: live ? 'rgba(16,185,129,.13)' : 'rgba(245,158,11,.13)',
@@ -2483,6 +2507,38 @@ function LiveMarket({ onToJournal }) {
               {confluence.confluence.motif} — le signal n'est confirmé que si ce seuil est atteint.
             </p>
           </div>
+        )}
+
+        {/* Termes évalués : chaque terme vérifié sur CE graphique avec sa valeur.
+            Le moteur expose son raisonnement au lieu de l'affirmer. */}
+        {vocabulaire && vocabulaire.length > 0 && (
+          <details className="panel" style={{ padding:'12px 14px', marginTop:12 }}>
+            <summary style={{ cursor:'pointer', fontSize:13, fontWeight:600 }}>
+              <i className="fas fa-list-check" style={{ marginRight:8, color:'#60a5fa' }}></i>
+              Termes vérifiés sur ce graphique
+              {' · '}{vocabulaire.filter(t => t.present).length}/{vocabulaire.length}
+              <span style={{ marginLeft:8, fontWeight:400, fontSize:11.5, color:'var(--dim)' }}>
+                l'analyse s'appuie sur ces mesures
+              </span>
+            </summary>
+            <div style={{ display:'grid', gap:4, marginTop:10 }}>
+              {vocabulaire.map(t => (
+                <div key={t.sigle} style={{ display:'flex', gap:10, alignItems:'baseline',
+                  fontSize:12.5, opacity: t.present ? 1 : 0.4 }}>
+                  <i className={`fas ${t.present ? 'fa-circle-check' : 'fa-circle-minus'}`}
+                    style={{ width:12, color: t.present ? '#34d399' : 'var(--muted)', fontSize:11 }}></i>
+                  <b style={{ width:108, color: t.present ? '#93c5fd' : 'var(--muted)' }}>{t.sigle}</b>
+                  <span style={{ flex:1, color: t.present ? 'var(--muted)' : 'var(--dim)' }}>
+                    {t.valeur || t.lecture}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p style={{ margin:'10px 0 0', fontSize:11.5, color:'var(--dim)' }}>
+              Un terme grisé est absent de ce graphique : il ne pèse donc pas dans le verdict.
+              Le détail de chacun est dans l'onglet Termes.
+            </p>
+          </details>
         )}
 
         {alerts.length > 0 && (
@@ -3463,6 +3519,270 @@ function Alertes() {
   );
 }
 
+/* ══════════════ TERMES ══════════════ */
+
+/**
+ * Le vocabulaire du moteur, chaque terme relié à l'endroit de l'interface où
+ * il est calculé. Sans ça, les sigles restent opaques : on voit « BOS » ou
+ * « FVG » sans savoir ce que l'application a réellement mesuré.
+ */
+const LEXIQUE = [
+  { f:'Structure', sigle:'BOS', nom:'Break of Structure', fr:'rupture de structure',
+    def:"Clôture au-delà du dernier sommet (ou creux) DANS le sens de la tendance : le mouvement se poursuit.",
+    ou:"Règle R2 · panneaux « Structure calculée » et « éléments identifiés »" },
+  { f:'Structure', sigle:'CHoCH', nom:'Change of Character', fr:'changement de caractère',
+    def:"Première cassure CONTRE la tendance en place : le marché change de camp, retournement possible.",
+    ou:"Règle R2 (nommée « changement de caractère » dans le verdict)" },
+  { f:'Structure', sigle:'MSS', nom:'Market Structure Shift', fr:'décalage de structure',
+    def:"Cassure qui invalide la structure précédente — un CHoCH suivi d'une prise de liquidité.",
+    ou:"Déduit du verdict quand un CHoCH apparaît après un balayage" },
+  { f:'Structure', sigle:'HH / HL', nom:'Higher High / Higher Low', fr:'sommet / creux ascendants',
+    def:"Séquence qui définit une tendance haussière : chaque sommet et chaque creux monte.",
+    ou:"Ligne « Récent » du panneau « Structure calculée »" },
+  { f:'Structure', sigle:'LH / LL', nom:'Lower High / Lower Low', fr:'sommet / creux descendants',
+    def:"Séquence qui définit une tendance baissière : chaque sommet et chaque creux descend.",
+    ou:"Ligne « Récent » du panneau « Structure calculée »" },
+  { f:'Structure', sigle:'Swing', nom:'Swing high / low', fr:'sommet ou creux local',
+    def:"Point plus haut (ou plus bas) que les bougies voisines. Base de toute la lecture de structure.",
+    ou:"Fenêtre réglable par stratégie (« Fenêtre des swings »)" },
+  { f:'Zones', sigle:'OB', nom:'Order Block', fr:'bloc d’ordres',
+    def:"Dernière bougie de sens opposé avant une impulsion : la zone où de gros ordres ont été passés.",
+    ou:"Règle R3 · section « order blocks » de l'inventaire" },
+  { f:'Zones', sigle:'FVG', nom:'Fair Value Gap', fr:'déséquilibre de prix',
+    def:"Écart entre trois bougies, laissé quand le prix bouge trop vite : le marché revient souvent le combler.",
+    ou:"Règle R3 · section « imbalances » de l'inventaire" },
+  { f:'Zones', sigle:'Breaker', nom:'Breaker block', fr:'bloc cassé',
+    def:"Order block cassé par la clôture : la zone change de camp (support devenu résistance).",
+    ou:"Section « breakers » du panneau Fibonacci et de l'inventaire" },
+  { f:'Zones', sigle:'EQH / EQL', nom:'Equal Highs / Equal Lows', fr:'sommets / creux égaux',
+    def:"Deux sommets (ou creux) au même niveau : les stops s'y accumulent, le prix vient les chercher.",
+    ou:"Section « liquidité » de l'inventaire · règle R1" },
+  { f:'Zones', sigle:'Liquidity', nom:'Liquidity pool', fr:'amas de liquidité',
+    def:"Niveau où se trouvent les ordres stop (au-dessus des sommets, sous les creux). Le prix y est attiré.",
+    ou:"Section « liquidité » de l'inventaire" },
+  { f:'Prix', sigle:'Premium', nom:'Premium', fr:'zone haute du range',
+    def:"Prix au-dessus de l'équilibre (50 %) du range : on privilégie la VENTE.",
+    ou:"Règle R4 · panneau « Structure calculée »" },
+  { f:'Prix', sigle:'Discount', nom:'Discount', fr:'zone basse du range',
+    def:"Prix sous l'équilibre (50 %) du range : on privilégie l'ACHAT.",
+    ou:"Règle R4 · panneau « Structure calculée »" },
+  { f:'Prix', sigle:'OTE', nom:'Optimal Trade Entry', fr:'zone d’entrée optimale',
+    def:"Retracement entre 0,618 et 0,786 du dernier mouvement : la zone d'entrée privilégiée.",
+    ou:"Panneau « Fibonacci & périodes de référence »" },
+  { f:'Prix', sigle:'PDH / PDL', nom:'Previous Day High / Low', fr:'plus haut / bas de la veille',
+    def:"Repères de la séance précédente : souvent pris puis rejoués comme supports ou résistances.",
+    ou:"Panneau « Fibonacci & périodes de référence »" },
+  { f:'Prix', sigle:'PWH / PWL', nom:'Previous Week High / Low', fr:'plus haut / bas de la semaine passée',
+    def:"Mêmes repères, à l'échelle hebdomadaire : le contexte large.",
+    ou:"Panneau « Fibonacci & périodes de référence »" },
+  { f:'Flux', sigle:'Sweep', nom:'Liquidity sweep', fr:'balayage de liquidité',
+    def:"Mèche au-delà d'un niveau puis clôture de l'autre côté : les stops sont pris, pas la tendance poursuivie.",
+    ou:"Règle R1 · section « balayages » de l'inventaire" },
+  { f:'Flux', sigle:'Displacement', nom:'Displacement', fr:'déplacement',
+    def:"Bougie au corps large (au moins 1,5 × ATR) : signature d'une entrée institutionnelle.",
+    ou:"Ligne « Déplacements » du panneau « Structure calculée »" },
+  { f:'Flux', sigle:'Kill zone', nom:'Kill zone', fr:'plage horaire active',
+    def:"Créneaux où la liquidité est prise : Londres 7 h–10 h UTC, New York 12 h–15 h UTC.",
+    ou:"Panneau « Structure calculée » (session en cours)" },
+  { f:'Risque', sigle:'ATR', nom:'Average True Range', fr:'amplitude moyenne',
+    def:"Amplitude moyenne sur 14 bougies. Sert à dimensionner l'invalidation et les objectifs.",
+    ou:"Sous le graphique · base du stop réglable par stratégie" },
+  { f:'Risque', sigle:'R', nom:'Multiple de risque', fr:'risque initial',
+    def:"1 R = la distance entre l'entrée et l'invalidation. Un gain de 2 R vaut deux fois le risque pris.",
+    ou:"Colonne RR du journal" },
+  { f:'Risque', sigle:'RR', nom:'Risk / Reward', fr:'risque / gain',
+    def:"Rapport entre la distance à l'objectif et la distance à l'invalidation, prévu puis réalisé.",
+    ou:"Champ « R prévu » de chaque trade du journal" },
+  { f:'Moteur', sigle:'Confluence', nom:'Multi-timeframe alignment', fr:'alignement multi-unités',
+    def:"Les unités de temps doivent aller dans le même sens, sinon le signal reste « à surveiller ».",
+    ou:"Panneau « Alignement des unités de temps »" },
+  { f:'Moteur', sigle:'R1..R4', nom:'Les quatre familles de règles', fr:'règles du moteur',
+    def:"R1 balayage · R2 rupture de structure · R3 zone réactive · R4 position dans le range. Une confirmation en exige deux.",
+    ou:"Sélecteur de stratégie et verdict en direct" }
+];
+
+function Termes() {
+  const [filtre, setFiltre] = useState('');
+  const [famille, setFamille] = useState('Toutes');
+  // Termes ajoutés par l'utilisateur : ils complètent le vocabulaire du moteur.
+  const [persos, setPersos] = useState([]);
+  const [edition, setEdition] = useState(null);
+  const [ouvert, setOuvert] = useState(false);
+  const [form, setForm] = useState({ sigle:'', nom:'', fr:'', famille:'Autre', def:'', ou:'' });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const charger = async () => {
+    try {
+      const d = await (await api('/termes')).json();
+      if (d.success) setPersos(d.termes || []);
+    } catch (e) { /* le lexique du moteur reste disponible */ }
+  };
+  useEffect(() => { charger(); }, []);
+
+  const VIDE = { sigle:'', nom:'', fr:'', famille:'Autre', def:'', ou:'' };
+  const tous = [
+    ...LEXIQUE,
+    ...persos.map(t => ({ f: t.famille, sigle: t.sigle, nom: t.nom, fr: t.fr, def: t.def,
+      ou: t.ou || 'terme ajouté par vous', id: t.id, perso: true }))
+  ];
+  const familles = ['Toutes', ...new Set(tous.map(t => t.f))];
+  const liste = tous.filter(t =>
+    (famille === 'Toutes' || t.f === famille) &&
+    (!filtre.trim() || `${t.sigle} ${t.nom} ${t.fr} ${t.def}`.toLowerCase().includes(filtre.toLowerCase())));
+
+  const enregistrer = async () => {
+    if (!form.sigle.trim() || !form.nom.trim()) { setErr('Le sigle et le nom complet sont requis'); return; }
+    setBusy(true); setErr('');
+    try {
+      const r = await api(edition && edition.id ? '/termes/' + edition.id : '/termes', {
+        method: edition && edition.id ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form)
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Enregistrement refusé');
+      setEdition(null); setForm(VIDE); setOuvert(false);
+      await charger();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const supprimer = async (id) => {
+    try { await api('/termes/' + id, { method:'DELETE' }); await charger(); } catch (e) {}
+  };
+
+  const ouvrirEdition = (t) => {
+    setEdition(t); setOuvert(true); setErr('');
+    setForm({ sigle: t.sigle, nom: t.nom, fr: t.fr || '', famille: t.f || 'Autre',
+      def: t.def || '', ou: t.ou || '' });
+  };
+
+  return (
+    <div>
+      <Reveal>
+        <h2 style={{ margin:'0 0 6px', fontSize:22 }}>
+          <i className="fas fa-graduation-cap" style={{ color:'#60a5fa', marginRight:10 }}></i>Termes
+        </h2>
+        <p style={{ color:'var(--muted)', fontSize:13.5, margin:'0 0 16px', maxWidth:760 }}>
+          Chaque terme indique ce que le moteur calcule réellement et où le voir.
+          Les {LEXIQUE.length} termes du moteur sont évalués sur chaque graphique avant l'analyse ;
+          ajoutez les vôtres pour compléter ce vocabulaire.
+        </p>
+      </Reveal>
+
+      <Reveal delay={60}>
+        <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'center', marginBottom:14 }}>
+          <input className="fld" placeholder="Rechercher un terme…" value={filtre}
+            onChange={e => setFiltre(e.target.value)} style={{ maxWidth:260 }} />
+          {familles.map(f => (
+            <button key={f} onClick={() => setFamille(f)}
+              className={famille === f ? 'btn sm' : 'btn ghost sm'}>{f}</button>
+          ))}
+          <button className="btn sm" style={{ marginLeft:'auto' }}
+            onClick={() => { setEdition(null); setForm(VIDE); setErr(''); setOuvert(o => !o); }}>
+            <i className={`fas ${ouvert ? 'fa-xmark' : 'fa-plus'}`}></i>
+            {ouvert ? 'Fermer' : 'Ajouter un terme'}
+          </button>
+        </div>
+      </Reveal>
+
+      {ouvert && (
+        <Reveal>
+          <div className="panel" style={{ padding:'14px 16px', marginBottom:16,
+            display:'grid', gap:9, borderColor:'rgba(96,165,250,.35)' }}>
+            <b style={{ fontSize:13 }}>
+              {edition ? `Modifier « ${edition.sigle} »` : 'Nouveau terme'}
+            </b>
+            <div style={{ display:'grid', gap:9, gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))' }}>
+              <label style={{ fontSize:12 }}>
+                <div style={{ color:'var(--muted)', marginBottom:3 }}>Sigle *</div>
+                <input className="fld" value={form.sigle} maxLength={24}
+                  onChange={e => setForm(f => ({ ...f, sigle:e.target.value }))} placeholder="ex. IFVG" />
+              </label>
+              <label style={{ fontSize:12 }}>
+                <div style={{ color:'var(--muted)', marginBottom:3 }}>Nom complet *</div>
+                <input className="fld" value={form.nom} maxLength={80}
+                  onChange={e => setForm(f => ({ ...f, nom:e.target.value }))}
+                  placeholder="ex. Inverse Fair Value Gap" />
+              </label>
+              <label style={{ fontSize:12 }}>
+                <div style={{ color:'var(--muted)', marginBottom:3 }}>Nom français</div>
+                <input className="fld" value={form.fr} maxLength={60}
+                  onChange={e => setForm(f => ({ ...f, fr:e.target.value }))}
+                  placeholder="ex. déséquilibre inversé" />
+              </label>
+              <label style={{ fontSize:12 }}>
+                <div style={{ color:'var(--muted)', marginBottom:3 }}>Famille</div>
+                <select className="fld" value={form.famille}
+                  onChange={e => setForm(f => ({ ...f, famille:e.target.value }))}>
+                  {['Structure','Zones','Prix','Flux','Risque','Moteur','Autre'].map(x =>
+                    <option key={x} value={x}>{x}</option>)}
+                </select>
+              </label>
+            </div>
+            <label style={{ fontSize:12 }}>
+              <div style={{ color:'var(--muted)', marginBottom:3 }}>Définition</div>
+              <textarea className="fld" rows={3} value={form.def} maxLength={600}
+                onChange={e => setForm(f => ({ ...f, def:e.target.value }))}
+                placeholder="Ce que ce terme signifie, et comment le reconnaître sur un graphique." />
+            </label>
+            <label style={{ fontSize:12 }}>
+              <div style={{ color:'var(--muted)', marginBottom:3 }}>Où le voir dans l'application</div>
+              <input className="fld" value={form.ou} maxLength={200}
+                onChange={e => setForm(f => ({ ...f, ou:e.target.value }))}
+                placeholder="ex. zone repérée à la main sur le graphique" />
+            </label>
+            {err && <div style={{ fontSize:12, color:'#f87171' }}><i className="fas fa-circle-exclamation" style={{ marginRight:6 }}></i>{err}</div>}
+            <div style={{ display:'flex', gap:8 }}>
+              <button className="btn sm" onClick={enregistrer} disabled={busy}>
+                {busy ? '…' : <><i className="fas fa-check"></i> {edition ? 'Enregistrer' : 'Ajouter'}</>}
+              </button>
+              <button className="btn ghost sm" onClick={() => { setOuvert(false); setEdition(null); setForm(VIDE); setErr(''); }}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        </Reveal>
+      )}
+
+      <div style={{ display:'grid', gap:10, gridTemplateColumns:'repeat(auto-fit,minmax(330px,1fr))' }}>
+        {liste.map(t => (
+          <Reveal key={(t.id || t.sigle)} delay={40}>
+            <div className="panel" style={{ padding:'14px 16px', height:'100%' }}>
+              <div style={{ display:'flex', alignItems:'baseline', gap:8, flexWrap:'wrap' }}>
+                <b style={{ fontSize:15, color:'#93c5fd' }}>{t.sigle}</b>
+                <span style={{ fontSize:12.5, color:'#e2e8f0' }}>{t.nom}</span>
+                <span className="tag" style={{ fontSize:10.5 }}>{t.f}</span>
+                {t.perso && (
+                  <span style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+                    <button onClick={() => ouvrirEdition(t)} title="Modifier"
+                      style={{ background:'none', border:'none', color:'#60a5fa', cursor:'pointer', fontSize:12 }}>
+                      <i className="fas fa-pen"></i>
+                    </button>
+                    <button onClick={() => supprimer(t.id)} title="Supprimer"
+                      style={{ background:'none', border:'none', color:'#f87171', cursor:'pointer', fontSize:12 }}>
+                      <i className="fas fa-trash"></i>
+                    </button>
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize:12, color:'var(--dim)', margin:'3px 0 7px' }}>{t.fr}</div>
+              <p style={{ margin:'0 0 8px', fontSize:13, color:'var(--muted)', lineHeight:1.6 }}>{t.def}</p>
+              <div style={{ fontSize:11.5, color: t.perso ? '#93c5fd' : '#34d399' }}>
+                <i className={`fas ${t.perso ? 'fa-user' : 'fa-location-dot'}`} style={{ marginRight:5 }}></i>{t.ou}
+              </div>
+            </div>
+          </Reveal>
+        ))}
+      </div>
+      {!liste.length && (
+        <p style={{ color:'var(--dim)', fontSize:13 }}>Aucun terme ne correspond à « {filtre} ».</p>
+      )}
+    </div>
+  );
+}
+
 /* ══════════════ DASHBOARD ══════════════ */
 
 function Dashboard({ user, onLogout }) {
@@ -3513,6 +3833,7 @@ function Dashboard({ user, onLogout }) {
     { id:'strategies', label:'Stratégies',icon:'fa-book' },
     { id:'journal',    label:'Journal',   icon:'fa-receipt' },
     { id:'history',    label:'Historique',icon:'fa-clock-rotate-left' },
+    { id:'termes',     label:'Termes',    icon:'fa-graduation-cap' },
     { id:'alerts',     label:'Alertes',    icon:'fa-bell' }
   ];
 
@@ -3604,6 +3925,7 @@ function Dashboard({ user, onLogout }) {
             {tab === 'strategies' && <Strategies strategies={strategies} onDelete={del} onSaved={load} />}
             {tab === 'journal' && <Journal prefill={prefill} onPrefillUsed={()=>setPrefill(null)} strategies={strategies} />}
             {tab === 'history' && <History history={history} />}
+            {tab === 'termes' && <Termes />}
             {tab === 'alerts' && <Alertes />}
           </Garde>
         </>)}

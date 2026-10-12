@@ -474,8 +474,92 @@ function analyze(candles, meta = {}, options = {}) {
   return r;
 }
 
+/**
+ * Évaluation du vocabulaire : pour chaque terme, ce que CE graphique montre
+ * réellement, avec sa valeur. Le moteur nomme ainsi chaque brique de son
+ * raisonnement avant de conclure — on peut vérifier le verdict au lieu de le
+ * croire sur parole, et un terme absent se voit tout de suite.
+ */
+function vocabulaire(r) {
+  const st = r.structure || {}, pd = r.premiumDiscount || {}, se = r.sessions || {};
+  const pl = r.previousLevels || {}, fib = r.fibLevels || {};
+  const fvgs = r.fvgs || [], obs = r.orderBlocks || [], pools = r.liquidity || [];
+  const sw = r.sweeps || [], brk = r.breakers || [], disp = r.displacements || [];
+  const ev = st.event || null;
+  const f2 = x => (x === null || x === undefined ? null : Number(x).toFixed(2));
+  const haussier = d => /buy|bull/i.test(String(d || ''));
+  const sens = d => (haussier(d) ? 'haussier' : 'baissier');
+  const compte = (arr, t) => arr.filter(z => !t || z.type === t || z.kind === t).length;
+  const zone = z => (z.price !== undefined ? f2(z.price) : `${f2(z.low)}–${f2(z.high)}`);
+
+  return [
+    { sigle: 'BOS', famille: 'Structure', present: !!ev && ev.type === 'BOS',
+      valeur: ev && ev.type === 'BOS' ? `${sens(ev.direction)} à ${f2(ev.level)}` : null,
+      lecture: `tendance ${st.trend || 'indéfinie'} · ${compte([ev].filter(Boolean)) ? 'cassure dans le sens de la tendance' : 'aucune cassure de continuation'}` },
+    { sigle: 'CHoCH', famille: 'Structure', present: !!ev && ev.type === 'CHoCH',
+      valeur: ev && ev.type === 'CHoCH' ? `${sens(ev.direction)} à ${f2(ev.level)}` : null,
+      lecture: 'première cassure contre la tendance en place' },
+    { sigle: 'MSS', famille: 'Structure', present: !!ev && ev.type === 'CHoCH' && sw.length > 0,
+      valeur: ev && ev.type === 'CHoCH' && sw.length ? `décalage après ${sw.length} balayage(s)` : null,
+      lecture: 'changement de structure confirmé par une prise de liquidité' },
+    { sigle: 'HH/HL', famille: 'Structure', present: st.trend === 'bullish',
+      valeur: st.trend === 'bullish' ? 'séquence de sommets et creux ascendants' : null,
+      lecture: 'définition d\'une tendance haussière' },
+    { sigle: 'LH/LL', famille: 'Structure', present: st.trend === 'bearish',
+      valeur: st.trend === 'bearish' ? 'séquence de sommets et creux descendants' : null,
+      lecture: 'définition d\'une tendance baissière' },
+    { sigle: 'Swing', famille: 'Structure', present: !!(st.lastSwingHigh || st.lastSwingLow),
+      valeur: [st.lastSwingHigh && `sommet ${f2(st.lastSwingHigh.price)}`,
+        st.lastSwingLow && `creux ${f2(st.lastSwingLow.price)}`].filter(Boolean).join(' · ') || null,
+      lecture: 'points de référence de la structure' },
+    { sigle: 'OB', famille: 'Zones', present: obs.length > 0,
+      valeur: obs.length ? `${obs.length} bloc(s) : ${compte(obs, 'bullish')} haussier(s), ${compte(obs, 'bearish')} baissier(s)` : null,
+      lecture: 'dernières bougies opposées avant impulsion' },
+    { sigle: 'FVG', famille: 'Zones', present: fvgs.length > 0,
+      valeur: fvgs.length ? `${fvgs.length} déséquilibre(s) : ${compte(fvgs, 'bullish')} haussier(s), ${compte(fvgs, 'bearish')} baissier(s)` : null,
+      lecture: 'écarts laissés par un déplacement rapide' },
+    { sigle: 'Breaker', famille: 'Zones', present: brk.length > 0,
+      valeur: brk.length ? `${brk.length} zone(s) retournée(s)` : null,
+      lecture: 'order block cassé, devenu zone opposée' },
+    { sigle: 'EQH / EQL', famille: 'Zones', present: pools.some(p => /^(EQL|EQH)$/i.test(String(p.type || ''))),
+      valeur: pools.filter(p => /^(EQL|EQH)$/i.test(String(p.type || '')))
+        .map(p => `${p.type} ${f2(p.price)} (${p.touches} touche(s))`).join(' · ') || null,
+      lecture: 'sommets ou creux au même niveau' },
+    { sigle: 'Liquidity', famille: 'Zones', present: pools.length > 0,
+      valeur: pools.length ? `${pools.length} amas de stops` : null,
+      lecture: 'niveaux où la liquidité est accumulée' },
+    { sigle: 'Premium', famille: 'Prix', present: pd.position === 'premium',
+      valeur: pd.equilibrium ? `prix ${f2(r.lastPrice)} · équilibre ${f2(pd.equilibrium)} · range ${f2(pd.low)}–${f2(pd.high)}` : null,
+      lecture: 'moitié haute du range : vente privilégiée' },
+    { sigle: 'Discount', famille: 'Prix', present: pd.position === 'discount',
+      valeur: pd.equilibrium ? `prix ${f2(r.lastPrice)} · équilibre ${f2(pd.equilibrium)} · range ${f2(pd.low)}–${f2(pd.high)}` : null,
+      lecture: 'moitié basse du range : achat privilégié' },
+    { sigle: 'OTE', famille: 'Prix', present: !!(pd.ote && pd.ote.deep),
+      valeur: pd.ote ? `${f2(pd.ote.deep)}–${f2(pd.ote.shallow)} (retracement 0,618–0,786)` : null,
+      lecture: 'zone d\'entrée optimale du dernier mouvement' },
+    { sigle: 'PDH / PDL', famille: 'Prix', present: Number.isFinite(pl.PDH) || Number.isFinite(pl.PDL),
+      valeur: Number.isFinite(pl.PDH) ? `veille ${f2(pl.PDL)}–${f2(pl.PDH)}` : null,
+      lecture: 'repères de la séance précédente' },
+    { sigle: 'PWH / PWL', famille: 'Prix', present: Number.isFinite(pl.PWH) || Number.isFinite(pl.PWL),
+      valeur: Number.isFinite(pl.PWH) ? `semaine ${f2(pl.PWL)}–${f2(pl.PWH)}` : null,
+      lecture: 'repères du contexte large' },
+    { sigle: 'Sweep', famille: 'Flux', present: sw.length > 0,
+      valeur: sw.length ? `${sw.length} balayage(s) : ${sw.slice(0, 3).map(x => `${x.type} à ${f2(x.level || x.price)}${x.reclaimed ? ' (niveau repris)' : ''}`).join(' · ')}` : null,
+      lecture: 'stops pris au-delà d\'un niveau puis retour' },
+    { sigle: 'Displacement', famille: 'Flux', present: disp.length > 0,
+      valeur: disp.length ? `${disp.length} bougie(s) de déplacement (≥ 1,5 × ATR)` : null,
+      lecture: 'signature d\'une entrée institutionnelle' },
+    { sigle: 'Kill zone', famille: 'Flux', present: !!se.killZone && se.killZone !== 'aucune en ce moment',
+      valeur: `${se.sessionCourante || '—'} · ${se.killZone || 'aucune en ce moment'}`,
+      lecture: 'créneaux où la liquidité est prise' },
+    { sigle: 'ATR', famille: 'Risque', present: Number.isFinite(r.atr14),
+      valeur: Number.isFinite(r.atr14) ? `${f2(r.atr14)} (moyenne 14 bougies)` : null,
+      lecture: 'amplitude qui dimensionne le stop et les objectifs' }
+  ];
+}
+
 module.exports = {
-  analyze, atr, swings, marketStructure, fvgs, orderBlocks, liquidityPools,
+  analyze, vocabulaire, atr, swings, marketStructure, fvgs, orderBlocks, liquidityPools,
   premiumDiscount, lastCandleInfo, sweeps, breakers, displacements,
   previousLevels, fibLevels, sessions, inventory
 };

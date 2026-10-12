@@ -38,7 +38,7 @@ function ruleSweep(candles, report) {
       const wick = last.c - last.o !== 0 ? Math.min(last.o, last.c) - last.l : last.c - last.l;
       const range = Math.max(last.h - last.l, 1e-9);
       return {
-        rule: 'R1', name: 'Balayage de liquidité',
+        rule: 'R1', name: 'Sweep (balayage de liquidité)',  sigle: 'R1',
         direction: 'BUY', strength: +(Math.min(wick / range, 0.9)).toFixed(3),
         detail: `mèche sous ${lv.kind} ${num(lv.price)} puis clôture au-dessus (${num(last.c)})`,
         level: num(lv.price)
@@ -49,7 +49,7 @@ function ruleSweep(candles, report) {
       const wick = last.h - Math.max(last.o, last.c);
       const range = Math.max(last.h - last.l, 1e-9);
       return {
-        rule: 'R1', name: 'Balayage de liquidité',
+        rule: 'R1', name: 'Sweep (balayage de liquidité)',  sigle: 'R1',
         direction: 'SELL', strength: +(Math.min(wick / range, 0.9)).toFixed(3),
         detail: `mèche au-dessus de ${lv.kind} ${num(lv.price)} puis clôture en dessous (${num(last.c)})`,
         level: num(lv.price)
@@ -69,7 +69,7 @@ function ruleBreak(candles, report) {
   const base = e.type === 'CHoCH' ? 0.75 : 0.6;
   const pierce = Math.min(Math.abs(last.c - e.level) / range, 1);
   return {
-    rule: 'R2', name: e.type === 'CHoCH' ? 'Changement de caractère' : 'Rupture de structure',
+    rule: 'R2', name: e.type === 'CHoCH' ? 'CHoCH (changement de caractère)' : 'BOS (rupture de structure)',
     direction: e.direction === 'bullish' ? 'BUY' : 'SELL',
     strength: +Math.min(base + pierce * 0.2, 0.95).toFixed(3),
     detail: `clôture ${num(last.c)} au-delà du niveau ${num(e.level)}`,
@@ -113,7 +113,7 @@ function ruleZone(candles, report) {
       // Zone de demande : achat seulement si le prix vient d'en bas.
       if (last.c > z.high && position !== 'premium') {
         return {
-          rule: 'R3', name: `Rejet sur ${z.kind} haussier`, direction: 'BUY', strength,
+          rule: 'R3', name: `Rejet sur ${z.kind} haussier (OB/FVG)`, direction: 'BUY', strength,
           detail: `zone ${num(z.low)}–${num(z.high)} touchée puis clôture au-dessus (prix en ${where})`,
           level: num(z.high)
         };
@@ -121,7 +121,7 @@ function ruleZone(candles, report) {
       // Piège : zone de demande prise par le haut, puis cédée → vente.
       if (last.c < z.low && position === 'premium') {
         return {
-          rule: 'R3', name: `Échec de ${z.kind} haussier en premium`, direction: 'SELL', strength,
+          rule: 'R3', name: `Échec de ${z.kind} haussier en premium (OB/FVG)`, direction: 'SELL', strength,
           detail: `zone ${num(z.low)}–${num(z.high)} atteinte en premium puis cassée vers le bas`,
           level: num(z.low)
         };
@@ -132,14 +132,14 @@ function ruleZone(candles, report) {
       // Zone d'offre : vente seulement si le prix vient d'en haut.
       if (last.c < z.low && position !== 'discount') {
         return {
-          rule: 'R3', name: `Rejet sur ${z.kind} baissier`, direction: 'SELL', strength,
+          rule: 'R3', name: `Rejet sur ${z.kind} baissier (OB/FVG)`, direction: 'SELL', strength,
           detail: `zone ${num(z.low)}–${num(z.high)} touchée puis clôture en dessous (prix en ${where})`,
           level: num(z.low)
         };
       }
       if (last.c > z.high && position === 'discount') {
         return {
-          rule: 'R3', name: `Échec de ${z.kind} baissier en discount`, direction: 'BUY', strength,
+          rule: 'R3', name: `Échec de ${z.kind} baissier en discount (OB/FVG)`, direction: 'BUY', strength,
           detail: `zone ${num(z.low)}–${num(z.high)} atteinte en discount puis cassée vers le haut`,
           level: num(z.high)
         };
@@ -156,7 +156,7 @@ function rulePosition(report) {
   const trend = report.structure.trend;
   if (pd.position === 'discount' && trend !== 'bearish') {
     return {
-      rule: 'R4', name: 'Prix en discount',
+      rule: 'R4', name: 'Discount (zone basse du range)',
       direction: 'BUY', strength: 0.4,
       detail: `prix ${num(report.lastPrice)} sous l'équilibre ${num(pd.equilibrium)}`,
       level: num(pd.equilibrium)
@@ -164,7 +164,7 @@ function rulePosition(report) {
   }
   if (pd.position === 'premium' && trend !== 'bullish') {
     return {
-      rule: 'R4', name: 'Prix en premium',
+      rule: 'R4', name: 'Premium (zone haute du range)',
       direction: 'SELL', strength: 0.4,
       detail: `prix ${num(report.lastPrice)} au-dessus de l'équilibre ${num(pd.equilibrium)}`,
       level: num(pd.equilibrium)
@@ -305,14 +305,14 @@ function checklist(report) {
   const pd = report.premiumDiscount;
   const zones = [...(report.orderBlocks || []), ...(report.fvgs || [])];
   return [
-    { key: 'tendance', label: 'Tendance définie', ok: st.trend !== 'range', detail: st.trend },
-    { key: 'rupture', label: 'Rupture de structure (clôture)', ok: !!st.event,
+    { key: 'tendance', label: 'HH-HL / LH-LL — tendance définie', ok: st.trend !== 'range', detail: st.trend },
+    { key: 'rupture', label: 'BOS / CHoCH — rupture de structure (clôture)', ok: !!st.event,
       detail: st.event ? `${st.event.type} ${st.event.direction} à ${num(st.event.level)}` : 'aucune cassure de clôture' },
-    { key: 'liquidite', label: 'Liquidité prise', ok: (report.liquidity || []).length > 0,
+    { key: 'liquidite', label: 'Sweep — liquidité prise (EQH/EQL)', ok: (report.liquidity || []).length > 0,
       detail: (report.liquidity || []).map(p => `${p.type} ${num(p.price)}`).join(', ') || 'aucun pool de liquidité' },
-    { key: 'zone', label: 'Zone réactive (order block / FVG)', ok: zones.length > 0,
+    { key: 'zone', label: 'OB / FVG — zone réactive', ok: zones.length > 0,
       detail: zones.length ? `${zones.length} zone(s) ouverte(s)` : 'aucune zone valide' },
-    { key: 'position', label: 'Position favorable dans le range', ok: !!pd && pd.position !== null,
+    { key: 'position', label: 'Premium / Discount — position dans le range', ok: !!pd && pd.position !== null,
       detail: pd ? `${pd.position} (équilibre ${num(pd.equilibrium)})` : 'range indéterminé' }
   ];
 }
