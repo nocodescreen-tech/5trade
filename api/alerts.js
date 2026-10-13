@@ -13,6 +13,8 @@
  */
 const fs = require('fs');
 const path = require('path');
+// Le reseau met parfois 9 s a joindre Telegram : sans reprise, l'alerte est perdue.
+const { fetchAvecReprise } = require('./reseau');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const FICHIER = path.join(DATA_DIR, 'alerts.json');
@@ -158,7 +160,7 @@ async function envoyerTelegram(c, v, m, qualite = {}) {
     '5trade — outil d\'analyse, pas un conseil en investissement.'
   ].join('\n');
 
-  const r = await fetch(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
+  const r = await fetchAvecReprise(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: c.telegramChat, text: texte, parse_mode: 'HTML',

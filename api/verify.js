@@ -1192,6 +1192,59 @@ function tinyPng(W = 64, H = 40) {
       /chatsTg\.map/.test(jsx));
   }
 
+  // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──
+  // Mesure réelle : 8,7 s pour joindre Telegram depuis cette connexion. Sans
+  // reprise, l'alerte échouait sur un appel pourtant valide.
+  {
+    const rSrc = fs.readFileSync(path.join(__dirname, 'reseau.js'), 'utf8');
+    ok('un utilitaire de reprise réseau existe',
+      /async function fetchAvecReprise/.test(rSrc) && /module\.exports = \{ fetchAvecReprise/.test(rSrc));
+    ok('le délai d\'un essai est généreux', /DELAI_MS = \d{4,}/.test(rSrc));
+    ok('Telegram passe par la reprise', /fetchAvecReprise\(`https:\/\/api\.telegram\.org/.test(
+      fs.readFileSync(path.join(__dirname, 'alerts.js'), 'utf8')));
+    ok('Gemini passe par la reprise', /fetchAvecReprise\(`\$\{GEMINI_API\}/.test(
+      fs.readFileSync(path.join(__dirname, 'vision.js'), 'utf8')));
+
+    // Comportement réel, sans réseau : on remplace fetch le temps du test.
+    const vraiFetch = global.fetch;
+    const { fetchAvecReprise } = require('./reseau.js');
+    (async () => {
+      let n = 0;
+      global.fetch = async () => {
+        n++;
+        if (n < 3) { const e = new Error('fetch failed'); e.cause = { message: 'ECONNRESET' }; throw e; }
+        return { ok: true, status: 200 };
+      };
+      const r = await fetchAvecReprise('https://exemple.test/x', {}, 3);
+      ok('deux échecs réseau puis succès : la 3e tentative aboutit', r && r.status === 200, `${n} tentatives`);
+
+      n = 0;
+      global.fetch = async () => {
+        n++;
+        const e = new Error('fetch failed'); e.cause = { message: 'ETIMEDOUT' }; throw e;
+      };
+      let err = null;
+      try { await fetchAvecReprise('https://exemple.test/x', {}, 3); } catch (e) { err = e; }
+      ok('tous les essais échouent : l\'erreur dit pourquoi',
+        !!err && /Après\s*3 tentatives|après 3 tentatives|tentatives/i.test(err.message) && /ETIMEDOUT/.test(err.message),
+        err ? err.message.slice(0, 100) : 'aucune erreur');
+      ok('le nombre de tentatives est respecté', n === 3, `${n} tentatives`);
+
+      // Une réponse en erreur est un succès RÉSEAU : on ne réessaie pas.
+      n = 0;
+      global.fetch = async () => { n++; return { ok: false, status: 400, text: async () => 'mauvais jeton' }; };
+      const r2 = await fetchAvecReprise('https://exemple.test/x', {}, 3);
+      ok('un 400 est rendu sans réessayer (l\'appelant doit voir la vraie cause)',
+        r2.status === 400 && n === 1, `${n} tentative(s)`);
+
+      global.fetch = vraiFetch;
+      console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
+      if (skip) console.log(`  (${skip} test(s) non exécuté(s) : dépendance externe absente — voir les lignes « • »)`);
+      process.exit(fail ? 1 : 0);
+    })();
+    return;
+  }
+
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
   if (skip) console.log(`  (${skip} test(s) non exécuté(s) : dépendance externe absente — voir les lignes « • »)`);
   process.exit(fail ? 1 : 0);

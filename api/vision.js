@@ -10,6 +10,9 @@
  * Les deux ont été testés sur une vraie capture : ils décrivent correctement
  * structure, BOS/CHoCH, zones de liquidité.
  */
+// Meme raison que pour Telegram : une reponse lente ne doit pas etre prise
+// pour une panne.
+const { fetchAvecReprise } = require('./reseau');
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models';
 const DEEPSEEK_URL = process.env.DEEPSEEK_URL_VISION || 'https://api.deepseek.com/v1/chat/completions';
 
@@ -56,7 +59,7 @@ async function geminiAnalyze(images, prompt) {
   const essais = modelesGemini();
   let derniere = '';
   for (const modele of essais) {
-    const res = await fetch(`${GEMINI_API}/${modele}:generateContent`, {
+    const res = await fetchAvecReprise(`${GEMINI_API}/${modele}:generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
       body: corps
@@ -93,7 +96,7 @@ async function deepseekAnalyze(images, prompt) {
     });
   }
 
-  const res = await fetch(DEEPSEEK_URL, {
+  const res = await fetchAvecReprise(DEEPSEEK_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
