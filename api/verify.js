@@ -1446,6 +1446,23 @@ function tinyPng(W = 64, H = 40) {
     const sansPreuve = (v.rules || []).filter(r => /^regle:/.test(r.preuve || ''));
     ok('aucune règle ne retombe sur son nom faute d\'empreinte', sansPreuve.length === 0,
       sansPreuve.map(r => r.rule).join(',') || 'toutes ont une empreinte réelle');
+
+    // Chaque règle doit porter la nature d'empreinte qui lui correspond : c'est ce
+    // qui garantit que deux règles de MÊME nature (un niveau) se comparent.
+    const natureAttendue = { R1: 'niveau', R2: 'niveau', R3: 'zone', R4: 'range', R5: 'structure' };
+    const natures = new Set();
+    [vague(),
+      (() => { const s = []; for (let i = 0; i < 90; i++) { const p = 100 + i * 0.3 + Math.sin(i / 3) * 2; s.push({ t: i * 60000, o: p, h: p + 1, l: p - 1, c: p + 0.4, v: 9 }); } return s; })(),
+      (() => { const s = []; for (let i = 0; i < 90; i++) { const p = 100 + Math.sin(i / 5) * 6; s.push({ t: i * 60000, o: p, h: p + 1.2, l: p - 1.2, c: p + 0.2, v: 9 }); } return s; })()]
+      .forEach(serie => {
+        (Sig.detect(serie, { symbol: 'T', timeframe: '5m' }).rules || []).forEach(r => {
+          const prefixe = String(r.preuve || '').split(':')[0];
+          natures.add(prefixe);
+          ok(`${r.rule} porte une empreinte « ${natureAttendue[r.rule]} »`,
+            prefixe === natureAttendue[r.rule], `${r.rule} → ${prefixe}`);
+        });
+      });
+    ok('plusieurs natures d\'empreinte coexistent', natures.size >= 2, [...natures].join(', '));
   }
 
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──
