@@ -17,7 +17,12 @@ const path = require('path');
 const { fetchAvecReprise } = require('./reseau');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
-const FICHIER = path.join(DATA_DIR, 'alerts.json');
+// Le fichier de configuration est surchargeable par l'environnement.
+// POURQUOI : la suite de tests faisait Al.update({ actif: false, email: null })
+// sur le VRAI fichier — lancer le canonique effaçait donc la configuration de
+// l'utilisateur (surveillance éteinte, email vidé, marchés remplacés par un
+// marché de test). Les tests écrivent désormais dans un fichier à part.
+const FICHIER = process.env.ALERTS_FICHIER || path.join(DATA_DIR, 'alerts.json');
 
 /** Configuration par défaut : surveillance inactive tant qu'aucun email n'est posé. */
 const DEFAUT = {

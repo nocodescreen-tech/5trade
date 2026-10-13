@@ -46,3 +46,15 @@ api/babel.min.js
 server.log
 out.log
 err.log
+
+# Fichiers de travail et de diagnostic.
+# ck.txt contient un cookie de session VIVANT (s5_session=…) : committé, il
+# donnerait un accès à l'application à quiconque lit le dépôt. Il ne doit
+# jamais partir sur GitHub.
+ck*.txt
+cookie*.txt
+tm.json
+audit-*.cjs
+hermes-*.cjs
+*-signal.json
+

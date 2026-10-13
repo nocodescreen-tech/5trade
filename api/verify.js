@@ -11,6 +11,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const postgres = require('postgres');
 
 // Le .env porte la config (DB, S3) : on le charge comme le serveur
@@ -527,6 +528,14 @@ function tinyPng(W = 64, H = 40) {
 
   // ── Alertes : prévenir hors de la page quand un signal se confirme ──
   {
+    // FICHIER DE CONFIGURATION ISOLÉ.
+    // Ce bloc faisait Al.update({ actif: false, email: null }) sur le VRAI
+    // data/alerts.json : lancer le canonique ÉTEIGNAIT donc la surveillance de
+    // l'utilisateur, effaçait son adresse email et remplaçait ses marchés par un
+    // marché de test. Les tests écrivent désormais à part, et n'y touchent plus.
+    const fichierTest = path.join(os.tmpdir(), `5trade-alertes-${process.pid}.json`);
+    process.env.ALERTS_FICHIER = fichierTest;
+    try { fs.unlinkSync(fichierTest); } catch (e) { /* pas encore créé */ }
     const Al = require('./alerts.js');
     const serie = () => {
       const out = []; let ts = 0;
@@ -585,6 +594,10 @@ function tinyPng(W = 64, H = 40) {
     Al.resetDedup();
     Al.stop();
     ok('alertes : désactivées après les tests (aucun envoi non voulu)', Al.get().actif === false);
+    // Le fichier de test est jeté, et l'environnement remis en place : la
+    // configuration réelle de l'utilisateur n'a jamais été ouverte.
+    try { fs.unlinkSync(fichierTest); } catch (e) { /* déjà absent */ }
+    delete process.env.ALERTS_FICHIER;
   }
 
   // ── Mode auto / manuel : les stratégies de la base deviennent des moteurs ──
@@ -1190,6 +1203,117 @@ function tinyPng(W = 64, H = 40) {
       /email et Telegram\) fonctionnent ensemble/.test(jsx));
     ok('plusieurs conversations sont proposées au choix',
       /chatsTg\.map/.test(jsx));
+  }
+
+  // ── Confluence : ce qui compte vraiment comme un « accord » ──
+  // Cas signalé : 5m bullish / 15m bullish / 1h RANGE annoncé « 3/3 d'accord ».
+  // Une unité en range portait une direction (règle de position) et était donc
+  // comptée comme une confirmation, alors qu'elle ne confirme rien.
+  {
+    const tf = (nom, tendance, direction, status) => ({
+      tf: nom,
+      verdict: { trend: tendance, direction, status, strength: 0.6, rules: [{ rule: 'R2', name: 'x' }] }
+    });
+    const analyse = liste => Sig.confluence(liste, { seuilAlignes: 2 });
+
+    const c1 = analyse([tf('5m', 'bullish', 'BUY', 'confirme'), tf('15m', 'bullish', 'BUY', 'confirme'),
+      tf('1h', 'range', 'BUY', 'surveiller')]);
+    ok('range en hausse ne compte PAS comme un accord', c1.nbAlignes === 2, `${c1.nbAlignes} appuis`);
+    ok('il est classé « appui faible », pas « appui »', c1.nbAppuisFaibles === 1);
+    ok('le score suit les vrais appuis', c1.score === +(2 / 3).toFixed(3), String(c1.score));
+    ok('le motif ne prétend pas 3/3', /2\/3/.test(c1.motif) && /sans tendance/.test(c1.motif), c1.motif);
+    ok('l\'unité en range explique pourquoi elle ne compte pas',
+      /ne compte pas/.test((c1.detail.find(d => d.tf === '1h') || {}).raison || '')
+      && /rien pour la confirmer/.test((c1.detail.find(d => d.tf === '1h') || {}).raison || ''),
+      (c1.detail.find(d => d.tf === '1h') || {}).raison);
+
+    const c2 = analyse([tf('5m', 'bullish', 'BUY', 'confirme'), tf('15m', 'bearish', 'SELL', 'confirme'),
+      tf('1h', 'range', 'NEUTRE', 'neutre')]);
+    ok('une unité SANS direction n\'est pas une unité contraire', c2.nbContraires === 1,
+      `${c2.nbContraires} contraires`);
+    ok('désaccord franc : pas aligné', c2.aligne === false);
+
+    const c3 = analyse([tf('5m', 'bullish', 'BUY', 'confirme'), tf('15m', 'bullish', 'BUY', 'surveiller'),
+      tf('1h', 'bullish', 'BUY', 'surveiller')]);
+    ok('trois unités réellement haussières : aligné', c3.aligne === true && c3.nbAlignes === 3);
+
+    const c4 = analyse([tf('5m', 'range', 'BUY', 'surveiller'), tf('15m', 'range', 'BUY', 'surveiller'),
+      tf('1h', 'range', 'NEUTRE', 'neutre')]);
+    ok('tout en range : aucune confluence possible', c4.aligne === false && c4.nbAlignes === 0);
+
+    const c5 = analyse([tf('5m', 'bearish', 'SELL', 'confirme'), tf('15m', 'bearish', 'SELL', 'confirme'),
+      tf('1h', 'bullish', 'BUY', 'confirme')]);
+    ok('contre-tendance signalée', c5.contreTendance === true && c5.aligne === false);
+  }
+
+  // ── Les règles se lisent par catégorie, plus par un compte ambigu ──
+  // « reglesActives: 5 » face à « confirmations: 3 » ne disait pas si les deux
+  // autres manquaient, s'opposaient ou n'avaient rien trouvé.
+  {
+    const s = [];
+    for (let i = 0; i < 80; i++) {
+      const p = 100 + Math.sin(i / 6) * 3 + i * 0.05;
+      s.push({ t: i * 60000, o: p, h: p + 0.8, l: p - 0.8, c: p + 0.2, v: 8 });
+    }
+    const v = Sig.detect(s, { symbol: 'T', timeframe: '5m' });
+    ok('les règles évaluées sont listées', Array.isArray(v.reglesEvaluees) && v.reglesEvaluees.length >= 5,
+      (v.reglesEvaluees || []).join(','));
+    ok('les règles d\'accord sont listées', Array.isArray(v.reglesPour), (v.reglesPour || []).join(','));
+    ok('les règles contraires sont listées', Array.isArray(v.reglesContre));
+    ok('les règles muettes sont listées', Array.isArray(v.reglesMuettes));
+    ok('chaque règle évaluée tombe dans une catégorie',
+      v.reglesPour.length + v.reglesContre.length + v.reglesNeutres.length + v.reglesMuettes.length
+        === v.reglesEvaluees.length,
+      `${v.reglesPour.length}+${v.reglesContre.length}+${v.reglesNeutres.length}+${v.reglesMuettes.length}`
+      + ` = ${v.reglesEvaluees.length}`);
+    ok('le résumé dit « X sur Y » et non un « X » isolé',
+      new RegExp(`${v.confirmations}/${v.reglesEvaluees.length}`).test(v.summary || ''),
+      String(v.summary || '').slice(0, 80));
+  }
+
+  // ── Le déclencheur ne doit jamais être l'objectif ──
+  // Cas réel : entrée 83 533.46, déclencheur « clôture au-dessus de 83 534.11 »,
+  // objectif 1 = 83 534.11. Le moteur annonçait un objectif déjà atteint à
+  // l'entrée : 0,65 de gain pour 139 de risque.
+  {
+    const s = [];
+    for (let i = 0; i < 90; i++) {
+      const p = 100 + i * 0.35 + Math.sin(i / 4) * 1.2;
+      s.push({ t: i * 60000, o: p, h: p + 1.1, l: p - 1.1, c: p + 0.4, v: 10 });
+    }
+    const v = Sig.detect(s, { symbol: 'T', timeframe: '5m' });
+    const L = v.levels || {};
+    const sc = v.scenarios || {};
+    const nombre = t => { const m = String(t || '').match(/[\d]+(?:[.,]\d+)?/); return m ? parseFloat(m[0].replace(',', '.')) : null; };
+
+    ['bullish', 'bearish'].forEach(sens => {
+      const x = sc[sens] || {};
+      const cible1 = x.target1;
+      const declenche = nombre(x.trigger);
+      const sensPos = sens === 'bullish' ? 1 : -1;
+      if (Number.isFinite(cible1)) {
+        ok(`scénario ${sens} : l'objectif 1 est distinct du déclencheur`,
+          declenche === null || Math.abs(cible1 - declenche) > 1e-9,
+          `déclencheur ${declenche} vs objectif ${cible1}`);
+      }
+      // Le gain doit être du bon côté et couvrir au moins une fraction du risque.
+      if (Number.isFinite(cible1) && Number.isFinite(x.entry) && Number.isFinite(x.stop)) {
+        const gain = (cible1 - x.entry) * sensPos;
+        const risque = (x.entry - x.stop) * sensPos;
+        ok(`scénario ${sens} : l'objectif est du bon côté de l'entrée`, gain > 0,
+          `gain ${gain.toFixed(2)}`);
+        ok(`scénario ${sens} : le stop est du bon côté`, risque > 0, `risque ${risque.toFixed(2)}`);
+        ok(`scénario ${sens} : le gain couvre au moins la moitié du risque`,
+          gain >= risque * 0.5, `R/R ${(gain / risque).toFixed(2)}`);
+      }
+    });
+
+    // Aucune cible à moins d'un ATR : sinon le trade ne paie pas ses frais.
+    if (Number.isFinite(L.target1) && Number.isFinite(L.entry) && Number.isFinite(v.atr)) {
+      ok('l\'objectif 1 est à au moins un ATR de l\'entrée',
+        Math.abs(L.target1 - L.entry) >= v.atr * 0.999,
+        `${Math.abs(L.target1 - L.entry).toFixed(2)} pour un ATR de ${v.atr}`);
+    }
   }
 
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──

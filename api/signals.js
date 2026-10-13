@@ -186,13 +186,29 @@ function levelsFor(report, direction, atrStop) {
   const low = report.structure.lastSwingLow;
   const high = report.structure.lastSwingHigh;
 
+  // DISTANCE MINIMALE D'UNE CIBLE.
+  // Avant : seules les valeurs « au-dessus du prix » étaient retenues, puis on
+  // prenait la plus proche. Conséquence réelle observée : entrée 83 533.46 et
+  // objectif 1 à 83 534.11 — soit 0,65 point de gain pour 139 points de risque.
+  // Pire : le dernier sommet servait à la fois de déclencheur (à franchir) et
+  // d'objectif (à atteindre), donc le moteur annonçait un objectif déjà atteint
+  // dès l'entrée. Une cible à moins d'un ATR ne paie pas le risque : elle est
+  // écartée, et on retombe alors sur une cible construite à partir de l'ATR.
+  const margeMini = atr;
+
   if (direction === 'BUY') {
     const structural = low && Number.isFinite(low.price) ? low.price : price - atr * k;
     const stop = Math.min(structural, price - atr * 0.5);         // jamais trop près
+    // Le déclencheur d'un achat est « clôture au-dessus du dernier sommet » : ce
+    // niveau est un SEUIL À FRANCHIR, pas une destination. Les objectifs se
+    // situent donc au-delà, jamais dessus — sinon la cible est déjà atteinte au
+    // moment où l'on entre.
+    const seuil = (high && Number.isFinite(high.price)) ? high.price : price;
+    const plancher = Math.max(price + margeMini, seuil);
     const targets = [
       report.structure.lastSwingHigh && report.structure.lastSwingHigh.price,
       ...(report.liquidity || []).filter(p => p.price > price).map(p => p.price)
-    ].filter(p => p && p > price).sort((a, b) => a - b);
+    ].filter(p => Number.isFinite(p) && p > plancher).sort((a, b) => a - b);
     return {
       entry: num(price), stop: num(stop),
       target1: num(targets[0] || price + atr * 2),
@@ -202,10 +218,14 @@ function levelsFor(report, direction, atrStop) {
   if (direction === 'SELL') {
     const structural = high && Number.isFinite(high.price) ? high.price : price + atr * k;
     const stop = Math.max(structural, price + atr * 0.5);
+    // Symétrique : le déclencheur d'une vente est la clôture sous le dernier
+    // creux, donc les objectifs sont en dessous de ce seuil.
+    const seuil = (low && Number.isFinite(low.price)) ? low.price : price;
+    const plafond = Math.min(price - margeMini, seuil);
     const targets = [
       report.structure.lastSwingLow && report.structure.lastSwingLow.price,
       ...(report.liquidity || []).filter(p => p.price < price).map(p => p.price)
-    ].filter(p => p && p < price).sort((a, b) => b - a);
+    ].filter(p => Number.isFinite(p) && p < plafond).sort((a, b) => b - a);
     return {
       entry: num(price), stop: num(stop),
       target1: num(targets[0] || price - atr * 2),
@@ -236,7 +256,11 @@ function scenarios(report, atrStop) {
   const liq = report.liquidity || [];
 
   const distPct = n => (Number.isFinite(n) ? +Math.abs((n - prix) / prix * 100).toFixed(2) : null);
-  const distAtr = n => (Number.isFinite(n) ? +(Math.abs(n - prix) / atr).toFixed(1) : null);
+  // Deux décimales, pas une : 2,33 de distance pour un ATR de 52,17 vaut 0,0447,
+  // que l'arrondi à une décimale affichait « 0.0× ATR ». Une distance faible mais
+  // réelle était donc présentée comme nulle — l'utilisateur ne pouvait pas
+  // distinguer « collé au prix » de « pas de donnée ».
+  const distAtr = n => (Number.isFinite(n) ? +(Math.abs(n - prix) / atr).toFixed(2) : null);
   const ou = (n, t) => (Number.isFinite(n) ? `${num(n)} (${distPct(n)} %${t ? `, ${distAtr(n)}× ATR` : ''})` : null);
 
   // Ce qui est réellement en face : zone la plus proche de chaque côté,
@@ -587,6 +611,21 @@ function detect(candles, meta = {}, options = {}) {
 
   const independent = new Set(winner.map(r => r.rule)).size;
 
+  // ── Lire les règles sans ambiguïté ──
+  // L'écran affichait « reglesActives: 5 » face à « confirmations: 3 », ce qui
+  // était illisible : on ne savait pas si les 2 autres manquaient, s'opposaient
+  // ou n'avaient simplement rien à dire. Chaque règle interrogée finit donc dans
+  // une catégorie explicite.
+  const reglesEvaluees = actives;
+  const reglesPour = rules.filter(r => r.direction === direction).map(r => r.rule);
+  const reglesContre = rules
+    .filter(r => (r.direction === 'BUY' || r.direction === 'SELL') && r.direction !== direction)
+    .map(r => r.rule);
+  const reglesNeutres = rules.filter(r => r.direction !== 'BUY' && r.direction !== 'SELL').map(r => r.rule);
+  // Une règle évaluée qui n'a produit AUCUN avis : elle n'a rien trouvé sur ce
+  // graphique (pas « elle est satisfaite », ni « elle s'y oppose »).
+  const reglesMuettes = actives.filter(r => !rules.some(x => x.rule === r));
+
   // CONTRADICTION : des règles qui tirent en sens opposés. C'est le cas piégeux —
   // une moyenne masquerait le désaccord et produirait une confirmation qui ne
   // repose sur rien. Deux règles qui se contredisent ne sont pas une confirmation.
@@ -666,7 +705,8 @@ function detect(candles, meta = {}, options = {}) {
       + ` Biais ${sc.biais} (${sc.raisonBiais}).`
       + ` Scénarios : achat si ${sc.bullish.trigger}, vente si ${sc.bearish.trigger}.`
     : `${entete}${direction === 'BUY' ? 'ACHAT' : 'VENTE'} ${status === 'confirme' ? 'CONFIRMÉ' : 'à surveiller'}`
-      + ` — ${independent} règle(s) : ${winner.map(r => r.name).join(' + ')}`
+      // « 3 règles » tout court ne dit pas sur combien elles ont ete jugees.
+      + ` — ${independent}/${reglesEvaluees.length} règle(s) d'accord : ${winner.map(r => r.name).join(' + ')}`
       + (contradiction.franche ? ` · DÉSACCORD : ${contradiction.lecture}`
         : (contradiction.active ? ` · ${contradiction.lecture}` : ''))
       + ` · force ${(strength * 100).toFixed(0)} %`
@@ -678,6 +718,10 @@ function detect(candles, meta = {}, options = {}) {
     timeframe: meta.timeframe || null,
     status, direction, strength,
     confirmations: independent,
+    // Les regles, rangees par categorie : ce qui appuie, ce qui s'oppose, ce qui
+    // est neutre, et ce qui n'a rien trouve. Sans ca, « 5 evaluees / 3 d'accord »
+    // laissait l'utilisateur deviner ce que faisaient les deux autres.
+    reglesEvaluees, reglesPour, reglesContre, reglesNeutres, reglesMuettes,
     rules,
     levels,
     scenarios: sc,
@@ -757,9 +801,40 @@ function confluence(parTF, options = {}) {
   const direction = dirTravail
     || (achats.length > ventes.length ? 'BUY' : ventes.length > achats.length ? 'SELL' : 'NEUTRE');
 
-  const alignes = direction === 'NEUTRE' ? [] : listes.filter(x => x.verdict.direction === direction);
-  const contraires = listes.filter(x => x.verdict.direction && x.verdict.direction !== direction);
-  const confirmees = alignes.filter(x => x.verdict.status === 'confirme');
+  // ── Ce qui compte comme un ACCORD ──
+  // Avant, une unité « alignée » était simplement une unité dont la DIRECTION
+  // valait la direction retenue. Or une unité en range peut porter une direction
+  // (une règle de position, par exemple) sans rien confirmer du mouvement : elle
+  // était donc comptée comme un accord, et l'écran pouvait annoncer « 3/3
+  // unités d'accord » alors qu'AUCUNE ne confirmait quoi que ce soit.
+  // On distingue désormais trois contributions :
+  //   appui       → même direction ET tendance dans ce sens  (vraie confluence)
+  //   appui faible→ même direction mais tendance indécise     (ne compte pas)
+  //   contraire   → direction opposée
+  const tendanceAttendue = direction === 'BUY' ? 'bullish' : direction === 'SELL' ? 'bearish' : null;
+  // Un APPUI demande la même direction ET une raison de la croire :
+  //   • soit la tendance va dans ce sens ;
+  //   • soit le signal de cette unité est CONFIRMÉ par au moins deux règles
+  //     indépendantes — un range où deux règles s'accordent n'est pas rien, et
+  //     exiger une tendance même quand les règles parlent clairement serait
+  //     excessif (c'est le reproche inverse de celui qu'on corrige).
+  // Tout le reste qui pointe dans la même direction est un « appui faible » :
+  // même direction, mais rien pour la confirmer.
+  const confirmeParRegles = x => x.verdict.status === 'confirme'
+    && (x.verdict.confirmations || 0) >= 2;
+  const estAppui = x => x.verdict.direction === direction
+    && (x.verdict.trend === tendanceAttendue || confirmeParRegles(x));
+  const appuis = tendanceAttendue ? listes.filter(estAppui) : [];
+  const appuisFaibles = tendanceAttendue
+    ? listes.filter(x => x.verdict.direction === direction && !estAppui(x))
+    : [];
+  // Une unité sans direction (NEUTRE) n'est PAS une unité contraire : elle ne
+  // s'oppose à rien, elle ne dit rien. La compter comme contraire gonflait
+  // artificiellement l'opposition.
+  const contraires = listes.filter(x =>
+    (x.verdict.direction === 'BUY' || x.verdict.direction === 'SELL')
+    && x.verdict.direction !== direction);
+  const confirmees = appuis.filter(x => x.verdict.status === 'confirme');
   const superieure = listes[listes.length - 1];    // le contexte large
 
   const tendances = listes.map(x => x.verdict.trend).filter(Boolean);
@@ -767,13 +842,13 @@ function confluence(parTF, options = {}) {
   const nbBear = tendances.filter(t => t === 'bearish').length;
   const tendanceDominante = nbBull === nbBear ? 'range' : (nbBull > nbBear ? 'bullish' : 'bearish');
 
-  // Deux exigences pour « aligné » : assez d'unités d'accord ET l'unité de
-  // travail ne doit pas contredire le contexte supérieur.
+  // Deux exigences pour « aligné » : assez d'unités qui APPUIENT réellement, et
+  // l'unité de travail qui ne contredit pas le contexte supérieur.
   const coherentAvecContexte = !superieure || superieure.verdict.trend === 'range'
     || superieure.verdict.trend === tendanceDominante
     || (direction === 'BUY' && superieure.verdict.trend === 'bullish')
     || (direction === 'SELL' && superieure.verdict.trend === 'bearish');
-  const aligne = alignes.length >= seuil && direction !== 'NEUTRE' && coherentAvecContexte;
+  const aligne = appuis.length >= seuil && direction !== 'NEUTRE' && coherentAvecContexte;
 
   // Le signal du dessus doit lui aussi aller dans le bon sens, sinon c'est un
   // contre-tendance déguisé : on le dit franchement.
@@ -782,32 +857,58 @@ function confluence(parTF, options = {}) {
   return {
     aligne,
     contreTendance,
-    score: +(alignes.length / listes.length).toFixed(3),
+    // Le score est la part d'unités qui appuient RÉELLEMENT (direction ET
+    // tendance), pas la part d'unités affichant la même direction.
+    score: +(appuis.length / listes.length).toFixed(3),
     direction,
     seuilAlignes: seuil,
-    nbAlignes: alignes.length,
+    nbAlignes: appuis.length,
+    nbAppuisFaibles: appuisFaibles.length,
     nbContraires: contraires.length,
     nbConfirmees: confirmees.length,
     tendanceDominante,
     tendanceSuperieure: superieure ? superieure.verdict.trend : null,
     tfTravail: travail ? travail.tf : null,
     tfSuperieure: superieure ? superieure.tf : null,
-    detail: listes.map(x => ({
-      tf: x.tf,
-      tendance: x.verdict.trend,
-      status: x.verdict.status,
-      direction: x.verdict.direction,
-      strength: x.verdict.strength,
-      confirme: x.verdict.status === 'confirme',
-      regles: (x.verdict.rules || []).map(r => r.rule)
-    })),
+    detail: listes.map(x => {
+      const estAppui = appuis.includes(x);
+      const estFaible = appuisFaibles.includes(x);
+      const estContre = contraires.includes(x);
+      return {
+        tf: x.tf,
+        tendance: x.verdict.trend,
+        status: x.verdict.status,
+        direction: x.verdict.direction,
+        strength: x.verdict.strength,
+        confirme: x.verdict.status === 'confirme',
+        regles: (x.verdict.rules || []).map(r => r.rule),
+        // Pourquoi cette unité pèse — ou ne pèse pas — dans le score global.
+        contribution: estAppui ? 'appui' : estFaible ? 'appui faible' : estContre ? 'contraire' : 'sans direction',
+        contribue: estAppui,
+        raison: estAppui
+          ? (x.verdict.trend === tendanceAttendue
+            ? `tendance ${x.verdict.trend} et direction ${x.verdict.direction} : appuie`
+            : `tendance indécise (${x.verdict.trend}) mais signal confirmé par ${x.verdict.confirmations} règles : appuie`)
+          : estFaible
+            ? `direction ${x.verdict.direction} mais rien pour la confirmer (tendance ${x.verdict.trend}, ${x.verdict.confirmations || 0} règle(s)) : ne compte pas`
+            : estContre
+              ? `direction ${x.verdict.direction} : contraire`
+              : 'aucune direction exploitable'
+      };
+    }),
     motif: direction === 'NEUTRE'
       ? 'aucune direction ne se dégage sur les unités de temps'
       : contreTendance
         ? `signal ${direction === 'BUY' ? 'acheteur' : 'vendeur'} mais contexte ${superieure ? superieure.tf : ''} ${superieure ? superieure.verdict.trend : ''} : contre-tendance`
         : aligne
-          ? `${alignes.length}/${listes.length} unités d'accord sur ${direction === 'BUY' ? 'l\'achat' : 'la vente'} (seuil ${seuil})`
-          : `seulement ${alignes.length}/${listes.length} unité(s) d'accord : il en faut ${seuil}`
+          ? `${appuis.length}/${listes.length} unités appuient ${direction === 'BUY' ? 'l\'achat' : 'la vente'} (seuil ${seuil})`
+            + (appuisFaibles.length
+              ? ` — ${appuisFaibles.length} affiche(nt) la même direction mais sans tendance : non comptée(s)`
+              : '')
+          : `${appuis.length}/${listes.length} unité(s) appuient réellement : il en faut ${seuil}`
+            + (appuisFaibles.length
+              ? ` — ${appuisFaibles.length} autre(s) affichent la même direction mais sans tendance`
+              : '')
   };
 }
 
