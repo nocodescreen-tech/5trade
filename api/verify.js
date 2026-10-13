@@ -1266,9 +1266,10 @@ function tinyPng(W = 64, H = 40) {
         === v.reglesEvaluees.length,
       `${v.reglesPour.length}+${v.reglesContre.length}+${v.reglesNeutres.length}+${v.reglesMuettes.length}`
       + ` = ${v.reglesEvaluees.length}`);
-    ok('le résumé dit « X sur Y » et non un « X » isolé',
-      new RegExp(`${v.confirmations}/${v.reglesEvaluees.length}`).test(v.summary || ''),
-      String(v.summary || '').slice(0, 80));
+    ok('le résumé annonce des preuves distinctes ET le nombre de règles évaluées',
+      /preuve\(s\) distincte\(s\)/.test(v.summary || '')
+      && new RegExp(`sur ${v.reglesEvaluees.length} règle`).test(v.summary || ''),
+      String(v.summary || '').slice(0, 110));
   }
 
   // ── Le déclencheur ne doit jamais être l'objectif ──
@@ -1399,6 +1400,52 @@ function tinyPng(W = 64, H = 40) {
       !/probabilité de (gain|réussite) [:=]/i.test(jsx));
     ok('l\'écran affiche « X/Y règles » et non un « X » isolé',
       /règle\(s\) d'accord/.test(jsx) && /reglesEvaluees/.test(jsx));
+  }
+
+  // ── Les confirmations comptent des PREUVES, pas des noms de règles ──
+  // Défaut signalé : « new Set(winner.map(r => r.rule)).size » comptait des
+  // identifiants. R1 (balayage) et R2 (cassure) lisent souvent LE MÊME niveau sur
+  // LA MÊME bougie — le balayage EST la rupture. Un seul événement du marché
+  // comptait donc double, et gonflait la force du signal.
+  {
+    const vague = () => {
+      const out = []; let ts = 0;
+      const push = (o, h, l, c) => out.push({ t: ts += 60000, o, h, l, c, v: 2, closed: true });
+      [[100, 102, 99.6], [101.2, 103.6, 100.8], [102.4, 105.2, 102], [103.6, 106.8, 103.2],
+       [104.8, 108.4, 104.4], [106.2, 110, 105.8], [107.4, 111.6, 107], [108.6, 113.2, 108.2]]
+        .forEach(([creux, sommet, base]) => {
+          const pas = (sommet - creux) / 4;
+          for (let i = 0; i < 4; i++) {
+            const o = creux + pas * i, c = creux + pas * (i + 1);
+            push(o, Math.max(o, c) + 0.15, Math.min(o, c, base) - 0.05, c);
+          }
+        });
+      return out;
+    };
+    const v = Sig.detect(vague(), { symbol: 'T', timeframe: '15m' });
+    const regles = (v.rules || []).map(r => r.rule);
+    ok('chaque règle porte une empreinte de preuve',
+      (v.rules || []).every(r => !!r.preuve), (v.rules || []).map(r => `${r.rule}:${r.preuve}`).join(' '));
+    ok('le nombre de confirmations est le nombre de PREUVES distinctes',
+      v.confirmations === Object.keys(v.preuves || {}).length,
+      `${v.confirmations} preuves pour ${regles.length} règle(s)`);
+    ok('deux règles lisant le même niveau comptent pour une seule',
+      v.confirmations <= regles.length, `${v.confirmations} <= ${regles.length}`);
+    if ((v.preuvesPartagees || []).length) {
+      ok('le partage de preuve est annoncé explicitement',
+        /décrivent la même observation/.test((v.preuvesPartagees[0] || {}).lecture || ''),
+        v.preuvesPartagees[0].lecture);
+      ok('un signal avec une seule preuve n\'est pas confirmé à seuil 2',
+        v.confirmations >= 2 || v.status !== 'confirme',
+        `${v.confirmations} preuve(s), statut ${v.status}`);
+    }
+    ok('le résumé parle de preuves distinctes', /preuve\(s\) distincte\(s\)/.test(v.summary || ''),
+      String(v.summary || '').slice(0, 100));
+    // Les empreintes doivent être de nature différente selon les règles : R5 (la
+    // structure) ne peut jamais partager sa preuve avec une règle de niveau.
+    const sansPreuve = (v.rules || []).filter(r => /^regle:/.test(r.preuve || ''));
+    ok('aucune règle ne retombe sur son nom faute d\'empreinte', sansPreuve.length === 0,
+      sansPreuve.map(r => r.rule).join(',') || 'toutes ont une empreinte réelle');
   }
 
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──

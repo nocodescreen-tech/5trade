@@ -47,7 +47,11 @@ function ruleSweep(candles, report) {
         rule: 'R1', name: 'Sweep (balayage de liquidité)',  sigle: 'R1',
         direction: 'BUY', strength: +(Math.min(wick / range, 0.9)).toFixed(3),
         detail: `mèche sous ${lv.kind} ${num(lv.price)} puis clôture au-dessus (${num(last.c)})`,
-        level: num(lv.price)
+        level: num(lv.price),
+        // Empreinte de la PREUVE : le niveau reellement balaye. Deux regles
+        // qui lisent ce meme niveau decrivent UN SEUL evenement du marche —
+        // les compter separement gonflait la force du signal.
+        preuve: `niveau:${num(lv.price)}`, source: lv.kind
       };
     }
     // Balayage baissier : on perce AU-DESSUS, puis on clôture EN DESSOUS.
@@ -58,7 +62,11 @@ function ruleSweep(candles, report) {
         rule: 'R1', name: 'Sweep (balayage de liquidité)',  sigle: 'R1',
         direction: 'SELL', strength: +(Math.min(wick / range, 0.9)).toFixed(3),
         detail: `mèche au-dessus de ${lv.kind} ${num(lv.price)} puis clôture en dessous (${num(last.c)})`,
-        level: num(lv.price)
+        level: num(lv.price),
+        // Empreinte de la PREUVE : le niveau reellement balaye. Deux regles
+        // qui lisent ce meme niveau decrivent UN SEUL evenement du marche —
+        // les compter separement gonflait la force du signal.
+        preuve: `niveau:${num(lv.price)}`, source: lv.kind
       };
     }
   }
@@ -79,7 +87,10 @@ function ruleBreak(candles, report) {
     direction: e.direction === 'bullish' ? 'BUY' : 'SELL',
     strength: +Math.min(base + pierce * 0.2, 0.95).toFixed(3),
     detail: `clôture ${num(last.c)} au-delà du niveau ${num(e.level)}`,
-    level: num(e.level)
+    level: num(e.level),
+    // Meme niveau que R1 s'il s'agit du meme mouvement : la cassure EST souvent le
+    // balayage. L'empreinte identique empeche de compter deux fois.
+    preuve: `niveau:${num(e.level)}`, source: e.type
   };
 }
 
@@ -121,7 +132,10 @@ function ruleZone(candles, report) {
         return {
           rule: 'R3', name: `Rejet sur ${z.kind} haussier (OB/FVG)`, direction: 'BUY', strength,
           detail: `zone ${num(z.low)}–${num(z.high)} touchée puis clôture au-dessus (prix en ${where})`,
-          level: num(z.high)
+          level: num(z.high),
+          // La preuve est la zone touchee, pas son bord : deux lectures de
+          // la meme zone restent un seul evenement.
+          preuve: `zone:${num(z.low)}-${num(z.high)}`, source: z.kind
         };
       }
       // Piège : zone de demande prise par le haut, puis cédée → vente.
@@ -129,7 +143,10 @@ function ruleZone(candles, report) {
         return {
           rule: 'R3', name: `Échec de ${z.kind} haussier en premium (OB/FVG)`, direction: 'SELL', strength,
           detail: `zone ${num(z.low)}–${num(z.high)} atteinte en premium puis cassée vers le bas`,
-          level: num(z.low)
+          level: num(z.low),
+          // La preuve est la zone touchee, pas son bord : deux lectures de
+          // la meme zone restent un seul evenement.
+          preuve: `zone:${num(z.low)}-${num(z.high)}`, source: z.kind
         };
       }
     }
@@ -140,14 +157,20 @@ function ruleZone(candles, report) {
         return {
           rule: 'R3', name: `Rejet sur ${z.kind} baissier (OB/FVG)`, direction: 'SELL', strength,
           detail: `zone ${num(z.low)}–${num(z.high)} touchée puis clôture en dessous (prix en ${where})`,
-          level: num(z.low)
+          level: num(z.low),
+          // La preuve est la zone touchee, pas son bord : deux lectures de
+          // la meme zone restent un seul evenement.
+          preuve: `zone:${num(z.low)}-${num(z.high)}`, source: z.kind
         };
       }
       if (last.c > z.high && position === 'discount') {
         return {
           rule: 'R3', name: `Échec de ${z.kind} baissier en discount (OB/FVG)`, direction: 'BUY', strength,
           detail: `zone ${num(z.low)}–${num(z.high)} atteinte en discount puis cassée vers le haut`,
-          level: num(z.high)
+          level: num(z.high),
+          // La preuve est la zone touchee, pas son bord : deux lectures de
+          // la meme zone restent un seul evenement.
+          preuve: `zone:${num(z.low)}-${num(z.high)}`, source: z.kind
         };
       }
     }
@@ -165,7 +188,10 @@ function rulePosition(report) {
       rule: 'R4', name: 'Discount (zone basse du range)',
       direction: 'BUY', strength: 0.4,
       detail: `prix ${num(report.lastPrice)} sous l'équilibre ${num(pd.equilibrium)}`,
-      level: num(pd.equilibrium)
+      level: num(pd.equilibrium),
+      // La preuve est le range lui-meme : premium et discount decrivent la
+      // meme observation, vue d'un cote ou de l'autre.
+      preuve: `range:${num(pd.low)}-${num(pd.high)}`, source: 'position dans le range'
     };
   }
   if (pd.position === 'premium' && trend !== 'bullish') {
@@ -173,7 +199,10 @@ function rulePosition(report) {
       rule: 'R4', name: 'Premium (zone haute du range)',
       direction: 'SELL', strength: 0.4,
       detail: `prix ${num(report.lastPrice)} au-dessus de l'équilibre ${num(pd.equilibrium)}`,
-      level: num(pd.equilibrium)
+      level: num(pd.equilibrium),
+      // La preuve est le range lui-meme : premium et discount decrivent la
+      // meme observation, vue d'un cote ou de l'autre.
+      preuve: `range:${num(pd.low)}-${num(pd.high)}`, source: 'position dans le range'
     };
   }
   return null;
@@ -364,7 +393,10 @@ function ruleTendance(report) {
     name: `Sens de la structure : ${achat ? 'haussier' : 'baissier'}`,
     direction: achat ? 'BUY' : 'SELL',
     strength: 0.45,
-    detail: `structure en ${t} — un signal dans ce sens est favorisé`
+    detail: `structure en ${t} — un signal dans ce sens est favorisé`,
+    // La tendance est une observation a part : elle ne partage sa preuve avec
+    // aucune autre regle.
+    preuve: `structure:${t}`, source: 'sens de la structure'
   };
 }
 
@@ -615,7 +647,27 @@ function detect(candles, meta = {}, options = {}) {
   const loser = buy.length >= sell.length ? sell : buy;
   const direction = winner.length ? winner[0].direction : 'NEUTRE';
 
-  const independent = new Set(winner.map(r => r.rule)).size;
+  // ── LES CONFIRMATIONS COMPTENT DES PREUVES, PAS DES NOMS DE RÈGLES ──
+  // Avant : `new Set(winner.map(r => r.rule)).size` comptait des IDENTIFIANTS.
+  // Trois règles différentes valaient donc trois observations indépendantes.
+  // Or R1 (balayage) et R2 (cassure) lisent souvent LE MÊME niveau sur LA MÊME
+  // bougie : le balayage EST la rupture. C'est un seul événement du marché compté
+  // deux fois, et la force du signal s'en trouvait gonflée sans qu'aucun fait
+  // nouveau soit apparu. Chaque règle porte désormais une empreinte de sa preuve
+  // (le niveau lu, la zone touchée, le range, la structure) : le comptage
+  // regroupe par empreinte.
+  const clePreuve = r => r.preuve || `regle:${r.rule}`;
+  const preuves = new Set(winner.map(clePreuve));
+  const independent = preuves.size;
+  // Regroupement lisible : quelles règles décrivent la même preuve.
+  const preuvesDetail = {};
+  for (const r of winner) {
+    const cle = clePreuve(r);
+    (preuvesDetail[cle] = preuvesDetail[cle] || []).push({ rule: r.rule, name: r.name, source: r.source || null });
+  }
+  const preuvesPartagees = Object.entries(preuvesDetail)
+    .filter(([, regles]) => regles.length > 1)
+    .map(([cle, regles]) => ({ preuve: cle, regles: regles.map(x => x.rule), lecture: regles.map(x => x.rule).join(' + ') + ' décrivent la même observation' }));
 
   // ── Lire les règles sans ambiguïté ──
   // L'écran affichait « reglesActives: 5 » face à « confirmations: 3 », ce qui
@@ -746,8 +798,12 @@ function detect(candles, meta = {}, options = {}) {
       + ` Biais ${sc.biais} (${sc.raisonBiais}).`
       + ` Scénarios : achat si ${sc.bullish.trigger}, vente si ${sc.bearish.trigger}.`
     : `${entete}${direction === 'BUY' ? 'ACHAT' : 'VENTE'} ${status === 'confirme' ? 'CONFIRMÉ' : 'à surveiller'}`
-      // « 3 règles » tout court ne dit pas sur combien elles ont ete jugees.
-      + ` — ${independent}/${reglesEvaluees.length} règle(s) d'accord : ${winner.map(r => r.name).join(' + ')}`
+      // On annonce des PREUVES distinctes, pas des noms de regles : deux regles
+      // qui lisent le meme niveau ne confirment qu'une seule fois.
+      + ` — ${independent} preuve(s) distincte(s) : ${winner.map(r => r.name).join(' + ')}`
+      + ` (sur ${reglesEvaluees.length} règle(s) évaluée(s))`
+      + (preuvesPartagees.length
+        ? ` · ${preuvesPartagees.map(pp => pp.lecture).join(' ; ')}` : '')
       + (contradiction.franche ? ` · DÉSACCORD : ${contradiction.lecture}`
         : (contradiction.active ? ` · ${contradiction.lecture}` : ''))
       + ` · force ${(strength * 100).toFixed(0)} %`
@@ -763,6 +819,9 @@ function detect(candles, meta = {}, options = {}) {
     // est neutre, et ce qui n'a rien trouve. Sans ca, « 5 evaluees / 3 d'accord »
     // laissait l'utilisateur deviner ce que faisaient les deux autres.
     reglesEvaluees, reglesPour, reglesContre, reglesNeutres, reglesMuettes,
+    // Preuves : combien d'observations DISTINCTES, et quelles regles se
+    // partagent la meme. C'est ce qui empeche un meme fait de compter double.
+    preuves: preuvesDetail, preuvesPartagees,
     rules,
     levels,
     scenarios: sc,
