@@ -1308,6 +1308,9 @@ function tinyPng(W = 64, H = 40) {
       }
     });
 
+    // L'ATR doit être exposé : sans lui, les distances annoncées en « × ATR » ne
+    // sont pas vérifiables par l'utilisateur.
+    ok('l\'ATR est exposé dans le verdict', Number.isFinite(v.atr) && v.atr > 0, String(v.atr));
     // Aucune cible à moins d'un ATR : sinon le trade ne paie pas ses frais.
     if (Number.isFinite(L.target1) && Number.isFinite(L.entry) && Number.isFinite(v.atr)) {
       ok('l\'objectif 1 est à au moins un ATR de l\'entrée',

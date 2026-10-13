@@ -769,6 +769,9 @@ function detect(candles, meta = {}, options = {}) {
     checklist: chk,
     missing,
     price: report.lastPrice,
+    // L'ATR est exposé : sans lui, impossible de vérifier soi-même les distances
+    // annoncées en « × ATR » ni la cohérence des objectifs.
+    atr: Number.isFinite(report.atr14) ? +report.atr14.toFixed(6) : null,
     trend: report.structure.trend,
     summary,
     // Le désaccord entre règles est exposé tel quel : on ne masque pas un
