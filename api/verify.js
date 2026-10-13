@@ -1316,6 +1316,88 @@ function tinyPng(W = 64, H = 40) {
     }
   }
 
+  // ── Étapes de playbook : ne jamais annoncer une étape bloquante comme franchie ──
+  // Cas signalé : « étape 5 sur 5 » + « étapes 4/5 » alors qu'une étape obligatoire
+  // était en attente. Le dénominateur mélangeait obligatoires et facultatives.
+  {
+    const PB = require('./playbooks.js');
+    const St = require('./structure.js');
+    const s = [];
+    for (let i = 0; i < 120; i++) {
+      const p = 100 + Math.sin(i / 8) * 5 + i * 0.02;
+      s.push({ t: i * 60000, o: p, h: p + 1.4, l: p - 1.4, c: p + 0.3, v: 12 });
+    }
+    const r = St.analyze(s, { symbol: 'T', timeframe: '5m' });
+
+    ['scalping', 'liquidite', 'intraday', 'swing'].forEach(t => {
+      const pb = PB.evaluer(r, t);
+      ok(`${t} : les étapes obligatoires sont comptées à part`,
+        Number.isFinite(pb.etapesObligatoires) && pb.etapesObligatoires <= pb.etapesTotal,
+        `${pb.etapesOk}/${pb.etapesObligatoires} obligatoires sur ${pb.etapesTotal} au total`);
+      ok(`${t} : les étapes facultatives sont nommées`,
+        Array.isArray(pb.etapesFacultatives), `${(pb.etapesFacultatives || []).length}`);
+      ok(`${t} : pret exige TOUTES les étapes obligatoires`,
+        pb.pret ? pb.etapesEnAttente.length === 0 : true);
+      // Le libellé doit désigner le VRAI point de blocage : les prérequis d'abord,
+      // les étapes ensuite — et jamais laisser croire qu'une étape bloquante est
+      // franchie.
+      if (!pb.pret) {
+        if (pb.prerequisOk < pb.prerequisTotal) {
+          ok(`${t} : le blocage annoncé est le manque de prérequis`,
+            /contexte incomplet/.test(pb.avancement || '')
+            && new RegExp(`${pb.prerequisTotal - pb.prerequisOk} prérequis manquant`).test(pb.avancement || ''),
+            pb.avancement);
+        } else if (pb.etapesEnAttente && pb.etapesEnAttente.length) {
+          ok(`${t} : une étape en attente est annoncée comme bloquante`,
+            /bloqué à l'étape/.test(pb.avancement || '') && !/toutes les étapes/.test(pb.avancement || ''),
+            pb.avancement);
+        }
+      }
+      ok(`${t} : jamais « étape N sur N » quand une étape bloque`,
+        !/^étape \d+ sur \d+$/.test(pb.avancement || ''), pb.avancement);
+      if (pb.pret) {
+        ok(`${t} : « pret » implique zéro étape obligatoire en attente`,
+          pb.etapesEnAttente.length === 0 && pb.etapesOk === pb.etapesObligatoires);
+      }
+    });
+  }
+
+  // ── État du marché : quatre notions distinctes, aucun blocage arbitraire ──
+  {
+    const s = [];
+    for (let i = 0; i < 100; i++) {
+      const p = 100 + Math.sin(i / 5) * 4 + i * 0.03;
+      s.push({ t: i * 60000, o: p, h: p + 1, l: p - 1, c: p + 0.25, v: 9 });
+    }
+    const vc = Sig.detect(s, { symbol: 'BTCUSDT', timeframe: '5m' });
+    ok('l\'état du marché est exposé', !!vc.etatMarche && typeof vc.etatMarche === 'object');
+    ok('un crypto est vu comme ouvert en continu',
+      /continu/.test(vc.etatMarche.marche || ''), vc.etatMarche.marche);
+    ok('sa session n\'est PAS comptée comme un blocage',
+      (vc.etatMarche.bloque || []).length === 0, vc.etatMarche.lecture);
+    ok('la fraîcheur des données est évaluée à part',
+      typeof vc.etatMarche.donneesFraiches === 'boolean' || vc.etatMarche.donneesFraiches === null);
+
+    const vx = Sig.detect(s, { symbol: 'frxXAUUSD', timeframe: '5m' });
+    ok('un marché à séance est distingué du crypto',
+      /séance/.test(vx.etatMarche.marche || ''), vx.etatMarche.marche);
+    ok('hors séance sans exigence de session : rien n\'est bloqué',
+      (vx.etatMarche.bloque || []).length === 0 && !vx.etatMarche.sessionExigee,
+      vx.etatMarche.lecture);
+    ok('la volatilité est un état séparé',
+      typeof vx.etatMarche.volatiliteSuffisante === 'boolean' || vx.etatMarche.volatiliteSuffisante === null);
+  }
+
+  // ── La force est un score, jamais présentée comme une probabilité ──
+  {
+    ok('l\'écran dit que la force est un score interne, pas une probabilité',
+      /Score interne du moteur/.test(jsx) && /PAS une probabilité de réussite/.test(jsx));
+    ok('l\'écran n\'emploie pas le mot « probabilité » pour la force',
+      !/probabilité de (gain|réussite) [:=]/i.test(jsx));
+    ok('l\'écran affiche « X/Y règles » et non un « X » isolé',
+      /règle\(s\) d'accord/.test(jsx) && /reglesEvaluees/.test(jsx));
+  }
+
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──
   // Mesure réelle : 8,7 s pour joindre Telegram depuis cette connexion. Sans
   // reprise, l'alerte échouait sur un appel pourtant valide.

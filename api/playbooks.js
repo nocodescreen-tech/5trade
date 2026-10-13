@@ -159,21 +159,37 @@ function evaluer(r, type) {
     etape(5, 'Alignement 1 h / 4 h / 1 j', null, 'vérifié par la confluence');
   }
 
+  // ── Compteurs explicites ──
+  // Avant : une étape qui BLOQUE s'annonçait « étape 5 sur 5 », ce qui laissait
+  // croire que tout était franchi. Et les étapes facultatives (non évaluables sur
+  // ce graphique) n'étaient pas distinguées des obligatoires.
+  //
+  // Convention : une étape évaluée (ok === true ou false) est OBLIGATOIRE sur ce
+  // graphique. Une étape non évaluée (ok === null) est FACULTATIVE : elle demande
+  // une vérification ailleurs (la confluence, par exemple) et ne peut pas bloquer.
   const prerequisOk = P.filter(p => p.ok).length;
-  const etapesEvaluees = E.filter(e => e.ok !== null);
-  const etapesOk = etapesEvaluees.filter(e => e.ok).length;
-  const pret = prerequisOk === P.length && etapesEvaluees.length > 0
-    && etapesOk === etapesEvaluees.length;
+  const etapesObligatoires = E.filter(e => e.ok !== null);
+  const etapesOk = etapesObligatoires.filter(e => e.ok).length;
+  const etapesEnAttente = etapesObligatoires.filter(e => !e.ok);
+  const etapesFacultatives = E.filter(e => e.ok === null);
+  const pret = prerequisOk === P.length && etapesObligatoires.length > 0
+    && etapesEnAttente.length === 0;
 
-  // Le premier point qui bloque : c'est lui qu'on annonce.
-  const premierManque = P.find(p => !p.ok) || E.find(e => e.ok === false) || null;
+  // Le premier point qui bloque : c'est lui qu'on annonce, et lui seul.
+  const premierManque = P.find(p => !p.ok) || etapesEnAttente[0] || null;
   let avancement;
   if (prerequisOk < P.length) {
-    avancement = 'contexte incomplet';
-  } else if (etapesEvaluees.length && etapesOk === etapesEvaluees.length) {
-    avancement = 'toutes les étapes franchies — signal valable pour ce type';
+    avancement = `contexte incomplet — ${P.length - prerequisOk} prérequis manquant(s) sur ${P.length}`;
+  } else if (!etapesObligatoires.length) {
+    avancement = 'aucune étape obligatoire ne peut être évaluée sur ce graphique';
+  } else if (etapesEnAttente.length === 0) {
+    avancement = `toutes les étapes obligatoires sont franchies (${etapesOk}/${etapesObligatoires.length})`
+      + (etapesFacultatives.length
+        ? ` · ${etapesFacultatives.length} étape(s) facultative(s) non évaluée(s) ici` : '');
   } else {
-    avancement = `étape ${(premierManque && premierManque.numero) || (etapesOk + 1)} sur ${E.length}`;
+    avancement = `bloqué à l'étape ${(premierManque && premierManque.numero) || '?'} sur ${E.length}`
+      + ` — ${premierManque ? premierManque.label : 'à préciser'}`
+      + ` (${etapesOk}/${etapesObligatoires.length} franchie(s))`;
   }
 
   return {
@@ -181,7 +197,12 @@ function evaluer(r, type) {
     timeframes: t.timeframes,
     prerequis: P, etapes: E,
     prerequisOk, prerequisTotal: P.length,
-    etapesOk, etapesEvaluees: etapesEvaluees.length, etapesTotal: E.length,
+    etapesOk,
+    etapesObligatoires: etapesObligatoires.length,
+    etapesTotal: E.length,
+    etapesEvaluees: etapesObligatoires.length,
+    etapesEnAttente: etapesEnAttente.map(e => ({ numero: e.numero, label: e.label, detail: e.detail })),
+    etapesFacultatives: etapesFacultatives.map(e => ({ numero: e.numero, label: e.label })),
     pret, avancement,
     blocage: premierManque ? (premierManque.label || null) : null,
     detailBlocage: premierManque ? (premierManque.detail || null) : null

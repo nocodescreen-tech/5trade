@@ -18,6 +18,12 @@
  */
 const S = require('./structure');
 
+/** Durée d'une bougie par unité de temps — sert à juger la fraîcheur des données. */
+const TF_MS = {
+  '1m': 60000, '5m': 300000, '15m': 900000, '30m': 1800000,
+  '1h': 3600000, '4h': 14400000, '1d': 86400000
+};
+
 const num = v => (Number.isFinite(v) ? +v.toFixed(6) : null);
 
 /** R1 — balayage de liquidité (« sweep ») sur la dernière bougie clôturée. */
@@ -654,6 +660,41 @@ function detect(candles, meta = {}, options = {}) {
   const filtresExiges = Array.isArray(options.filtres) ? options.filtres : [];
   const filtresKO = tousFiltres.filter(f => filtresExiges.includes(f.cle) && !f.ok);
 
+  // ── État du marché, à ne pas confondre avec la session de la stratégie ──
+  // Quatre choses différentes étaient mélangées sous « session » :
+  //   • le marché est-il ouvert ? (un crypto s'échange 24 h/24 ; un indice non)
+  //   • la session préférée de la stratégie est-elle active ?
+  //   • les données sont-elles fraîches ?
+  //   • la volatilité est-elle suffisante ?
+  // Une session inactive NE bloque pas : seuls les filtres réellement exigés par
+  // la stratégie bloquent. On expose donc l'état, sans décider à sa place.
+  const symbole = String(meta.symbol || '');
+  const crypto = /USDT$|USDC$|USDT$/i.test(symbole) || /^(BTC|ETH|SOL|XRP)/i.test(symbole);
+  const se2 = report.sessions || {};
+  const sessionActive2 = /londres|new ?york|overlap/i.test(String(se2.sessionCourante || ''));
+  const ageBougie = Number.isFinite(report.atr14) && clean.length
+    ? Date.now() - clean[clean.length - 1].t : null;
+  const dureeTf = TF_MS[meta.timeframe] || null;
+  const donneesFraiches = dureeTf ? (ageBougie !== null && ageBougie < dureeTf * 3) : null;
+  const etatMarche = {
+    marche: crypto ? 'ouvert en continu (crypto)' : 'horaires de séance',
+    ouvert: crypto ? true : (sessionActive2 || !!se2.killZone),
+    session: se2.sessionCourante || 'inconnue',
+    sessionExigee: filtresExiges.includes('session'),
+    donneesFraiches,
+    ageDerniereBougieMin: ageBougie !== null ? +(ageBougie / 60000).toFixed(1) : null,
+    volatiliteSuffisante: (tousFiltres.find(f => f.cle === 'volatilite') || {}).ok ?? null,
+    // Ce qui bloque réellement (vide = rien ne bloque).
+    bloque: filtresKO.map(f => f.label),
+    lecture: filtresKO.length
+      ? `bloqué par : ${filtresKO.map(f => f.label).join(', ')}`
+      : crypto
+        ? 'marché ouvert en continu : aucune restriction de séance'
+        : sessionActive2
+          ? `séance ${se2.sessionCourante} en cours`
+          : 'hors séance, mais aucune stratégie n\'exige de session : rien n\'est bloqué'
+  };
+
   const seuilRegles = Number.isFinite(options.seuilRegles) ? options.seuilRegles : 2;
   const seuilForce = Number.isFinite(options.seuilForce) ? options.seuilForce : 0.35;
   const seuilSurveiller = Math.max(0.3, seuilForce - 0.05);
@@ -736,6 +777,10 @@ function detect(candles, meta = {}, options = {}) {
     // Filtres : ce que la stratégie exigeait, et ce que le marché en dit.
     filtres: tousFiltres,
     filtresExiges,
+    // État du marché : ouvert/fermé, session, fraîcheur des données, volatilité.
+    // Quatre notions distinctes, exposées séparément au lieu d'un mot « session »
+    // qui laissait croire à un blocage.
+    etatMarche,
     // Traçabilité : quelles règles ont été appliquées, et au nom de quoi.
     reglesActives: actives,
     seuils: { regles: seuilRegles, force: seuilForce },

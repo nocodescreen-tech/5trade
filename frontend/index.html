@@ -2702,8 +2702,20 @@ function LiveMarket({ onToJournal }) {
               {signal.status === 'confirme' ? ' CONFIRMÉ' : signal.status === 'surveiller' ? ' à surveiller' : ''}
             </span>
             <span style={{ fontSize:12.5, color:'var(--muted)' }}>
-              {signal.confirmations} règle(s) · force {(signal.strength * 100).toFixed(0)} %
+              {/* « X/Y règles » et non « X règles » : sinon on ne sait pas sur
+                  combien de règles le signal a été jugé. Et la force est un SCORE
+                  INTERNE, pas une probabilité de réussite — le titre le dit, pour
+                  qu'on ne lise pas « force 45 % » comme « 45 % de chances ». */}
+              {signal.confirmations}/{signal.reglesEvaluees ? signal.reglesEvaluees.length : signal.confirmations} règle(s) d'accord
+              {' · '}
+              <span title={'Score interne du moteur, entre 0 et 100 : il mesure la solidité du signal '
+                + '(nombre de règles, tendance, zones), PAS une probabilité de réussite. Aucun modèle '
+                + 'probabiliste n\'est validé à ce jour, donc aucune probabilité n\'est affichée.'}>
+                force {(signal.strength * 100).toFixed(0)} % <i className="fas fa-circle-info" style={{ fontSize:10, opacity:.6 }}></i>
+              </span>
               {signal.trend ? ` · tendance ${signal.trend}` : ''}
+              {signal.reglesMuettes && signal.reglesMuettes.length
+                ? ` · ${signal.reglesMuettes.length} règle(s) sans avis` : ''}
             </span>
             <span style={{ flex:'1 1 auto' }}></span>
             <span style={{ fontSize:11.5, color:'var(--dim)' }}>
@@ -2946,7 +2958,13 @@ function LiveMarket({ onToJournal }) {
                       </span>
                       <span style={{ fontSize:11.5, color:'var(--dim)' }}>
                         prérequis {pb.prerequisOk}/{pb.prerequisTotal}
-                        {' · '}étapes {pb.etapesOk}/{pb.etapesTotal}
+                        {/* Le dénominateur est le nombre d'étapes OBLIGATOIRES, pas le
+                            total : « étapes 4/5 » alors que les cinq sont franchies
+                            (dont une facultative, non évaluable sur ce graphique) se
+                            lisait comme un manque. Les facultatives sont nommées à part. */}
+                        {' · '}étapes {pb.etapesOk}/{pb.etapesObligatoires ?? pb.etapesTotal}
+                        {Array.isArray(pb.etapesFacultatives) && pb.etapesFacultatives.length > 0
+                          ? ` · ${pb.etapesFacultatives.length} facultative(s)` : ''}
                       </span>
                       <span style={{ fontSize:11.5, color:'var(--dim)', marginLeft:'auto' }}>
                         {pb.duree} · {pb.timeframes.join('/')}
