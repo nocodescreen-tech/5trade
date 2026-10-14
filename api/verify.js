@@ -968,7 +968,7 @@ function tinyPng(W = 64, H = 40) {
   // filtres (qui bloquent), et une stratégie en choisit autant qu'elle veut.
   {
     const nb = Object.keys(Sig.TOUTES_REGLES).length;
-    ok('le moteur propose plus de quatre règles', nb >= 5, `${nb} règles`);
+    ok('le moteur propose au moins quatre règles d\'observation', nb >= 4, `${nb} règles`);
     ok('chaque règle a un libellé lisible',
       Object.keys(Sig.TOUTES_REGLES).every(r => Sig.REGLES_INFO[r]));
     ok('le seuil de règles suit le nombre réel de règles',
@@ -977,15 +977,27 @@ function tinyPng(W = 64, H = 40) {
     ok('une stratégie mono-règle reste possible',
       Sig.profilDepuisStrategie({ id: 'x', title: 't', moteur: { regles: ['R1'], seuilRegles: 1 } })
         .regles.length === 1);
-    ok('R5 (sens de la structure) produit un avis directionnel', (() => {
-      // On interroge la règle elle-même : sur une série lisse, la structure peut
-      // rester « range » et la règle est alors muette — ce qui est correct.
-      const haussier = Sig.ruleTendance({ structure: { trend: 'bullish' } });
-      const baissier = Sig.ruleTendance({ structure: { trend: 'bearish' } });
-      const range = Sig.ruleTendance({ structure: { trend: 'range' } });
-      return !!haussier && haussier.rule === 'R5' && haussier.direction === 'BUY'
-        && !!baissier && baissier.direction === 'SELL'
-        && range === null;
+    // R5 a été RETIRÉE du vote : « la structure est haussière donc un achat est
+    // favorisé » ne lit rien sur le graphique. Ce test vérifie désormais le
+    // contraire de ce qu'il vérifiait avant — c'est voulu.
+    ok('R5 ne vote plus : une stratégie qui la demande ne l\'obtient pas', (() => {
+      const profil = Sig.profilDepuisStrategie({ id: 'x', title: 't', moteur: { regles: ['R5'] } });
+      return !profil.regles.includes('R5') && !profil.regles.includes('R5'.toLowerCase());
+    })());
+    ok('aucune règle votante n\'est R5', (() => {
+      const s = [];
+      for (let i = 0; i < 90; i++) { const p = 100 + i * 0.3 + Math.sin(i / 3) * 2; s.push({ t: i * 60000, o: p, h: p + 1, l: p - 1, c: p + 0.4, v: 9 }); }
+      const v = Sig.detect(s, { symbol: 'T', timeframe: '5m' });
+      return !(v.rules || []).some(r => r.rule === 'R5')
+        && !(v.reglesEvaluees || []).includes('R5');
+    })());
+    ok('la structure est exposée comme CONTEXTE, et marquée non-confirmante', (() => {
+      const s = [];
+      for (let i = 0; i < 90; i++) { const p = 100 + i * 0.3 + Math.sin(i / 3) * 2; s.push({ t: i * 60000, o: p, h: p + 1, l: p - 1, c: p + 0.4, v: 9 }); }
+      const v = Sig.detect(s, { symbol: 'T', timeframe: '5m' });
+      return v.context && v.context.confirme === false
+        && typeof v.context.lecture === 'string' && v.context.lecture.length > 10
+        && 'trend' in v.context;
     })());
 
     ok('les filtres existent et sont calculés', (() => {
@@ -1256,7 +1268,7 @@ function tinyPng(W = 64, H = 40) {
       s.push({ t: i * 60000, o: p, h: p + 0.8, l: p - 0.8, c: p + 0.2, v: 8 });
     }
     const v = Sig.detect(s, { symbol: 'T', timeframe: '5m' });
-    ok('les règles évaluées sont listées', Array.isArray(v.reglesEvaluees) && v.reglesEvaluees.length >= 5,
+    ok('les règles évaluées sont listées', Array.isArray(v.reglesEvaluees) && v.reglesEvaluees.length >= 4,
       (v.reglesEvaluees || []).join(','));
     ok('les règles d\'accord sont listées', Array.isArray(v.reglesPour), (v.reglesPour || []).join(','));
     ok('les règles contraires sont listées', Array.isArray(v.reglesContre));

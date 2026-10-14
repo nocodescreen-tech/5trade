@@ -2055,7 +2055,10 @@ RÈGLES DISPONIBLES (choisis uniquement celles qui correspondent réellement à 
   R2 = rupture de structure (BOS / CHoCH, cassure confirmée par la clôture)
   R3 = zone réactive (order block, FVG, breaker : le prix réagit sur une zone)
   R4 = position dans le range (premium pour vendre, discount pour acheter)
-  R5 = sens de la structure (tendance haussière ou baissière confirmée)
+  R5 = sens de la structure. ATTENTION : ce n'est PAS une regle de confirmation.
+       « la structure est haussiere donc un achat est favorise » ne dit rien de plus que
+       le sens du signal : c'est une tautologie. Elle informe (contexte), elle ne compte pas
+       parmi les confirmations. Ne jamais presenter R5 comme une confirmation du signal.
 
 FILTRES (conditions qui ne donnent pas de sens mais dont l'absence invalide) :
   volatilite = la stratégie exige une amplitude exploitable

@@ -377,28 +377,20 @@ function checklist(report) {
 }
 
 /**
- * R5 — Sens de la structure.
+ * R5 — Sens de la structure : RETIRÉE DU VOTE (conservée comme documentation).
  *
- * Les règles R1 à R4 disent « il se passe quelque chose ici ». Celle-ci dit
- * « et ce quelque chose va dans le sens du marché ». Une tendance haussière ne
- * rend pas tout achat bon, mais elle rend les achats plus fiables que les
- * ventes — et l'inverse.
+ * Elle disait : « la structure est haussière, donc un achat est favorisé ».
+ * C'est une TAUTOLOGIE, pas une observation : elle ne lisait rien sur le
+ * graphique et redisait le sens du signal. La compter comme confirmation revenait
+ * à confirmer un achat par le fait qu'on est haussier — et, depuis le passage aux
+ * empreintes de preuve, elle pouvait à elle seule fournir la deuxième
+ * « confirmation » du seuil.
+ *
+ * La structure reste exposée dans le verdict, mais dans `context` : elle sert à
+ * LIRE le signal (va-t-il dans le sens de la structure, ou contre elle ?), et
+ * `context.confirme` vaut false pour que personne ne s'y trompe.
  */
-function ruleTendance(report) {
-  const t = (report.structure || {}).trend;
-  if (t !== 'bullish' && t !== 'bearish') return null;
-  const achat = t === 'bullish';
-  return {
-    rule: 'R5',
-    name: `Sens de la structure : ${achat ? 'haussier' : 'baissier'}`,
-    direction: achat ? 'BUY' : 'SELL',
-    strength: 0.45,
-    detail: `structure en ${t} — un signal dans ce sens est favorisé`,
-    // La tendance est une observation a part : elle ne partage sa preuve avec
-    // aucune autre regle.
-    preuve: `structure:${t}`, source: 'sens de la structure'
-  };
-}
+
 
 /**
  * Filtres — les conditions qui ne votent pas mais qui bloquent.
@@ -440,12 +432,21 @@ function filtresDisponibles(report) {
   ];
 }
 
+/**
+ * Les règles qui VOTENT. Elles décrivent chacune une observation du marché.
+ *
+ * R5 (« la structure est haussière, donc un achat est favorisé ») n'y figure
+ * plus. C'était une TAUTOLOGIE : elle ne lisait rien sur le graphique et
+ * redisait le sens du signal. La compter comme confirmation revenait à confirmer
+ * un achat par le fait qu'on est haussier. Ce n'est pas une observation, donc ça
+ * ne vote pas — la structure reste exposée comme CONTEXTE (affichée, expliquée),
+ * mais elle ne peut plus atteindre le seuil de confirmation à elle seule.
+ */
 const TOUTES_REGLES = {
   R1: (candles, report) => ruleSweep(candles, report),
   R2: (candles, report) => ruleBreak(candles, report),
   R3: (candles, report) => ruleZone(candles, report),
-  R4: (candles, report) => rulePosition(report),
-  R5: (candles, report) => ruleTendance(report)
+  R4: (candles, report) => rulePosition(report)
 };
 
 /** Ce que chaque règle veut dire, pour l'interface et les messages. */
@@ -454,7 +455,7 @@ const REGLES_INFO = {
   R2: 'Rupture de structure (BOS / CHoCH)',
   R3: 'Zone réactive (order block / FVG)',
   R4: 'Position dans le range (premium / discount)',
-  R5: 'Sens de la structure (tendance)'
+  R5: 'Sens de la structure (contexte : ne vote pas)'
 };
 
 const sansAccents = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -851,11 +852,26 @@ function detect(candles, meta = {}, options = {}) {
     biais: sc.biais,
     raisonBiais: sc.raisonBiais,
     strategie: options.strategie || null,
+    // ── CONTEXTE (ne vote pas, ne confirme pas) ──
+    // La structure de marché est exposée pour LIRE le signal — dit-elle s'il va
+    // dans son sens ou contre elle — mais elle ne compte pas comme confirmation.
+    // « La structure est haussière donc un achat est favorisé » ne lit rien de
+    // plus sur le graphique : c'est le sens du signal répété. C'était une
+    // tautologie, elle est désormais ici et non dans les règles qui votent.
     context: {
       trend: report.structure.trend,
       event: report.structure.event,
       position: report.premiumDiscount ? report.premiumDiscount.position : null,
-      atr14: report.atr14
+      atr14: report.atr14,
+      dernierSommet: report.structure.lastSwingHigh ? num(report.structure.lastSwingHigh.price) : null,
+      dernierCreux: report.structure.lastSwingLow ? num(report.structure.lastSwingLow.price) : null,
+      lecture: report.structure.trend === 'bullish'
+        ? 'structure haussière : un achat va DANS son sens, une vente va CONTRE'
+        : report.structure.trend === 'bearish'
+          ? 'structure baissière : une vente va DANS son sens, un achat va CONTRE'
+          : 'structure en range : ni sens ni contre-sens',
+      // La structure informe, elle ne confirme pas.
+      confirme: false
     }
   };
 }
@@ -1043,5 +1059,5 @@ module.exports = {
   detect, scenarios, checklist, levelsFor, profilDepuisStrategie, TOUTES_REGLES,
   confluence, verdictAvecConfluence, TF_SUPERIEURS, normaliserMoteur, STYLES, MOTEUR_DEFAUT,
   filtresDisponibles, CLES_FILTRES, REGLES_INFO,
-  ruleSweep, ruleBreak, ruleZone, rulePosition, ruleTendance
+  ruleSweep, ruleBreak, ruleZone, rulePosition
 };
