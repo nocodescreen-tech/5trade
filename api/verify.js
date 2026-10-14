@@ -599,6 +599,28 @@ function tinyPng(W = 64, H = 40) {
     Al.resetDedup();
     Al.stop();
     ok('alertes : désactivées après les tests (aucun envoi non voulu)', Al.get().actif === false);
+
+    // ── Push navigateur : abonnements persistés + payloads, sans réseau ──
+    const Push = require('./pushAlerts');
+    ok('push : abonnement invalide refusé', (() => {
+      try { Al.ajouterAbonnement({}); return false; } catch { return true; }
+    })());
+    const fauxSub = { endpoint: 'https://push.test/abc', keys: { p256dh: 'x', auth: 'y' } };
+    Al.ajouterAbonnement(fauxSub);
+    ok('push : abonnement enregistré et listé',
+      Al.listerAbonnements().some(s => s.endpoint === fauxSub.endpoint));
+    Al.ajouterAbonnement(fauxSub);
+    ok('push : pas de doublon', Al.listerAbonnements().filter(s => s.endpoint === fauxSub.endpoint).length === 1);
+    Al.retirerAbonnement(fauxSub.endpoint);
+    ok('push : abonnement retiré', !Al.listerAbonnements().some(s => s.endpoint === fauxSub.endpoint));
+    const payS = Push.payloadSignal({ direction: 'BUY', status: 'confirme', symbol: 'BTCUSDT', strength: 0.8, levels: { entry: 100 }, id: 'k' });
+    ok('push : payload de signal exploitable',
+      /ACHAT/.test(payS.title) && /BTCUSDT/.test(payS.body) && payS.icon === '/logo.svg' && !!payS.data.url);
+    const payT = Push.payloadTrade({ pair: 'XAUUSD', direction: 'SELL', pnl: -12.5, result: 'loss', id: 't' });
+    ok('push : payload de trade exploitable',
+      /loss/.test(payT.title) && payT.badge === '/logo.svg' && !!payT.data.url);
+    ok('push : sans clés VAPID, aucun envoi réseau',
+      await Push.envoyerNotification(fauxSub, payS).then(r => r.success === false));
     // Le fichier de test est jeté, et l'environnement remis en place : la
     // configuration réelle de l'utilisateur n'a jamais été ouverte.
     } finally {
@@ -1053,11 +1075,11 @@ function tinyPng(W = 64, H = 40) {
   // ── Mobile : le direct doit être utilisable au pouce ──
   {
     ok('barre de navigation mobile en bas d\'écran',
-      /\.mobile-nav\{[\s\S]{0,200}position:fixed;bottom:0/.test(htmlSrc));
+      /\.mobile-nav\{[\s\S]{0,300}position:\s*fixed;\s*bottom:\s*0/.test(htmlSrc));
     ok('la navigation d\'ordinateur est masquée sur mobile', /\.nav\{display:none\}/.test(htmlSrc));
     ok('au plus cinq cibles au pouce (le reste dans « Plus »)',
       /NAV_PRINCIPAL = \['live', 'analyze', 'strategies', 'journal'\]/.test(jsx)
-      && /NAV_SECONDAIRE = \['add', 'history', 'termes', 'alerts'\]/.test(jsx));
+      && /NAV_SECONDAIRE = \['add', 'history', 'termes', 'alerts', 'outils'\]/.test(jsx));
     ok('cibles tactiles d\'au moins 44 px', /min-height:44px/.test(htmlSrc));
     ok('encoche et barre gestuelle respectées (safe-area)',
       /env\(safe-area-inset-bottom\)/.test(htmlSrc));
@@ -1135,12 +1157,21 @@ function tinyPng(W = 64, H = 40) {
     ok('la barre mobile se limite à cinq cibles', /repeat\(5,1fr\)/.test(htmlSrc));
     ok('les onglets secondaires passent dans « Plus »',
       /NAV_PRINCIPAL/.test(jsx) && /NAV_SECONDAIRE/.test(jsx) && /mobile-plus/.test(jsx));
-    ok('les onglets rangés sont bien les quatre secondaires',
-      /\['add', 'history', 'termes', 'alerts'\]/.test(jsx));
+    ok('les onglets rangés sont bien les cinq secondaires',
+      /\['add', 'history', 'termes', 'alerts', 'outils'\]/.test(jsx));
+    ok('onglet « Outils » déclaré avec son composant',
+      /id:'outils'/.test(jsx) && /function Outils\(\)/.test(jsx)
+      && /tab === 'outils' && <Outils/.test(jsx));
+    ok('la page Outils appelle les modules orphelins',
+      /\/volume-profile/.test(jsx) && /\/currency-strength/.test(jsx)
+      && /\/backtest/.test(jsx) && /\/accounts/.test(jsx));
+    ok('raccourcis clavier branchés sur des onglets existants',
+      /addEventListener\('5trade-nav'/.test(jsx)
+      && !/detail: 'dashboard'/.test(jsx + fs.readFileSync(path.join(__dirname, '..', 'frontend', 'theme.js'), 'utf8')));
     ok('cibles tactiles de 44 px minimum', (htmlSrc.match(/min-height:44px/g) || []).length >= 2);
     ok('le bug de la virgule est corrigé (couleur et police des boutons)',
       !/color:var\(--muted\),font-family/.test(htmlSrc)
-      && /color:var\(--muted\);font-family:inherit/.test(htmlSrc));
+      && /color:var\(--muted\);\s*font-family:inherit/.test(htmlSrc));
     ok('l\'animation respecte prefers-reduced-motion', /prefers-reduced-motion/.test(htmlSrc));
     ok('le graphique s\'adapte à la largeur de l\'écran',
       /window\.innerWidth < 820/.test(jsx) && /etroi \? 300 : 430/.test(jsx));

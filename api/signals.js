@@ -18,7 +18,6 @@
  */
 const S = require('./structure');
 const { pairesCorrelees, positionSizing } = require('./trades');
-const { filtreCalendrier } = require('./fundamentals');
 const { rsi, macd } = require('./indicators');
 
 /** Durée d'une bougie par unité de temps — sert à juger la fraîcheur des données. */
@@ -512,33 +511,36 @@ function filtresDisponibles(report) {
       lecture: 'un spread trop élevé mange le profit attendu'
     },
     {
-      // FILTRE RSI : un RSI en surachat/survente est un signal de retournement.
-      // Note: report.candles est un nombre (le compte), pas un tableau.
-      // Le RSI est calculé à partir des bougies brutes disponibles dans le rapport.
+      // FILTRE RSI : un RSI > 70 (surachat) ou < 30 (survente) annonce
+      // un retournement possible. La série est calculée dans detect().
       cle: 'rsi', label: 'RSI (surachat/survente)',
       ok: (() => {
-        // Les bougies ne sont pas directement dans le rapport — on utilise lastCandle
-        // et les données disponibles pour une estimation
-        if (!report.lastCandle) return true;
-        // Pas de données suffisantes pour un RSI fiable dans le rapport
-        return true;
+        const vals = report._rsi || [];
+        if (!vals.length) return true;
+        const lastRsi = vals[vals.length - 1];
+        return lastRsi >= 30 && lastRsi <= 70;
       })(),
       detail: (() => {
-        if (!report.lastCandle) return 'RSI indisponible';
-        return 'RSI calculé sur les bougies brutes (disponible dans l\'analyse complète)';
+        const vals = report._rsi || [];
+        if (!vals.length) return 'RSI indisponible (historique trop court)';
+        const lastRsi = vals[vals.length - 1];
+        return `RSI ${lastRsi.toFixed(1)}${lastRsi > 70 ? ' — surachat' : lastRsi < 30 ? ' — survente' : ' — neutre'}`;
       })(),
       lecture: 'un RSI en surachat/survente peut annoncer un retournement'
     },
     {
-      // FILTRE MACD : un croisement MACD est un signal de tendance.
+      // FILTRE MACD : informatif, jamais bloquant. Le croisement
+      // MACD/signal confirme ou infirme la tendance en place.
       cle: 'macd', label: 'MACD (croisement)',
-      ok: (() => {
-        if (!report.lastCandle) return true;
-        return true;
-      })(),
+      ok: true,
       detail: (() => {
-        if (!report.lastCandle) return 'MACD indisponible';
-        return 'MACD calculé sur les bougies brutes (disponible dans l\'analyse complète)';
+        const m = (report._macd && report._macd.macd) || [];
+        const s = (report._macd && report._macd.signal) || [];
+        if (!m.length || !s.length) return 'MACD indisponible (historique trop court)';
+        const lastMacd = m[m.length - 1];
+        const lastSignal = s[s.length - 1];
+        const diff = lastMacd - lastSignal;
+        return `MACD ${lastMacd.toFixed(4)} / signal ${lastSignal.toFixed(4)} — ${diff > 0 ? 'haussier' : 'baissier'}`;
       })(),
       lecture: 'un croisement MACD confirme ou infirme la tendance'
     }
@@ -772,6 +774,11 @@ function detect(candles, meta = {}, options = {}) {
   if (clean.length < 20) throw new Error('Pas assez de bougies (20 minimum)');
 
   const report = S.analyze(clean, meta, options.parametres || {});
+
+  // Indicateurs calculés sur les mêmes bougies que le signal : les filtres
+  // RSI / MACD lisent ces séries au lieu d'estimations.
+  try { report._rsi = rsi(clean, 14); } catch { report._rsi = []; }
+  try { report._macd = macd(clean); } catch { report._macd = { macd: [], signal: [], histogram: [] }; }
 
   // Règles actives : celles demandées, sinon toutes.
   const demandees = Array.isArray(options.regles) ? options.regles.filter(r => TOUTES_REGLES[r]) : [];
@@ -1332,5 +1339,5 @@ module.exports = {
   detect, scenarios, checklist, levelsFor, profilDepuisStrategie, TOUTES_REGLES,
   confluence, verdictAvecConfluence, TF_SUPERIEURS, normaliserMoteur, STYLES, MOTEUR_DEFAUT,
   filtresDisponibles, CLES_FILTRES, REGLES_INFO,
-  ruleSweep, ruleBreak, ruleZone, rulePosition
+  ruleSweep, ruleBreak, ruleZone, rulePosition, signalTrade
 };

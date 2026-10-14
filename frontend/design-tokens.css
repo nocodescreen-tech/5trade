@@ -4,9 +4,8 @@
    Deux thèmes strictement symétriques : mêmes rôles, teintes inversées.
    ═══════════════════════════════════════════════════════════════ */
 
-/* ── Thème SOMBRE (défaut) ─────────────────────────────────── */
-:root,
-html[data-theme="sombre"] {
+/* ── Thème SOMBRE (défaut : aucun attribut data-theme) ──────── */
+:root {
   /* Surfaces — du fond vers l'avant-plan, chaque palier +1 de clarté */
   --bg:        #0a0d14;
   --panel:     #11151f;
@@ -47,7 +46,7 @@ html[data-theme="sombre"] {
 }
 
 /* ── Thème CLAIR — mêmes rôles, teintes inversées ──────────── */
-html[data-theme="clair"] {
+html[data-theme="light"] {
   --bg:        #f7f8fa;
   --panel:     #ffffff;
   --panel2:    #f2f4f7;

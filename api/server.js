@@ -299,8 +299,21 @@ const { analyserOrderFlow } = require('./orderFlow');
 const { analyserAnomalies } = require('./anomalyDetection');
 
 // ─── Alertes push — implémentation dans pushAlerts.js ───
-const { envoyerNotification, payloadSignal, payloadTrade } = require('./pushAlerts');
-const pushSubscribers = new Set();
+const { configurerVAPID, vapidPret, envoyerNotification } = require('./pushAlerts');
+
+// Envoi push : diffuse aux abonnements du navigateur, purge les expirés.
+// Injecté à la surveillance comme sendMail (alerts.js ne connaît que deps).
+async function sendPush(payload) {
+  let ok = 0;
+  for (const sub of Alerts.listerAbonnements()) {
+    try {
+      const r = await envoyerNotification(sub, payload);
+      if (r.success) ok++;
+      else if (r.expired) Alerts.retirerAbonnement(sub.endpoint);
+    } catch { /* un abonné mort ne bloque pas les autres */ }
+  }
+  return ok;
+}
 
 // ─── Multi-comptes — implémentation dans multiAccount.js ───
 const { creerCompte, listerComptes, getCompte, mettreAJourCapital, supprimerCompte, pnlCompte } = require('./multiAccount');
@@ -1829,11 +1842,25 @@ app.get('/api/dynamic-risk', requireAuth, async (req, res) => {
 // ─── Backtesting visuel ───
 app.post('/api/backtest', requireAuth, async (req, res) => {
   try {
-    const { symbol, tf, riskPct, initialCapital, signalType } = req.body;
+    const { symbol, tf, riskPct, initialCapital } = req.body;
     const { candles } = await Market.getCandles(symbol || 'BTCUSDT', tf || '1h', 1000);
-    const signalFn = (candles) => {
-      // Simplifié : utiliser le moteur de signaux
-      return { action: null, entry: 0, sl: 0, tp: 0 };
+    // Le backtest rejoue le vrai moteur : chaque tranche est analysée avec
+    // Signals.detect, et seuls les signaux confirmés ouvrent une position.
+    const signalFn = (slice) => {
+      try {
+        const v = Signals.detect(slice, { symbol: symbol || 'BTCUSDT', timeframe: tf || '1h' });
+        if (v.status !== 'confirme' || !v.levels || v.levels.entry == null) {
+          return { action: null, entry: 0, sl: 0, tp: 0 };
+        }
+        return {
+          action: v.direction,
+          entry: v.levels.entry,
+          sl: v.levels.stop,
+          tp: v.levels.target1
+        };
+      } catch {
+        return { action: null, entry: 0, sl: 0, tp: 0 };
+      }
     };
     const result = backtestVisuel({ candles, signalFn, riskPct, initialCapital });
     res.json({ success: true, result });
@@ -1859,7 +1886,10 @@ app.get('/api/interest-rates', requireAuth, async (req, res) => {
   try {
     const taux = await getTauxInteret();
     const classe = classeTaux(taux);
-    res.json({ success: true, taux, classe });
+    res.json({
+      success: true, taux, classe,
+      source: 'valeurs de référence — brancher les API des banques centrales pour du temps réel'
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1971,24 +2001,25 @@ app.get('/api/export/csv', requireAuth, async (req, res) => {
 });
 
 // ─── Alertes push ───
+app.get('/api/push/config', requireAuth, async (req, res) => {
+  res.json({
+    success: true,
+    pret: vapidPret(),
+    clePublique: process.env.VAPID_PUBLIC_KEY || null,
+    abonnes: Alerts.listerAbonnements().length
+  });
+});
+
 app.post('/api/push/subscribe', requireAuth, async (req, res) => {
   try {
-    const { subscription } = req.body;
-    if (!subscription || !subscription.endpoint) {
-      return res.status(400).json({ error: 'Subscription invalide' });
-    }
-    // Enregistrer l'abonnement (en mémoire pour cette version)
-    pushSubscribers.add(subscription);
+    Alerts.ajouterAbonnement(req.body && req.body.subscription);
     res.json({ success: true, message: 'Abonnement push enregistré' });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.delete('/api/push/subscribe', requireAuth, async (req, res) => {
   try {
-    const { endpoint } = req.body;
-    for (const sub of pushSubscribers) {
-      if (sub.endpoint === endpoint) { pushSubscribers.delete(sub); break; }
-    }
+    if (req.body && req.body.endpoint) Alerts.retirerAbonnement(req.body.endpoint);
     res.json({ success: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -3026,10 +3057,15 @@ async function start() {
 
   // Alertes : config chargée du disque, surveillance périodique démarrée.
   Alerts.load();
+  // Push navigateur : clés VAPID du .env (sans elles, les abonnements restent inertes).
+  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    configurerVAPID(process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
+  }
   Alerts.start({
     market: Market,
     signals: Signals,
     sendMail,
+    sendPush,
     labelOf: id => {
       const s = Market.listSymbols().find(x => x.provider === id);
       return s ? s.providerLabel : id;

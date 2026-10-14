@@ -39,8 +39,16 @@ async function envoyerNotification(subscription, payload) {
     await webpush.sendNotification(subscription, JSON.stringify(payload));
     return { success: true };
   } catch (e) {
-    return { success: false, error: e.message };
+    // 410 Gone / 404 : l'abonnement n'existe plus côté navigateur.
+    // L'appelant doit purger, pas réessayer.
+    const expire = e && (e.statusCode === 410 || e.statusCode === 404);
+    return { success: false, expired: !!expire, error: e.message };
   }
+}
+
+/** Le module peut-il envoyer (clés VAPID posées) ? */
+function vapidPret() {
+  return !!vapidKeys;
 }
 
 /**
@@ -53,8 +61,8 @@ function payloadSignal(signal) {
   return {
     title: `5trade — ${signal.direction === 'BUY' ? 'ACHAT' : 'VENTE'} ${signal.status}`,
     body: `${signal.symbol} · force ${(signal.strength * 100).toFixed(0)} % · entrée ${signal.levels?.entry || '—'}`,
-    icon: '/icon-192.png',
-    badge: '/badge-72.png',
+    icon: '/logo.svg',
+    badge: '/logo.svg',
     data: {
       url: '/?tab=live',
       signalId: signal.id
@@ -75,8 +83,8 @@ function payloadTrade(trade) {
   return {
     title: `5trade — Trade ${trade.result}`,
     body: `${emoji} ${trade.pair} ${trade.direction} · PnL ${pnl > 0 ? '+' : ''}${pnl.toFixed(2)}`,
-    icon: '/icon-192.png',
-    badge: '/badge-72.png',
+    icon: '/logo.svg',
+    badge: '/logo.svg',
     data: {
       url: '/?tab=trades',
       tradeId: trade.id
@@ -84,4 +92,4 @@ function payloadTrade(trade) {
   };
 }
 
-module.exports = { configurerVAPID, envoyerNotification, payloadSignal, payloadTrade };
+module.exports = { configurerVAPID, vapidPret, envoyerNotification, payloadSignal, payloadTrade };

@@ -1,12 +1,18 @@
 /**
- * 5trade — thème clair/sombre + raccourcis clavier.
+ * 5trade — thème + raccourcis clavier.
  *
- * Le thème n'est qu'un attribut `data-theme` sur <html> : toutes les couleurs
- * sont des variables CSS définies dans index.html. Basculer, c'est changer
- * l'attribut — aucun rechargement, aucun aller-retour serveur.
+ * DÉCISION : l'application est verrouillée en thème SOMBRE.
+ * Le thème clair rendait une partie de l'interface illisible (couleurs
+ * codées en dur pour le sombre dans des centaines d'endroits) : plutôt
+ * qu'un thème à moitié cassé, il n'y en a qu'un seul qui marche.
+ * Un vrai thème clair demanderait de revoir toutes les couleurs — chantier
+ * séparé, pas un interrupteur.
  *
+ * L'API est conservée (appliquer/basculer/actuel) pour ne rien casser chez
+ * les appelants, mais tout appel mène au sombre.
+ *
+ * Raccourcis restants :
  *   1..5  → onglets principaux
- *   t     → thème clair / sombre
  *   r     → rafraîchir les données
  *   ?     → aide
  *   Échap → fermer / annuler
@@ -15,36 +21,30 @@
   const CLE = '5trade-theme';
 
   const ThemeManager = {
-    /** Thème actuellement appliqué. */
+    /** Thème actuellement appliqué : toujours 'sombre'. */
     actuel() {
-      return document.documentElement.getAttribute('data-theme') || 'sombre';
+      return 'sombre';
     },
 
-    /** Applique un thème et le mémorise. */
-    appliquer(theme) {
-      const t = theme === 'clair' ? 'clair' : 'sombre';
-      document.documentElement.setAttribute('data-theme', t);
-      try { localStorage.setItem(CLE, t); } catch {}
-      // Le theme-color du navigateur suit le thème (barre d'adresse mobile).
+    /** Applique le thème sombre et le mémorise (tout autre choix est ignoré). */
+    appliquer() {
+      document.documentElement.removeAttribute('data-theme');
+      try { localStorage.setItem(CLE, 'sombre'); } catch {}
+      try { localStorage.removeItem('theme'); } catch {}
       const meta = document.querySelector('meta[name="theme-color"]');
-      if (meta) meta.setAttribute('content', t === 'clair' ? '#f8fafc' : '#070a11');
-      window.dispatchEvent(new CustomEvent('5trade-theme', { detail: t }));
-      return t;
+      if (meta) meta.setAttribute('content', '#070a11');
+      window.dispatchEvent(new CustomEvent('5trade-theme', { detail: 'sombre' }));
+      return 'sombre';
     },
 
-    /** Bascule clair ↔ sombre et renvoie le nouveau thème. */
+    /** Bascule désactivée : renvoie 'sombre' sans rien changer. */
     basculer() {
-      return ThemeManager.appliquer(ThemeManager.actuel() === 'sombre' ? 'clair' : 'sombre');
+      return ThemeManager.appliquer();
     },
 
-    /** Applique le thème memorisé (ou celui du système) au démarrage. */
+    /** Force le sombre au démarrage (répare les navigateurs restés en clair). */
     init() {
-      let t = null;
-      try { t = localStorage.getItem(CLE); } catch {}
-      if (!t) {
-        t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'clair' : 'sombre';
-      }
-      ThemeManager.appliquer(t);
+      ThemeManager.appliquer();
     }
   };
 
@@ -77,13 +77,8 @@
     enregistrer('2', () => window.dispatchEvent(new CustomEvent('5trade-nav', { detail: 'analyze' })), 'Onglet Analyse');
     enregistrer('3', () => window.dispatchEvent(new CustomEvent('5trade-nav', { detail: 'strategies' })), 'Onglet Stratégies');
     enregistrer('4', () => window.dispatchEvent(new CustomEvent('5trade-nav', { detail: 'journal' })), 'Onglet Journal');
-    enregistrer('5', () => window.dispatchEvent(new CustomEvent('5trade-nav', { detail: 'dashboard' })), 'Onglet Dashboard');
-    enregistrer('t', () => {
-      const t = ThemeManager.basculer();
-      window.dispatchEvent(new CustomEvent('5trade-theme', { detail: t }));
-    }, 'Basculer thème clair / sombre');
+    enregistrer('5', () => window.dispatchEvent(new CustomEvent('5trade-nav', { detail: 'alerts' })), 'Onglet Alertes');
     enregistrer('r', () => window.dispatchEvent(new CustomEvent('5trade-refresh')), 'Rafraîchir les données');
-    enregistrer('?', () => window.dispatchEvent(new CustomEvent('5trade-help')), 'Afficher les raccourcis');
     enregistrer('escape', () => window.dispatchEvent(new CustomEvent('5trade-escape')), 'Fermer / annuler');
 
     document.addEventListener('keydown', gerer);

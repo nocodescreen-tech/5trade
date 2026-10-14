@@ -54,8 +54,12 @@
 <!-- Font Awesome fallback local : si le CDN est bloqué, on charge la version minifiée servie par l'app -->
 <script>
   (function(){
+    // Ce script vit dans <head> : document.body n'existe pas encore au
+    // premier passage. On attend le DOM, sinon appendChild lève un
+    // TypeError qui tue tout le bloc et le repli ne se charge jamais.
+    function verifier(){
     var link = document.querySelector('link[href*="font-awesome"]');
-    if(!link) return;
+    if(!link || !document.body) return;
     var testIcon = document.createElement('i');
     testIcon.className = 'fas fa-chart-line';
     testIcon.style.cssText = 'position:absolute;left:-9999px';
@@ -70,10 +74,26 @@
       document.head.appendChild(fallback);
       console.info('Font Awesome: CDN inaccessible, fallback local chargé');
     }
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', verifier);
+    } else {
+      verifier();
+    }
   })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<!-- Design system 5trade : tokens + thème clair/sombre + mode hors ligne -->
+<link rel="stylesheet" href="design-tokens.css?v=1">
+<script src="theme.js?v=1"></script>
+<script>
+  // Service worker : notifications push uniquement (aucune interception
+  // réseau — le rechargement de la page n'est jamais affecté).
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () { navigator.serviceWorker.register('/sw.js').catch(function () {}); });
+  }
+</script>
 
 <style>
   :root{
@@ -177,9 +197,12 @@
   .bar > i{display:block; height:100%; background:var(--accent); border-radius:9px;
     transition:width .5s var(--transition)}
 
-  /* Nav principale */
-  .nav{display:flex; gap:4px; flex-wrap:wrap}
-  .nav-item{display:inline-flex; align-items:center; gap:8px;
+  /* Nav principale : une seule rangée, jamais de retour à la ligne.
+     Les onglets se partagent la largeur ; sur écran étroit, défilement horizontal. */
+  .nav{display:flex; gap:4px; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none}
+  .nav::-webkit-scrollbar{display:none}
+  .nav-item{flex:1 0 auto; justify-content:center; white-space:nowrap;
+    display:inline-flex; align-items:center; gap:8px;
     padding:9px 16px; border-radius:var(--radius-sm); font-size:14px; font-weight:600;
     color:var(--muted); background:transparent; border:none; cursor:pointer;
     font-family:inherit; transition:color var(--transition), background var(--transition)}
@@ -234,6 +257,68 @@
   .otp-box:focus{outline:none; border-color:var(--accent); box-shadow:var(--focus:ring); transform:translateY(-2px)}
   .otp-box.filled{border-color:var(--ok)}
 
+  /* ── Animations fluides (login / inscription / validation) ── */
+  .otp-in{animation:otpIn .45s cubic-bezier(.2,.9,.25,1.2) both}
+  @keyframes otpIn{from{opacity:0; transform:translateY(14px) scale(.9)} to{opacity:1; transform:none}}
+  .modal-veil{animation:veilIn .3s ease both}
+  @keyframes veilIn{from{opacity:0} to{opacity:1}}
+  .modal-card{animation:modalIn .55s cubic-bezier(.2,1.15,.3,1) both}
+  @keyframes modalIn{0%{opacity:0; transform:scale(.7) translateY(24px)}
+    60%{opacity:1; transform:scale(1.04) translateY(-2px)} 100%{opacity:1; transform:none}}
+  .auth-title{animation:titleIn .6s cubic-bezier(.2,.8,.2,1) both}
+  @keyframes titleIn{from{opacity:0; transform:translateY(-10px)} to{opacity:1; transform:none}}
+  .shake{animation:shake .4s ease}
+  @keyframes shake{0%,100%{transform:translateX(0)} 25%{transform:translateX(-7px)}
+    50%{transform:translateX(6px)} 75%{transform:translateX(-3px)}}
+
+  /* ── Fluidité globale : entrée de page, montée des panneaux, tactiles ── */
+  html{scroll-behavior:smooth}
+  .shell{animation:pageIn .5s ease both}
+  @keyframes pageIn{from{opacity:0} to{opacity:1}}
+  main.wrap .panel{animation:riseIn .4s cubic-bezier(.2,.9,.25,1) both}
+  @keyframes riseIn{from{opacity:0; transform:translateY(12px)} to{opacity:1; transform:none}}
+  .nav-item:active{transform:scale(.96)}
+  .mnav-btn:active{transform:scale(.94)}
+
+  /* ── Mascotte auth : flottement doux + bascule souple login/inscription ── */
+  .mascot-bob{animation:mascotBob 5.5s ease-in-out infinite}
+  @keyframes mascotBob{0%,100%{transform:translateY(0)} 50%{transform:translateY(-7px)}}
+  .mascot{transition:transform .7s cubic-bezier(.3,1.2,.3,1); transform-origin:50% 100%}
+  .mascot.login{transform:translateX(-10px) rotate(-2.5deg)}
+  .mascot.signup{transform:translateX(10px) rotate(2.5deg)}
+  .blink{animation:blink 4.8s ease-in-out infinite}
+  @keyframes blink{0%,92%,100%{transform:scaleY(1)} 95%{transform:scaleY(.06)} 97.5%{transform:scaleY(1)}}
+
+  /* ── Panneau auth : entrée fluide ── */
+  .authpane{animation:paneIn .45s cubic-bezier(.2,.9,.25,1) both}
+  @keyframes paneIn{from{opacity:0; transform:translateY(10px)} to{opacity:1; transform:none}}
+
+  /* ── Coche de validation : apparition à ressort + anneau ── */
+  .check3d{width:84px; height:84px; border-radius:50%; display:flex; align-items:center;
+    justify-content:center; background:var(--ok-bg, rgba(16,185,129,.12));
+    border:2px solid var(--ok, #10b981); color:var(--ok, #10b981); font-size:32px;
+    position:relative; animation:checkPop .6s cubic-bezier(.2,1.2,.3,1) both}
+  @keyframes checkPop{0%{transform:scale(.4); opacity:0} 60%{transform:scale(1.06); opacity:1} 100%{transform:scale(1)}}
+  .check-ring{position:absolute; inset:-7px; border-radius:50%;
+    border:2px solid var(--ok, #10b981); opacity:.5; animation:ringPing 1.6s ease-out infinite}
+  @keyframes ringPing{0%{transform:scale(.85); opacity:.6} 100%{transform:scale(1.25); opacity:0}}
+
+  /* ── Divers : lissage tilt, flottement icônes, cube de chargement, halo carte ── */
+  .tilt{transition:transform .25s ease-out; will-change:transform}
+  .floaty{animation:floaty 5s ease-in-out infinite}
+  @keyframes floaty{0%,100%{transform:translateY(0)} 50%{transform:translateY(-7px)}}
+  .cube-wrap{perspective:300px; display:inline-block}
+  .cube{width:100%; height:100%; position:relative; transform-style:preserve-3d; animation:cubeSpin 2.4s linear infinite}
+  .cube b{position:absolute; inset:0; border:1.5px solid var(--accent); border-radius:3px; background:var(--accent-bg, rgba(37,99,235,.12))}
+  .cube b:nth-child(1){transform:translateZ(var(--d))}
+  .cube b:nth-child(2){transform:rotateY(180deg) translateZ(var(--d))}
+  .cube b:nth-child(3){transform:rotateY(90deg) translateZ(var(--d))}
+  .cube b:nth-child(4){transform:rotateY(-90deg) translateZ(var(--d))}
+  .cube b:nth-child(5){transform:rotateX(90deg) translateZ(var(--d))}
+  .cube b:nth-child(6){transform:rotateX(-90deg) translateZ(var(--d))}
+  @keyframes cubeSpin{from{transform:rotateX(-20deg) rotateY(0)} to{transform:rotateX(-20deg) rotateY(360deg)}}
+  .glow-ring{box-shadow:0 0 0 1px var(--border2, var(--border))}
+
   /* Drop zone */
   .drop{border:2px dashed var(--border); border-radius:var(--radius); padding:26px;
     text-align:center; cursor:pointer;
@@ -267,7 +352,6 @@
   .ico{display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px}
   .ico-sm{width:16px; height:16px}
   .ico-lg{width:24px; height:24px}
-</style>
 
   /* ── Responsive ── */
   .wrap{max-width:1280px;margin:0 auto;padding:22px 24px 48px;width:100%}
@@ -298,7 +382,6 @@
     header .hdr{padding:10px 14px !important}
     .auth-card{padding:22px 18px 20px !important}
     #fx-glow{display:none}
-    .bg-aurora{filter:blur(60px);opacity:.42}
     .mascot{width:120px;height:129px}
     .btn{padding:12px 18px}
     .nav-item{padding:10px 14px}
@@ -348,14 +431,6 @@
 </style>
 </head>
 <body>
-<div class="bg-layer">
-  <div class="bg-grid"></div>
-  <div class="bg-aurora a"></div>
-  <div class="bg-aurora b"></div>
-  <div class="bg-aurora c"></div>
-  <div class="bg-noise"></div>
-</div>
-
 <div id="root" class="shell"></div>
 
 <!-- ── Composants ReactBits canoniques ── -->
@@ -365,7 +440,7 @@
 <script type="text/babel" data-presets="react-classic">
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 const RB = window.ReactBits || {};
-const { SplashCursor, SpotlightCard, GradientText, ShinyText, LatticeLoader, Counter } = RB;
+const { SplashCursor, SpotlightCard, LatticeLoader, Counter } = RB;
 
 const API_BASE = (window.location.port === '5173' || window.location.protocol === 'file:')
   ? 'http://localhost:3001/api' : '/api';
@@ -567,26 +642,26 @@ function AuthMascot({ mode = 'login', focus = null }) {
   const look = focus === 'username' ? -3 : focus === 'email' ? 0 : covering ? 0 : 3;
 
   return (
-    <div style={{ display:'flex', justifyContent:'center', marginBottom:-4 }}>
+    <div className="mascot-bob" style={{ display:'flex', justifyContent:'center', marginBottom:-4 }}>
       <svg viewBox="0 0 200 214" width="152" height="163"
         className={`mascot ${mode}`}
         role="img" aria-label="Assistant 5trade">
         <defs>
           <linearGradient id="mBody" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="#3b82f6" />
-            <stop offset="1" stopColor="#7c3aed" />
+            <stop offset="0" stopColor="#55677f" />
+            <stop offset="1" stopColor="#2c3648" />
           </linearGradient>
           <linearGradient id="mHead" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stopColor="#1b2434" />
             <stop offset="1" stopColor="#121826" />
           </linearGradient>
           <radialGradient id="mGlow" cx="50%" cy="50%">
-            <stop offset="0" stopColor="rgba(37,99,235,.35)" />
+            <stop offset="0" stopColor="rgba(37,99,235,.15)" />
             <stop offset="1" stopColor="rgba(37,99,235,0)" />
           </radialGradient>
         </defs>
 
-        <ellipse cx="100" cy="206" rx="56" ry="10" fill="rgba(37,99,235,.16)" />
+        <ellipse cx="100" cy="206" rx="56" ry="10" fill="rgba(37,99,235,.07)" />
         <circle cx="100" cy="96" r="86" fill="url(#mGlow)" />
 
         {/* corps */}
@@ -594,16 +669,16 @@ function AuthMascot({ mode = 'login', focus = null }) {
         <path d="M100 130 L100 205" stroke="rgba(255,255,255,.13)" strokeWidth="1.4" />
 
         {/* bras (masqués quand la mascotte se couvre les yeux) */}
-        <g style={{ opacity: covering ? 0 : 1, transition:'opacity .28s' }}>
-          <path d="M64 144 C47 154 41 170 46 185" stroke="#2563eb" strokeWidth="12"
+        <g style={{ opacity: covering ? 0 : 1, transition:'opacity .35s ease' }}>
+          <path d="M64 144 C47 154 41 170 46 185" stroke="#3d4c66" strokeWidth="12"
             fill="none" strokeLinecap="round" />
-          <path d="M136 144 C153 154 159 170 154 185" stroke="#2563eb" strokeWidth="12"
+          <path d="M136 144 C153 154 159 170 154 185" stroke="#3d4c66" strokeWidth="12"
             fill="none" strokeLinecap="round" />
         </g>
 
         {/* tête */}
         <circle cx="100" cy="84" r="45" fill="url(#mHead)"
-          stroke="rgba(96,165,250,.35)" strokeWidth="1.6" />
+          stroke="rgba(148,163,184,.3)" strokeWidth="1.6" />
 
         {/* casque / cheveux */}
         <path d="M55 76 C57 46 78 31 100 31 C122 31 143 46 145 76 C131 63 118 59 100 59 C82 59 69 63 55 76 Z"
@@ -611,15 +686,15 @@ function AuthMascot({ mode = 'login', focus = null }) {
 
         {/* yeux */}
         <g className="blink" style={{ transformOrigin:'100px 82px', transformBox:'view-box' }}>
-          <ellipse cx="86" cy="82" rx="10.5" ry="11.5" fill="#080c14" stroke="rgba(96,165,250,.45)" strokeWidth="1.2" />
-          <ellipse cx="114" cy="82" rx="10.5" ry="11.5" fill="#080c14" stroke="rgba(96,165,250,.45)" strokeWidth="1.2" />
+          <ellipse cx="86" cy="82" rx="10.5" ry="11.5" fill="#080c14" stroke="rgba(148,163,184,.4)" strokeWidth="1.2" />
+          <ellipse cx="114" cy="82" rx="10.5" ry="11.5" fill="#080c14" stroke="rgba(148,163,184,.4)" strokeWidth="1.2" />
         </g>
 
         {/* pupilles (suivent le champ actif) */}
         <g style={{ transform:`translate(${look}px,${lookingUp ? -1.5 : 1.5}px)`,
-          transition:'transform .35s cubic-bezier(.2,.9,.2,1)' }}>
-          <circle cx="86" cy="82" r="4.6" fill="#8dc0ff" />
-          <circle cx="114" cy="82" r="4.6" fill="#8dc0ff" />
+          transition:'transform .5s cubic-bezier(.3,1,.3,1)' }}>
+          <circle cx="86" cy="82" r="4.6" fill="#7fa8d8" />
+          <circle cx="114" cy="82" r="4.6" fill="#7fa8d8" />
         </g>
 
         {/* mains devant les yeux */}
@@ -629,8 +704,8 @@ function AuthMascot({ mode = 'login', focus = null }) {
           transformOrigin: '100px 84px', transformBox: 'view-box',
           transition: 'opacity .26s, transform .34s cubic-bezier(.2,.9,.2,1)'
         }}>
-          <circle cx="85" cy="80" r="15" fill="#2563eb" />
-          <circle cx="115" cy="80" r="15" fill="#2563eb" />
+          <circle cx="85" cy="80" r="15" fill="#3d4c66" />
+          <circle cx="115" cy="80" r="15" fill="#3d4c66" />
           <circle cx="85" cy="80" r="15" fill="none" stroke="rgba(255,255,255,.2)" strokeWidth="1.2" />
           <circle cx="115" cy="80" r="15" fill="none" stroke="rgba(255,255,255,.2)" strokeWidth="1.2" />
         </g>
@@ -768,20 +843,21 @@ function Auth({ onLogin }) {
             <SpotlightCard className="panel glow-ring" spotlightColor="rgba(37,99,235,.25)">
               <div className="auth-card" style={{ padding:'30px 28px 26px', position:'relative', overflow:'hidden' }}>
                 {ok && (
-                  <div style={{ position:'absolute', inset:0, zIndex:9, display:'flex',
+                  <div className="modal-veil" style={{ position:'absolute', inset:0, zIndex:9, display:'flex',
                     alignItems:'center', justifyContent:'center', background:'rgba(7,10,17,.9)',
                     backdropFilter:'blur(8px)', borderRadius:16 }}>
-                    <Check3D label="Identité vérifiée" />
+                    <div className="modal-card">
+                      <Check3D label="Identité vérifiée" />
+                    </div>
                   </div>
                 )}
 
-                <div style={{ textAlign:'center', marginBottom:22 }}>
-                  <div style={{ fontSize:40, fontWeight:900, letterSpacing:'-2px' }}>
-                    <GradientText>5trade</GradientText>
+                <div style={{ textAlign:'center', marginBottom:24 }}>
+                  <div className="auth-title" style={{ fontSize:38, fontWeight:800, letterSpacing:'-1px', color:'var(--txt)' }}>
+                    5trade
                   </div>
-                  <div style={{ marginTop:7, fontSize:13 }}>
-                    <ShinyText text="Plateforme d'analyse de trading assistée par IA"
-                      color="#7f8ea3" shineColor="#dbeafe" speed={3} />
+                  <div style={{ marginTop:9, fontSize:12.5, color:'var(--txt-muted)' }}>
+                    Plateforme d'analyse de trading assistée par IA
                   </div>
                 </div>
 
@@ -849,7 +925,7 @@ function Auth({ onLogin }) {
                 </div>)}
 
                 {step === 'otp' && (
-                  <form onSubmit={submitOtp}>
+                  <form onSubmit={submitOtp} className="authpane" key="otp">
                     <div style={{ textAlign:'center', marginBottom:16 }}>
                       <div className="floaty" style={{ display:'inline-flex', width:52, height:52, borderRadius:15,
                         alignItems:'center', justifyContent:'center', background:'rgba(37,99,235,.14)',
@@ -865,7 +941,8 @@ function Auth({ onLogin }) {
                     <div style={{ display:'flex', gap:8, justifyContent:'center' }}>
                       {digits.map((d,i) => (
                         <input key={i} ref={el => boxes.current[i] = el}
-                          className={`otp-box ${d ? 'filled' : ''}`}
+                          className={`otp-box otp-in ${d ? 'filled' : ''}`}
+                          style={{ animationDelay: `${i * 55}ms` }}
                           value={d} inputMode="numeric" maxLength={6}
                           autoComplete={i===0 ? 'one-time-code' : 'off'}
                           onChange={e => setDigit(i, e.target.value)}
@@ -880,7 +957,7 @@ function Auth({ onLogin }) {
                       </div>
                     )}
 
-                    {err && <div style={{ background:'rgba(239,68,68,.12)', border:'1px solid rgba(239,68,68,.35)',
+                    {err && <div className="shake" style={{ background:'rgba(239,68,68,.12)', border:'1px solid rgba(239,68,68,.35)',
                       color:'#fca5a5', padding:11, borderRadius:11, marginTop:12, fontSize:13, textAlign:'center' }}>{err}</div>}
                     {info && <div style={{ background:'rgba(16,185,129,.1)', border:'1px solid rgba(16,185,129,.3)',
                       color:'#6ee7b7', padding:11, borderRadius:11, marginTop:12, fontSize:13, textAlign:'center' }}>{info}</div>}
@@ -3837,6 +3914,10 @@ function Alertes() {
   const [chatsTg, setChatsTg] = useState([]);
   const [aideTg, setAideTg] = useState('');
   const [tgBusy, setTgBusy] = useState(false);
+  // Push navigateur : actif | inactif | refuse | non-supporte | non-configure | inconnu
+  const [pushEtat, setPushEtat] = useState('inconnu');
+  const [pushInfo, setPushInfo] = useState('');
+  const [pushBusy, setPushBusy] = useState(false);
 
   /**
    * Cherche la conversation Telegram à partir du jeton du bot.
@@ -3934,6 +4015,74 @@ function Alertes() {
     } catch (e) { setErr(e.message); }
     finally { setBusy(false); }
   };
+
+  /**
+   * Notifications push : l'abonnement vit dans le navigateur (PushManager),
+   * sa copie côté serveur sert à l'envoi. Sans worker actif ni clé VAPID,
+   * chaque étape dit pourquoi au lieu de se taire.
+   */
+  const cleVersU8 = (base64) => {
+    const pad = '='.repeat((4 - (base64.length % 4)) % 4);
+    const bin = atob((base64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  };
+
+  const etatPush = async () => {
+    setPushInfo('');
+    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+      setPushEtat('non-supporte'); return;
+    }
+    try {
+      const cfgPush = await (await api('/push/config')).json();
+      if (!cfgPush.pret || !cfgPush.clePublique) { setPushEtat('non-configure'); return; }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      setPushEtat(sub ? 'actif' : (Notification.permission === 'denied' ? 'refuse' : 'inactif'));
+    } catch (e) { setPushEtat('inconnu'); setPushInfo(e.message); }
+  };
+
+  const activerPush = async () => {
+    setPushBusy(true); setPushInfo('');
+    try {
+      const cfgPush = await (await api('/push/config')).json();
+      if (!cfgPush.pret || !cfgPush.clePublique) throw new Error('Push non configuré côté serveur (clés VAPID manquantes).');
+      if (Notification.permission === 'denied') throw new Error('Notifications refusées : autorise-les dans les réglages du site.');
+      if (Notification.permission !== 'granted') {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') throw new Error('Autorisation refusée.');
+      }
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: cleVersU8(cfgPush.clePublique)
+      });
+      const r = await api('/push/subscribe', { method:'POST', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ subscription: sub.toJSON() }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Enregistrement refusé');
+      setPushEtat('actif');
+      setMsg('Notifications push activées sur cet appareil.');
+    } catch (e) { setPushInfo(e.message); await etatPush(); }
+    finally { setPushBusy(false); }
+  };
+
+  const desactiverPush = async () => {
+    setPushBusy(true); setPushInfo('');
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      const endpoint = sub ? sub.endpoint : null;
+      if (sub) await sub.unsubscribe();
+      await api('/push/subscribe', { method:'DELETE', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ endpoint }) });
+      setPushEtat('inactif');
+    } catch (e) { setPushInfo(e.message); }
+    finally { setPushBusy(false); }
+  };
+
+  useEffect(() => { etatPush(); }, []);
 
   const ajouterMarche = () => {
     if (!nouveau.symbol) return;
@@ -4095,6 +4244,44 @@ function Alertes() {
               {(cfg && cfg.telegramToken && cfg.telegramChat) ? 'Telegram est configuré' : 'à configurer'}
             </span>
           </div>
+        </div>
+      </Reveal>
+
+      {/* Push navigateur : le signal arrive même onglet fermé (navigateur
+          ouvert). Cumule avec email et Telegram, sans les remplacer. */}
+      <Reveal>
+        <div className="panel" style={{ padding:20 }}>
+          <h2 style={{ fontSize:17, fontWeight:800, margin:'0 0 6px' }}>
+            <i className="fas fa-bell" style={{ color:'#60a5fa', marginRight:9 }}></i>Notifications push
+          </h2>
+          <p style={{ margin:'0 0 16px', fontSize:12.5, color:'var(--muted)' }}>
+            Le signal confirmé s'affiche sur ton appareil, même si l'onglet est fermé
+            (le navigateur doit rester ouvert).
+          </p>
+          <div style={{ display:'flex', gap:9, flexWrap:'wrap', alignItems:'center' }}>
+            {pushEtat !== 'actif' ? (
+              <button className="btn" onClick={activerPush} disabled={pushBusy}>
+                <i className="fas fa-bell"></i>Activer les notifications
+              </button>
+            ) : (
+              <button className="btn ghost" onClick={desactiverPush} disabled={pushBusy}>
+                <i className="fas fa-bell-slash"></i>Désactiver sur cet appareil
+              </button>
+            )}
+            <button className="btn ghost sm" onClick={etatPush} disabled={pushBusy}>Actualiser l'état</button>
+            <span style={{ alignSelf:'center', fontSize:12, color: pushEtat === 'actif' ? '#6ee7b7' : 'var(--dim)' }}>
+              {pushEtat === 'actif' ? 'push actif sur cet appareil'
+                : pushEtat === 'inactif' ? 'push inactif'
+                : pushEtat === 'refuse' ? 'notifications refusées par le navigateur'
+                : pushEtat === 'non-supporte' ? 'navigateur incompatible'
+                : pushEtat === 'non-configure' ? 'clés VAPID manquantes côté serveur'
+                : 'état inconnu'}
+            </span>
+          </div>
+          {pushInfo && (
+            <div style={{ marginTop:12, padding:'9px 12px', borderRadius:8, fontSize:12.5,
+              background:'rgba(251,191,36,.1)', color:'#fcd34d' }}>{pushInfo}</div>
+          )}
         </div>
       </Reveal>
 
@@ -4453,6 +4640,151 @@ function Termes() {
 
 /* ══════════════ DASHBOARD ══════════════ */
 
+/* Outils : donne une page aux modules backend orphelins (calendrier,
+   volume, corrélations, COT, taux, patterns, ML, order flow, anomalies,
+   comptes, exports, backtest). Chaque panneau charge à la demande. */
+const OUTILS_GET = [
+  { id:'dashboard',        label:'Tableau de bord',  icon:'fa-gauge-high',            url:'/dashboard' },
+  { id:'volume-profile',   label:'Volume Profile',   icon:'fa-chart-column',          url:'/volume-profile',   params:['symbol','tf'] },
+  { id:'currency-strength',label:'Force devises',    icon:'fa-money-bill-trend-up',  url:'/currency-strength' },
+  { id:'london-breakout',  label:'London Breakout',  icon:'fa-arrow-right-from-bracket', url:'/london-breakout', params:['symbol','tf'] },
+  { id:'divergences',      label:'Divergences',      icon:'fa-code-branch',           url:'/divergences',      params:['symbol','tf'] },
+  { id:'dynamic-risk',     label:'Risque dynamique', icon:'fa-sliders',               url:'/dynamic-risk',     params:['symbol','tf'] },
+  { id:'cot',              label:'COT Report',       icon:'fa-building-columns',      url:'/cot',              params:['symbol'] },
+  { id:'interest-rates',   label:'Taux d’intérêt',   icon:'fa-percent',               url:'/interest-rates' },
+  { id:'patterns',         label:'Patterns',         icon:'fa-shapes',                url:'/patterns',         params:['symbol','tf'] },
+  { id:'signal-scoring',   label:'Score ML',         icon:'fa-brain',                 url:'/signal-scoring' },
+  { id:'order-flow',       label:'Order Flow',       icon:'fa-arrow-right-arrow-left',url:'/order-flow',       params:['symbol','tf'] },
+  { id:'anomalies',        label:'Anomalies',        icon:'fa-triangle-exclamation', url:'/anomalies',        params:['symbol','tf'] }
+];
+
+function Outils() {
+  const [outil, setOutil] = useState(OUTILS_GET[0].id);
+  const [symbol, setSymbol] = useState('BTCUSDT');
+  const [tf, setTf] = useState('1h');
+  const [data, setData] = useState(null);
+  const [chargement, setChargement] = useState(false);
+  const [erreur, setErreur] = useState('');
+  const [comptes, setComptes] = useState([]);
+  const [nomCompte, setNomCompte] = useState('');
+  const [capitalCompte, setCapitalCompte] = useState('10000');
+
+  const chargerComptes = async () => {
+    try {
+      const r = await api('/accounts');
+      const d = await r.json();
+      if (d?.success) setComptes(d.comptes || d.accounts || []);
+    } catch {}
+  };
+  useEffect(() => { chargerComptes(); }, []);
+
+  const appeler = async (url, options) => {
+    setChargement(true); setErreur(''); setData(null);
+    try {
+      const r = await api(url, options);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      setData(d);
+    } catch (e) { setErreur(e.message); }
+    finally { setChargement(false); }
+  };
+
+  const charger = async () => {
+    const o = OUTILS_GET.find(x => x.id === outil);
+    if (!o) return;
+    const q = new URLSearchParams();
+    if ((o.params || []).includes('symbol')) q.set('symbol', symbol);
+    if ((o.params || []).includes('tf')) q.set('tf', tf);
+    appeler(o.url + (q.toString() ? '?' + q.toString() : ''));
+  };
+
+  const lancerBacktest = () => appeler('/backtest', {
+    method:'POST', headers:{ 'Content-Type':'application/json' },
+    body: JSON.stringify({ symbol, tf, riskPct: 1, initialCapital: 10000 })
+  });
+
+  const creerCompte = async () => {
+    if (!nomCompte.trim()) return;
+    try {
+      const r = await api('/accounts', { method:'POST', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ nom: nomCompte.trim(), capital: Number(capitalCompte) || 10000 }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      setNomCompte(''); chargerComptes();
+    } catch (e) { setErreur(e.message); }
+  };
+
+  const supprimerCompte = async (id) => {
+    try {
+      await api(`/accounts/${encodeURIComponent(id)}`, { method:'DELETE' });
+      chargerComptes();
+    } catch (e) { setErreur(e.message); }
+  };
+
+  return (
+    <div style={{ display:'grid', gap:14 }}>
+      <div className="panel" style={{ padding:18 }}>
+        <h3 style={{ margin:'0 0 10px' }}><i className="fas fa-toolbox"></i> Modules d'analyse</h3>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'end' }}>
+          <div>
+            <label className="lbl">Module</label>
+            <select className="fld" value={outil} onChange={e=>{setOutil(e.target.value);setData(null);setErreur('');}}>
+              {OUTILS_GET.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="lbl">Symbole</label>
+            <input className="fld" value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} style={{ width:130 }} />
+          </div>
+          <div>
+            <label className="lbl">Unité</label>
+            <select className="fld" value={tf} onChange={e=>setTf(e.target.value)}>
+              {['1m','5m','15m','1h','4h','1d'].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <button className="btn" onClick={charger} disabled={chargement}>
+            {chargement ? 'Chargement…' : 'Charger'}
+          </button>
+          <button className="btn ghost" onClick={lancerBacktest} disabled={chargement}>Backtest</button>
+        </div>
+        {erreur && <div style={{ color:'var(--bad)', marginTop:10, fontSize:13 }}>{erreur}</div>}
+        {data && <pre style={{ marginTop:12, maxHeight:420, overflow:'auto' }}>{JSON.stringify(data, null, 2)}</pre>}
+      </div>
+
+      <div className="panel" style={{ padding:18 }}>
+        <h3 style={{ margin:'0 0 10px' }}><i className="fas fa-wallet"></i> Comptes</h3>
+        {comptes.length === 0 && <div style={{ color:'var(--muted)', fontSize:13 }}>Aucun compte.</div>}
+        {comptes.map(c => (
+          <div key={c.id} style={{ display:'flex', gap:8, alignItems:'center', padding:'6px 0', borderBottom:'1px solid var(--border)' }}>
+            <strong>{c.nom}</strong>
+            <span style={{ color:'var(--muted)', fontSize:13 }}>{c.capital} {c.devise || 'USD'}</span>
+            <button className="btn ghost sm" onClick={()=>supprimerCompte(c.id)}>Supprimer</button>
+          </div>
+        ))}
+        <div style={{ display:'flex', gap:8, marginTop:10, flexWrap:'wrap', alignItems:'end' }}>
+          <div>
+            <label className="lbl">Nom</label>
+            <input className="fld" value={nomCompte} onChange={e=>setNomCompte(e.target.value)} placeholder="Compte démo" />
+          </div>
+          <div>
+            <label className="lbl">Capital</label>
+            <input className="fld" value={capitalCompte} onChange={e=>setCapitalCompte(e.target.value)} style={{ width:120 }} />
+          </div>
+          <button className="btn ghost" onClick={creerCompte}>Créer</button>
+        </div>
+      </div>
+
+      <div className="panel" style={{ padding:18 }}>
+        <h3 style={{ margin:'0 0 10px' }}><i className="fas fa-download"></i> Exports</h3>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          <a className="btn ghost sm" href="/api/export/pdf">Rapport HTML</a>
+          <a className="btn ghost sm" href="/api/export/csv">Journal CSV</a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ user, onLogout }) {
   const [tab, setTab] = useState('live');
   // Sur mobile, la barre du bas ne garde que l'essentiel ; le reste s'ouvre ici.
@@ -4463,13 +4795,6 @@ function Dashboard({ user, onLogout }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Initialisation du thème (sombre par défaut, lecture localStorage)
-  useEffect(() => {
-    const saved = localStorage.getItem('theme');
-    const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-    const theme = saved || (prefersLight ? 'light' : 'dark');
-    document.documentElement.setAttribute('data-theme', theme);
-  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -4487,6 +4812,24 @@ function Dashboard({ user, onLogout }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Raccourcis clavier (theme.js) : nav (1-5), rafraîchir (R), fermer (Échap).
+  // Seuls les onglets existants sont acceptés.
+  useEffect(() => {
+    const onNav = (e) => {
+      if (NAV.some(n => n.id === e.detail)) { setTab(e.detail); setPlusOuvert(false); }
+    };
+    const onRefresh = () => load();
+    const onEscape = () => setPlusOuvert(false);
+    window.addEventListener('5trade-nav', onNav);
+    window.addEventListener('5trade-refresh', onRefresh);
+    window.addEventListener('5trade-escape', onEscape);
+    return () => {
+      window.removeEventListener('5trade-nav', onNav);
+      window.removeEventListener('5trade-refresh', onRefresh);
+      window.removeEventListener('5trade-escape', onEscape);
+    };
+  }, [load]);
+
   const del = async (id) => {
     await api(`/knowledge/${id}`, { method:'DELETE' });
     load();
@@ -4503,7 +4846,7 @@ function Dashboard({ user, onLogout }) {
 
   // Onglets toujours visibles sur mobile, et ceux ranges dans « Plus ».
   const NAV_PRINCIPAL = ['live', 'analyze', 'strategies', 'journal'];
-  const NAV_SECONDAIRE = ['add', 'history', 'termes', 'alerts'];
+  const NAV_SECONDAIRE = ['add', 'history', 'termes', 'alerts', 'outils'];
 
   const NAV = [
     { id:'live',       label:'Direct',    icon:'fa-satellite-dish' },
@@ -4513,8 +4856,9 @@ function Dashboard({ user, onLogout }) {
     { id:'journal',    label:'Journal',   icon:'fa-receipt' },
     { id:'history',    label:'Historique',icon:'fa-clock-rotate-left' },
     { id:'termes',     label:'Termes',    icon:'fa-graduation-cap' },
-    { id:'alerts',     label:'Alertes',    icon:'fa-bell' }
-  ]};
+    { id:'alerts',     label:'Alertes',    icon:'fa-bell' },
+    { id:'outils',     label:'Outils',     icon:'fa-toolbox' }
+  ];
 
     return (
     <div style={{ minHeight:'100vh' }} className="pad-mobile">
@@ -4524,14 +4868,8 @@ function Dashboard({ user, onLogout }) {
               <div className="hdr" style={{ maxWidth:1240, margin:'0 auto', padding:'12px 20px', display:'flex',
                 justifyContent:'space-between', alignItems:'center', gap:14, flexWrap:'wrap' }}>
                 <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-                  {/* Logo 5trade — SVG inline, s'adapte au thème via currentColor */}
+                  {/* Logo 5trade : le mot en toutes lettres, rien à côté */}
                   <a className="logo-5trade" href="/" title="5trade — Accueil">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M12 2L4 7v10l8 5 8-5V7L12 2z"/>
-                      <path d="M12 22V12"/>
-                      <path d="M4 7l8-5 8 5"/>
-                      <circle cx="12" cy="15" r="3"/>
-                    </svg>
                     <span>5trade</span>
                   </a>
                   <span className="badge" style={{ background:'rgba(16,185,129,.12)', color:'#34d399' }}>
@@ -4548,19 +4886,6 @@ function Dashboard({ user, onLogout }) {
                   )}
                 </div>
                 <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                  {/* Bascule thème sombre/clair */}
-                  <button className="btn ghost sm" type="button"
-                    onClick={() => {
-                      const html = document.documentElement;
-                      const isLight = html.getAttribute('data-theme') === 'light';
-                      html.setAttribute('data-theme', isLight ? 'dark' : 'light');
-                      localStorage.setItem('theme', isLight ? 'dark' : 'light');
-                    }}
-                    title="Basculer thème sombre / clair"
-                    style={{ padding:'8px 12px', minWidth:44 }}>
-                    <i className="fas fa-sun" style={{ color: document.documentElement.getAttribute('data-theme') === 'light' ? 'var(--accent)' : 'var(--muted)' }}></i>
-                    <i className="fas fa-moon" style={{ color: document.documentElement.getAttribute('data-theme') === 'light' ? 'var(--muted)' : 'var(--accent)' }}></i>
-                  </button>
                   <span style={{ fontSize:12.5, color:'var(--muted)' }}>
                     <i className="fas fa-user-astronaut" style={{ marginRight:6 }}></i>
                     {user.username}
@@ -4574,9 +4899,9 @@ function Dashboard({ user, onLogout }) {
             </header>
 
       <main className="wrap">
-              <div className="nav" ref={navRef} style={{ marginBottom:20 }}>
+              <div className="nav" style={{ marginBottom:20 }}>
                 {NAV.map(n => (
-                  <button key={n.id} ref={el => itemRefs.current[n.id] = el}
+                  <button key={n.id}
                     className={`nav-item ${tab===n.id?'on':''}`} onClick={()=>setTab(n.id)}>
                     <i className={`fas ${n.icon}`}></i>{n.label}
                   </button>
@@ -4615,6 +4940,7 @@ function Dashboard({ user, onLogout }) {
             {tab === 'history' && <History history={history} />}
             {tab === 'termes' && <Termes />}
             {tab === 'alerts' && <Alertes />}
+            {tab === 'outils' && <Outils />}
           </Garde>
         </>)}
       </main>
@@ -4675,7 +5001,7 @@ function App() {
           <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:20 }}>
             <Loader3D size={56} />
             <span style={{ color:'var(--muted)', fontSize:13 }}>
-              <ShinyText text="Chargement de 5trade" color="#5d6b7d" shineColor="#cfe3ff" speed={2.4} />
+              Chargement de 5trade…
             </span>
           </div>
         </div>

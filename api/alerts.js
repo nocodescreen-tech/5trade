@@ -15,6 +15,9 @@ const fs = require('fs');
 const path = require('path');
 // Le reseau met parfois 9 s a joindre Telegram : sans reprise, l'alerte est perdue.
 const { fetchAvecReprise } = require('./reseau');
+// Constructeur de payload push pur (aucun effet de bord) : l'envoi passe
+// par deps.sendPush injecté, comme sendMail.
+const { payloadSignal } = require('./pushAlerts');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 // Le fichier de configuration est surchargeable par l'environnement.
@@ -49,7 +52,8 @@ const DEFAUT = {
     { symbol: 'BTCUSDT', tf: '15m', provider: 'binance' }
   ],
   derniers: [],              // 50 dernières alertes envoyées
-  deja: []                   // 200 dernières clés déjà notifiées (anti-doublon)
+  deja: [],                   // 200 dernières clés déjà notifiées (anti-doublon)
+  abonnements: []            // abonnements push navigateur [{ endpoint, keys, at }]
 };
 
 let config = { ...DEFAUT };
@@ -239,7 +243,10 @@ async function verifier(force = false) {
   if (!deps) return { controle: false, raison: 'surveillance non démarrée' };
   const c = config;
   if (!force && !c.actif) return { controle: false, raison: 'alertes désactivées' };
-  if (!c.email) return { controle: false, raison: 'aucun destinataire' };
+  // Sans email, le push peut prendre le relais (sinon rien ne peut partir).
+  if (!c.email && typeof deps.sendPush !== 'function') {
+    return { controle: false, raison: 'aucun destinataire' };
+  }
   if (!c.marches || !c.marches.length) return { controle: false, raison: 'aucun marché surveillé' };
 
   const resultats = [];
@@ -317,7 +324,25 @@ async function verifier(force = false) {
       if (c.deja.includes(cle)) { resultats.push({ ...m, verdict: 'déjà alerté' }); continue; }
 
       const msg = compose(v, m, r.candles[r.candles.length - 1].c, { confluence, rr });
-      await deps.sendMail({ to: c.email, subject: msg.subject, html: msg.html });
+      let emailOk = false;
+      if (c.email) {
+        await deps.sendMail({ to: c.email, subject: msg.subject, html: msg.html });
+        emailOk = true;
+      }
+      // Push navigateur : un canal en panne ne bloque jamais l'autre.
+      let pushOk = 0;
+      if (typeof deps.sendPush === 'function') {
+        try {
+          pushOk = await deps.sendPush(payloadSignal({
+            direction: v.direction, status: v.status, symbol: m.symbol,
+            strength: v.strength, levels: v.levels, id: cle
+          })) || 0;
+        } catch { /* le mail déjà parti reste valide */ }
+      }
+      if (!emailOk && pushOk <= 0) {
+        resultats.push({ ...m, verdict: 'aucun canal disponible' });
+        continue;
+      }
       // Telegram en plus : l'email peut attendre, le telephone non. Un echec
       // Telegram ne remet pas en cause l'alerte email deja partie.
       if (c.telegramToken && c.telegramChat) {
@@ -361,4 +386,27 @@ function start(injections) {
 
 function stop() { if (timer) { clearInterval(timer); timer = null; } }
 
-module.exports = { load, save, get, update, resetDedup, verifier, start, stop, compose, DEFAUT };
+/** Abonnements push navigateur (persistés dans alerts.json avec le reste). */
+function listerAbonnements() {
+  return Array.isArray(config.abonnements) ? config.abonnements : [];
+}
+
+function ajouterAbonnement(sub) {
+  if (!sub || !sub.endpoint) throw new Error('Abonnement invalide');
+  const liste = listerAbonnements().filter(s => s.endpoint !== sub.endpoint);
+  liste.push({ endpoint: String(sub.endpoint).slice(0, 500), keys: sub.keys || {}, at: Date.now() });
+  config.abonnements = liste.slice(-20);
+  save();
+  return config.abonnements;
+}
+
+function retirerAbonnement(endpoint) {
+  config.abonnements = listerAbonnements().filter(s => s.endpoint !== endpoint);
+  save();
+  return config.abonnements;
+}
+
+module.exports = {
+  load, save, get, update, resetDedup, verifier, start, stop, compose, DEFAUT,
+  listerAbonnements, ajouterAbonnement, retirerAbonnement
+};
