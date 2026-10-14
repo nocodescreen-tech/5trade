@@ -1536,6 +1536,80 @@ function tinyPng(W = 64, H = 40) {
       /forceNiveau/.test(jsx) && /strength \|\| 0\)\.toFixed\(2\)/.test(jsx));
   }
 
+  // ── L'ABSTENTION D'UNE RÈGLE DOIT LAISSER UNE TRACE ──
+  // `reglesActives` = les règles INTERROGÉES, pas les règles satisfaites. R3
+  // (aucune zone touchée) et R4 (aucun premium/discount exploitable) n'ont rien
+  // trouvé : elles ne sont ni d'accord ni contre. Elles étaient calculées puis
+  // JETÉES — l'écran affichait « 5 règles » face à « 2 preuves » sans qu'on
+  // puisse savoir si les autres manquaient ou se taisaient.
+  {
+    const lisse = [];
+    for (let i = 0; i < 120; i++) {
+      const p = 2000 + Math.sin(i / 9) * 4 + i * 0.02;
+      lisse.push({ t: i * 60000, o: p, h: p + 1.1, l: p - 1.1, c: p + 0.3, v: 7 });
+    }
+    const v = Sig.detect(lisse, { symbol: 'T', timeframe: '5m' });
+
+    ok('le verdict expose les règles SANS AVIS',
+      Array.isArray(v.reglesSansAvis), typeof v.reglesSansAvis);
+    ok('le verdict expose les règles CONCORDANTES', Array.isArray(v.reglesConcordantes));
+    ok('le verdict expose les règles OPPOSÉES', Array.isArray(v.reglesOpposees));
+    ok('le verdict expose les règles NEUTRES', Array.isArray(v.reglesNeutres));
+    ok('une lecture d\'ensemble est fournie',
+      typeof v.reglesLecture === 'string' && v.reglesLecture.length > 10, v.reglesLecture);
+
+    // LE POINT PRÉCIS : aucune règle interrogée ne doit disparaître.
+    const interrogees = (v.reglesActives || []).slice().sort().join(',');
+    const categorisees = [
+      ...(v.reglesConcordantes || []), ...(v.reglesOpposees || []),
+      ...(v.reglesNeutres || []), ...(v.reglesSansAvis || [])
+    ].slice().sort().join(',');
+    ok('chaque règle interrogée tombe dans EXACTEMENT une catégorie',
+      interrogees === categorisees && interrogees.length > 0,
+      `interrogées [${interrogees}] vs catégorisées [${categorisees}]`);
+    ok('aucun doublon entre les catégories',
+      new Set([...(v.reglesConcordantes || []), ...(v.reglesOpposees || []),
+        ...(v.reglesNeutres || []), ...(v.reglesSansAvis || [])]).size
+      === (v.reglesActives || []).length);
+
+    // Une abstention n'est ni un accord ni une opposition.
+    const sansAvis = v.reglesSansAvis || [];
+    ok('un « sans avis » n\'est pas compté comme concordant',
+      !sansAvis.some(r => (v.reglesConcordantes || []).includes(r)));
+    ok('un « sans avis » n\'est pas compté comme opposé',
+      !sansAvis.some(r => (v.reglesOpposees || []).includes(r)));
+    ok('il ne rapporte aucun bonus de concordance (le bonus suit les PREUVES)',
+      Math.abs(v.forceDetail.bonusConcordance
+        - 0.1 * Math.max(0, Object.keys(v.preuves || {}).length - 1)) < 0.001,
+      `bonus ${v.forceDetail.bonusConcordance}`);
+
+    // Le résumé et les raisons les NOMMENT.
+    ok('le résumé nomme les règles sans avis',
+      /rien à dire sur ce graphique/.test(v.summary), v.summary.slice(0, 120));
+
+    // Le dénominateur que l'écran affiche doit EXISTER (il manquait : le front
+    // lisait `reglesEvaluees`, absent, et affichait « 2/2 » en toutes occasions).
+    ok('le verdict expose `reglesEvaluees` (le dénominateur de l\'écran)',
+      Array.isArray(v.reglesEvaluees) && v.reglesEvaluees.length === (v.reglesActives || []).length,
+      `${(v.reglesEvaluees || []).length} vs ${(v.reglesActives || []).length}`);
+
+    // Plus AUCUN pourcentage de force, nulle part dans le verdict.
+    ok('aucun pourcentage de force dans le résumé', !/force [\d.]+ %/.test(v.summary));
+    ok('aucun pourcentage de force dans les raisons',
+      !(v.missing || []).some(m => /%/.test(m)), (v.missing || []).join(' | ').slice(0, 140));
+    ok('aucun pourcentage de force dans la lecture détaillée',
+      !/[\d.]+ %/.test(v.forceDetail.lecture));
+
+    // Et l'ECRAN lit bien ces champs.
+    const jsx2 = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8');
+    ok('l\'écran lit `reglesEvaluees` (le dénominateur)',
+      /reglesEvaluees/.test(jsx2));
+    ok('l\'écran lit `reglesSansAvis` et non l\'ancien `reglesMuettes` (jamais exposé)',
+      /signal\.reglesSansAvis/.test(jsx2) && !/signal\.reglesMuettes/.test(jsx2));
+    ok('l\'écran affiche le NOM des règles sans avis',
+      /reglesSansAvis\.join/.test(jsx2));
+  }
+
   // ── Corrections d'audit : sécurité, intégrité, réseau ──
   // Ces défauts ne se voyaient PAS dans le canonique : tout était vert alors que
   // le code acceptait un chemin traversant, une écriture non atomique, un fetch

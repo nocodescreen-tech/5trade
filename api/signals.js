@@ -706,9 +706,14 @@ function detect(candles, meta = {}, options = {}) {
     .filter(r => (r.direction === 'BUY' || r.direction === 'SELL') && r.direction !== direction)
     .map(r => r.rule);
   const reglesNeutres = rules.filter(r => r.direction !== 'BUY' && r.direction !== 'SELL').map(r => r.rule);
-  // Une règle évaluée qui n'a produit AUCUN avis : elle n'a rien trouvé sur ce
-  // graphique (pas « elle est satisfaite », ni « elle s'y oppose »).
-  const reglesMuettes = actives.filter(r => !rules.some(x => x.rule === r));
+  // ABSTENTION — une règle évaluée qui n'a produit AUCUN avis.
+  // C'est le cas de R3 (aucune zone touchée) et R4 (aucun premium/discount
+  // exploitable) : elles ne sont PAS « satisfaites », elles ne s'opposent à rien,
+  // elles n'ont simplement rien trouvé sur ce graphique. Les confondre avec un
+  // manque, c'est se demander pourquoi « 5 règles » n'en donnent que 2.
+  const reglesSansAvis = actives.filter(r => !rules.some(x => x.rule === r));
+  // Alias historique : le nom « muettes » est utilisé plus bas dans les tests.
+  const reglesMuettes = reglesSansAvis;
 
   // CONTRADICTION : des règles qui tirent en sens opposés. C'est le cas piégeux —
   // une moyenne masquerait le désaccord et produirait une confirmation qui ne
@@ -828,9 +833,16 @@ function detect(candles, meta = {}, options = {}) {
       missing.push(`il faut ${seuilRegles} règle(s) concordante(s) (${independent} pour l'instant)`);
     }
     if (strength < seuilForce) {
-      missing.push(`force ${(strength * 100).toFixed(0)} % < ${(seuilForce * 100).toFixed(0)} % requis`);
+      // Pas de « % » : la force est un score, pas une probabilité.
+      missing.push(`force ${forceNiveau} (${strength.toFixed(2)}/1) < ${seuilForce.toFixed(2)} requis`);
     }
     if (!winner.length) missing.push('aucune règle déclenchée sur la dernière bougie clôturée');
+    // Les règles SANS AVIS sont nommées parmi les raisons : sans ça, « il faut 2
+    // règles concordantes (1 pour l'instant) » laissait croire à un manque alors
+    // que les autres règles n'avaient simplement rien trouvé.
+    if (reglesSansAvis.length) {
+      missing.push(`${reglesSansAvis.join(', ')} n'ont rien à dire sur ce graphique (ni pour ni contre)`);
+    }
   }
 
   const sc = scenarios(report, options.parametres && options.parametres.atrStop);
@@ -857,7 +869,14 @@ function detect(candles, meta = {}, options = {}) {
         ? ` · ${preuvesPartagees.map(pp => pp.lecture).join(' ; ')}` : '')
       + (contradiction.franche ? ` · DÉSACCORD : ${contradiction.lecture}`
         : (contradiction.active ? ` · ${contradiction.lecture}` : ''))
-      + ` · force ${(strength * 100).toFixed(0)} %`
+      // Pas de « % » : la force est un score, pas une probabilité (voir plus haut).
+      + ` · force ${forceNiveau} (${strength.toFixed(2)}/1)`
+      // LES RÈGLES QUI N'ONT RIEN DIT SONT NOMMÉES. Sans ça, « 2 règles
+      // évaluées » face à « 1 preuve » laissait croire à un manque, alors que
+      // R3 et R4 pouvaient simplement n'avoir rien trouvé sur ce graphique.
+      + (reglesSansAvis.length
+        ? ` · muette(s) : ${reglesSansAvis.join(', ')} (rien à dire sur ce graphique, ni pour ni contre)`
+        : '')
       + ` · entrée ${fmt(levels.entry)} / invalidation ${fmt(levels.stop)} / objectifs ${fmt(levels.target1)} puis ${fmt(levels.target2)}`;
 
   return {
@@ -900,7 +919,27 @@ function detect(candles, meta = {}, options = {}) {
     // qui laissait croire à un blocage.
     etatMarche,
     // Traçabilité : quelles règles ont été appliquées, et au nom de quoi.
+    // ATTENTION au vocabulaire : `reglesActives` = les règles INTERROGÉES, pas les
+    // règles satisfaites. C'est ce qui faisait lire « 5 règles » comme « 5 d'accord ».
     reglesActives: actives,
+    // Le nombre de règles RÉELLEMENT interrogées, sous le nom que l'écran attend.
+    // Il manquait : le front lisait `reglesEvaluees`, absent du verdict, et
+    // retombait sur `confirmations` — d'où un « 2/2 » systématique, qui ne dit
+    // rien. Le dénominateur était faux depuis le début.
+    reglesEvaluees: actives,
+    // Ce que chaque règle interrogée a RÉPONDU. Sans ces listes, R3 et R4 — qui
+    // n'ont rien trouvé sur ce graphique et n'ont donc produit aucun avis —
+    // disparaissaient sans laisser de trace : l'écran affichait « 5 règles » face
+    // à « 2 preuves » sans qu'on puisse savoir si les 3 autres manquaient,
+    // s'opposaient, ou n'avaient simplement rien à dire.
+    reglesConcordantes: reglesPour,
+    reglesOpposees: reglesContre,
+    reglesNeutres,
+    reglesSansAvis,
+    // Lecture d'ensemble, pour que l'écran n'ait pas à recomposer ce raisonnement.
+    reglesLecture: reglesSansAvis.length
+      ? `${reglesPour.length} d'accord · ${reglesContre.length} contre · ${reglesSansAvis.length} sans avis (${reglesSansAvis.join(', ')} : rien à dire sur ce graphique, ni pour ni contre)`
+      : `${reglesPour.length} d'accord · ${reglesContre.length} contre · aucune règle muette`,
     seuils: { regles: seuilRegles, force: seuilForce },
     // Biais d'ensemble et sa justification : quel scénario est privilégié, et
     // pourquoi. Sans ça, les deux scénarios auraient toujours le même poids.

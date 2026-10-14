@@ -2702,11 +2702,12 @@ function LiveMarket({ onToJournal }) {
               {signal.status === 'confirme' ? ' CONFIRMÉ' : signal.status === 'surveiller' ? ' à surveiller' : ''}
             </span>
             <span style={{ fontSize:12.5, color:'var(--muted)' }}>
-              {/* « X/Y règles » et non « X règles » : sinon on ne sait pas sur
-                  combien de règles le signal a été jugé. Et la force est un SCORE
-                  INTERNE, pas une probabilité de réussite — le titre le dit, pour
-                  qu'on ne lise pas « force 45 % » comme « 45 % de chances ». */}
-              {signal.confirmations}/{signal.reglesEvaluees ? signal.reglesEvaluees.length : signal.confirmations} règle(s) d'accord
+              {/* « d'accord SUR N interrogées » : sans le dénominateur, on ne sait
+                  pas si les autres manquaient, s'opposaient, ou n'avaient rien à
+                  dire. Le dénominateur venait de `reglesEvaluees`, absent du
+                  verdict — l'écran retombait donc sur `confirmations` et affichait
+                  « 2/2 » en toutes circonstances. */}
+              {signal.confirmations}/{(signal.reglesEvaluees || signal.reglesActives || []).length || signal.confirmations} règle(s) d'accord
               {' · '}
               <span title={signal.forceDetail ? signal.forceDetail.lecture
                 : 'Score interne de solidité, PAS une probabilité de réussite.'}>
@@ -2718,8 +2719,23 @@ function LiveMarket({ onToJournal }) {
                 <i className="fas fa-circle-info" style={{ fontSize:10, opacity:.6, marginLeft:4 }}></i>
               </span>
               {signal.trend ? ` · tendance ${signal.trend}` : ''}
-              {signal.reglesMuettes && signal.reglesMuettes.length
-                ? ` · ${signal.reglesMuettes.length} règle(s) sans avis` : ''}
+              {/* LES RÈGLES SANS AVIS, NOMMÉES. Elles étaient calculées par le
+                  moteur puis jetées, et l'écran lisait un champ inexistant : une
+                  règle interrogée qui ne trouvait rien disparaissait sans trace,
+                  donnant l'impression d'un manque au lieu d'une abstention. */}
+              {(signal.reglesSansAvis || []).length > 0 && (
+                <span title={(signal.reglesLecture || '') +
+                  ' — une règle sans avis n\'est ni d\'accord ni contre : elle n\'a rien trouvé sur ce graphique.'}
+                  style={{ color:'var(--dim)' }}>
+                  {' · '}<i className="fas fa-minus" style={{ fontSize:9 }}></i>{' '}
+                  {signal.reglesSansAvis.length} sans avis ({signal.reglesSansAvis.join(', ')})
+                </span>
+              )}
+              {(signal.reglesOpposees || []).length > 0 && (
+                <span style={{ color:'#f87171' }}>
+                  {' · '}{signal.reglesOpposees.length} contre ({signal.reglesOpposees.join(', ')})
+                </span>
+              )}
             </span>
             <span style={{ flex:'1 1 auto' }}></span>
             <span style={{ fontSize:11.5, color:'var(--dim)' }}>
