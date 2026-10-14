@@ -42,7 +42,25 @@ const DATA_DIR = path.join(ROOT, 'data');
 // ─────────────────────────────────────────────────────────────
 // Middleware
 // ─────────────────────────────────────────────────────────────
-app.use(cors());
+// CORS : `cors()` sans argument accepte TOUTES les origines — n'importe quel site
+// pouvait donc appeler cette API, cookies de session compris.
+//
+// On RESTREINT PAR DÉFAUT. Un premier correctif autorisait tout hors production :
+// c'était un faux filet — un serveur lancé sans NODE_ENV=production (le cas
+// courant) redevenait ouvert à tout le web. C'est l'inverse qu'il faut : seules
+// les origines connues passent, et l'ouverture totale se DEMANDE explicitement
+// (CORS_LIBRE=1), pour une session de travail assumée.
+const ORIGINES_LOCALES = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+app.use(cors({
+  credentials: true,
+  origin(origine, cb) {
+    if (!origine) return cb(null, true);                                  // même origine, curl
+    if (ORIGINES_LOCALES.test(origine)) return cb(null, true);            // l'appli elle-même
+    if (process.env.APP_ORIGIN && origine === process.env.APP_ORIGIN) return cb(null, true);
+    if (process.env.CORS_LIBRE === '1') return cb(null, true);            // demande explicite
+    cb(null, false);                                                      // tout le reste : non
+  }
+}));
 app.use(express.json({ limit: '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 app.use('/uploads', express.static(UPLOADS_DIR));
@@ -83,6 +101,20 @@ function hashPassword(password, salt) {
 function verifyPassword(password, salt, hash) {
   const attempt = crypto.scryptSync(password, salt, 64).toString('hex');
   return crypto.timingSafeEqual(Buffer.from(attempt), Buffer.from(hash));
+}
+
+/**
+ * Nom de fichier sûr, à partir d'un nom fourni par le client.
+ *
+ * `path.join(dossier, nom)` avec un nom non filtré laisse SORTIR du dossier :
+ * « ../../config.js » remonte l'arborescence. On ne garde donc que le dernier
+ * segment du chemin, nettoyé des caractères qui posent problème sur disque, avec
+ * une longueur bornée et un repli si plus rien ne reste.
+ */
+function nomSur(brut) {
+  const base = path.basename(String(brut || 'fichier'));
+  const propre = base.replace(/[^\w.\-() ]+/g, '_').replace(/^\.+/, '').slice(0, 120).trim();
+  return propre || `fichier-${Date.now()}`;
 }
 
 function newId(prefix = '') {
@@ -399,6 +431,30 @@ function rateLimitLogin(req, res, next) {
   if (a.until < now) { a.count = 0; a.until = now + 10 * 60 * 1000; }
   a.count++;
   loginAttempts[ip] = a;
+  next();
+}
+
+// Anti-emballement sur les routes qui COÛTENT : /api/analyze appelle une IA
+// facturée à la requête. Un onglet laissé ouvert ou une boucle côté client peut
+// vider le crédit en quelques minutes. Par COMPTE et non par IP : c'est
+// l'utilisateur authentifié qui consomme, et plusieurs navigateurs peuvent
+// partager une IP. Généreux — 15 analyses / 5 min suffisent à l'usage normal.
+const analysesParCompte = {};
+function rateLimitAnalyse(req, res, next) {
+  const compte = (req.session && req.session.username) || req.ip || 'x';
+  const now = Date.now();
+  const FENETRE = 5 * 60 * 1000;
+  const LIMIT = process.env.NODE_ENV === 'production' ? 15 : 60;
+  const a = analysesParCompte[compte] || { count: 0, until: 0 };
+  if (a.until > now && a.count >= LIMIT) {
+    const s = Math.ceil((a.until - now) / 1000);
+    return res.status(429).json({
+      error: `Trop d'analyses coup sur coup. Réessayez dans ${s} s — chaque analyse appelle une IA facturée.`
+    });
+  }
+  if (a.until < now) { a.count = 0; a.until = now + FENETRE; }
+  a.count++;
+  analysesParCompte[compte] = a;
   next();
 }
 
@@ -758,6 +814,7 @@ app.post('/api/upload-strategies', requireAuth, upload.array('documents'), async
       const ext = path.extname(file.originalname).toLowerCase();
       const baseName = path.basename(file.originalname, ext);
       let text = '';
+      let raisonEchec = null;
 
       try {
         if (ext === '.txt' || ext === '.md') {
@@ -767,10 +824,24 @@ app.post('/api/upload-strategies', requireAuth, upload.array('documents'), async
         } else if (ext === '.docx') {
           text = await extractDocx(filePath);
         } else {
-          text = `Document ${file.originalname} (extraction non supportée)`;
+          text = null;
         }
       } catch (e) {
-        text = `Erreur extraction ${file.originalname}: ${e.message}`;
+        text = null;
+        raisonEchec = e.message;
+      }
+
+      // Sans texte exploitable, on n'enregistre RIEN. Une fiche vide — ou dont le
+      // contenu est un message d'erreur — pollue la base et se fait passer pour
+      // une stratégie. On dit simplement pourquoi le fichier a été écarté.
+      if (!text || !String(text).trim()) {
+        results.push({
+          success: false, file: file.originalname,
+          message: raisonEchec || 'Texte illisible'
+            + (path.extname(file.originalname).toLowerCase() === '.docx'
+              ? ' (pandoc est-il installé ?)' : '')
+        });
+        continue;
       }
 
       const strategy = {
@@ -778,14 +849,17 @@ app.post('/api/upload-strategies', requireAuth, upload.array('documents'), async
         title: baseName,
         content: text,
         type: `file${ext}`,
-        originalFileName: file.originalname,
+        originalFileName: nomSur(file.originalname),
         fileSize: file.size,
         source: 'upload',
         tags: extractTags(text),
         createdAt: new Date().toISOString()
       };
       await saveStrategy(strategy);
-      await fs.rename(filePath, path.join(DOCUMENTS_DIR, file.originalname)).catch(() => {});
+      // Le nom vient du client : sans filtrage, « ../../x.js » fait SORTIR du
+      // dossier (path traversal). On ne garde que le dernier segment du chemin,
+      // debarrasse des caracteres genants.
+      await fs.rename(filePath, path.join(DOCUMENTS_DIR, nomSur(file.originalname))).catch(() => {});
 
       results.push({ success: true, strategy, message: `${file.originalname} traité` });
     }
@@ -811,11 +885,11 @@ async function extractDocx(filePath) {
   return new Promise((resolve) => {
     const { exec } = require('child_process');
     exec(`pandoc "${filePath}" -t plain -o -`, (error, stdout) => {
-      if (error || !stdout) {
-        resolve('Conversion DOCX impossible (pandoc absent). Contenu à saisir manuellement.');
-      } else {
-        resolve(stdout);
-      }
+      // null, et non un message : l'appelant doit pouvoir distinguer « voici le
+      // texte » de « je n'ai pas pu lire ce fichier ». Rendre une phrase d'excuse
+      // faisait d'elle le CONTENU de la fiche — une stratégie enregistrée dont le
+      // texte disait « conversion impossible ».
+      resolve(error || !stdout ? null : stdout);
     });
   });
 }
@@ -1207,7 +1281,7 @@ const chartUpload = upload.fields([
   { name: 'chart', maxCount: 1 }
 ]);
 
-app.post('/api/analyze', requireAuth, chartUpload, async (req, res) => {
+app.post('/api/analyze', requireAuth, rateLimitAnalyse, chartUpload, async (req, res) => {
   try {
     const files = [
       ...(req.files?.charts || []),

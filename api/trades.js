@@ -35,9 +35,15 @@ function normalize(input = {}) {
 
   const entry = num(input.entry);
   if (entry === null) throw new Error('« entry » (prix d\'entrée) est requis');
+  // Un prix nul ou négatif n'existe pas : le laisser passer ferait ensuite des
+  // pourcentages absurdes (et un risque négatif dans les statistiques).
+  if (entry <= 0) throw new Error('« entry » doit être un prix strictement positif');
 
   const sl = num(input.sl);
   const tp = num(input.tp);
+  // SL et TP sont des PRIX : zéro ou négatif n'a pas de sens.
+  if (sl !== null && sl <= 0) throw new Error('« sl » doit être un prix strictement positif');
+  if (tp !== null && tp <= 0) throw new Error('« tp » doit être un prix strictement positif');
   if (sl !== null) {
     if (direction === 'BUY' && sl >= entry) throw new Error('Pour un BUY, le SL doit être sous l\'entrée');
     if (direction === 'SELL' && sl <= entry) throw new Error('Pour un SELL, le SL doit être au-dessus de l\'entrée');
@@ -50,9 +56,13 @@ function normalize(input = {}) {
   const risk = sl !== null ? Math.abs(entry - sl) : null;
   const reward = tp !== null ? Math.abs(tp - entry) : null;
 
+  // Une taille nulle ou négative n'a pas de sens, et fausserait le risque total.
+  const size = num(input.size);
+  if (size !== null && size <= 0) throw new Error('« size » doit être strictement positive');
+
   return {
     pair, direction, entry, sl, tp,
-    size: num(input.size),
+    size,
     // Origine du marché : sans elle, les statistiques mélangent des marchés qui
     // n'ont rien à voir (R_75 en 5m chez Deriv et BTC en 1h chez Binance). C'est
     // ce qui permet de répondre à « est-ce que je gagne SUR R_75 ? ».

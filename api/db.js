@@ -30,7 +30,13 @@ async function readJSON(file, fallback) {
 }
 async function writeJSON(file, data) {
   await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, JSON.stringify(data, null, 2));
+  // Ecriture ATOMIQUE : on ecrit d'abord a cote, puis on renomme. Un
+  // fs.writeFile direct expose a deux pannes : un process tue en cours
+  // d'ecriture laisse un JSON tronque (donc illisible au redemarrage), et deux
+  // ecritures simultanees s'ecrasent. Le rename, lui, est atomique.
+  const temporaire = `${file}.${process.pid}.tmp`;
+  await fs.writeFile(temporaire, JSON.stringify(data, null, 2));
+  await fs.rename(temporaire, file);
 }
 
 async function init() {

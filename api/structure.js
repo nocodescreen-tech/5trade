@@ -13,7 +13,17 @@
 /** Bougie attendue : { t, o, h, l, c, v }. */
 const isCandle = c => c && Number.isFinite(c.h) && Number.isFinite(c.l) && Number.isFinite(c.c);
 
-/** Vrai range moyen (Wilder simplifié) — sert à dimensionner SL/TP. */
+/**
+ * Vrai ATR de Wilder — sert à dimensionner SL/TP.
+ *
+ * Le calcul précédent était une MOYENNE SIMPLE des TR sur `period` bougies. Wilder
+ * lisse : la première valeur est la moyenne des `period` premiers TR, puis chaque
+ * valeur suivante vaut `(précédent × (period − 1) + TR) / period`. La différence
+ * n'est pas cosmétique : après un mouvement fort, la moyenne simple « oublie » la
+ * secousse d'un coup, alors que le lissage la garde plusieurs bougies. Un stop
+ * dimensionné sur une volatilité sous-estimée est trop serré — il se fait balayer
+ * par le bruit normal du marché.
+ */
 function atr(candles, period = 14) {
   if (candles.length < 2) return null;
   const trs = [];
@@ -22,8 +32,11 @@ function atr(candles, period = 14) {
     trs.push(Math.max(c.h - c.l, Math.abs(c.h - p.c), Math.abs(c.l - p.c)));
   }
   const n = Math.min(period, trs.length);
-  const slice = trs.slice(-n);
-  return +(slice.reduce((a, x) => a + x, 0) / n).toFixed(6);
+  // Amorce : moyenne simple des n premiers TR (c'est ainsi que Wilder démarre).
+  let valeur = trs.slice(0, n).reduce((a, x) => a + x, 0) / n;
+  // Puis lissage exponentiel de Wilder sur le reste.
+  for (let i = n; i < trs.length; i++) valeur = (valeur * (n - 1) + trs[i]) / n;
+  return +valeur.toFixed(6);
 }
 
 /**
@@ -392,7 +405,15 @@ function inventory(r) {
  * @param {{symbol?:string, timeframe?:string}} meta
  */
 function analyze(candles, meta = {}, options = {}) {
-  const clean = (candles || []).filter(isCandle);
+  // On ne raisonne que sur des bougies CLÔTURÉES.
+  // La dernière bougie d'une source est celle EN COURS de formation : un « BOS »
+  // ou un balayage détecté dessus est faux, puisque la clôture peut encore
+  // changer avant la fin de l'unité de temps. Ce filtre vit ICI, dans le module,
+  // et non chez l'appelant : quatre appelants le faisaient à la main, et le
+  // cinquième aurait oublié. (`closed !== false` laisse passer les séries de test,
+  // qui ne portent pas ce champ.)
+  const closes = (candles || []).filter(c => c && c.closed !== false && isCandle(c));
+  const clean = closes.length >= 20 ? closes : (candles || []).filter(isCandle);
   if (clean.length < 20) throw new Error('Pas assez de bougies pour analyser (20 minimum)');
   const last = clean[clean.length - 1];
 

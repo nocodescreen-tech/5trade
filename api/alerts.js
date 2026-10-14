@@ -244,6 +244,13 @@ async function verifier(force = false) {
   const resultats = [];
   let envoyes = 0;
 
+  // Aucun marche surveille : il n'y a RIEN a controler. Repondre « controle
+  // effectue » laisserait croire que la surveillance tourne alors qu'elle ne
+  // regarde rien — c'est exactement le cas ou le bot etait « branche sur du vide ».
+  if (!c.marches || !c.marches.length) {
+    return { controle: false, envoyes: 0, marches: [], raison: 'aucun marché surveillé' };
+  }
+
   for (const m of c.marches) {
     try {
       const r = await deps.market.getCandles(m.symbol, m.tf, 300, m.provider);
@@ -255,7 +262,7 @@ async function verifier(force = false) {
       const v = deps.signals.detect(closes, { symbol: m.symbol, timeframe: m.tf });
       if (v.status !== 'confirme') { resultats.push({ ...m, verdict: v.status }); continue; }
       if (v.strength < c.forceMin) {
-        resultats.push({ ...m, verdict: `confirmé mais force ${Math.round(v.strength * 100)} % < seuil` });
+        resultats.push({ ...m, verdict: `confirmé mais force ${Number(v.strength).toFixed(2)}/1 (${v.forceNiveau || '—'}) < seuil` });
         continue;
       }
 

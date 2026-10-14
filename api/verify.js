@@ -1536,6 +1536,104 @@ function tinyPng(W = 64, H = 40) {
       /forceNiveau/.test(jsx) && /strength \|\| 0\)\.toFixed\(2\)/.test(jsx));
   }
 
+  // ── Corrections d'audit : sécurité, intégrité, réseau ──
+  // Ces défauts ne se voyaient PAS dans le canonique : tout était vert alors que
+  // le code acceptait un chemin traversant, une écriture non atomique, un fetch
+  // sans délai. Les tests ci-dessous les verrouillent.
+  {
+    // (1) ATR de WILDER — le vrai lissage, pas une moyenne simple.
+    // Différence mesurable : après une secousse, la moyenne simple l'oublie d'un
+    // coup, le lissage de Wilder la garde plusieurs bougies.
+    const St = require('./structure.js');
+    const plates = [];
+    for (let i = 0; i < 30; i++) plates.push({ t: i * 60000, o: 100, h: 100.2, l: 99.8, c: 100, v: 1 });
+    const secousse = plates.map((c, i) => (i === 5 ? { ...c, h: 120, l: 98 } : c));
+    const w = St.analyze(secousse, { symbol: 'T', timeframe: '5m' });
+    // Le choc (TR = 22) est survenu il y a 25 bougies : hors de la fenêtre des 14
+    // dernières. Une moyenne glissante l'aurait donc OUBLIÉ et rendrait 0,4 ;
+    // Wilder en garde la trace et rend ~0,9.
+    ok('l\'ATR de Wilder garde la mémoire du choc sorti de la fenêtre',
+      w.atr14 > 0.6, `ATR ${w.atr14} (une moyenne glissante des 14 dernières rendrait ~0,4)`);
+    ok('et il reste borné — pas d\'explosion de la valeur',
+      w.atr14 < 3, `ATR ${w.atr14}`);
+
+    // (2) Le nom de fichier venu du client ne peut plus SORTIR du dossier.
+    // On rejoue exactement la logique de nomSur (server.js ne l'exporte pas).
+    const path = require('path');
+    const nomSur = brut => {
+      const base = path.basename(String(brut || 'fichier'));
+      const propre = base.replace(/[^\w.\-() ]+/g, '_').replace(/^\.+/, '').slice(0, 120).trim();
+      return propre || `fichier-${Date.now()}`;
+    };
+    ok('un chemin traversant est réduit à son dernier segment',
+      nomSur('../../config.js') === 'config.js', nomSur('../../config.js'));
+    ok('un chemin Windows traversant aussi',
+      nomSur('..\\..\\secret.env') === 'secret.env', nomSur('..\\..\\secret.env'));
+    ok('un nom sans danger est conservé tel quel',
+      nomSur('cours-ICT.pdf') === 'cours-ICT.pdf', nomSur('cours-ICT.pdf'));
+    ok('un nom vide rend un nom sûr, jamais un chemin vide',
+      nomSur('') === 'fichier', nomSur(''));
+    ok('un nom entièrement composé de points bascule sur le repli horodaté',
+      /^fichier-\d+$/.test(nomSur('...')), nomSur('...'));
+    ok('les caractères exotiques sont neutralisés',
+      !/[<>:"|?*]/.test(nomSur('a<b>c:d"e|f?g*h')), nomSur('a<b>c:d"e|f?g*h'));
+
+    // (3) Ecriture ATOMIQUE : db.js ne doit plus écrire directement dans le fichier.
+    const dbSrc = fs.readFileSync(path.join(__dirname, 'db.js'), 'utf8');
+    ok('db.js écrit dans un temporaire puis renomme',
+      /\.tmp`/.test(dbSrc) && /rename\(temporaire/.test(dbSrc));
+    ok('db.js n\'écrit plus directement le fichier final',
+      !/await fs\.writeFile\(file, JSON\.stringify/.test(dbSrc));
+
+    // (4) Aucun fetch NU dans market.js : tout passe par la reprise réseau.
+    const mkSrc = fs.readFileSync(path.join(__dirname, 'market.js'), 'utf8');
+    ok('market.js n\'a plus de fetch direct',
+      !/await fetch\(url\)/.test(mkSrc) && (mkSrc.match(/fetchAvecReprise/g) || []).length >= 2);
+
+    // (5) Les bougies non clôturées sont écartées PAR LE MOTEUR.
+    const mixte = [];
+    for (let i = 0; i < 60; i++) mixte.push({ t: i * 60000, o: 100, h: 100.5, l: 99.5, c: 100, v: 1, closed: true });
+    mixte.push({ t: 60 * 60000, o: 100, h: 130, l: 70, c: 129, v: 1, closed: false }); // bougie ouverte, énorme
+    const vMixte = Sig.detect(mixte, { symbol: 'T', timeframe: '5m' });
+    ok('une bougie EN COURS n\'influence pas le signal',
+      Math.abs(vMixte.price - 100) < 5, `prix retenu ${vMixte.price} (une bougie à 129 est exclue)`);
+
+    // (6) Trades : les valeurs absurdes sont refusées.
+    const Tr = require('./trades.js');
+    const refuse = obj => { try { Tr.normalize(obj); return false; } catch { return true; } };
+    ok('un prix d\'entrée négatif est refusé', refuse({ pair: 'X', direction: 'BUY', entry: -5 }));
+    ok('un prix d\'entrée nul est refusé', refuse({ pair: 'X', direction: 'BUY', entry: 0 }));
+    ok('une taille négative est refusée',
+      refuse({ pair: 'X', direction: 'BUY', entry: 100, size: -1 }));
+    ok('une taille nulle est refusée',
+      refuse({ pair: 'X', direction: 'BUY', entry: 100, size: 0 }));
+    ok('un SL négatif est refusé',
+      refuse({ pair: 'X', direction: 'BUY', entry: 100, sl: -1 }));
+    ok('un trade correct passe toujours',
+      !refuse({ pair: 'X', direction: 'BUY', entry: 100, sl: 95, tp: 110, size: 1 }));
+
+    // (7) /api/analyze est protégée par un limiteur (chaque appel coûte une IA).
+    const srvSrc = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('la route d\'analyse porte un limiteur',
+      /app\.post\('\/api\/analyze', requireAuth, rateLimitAnalyse/.test(srvSrc));
+    ok('le limiteur compte par compte, pas par IP seule',
+      /req\.session && req\.session\.username/.test(srvSrc) && /analysesParCompte/.test(srvSrc));
+
+    // (8) CORS n'est plus ouvert à tout le web.
+    ok('CORS n\'accepte plus toutes les origines sans condition',
+      !/app\.use\(cors\(\)\)/.test(srvSrc) && /APP_ORIGIN/.test(srvSrc));
+
+    // (9) Un marché vide n'est plus annoncé comme « contrôlé ».
+    const alSrc = fs.readFileSync(path.join(__dirname, 'alerts.js'), 'utf8');
+    ok('un compte sans marché surveillé le dit',
+      /aucun marché surveillé/.test(alSrc) && /if \(!c\.marches \|\| !c\.marches\.length\)/.test(alSrc));
+
+    // (10) L'extraction qui échoue ne devient plus le CONTENU d'une fiche.
+    ok('un fichier illisible est écarté au lieu de créer une fiche',
+      /resolve\(error \|\| !stdout \? null : stdout\)/.test(srvSrc)
+      && /if \(!text \|\| !String\(text\)\.trim\(\)\)/.test(srvSrc));
+  }
+
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──
   // Mesure réelle : 8,7 s pour joindre Telegram depuis cette connexion. Sans
   // reprise, l'alerte échouait sur un appel pourtant valide.

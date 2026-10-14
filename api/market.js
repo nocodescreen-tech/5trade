@@ -22,6 +22,9 @@
  */
 const WebSocket = require('ws');
 const fs = require('fs');
+// Memes appels que les alertes et la vision : la connexion est LENTE par
+// moments (8,7 s mesurees vers Telegram), et un fetch nu attend indefiniment.
+const { fetchAvecReprise } = require('./reseau');
 const path = require('path');
 
 // Cache disque : permet d'analyser même sans réseau (le buffer mémoire seul
@@ -55,7 +58,7 @@ const binance = {
   async candles(symbol, tf, count) {
     const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(symbol)}` +
       `&interval=${tf}&limit=${Math.min(count, 1000)}`;
-    const r = await fetch(url);
+    const r = await fetchAvecReprise(url);
     if (!r.ok) throw new Error(`Binance REST ${r.status}`);
     const rows = await r.json();
     return rows.map(k => ({
@@ -277,7 +280,7 @@ const twelvedata = {
     if (!key) throw new Error('TWELVEDATA_API_KEY absente');
     const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}` +
       `&interval=${tf}&outputsize=${count}&apikey=${key}`;
-    const r = await fetch(url);
+    const r = await fetchAvecReprise(url);
     const d = await r.json();
     if (d.status === 'error' || !d.values) throw new Error('Twelve Data : ' + (d.message || 'réponse invalide'));
     return d.values.map(v => ({

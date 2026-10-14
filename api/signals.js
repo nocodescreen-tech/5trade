@@ -649,7 +649,13 @@ function profilDepuisStrategie(doc) {
  *            checklist, missing, levels, summary, at, strategie}}
  */
 function detect(candles, meta = {}, options = {}) {
-  const clean = (candles || []).filter(c => c && Number.isFinite(c.c));
+  // Bougies clôturées uniquement, pour la même raison que dans structure.analyze :
+  // une bougie en formation peut encore changer de clôture, donc un signal lu
+  // dessus est provisoire. Le filtre appartient au moteur, pas à l'appelant.
+  const closes = (candles || []).filter(c => c && Number.isFinite(c.c) && c.closed !== false);
+  const clean = closes.length >= 20
+    ? closes
+    : (candles || []).filter(c => c && Number.isFinite(c.c));
   if (clean.length < 20) throw new Error('Pas assez de bougies (20 minimum)');
 
   const report = S.analyze(clean, meta, options.parametres || {});
