@@ -2823,6 +2823,42 @@ function LiveMarket({ onToJournal }) {
               </div>
             )}
 
+            {/* Statut NEUTRE : pas de direction, donc pas d'entrée unique — mais
+                les DEUX plans restent calculés et consultables. Les masquer
+                contredisait le commentaire juste au-dessus. Chaque scénario dit
+                son déclencheur : c'est le chiffre qui manquait pour agir. */}
+            {!signal.levels && signal.levelsRaison && (
+              <div style={{ fontSize:12.5, color:'var(--muted)', lineHeight:1.6 }}>
+                <i className="fas fa-compass" style={{ marginRight:6, color:'#60a5fa' }}></i>
+                {signal.levelsRaison}
+                <div style={{ marginTop:6, display:'grid', gap:4 }}>
+                  {[['achat', signal.scenarios && signal.scenarios.bullish],
+                    ['vente', signal.scenarios && signal.scenarios.bearish]]
+                    .filter(([, sc]) => sc && (sc.entry != null || sc.trigger))
+                    .map(([nom, sc]) => (
+                      <div key={nom} style={{ display:'flex', gap:14, flexWrap:'wrap' }}>
+                        <span style={{ color:'#cbd5e1', minWidth:44 }}>{nom}</span>
+                        <span><span style={{ color:'var(--muted)' }}>si </span>{sc.trigger || '—'}</span>
+                        {sc.entry != null && (
+                          <span><span style={{ color:'var(--muted)' }}>entrée </span><b>{fmt(sc.entry)}</b></span>
+                        )}
+                        {sc.stop != null && (
+                          <span><span style={{ color:'var(--muted)' }}>inval. </span>
+                            <b style={{ color:'#f87171' }}>{fmt(sc.stop)}</b></span>
+                        )}
+                        {sc.target1 != null && (
+                          <span><span style={{ color:'var(--muted)' }}>obj </span>
+                            <b style={{ color:'#34d399' }}>{fmt(sc.target1)}</b></span>
+                        )}
+                        {sc.target2 != null && (
+                          <span><b style={{ color:'#34d399' }}>{fmt(sc.target2)}</b></span>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
             {signal.missing && signal.missing.length > 0 && (
               <div style={{ fontSize:12.5, color:'#fbbf24' }}>
                 <i className="fas fa-circle-info" style={{ marginRight:6 }}></i>

@@ -268,10 +268,15 @@ function levelsFor(report, direction, atrStop) {
       report.structure.lastSwingHigh && report.structure.lastSwingHigh.price,
       ...(report.liquidity || []).filter(p => p.price > price).map(p => p.price)
     ].filter(p => Number.isFinite(p) && p > plancher).sort((a, b) => a - b);
+    // Deux objectifs espaces de quelques centiemes, ce n'est pas DEUX paliers :
+    // on ecarte toute cible a moins d'un ATR de la precedente retenue.
+    const paliers = targets.filter((p, i) => i === 0 || p - targets[0] >= margeMini);
+    const t1 = paliers[0] !== undefined ? paliers[0] : price + atr * 2;
+    const t2brut = paliers.find(x => x - t1 >= margeMini);
     return {
       entry: num(price), stop: num(stop),
-      target1: num(targets[0] || price + atr * 2),
-      target2: num(targets[1] || price + atr * 3)
+      target1: num(t1),
+      target2: num(t2brut !== undefined ? t2brut : t1 + atr)
     };
   }
   if (direction === 'SELL') {
@@ -285,10 +290,14 @@ function levelsFor(report, direction, atrStop) {
       report.structure.lastSwingLow && report.structure.lastSwingLow.price,
       ...(report.liquidity || []).filter(p => p.price < price).map(p => p.price)
     ].filter(p => Number.isFinite(p) && p < plafond).sort((a, b) => b - a);
+    // Symetrique : en vente, le 2e objectif doit etre plus BAS, et d'au moins un ATR.
+    const paliers = targets.filter((p, i) => i === 0 || targets[0] - p >= margeMini);
+    const t1 = paliers[0] !== undefined ? paliers[0] : price - atr * 2;
+    const t2brut = paliers.find(x => t1 - x >= margeMini);
     return {
       entry: num(price), stop: num(stop),
-      target1: num(targets[0] || price - atr * 2),
-      target2: num(targets[1] || price - atr * 3)
+      target1: num(t1),
+      target2: num(t2brut !== undefined ? t2brut : t1 - atr)
     };
   }
   return { entry: num(price), stop: null, target1: null, target2: null };
@@ -890,11 +899,20 @@ function detect(candles, meta = {}, options = {}) {
 
   const sc = scenarios(report, options.parametres && options.parametres.atrStop);
   const chk = checklist(report);
-  // Niveaux « du jour » : ceux du sens détecté, sinon les deux scénarios restent
-  // consultables (on ne cache plus l'information sous prétexte d'incertitude).
+  // Niveaux « du jour » : ceux du sens détecté UNIQUEMENT.
+  // En statut NEUTRE il n'y a pas de direction — donc pas d'entrée unique à
+  // annoncer : en fabriquer une serait inventer le signal. On ne renvoie plus
+  // quatre `null` (qui se lisent « calculé, puis vidé » et donnent un « — » muet
+  // à l'écran) mais **null accompagné de la raison**, qui renvoie aux DEUX jeux
+  // complets de `scenarios`. Ce qui n'est pas affiché doit dire pourquoi.
   const levels = status === 'neutre'
-    ? { entry: null, stop: null, target1: null, target2: null }
+    ? null
     : levelsFor(report, direction, options.parametres && options.parametres.atrStop);
+  const levelsRaison = status === 'neutre'
+    ? 'statut neutre : aucune direction activée, donc pas d\'entrée unique à annoncer. '
+      + `Les deux jeux complets sont dans scenarios — achat si ${sc.bullish.trigger}, `
+      + `vente si ${sc.bearish.trigger}`
+    : null;
   const fmt = v => (v === null || v === undefined ? '—' : v);
 
   const entete = options.strategie && options.strategie.titre
@@ -920,7 +938,11 @@ function detect(candles, meta = {}, options = {}) {
       + (reglesSansAvis.length
         ? ` · muette(s) : ${reglesSansAvis.join(', ')} (rien à dire sur ce graphique, ni pour ni contre)`
         : '')
-      + ` · entrée ${fmt(levels.entry)} / invalidation ${fmt(levels.stop)} / objectifs ${fmt(levels.target1)} puis ${fmt(levels.target2)}`;
+      // levels peut etre null (statut neutre) : on ne suppose pas sa forme.
+      + (levels
+        ? ` · entrée ${fmt(levels.entry)} / invalidation ${fmt(levels.stop)}`
+          + ` / objectifs ${fmt(levels.target1)} puis ${fmt(levels.target2)}`
+        : '');
 
   return {
     at: clean[clean.length - 1].t,
@@ -941,7 +963,11 @@ function detect(candles, meta = {}, options = {}) {
     // partagent la meme. C'est ce qui empeche un meme fait de compter double.
     preuves: preuvesDetail, preuvesPartagees,
     rules,
+    // `levels` = les niveaux du sens ACTIVE, ou null si le statut est neutre.
+    // Dans ce cas `levelsRaison` dit pourquoi (et ou les trouver) : un « — » a
+    // l'ecran sans explication se lit « pas de donnee », pas « pas de direction ».
     levels,
+    levelsRaison,
     scenarios: sc,
     checklist: chk,
     missing,

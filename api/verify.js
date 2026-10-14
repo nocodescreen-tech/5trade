@@ -1762,6 +1762,61 @@ function tinyPng(W = 64, H = 40) {
       && /if \(!text \|\| !String\(text\)\.trim\(\)\)/.test(srvSrc));
   }
 
+  // ── Niveaux en statut NEUTRE : ce qui n'est pas affiché doit dire pourquoi ──
+  // Défaut réel remonté par l'owner : le commentaire promettait « on ne cache plus
+  // l'information » pendant que le code renvoyait QUATRE `null`. L'information
+  // existait pourtant : `scenarios` portait entrée/invalidation/objectifs des deux
+  // côtés. Un « — » sans explication se lit « pas de donnée », pas « pas de sens ».
+  {
+    const plat = [];
+    for (let i = 0; i < 120; i++) {
+      const c = 100 + Math.sin(i / 3) * 0.4 + (i > 60 ? 1.5 : 0);
+      plat.push({ t: 1_700_000_000_000 + i * 300_000, o: c, h: c + 0.5, l: c - 0.5, c, v: 10, closed: true });
+    }
+    const vn = Sig.detect(plat, { symbol: 'T', timeframe: '5m' });
+    ok('la série plate est bien neutre (fixture)', vn.status === 'neutre', vn.status);
+
+    if (vn.status === 'neutre') {
+      ok('levels est null, PAS un objet de quatre null',
+        vn.levels === null && !(vn.levels && 'entry' in vn.levels),
+        JSON.stringify(vn.levels));
+      ok('levelsRaison explique l\'absence (et renvoie vers scenarios)',
+        typeof vn.levelsRaison === 'string' && /scenarios/.test(vn.levelsRaison));
+      ok('la raison donne les DEUX déclencheurs pour agir',
+        /achat si/.test(vn.levelsRaison || '') && /vente si/.test(vn.levelsRaison || ''));
+      // Le silence était le défaut : les deux plans doivent rester calculés.
+      const b = vn.scenarios && vn.scenarios.bullish, s = vn.scenarios && vn.scenarios.bearish;
+      ok('les deux scénarios restent complets (entrée, invalidation, 2 objectifs)',
+        !!b && !!s && [b, s].every(x => Number.isFinite(x.entry) && Number.isFinite(x.stop)
+          && Number.isFinite(x.target1) && Number.isFinite(x.target2)));
+    }
+
+    // Objectif 2 CONFONDU avec l'objectif 1 : mesuré sur une série réelle,
+    // 99.1003 et 99.100211 — deux paliers séparés de 0,0001. Un « objectif 2 »
+    // qui ne diffère pas du premier n'annonce aucun second palier.
+    for (const [nom, v2] of [['neutre', vn]]) {
+      const sc = (v2.scenarios || {});
+      const atr = v2.atr;
+      for (const sens of ['bullish', 'bearish']) {
+        const x = sc[sens];
+        if (!x || !Number.isFinite(x.target2) || !Number.isFinite(atr)) continue;
+        ok(`${nom}/${sens} : objectif 2 à au moins 1 ATR de l'objectif 1`,
+          Math.abs(x.target2 - x.target1) >= atr * 0.999,
+          `écart ${Math.abs(x.target2 - x.target1).toFixed(4)} · ATR ${atr.toFixed(4)}`);
+      }
+      if (sc.bullish && Number.isFinite(sc.bullish.target2)) {
+        ok('achat : objectif 2 plus haut que l\'objectif 1',
+          sc.bullish.target2 > sc.bullish.target1,
+          `${sc.bullish.target1} → ${sc.bullish.target2}`);
+      }
+      if (sc.bearish && Number.isFinite(sc.bearish.target2)) {
+        ok('vente : objectif 2 plus BAS que l\'objectif 1',
+          sc.bearish.target2 < sc.bearish.target1,
+          `${sc.bearish.target1} → ${sc.bearish.target2}`);
+      }
+    }
+  }
+
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──
   // Mesure réelle : 8,7 s pour joindre Telegram depuis cette connexion. Sans
   // reprise, l'alerte échouait sur un appel pourtant valide.
