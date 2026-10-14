@@ -1422,7 +1422,11 @@ function tinyPng(W = 64, H = 40) {
   // ── La force est un score, jamais présentée comme une probabilité ──
   {
     ok('l\'écran dit que la force est un score interne, pas une probabilité',
-      /Score interne du moteur/.test(jsx) && /PAS une probabilité de réussite/.test(jsx));
+      // Le texte vient du backend (forceDetail.lecture) : l'écran l'affiche en
+      // infobulle. Verifier les deux bouts : le libelle existe, et l'ecran l'utilise.
+      /Score interne du moteur|score interne/.test(jsx) || /forceDetail\.lecture/.test(jsx));
+    ok('le backend fournit la lecture, et l\'écran la consomme',
+      /forceDetail/.test(jsx) && /forceNiveau/.test(jsx));
     ok('l\'écran n\'emploie pas le mot « probabilité » pour la force',
       !/probabilité de (gain|réussite) [:=]/i.test(jsx));
     ok('l\'écran affiche « X/Y règles » et non un « X » isolé',
@@ -1490,6 +1494,46 @@ function tinyPng(W = 64, H = 40) {
         });
       });
     ok('plusieurs natures d\'empreinte coexistent', natures.size >= 2, [...natures].join(', '));
+  }
+
+  // ── La force est un SCORE, pas une probabilité ──
+  // « force 82 % » se lit « 82 chances sur 100 de gagner » — un chiffre que le moteur
+  // ne peut pas produire (aucun backtest). Le signe % transformait une opinion en
+  // statistique. On expose donc un score nu ET un mot.
+  {
+    const s = [];
+    for (let i = 0; i < 100; i++) { const p = 100 + i * 0.3 + Math.sin(i / 3) * 2; s.push({ t: i * 60000, o: p, h: p + 1, l: p - 1, c: p + 0.4, v: 9 }); }
+    const v = Sig.detect(s, { symbol: 'T', timeframe: '5m' });
+
+    ok('le niveau de force est un mot, pas un pourcentage',
+      ['faible', 'moyenne', 'forte'].includes(v.forceNiveau), String(v.forceNiveau));
+    ok('le score brut reste disponible entre 0 et 1',
+      Number.isFinite(v.strength) && v.strength >= 0 && v.strength <= 1, String(v.strength));
+    ok('le niveau correspond au score',
+      (v.forceNiveau === 'forte' && v.strength >= 0.65)
+      || (v.forceNiveau === 'moyenne' && v.strength >= 0.4 && v.strength < 0.65)
+      || (v.forceNiveau === 'faible' && v.strength < 0.4),
+      `${v.forceNiveau} @ ${v.strength}`);
+
+    ok('la composition de la force est exposee', !!v.forceDetail
+      && Number.isFinite(v.forceDetail.moyenneRegles)
+      && Number.isFinite(v.forceDetail.bonusConcordance)
+      && Number.isFinite(v.forceDetail.malusContradiction),
+      v.forceDetail ? JSON.stringify({ m: v.forceDetail.moyenneRegles, b: v.forceDetail.bonusConcordance, p: v.forceDetail.malusContradiction }) : 'absent');
+    ok('aucune probabilité n\'est annoncée (le moteur n\'en produit pas)',
+      v.forceDetail && v.forceDetail.probabilite === null, String(v.forceDetail && v.forceDetail.probabilite));
+    ok('la lecture dit explicitement que ce n\'est pas une probabilité',
+      /PAS une probabilité de réussite/.test((v.forceDetail || {}).lecture || ''),
+      (v.forceDetail || {}).lecture);
+    ok('la lecture detaille le calcul',
+      /moyenne des règles/.test((v.forceDetail || {}).lecture || '')
+      && /concordance/.test((v.forceDetail || {}).lecture || '')
+      && /contradiction/.test((v.forceDetail || {}).lecture || ''));
+    // L'ecran ne doit plus afficher de « % » pour la force.
+    ok('l\'écran n\'affiche plus la force en pourcentage',
+      !/force \{\(.*strength \* 100\)/.test(jsx) && !/force \{Math\.round\(\(a\.strength/.test(jsx));
+    ok('l\'écran affiche le niveau et le score nu',
+      /forceNiveau/.test(jsx) && /strength \|\| 0\)\.toFixed\(2\)/.test(jsx));
   }
 
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──

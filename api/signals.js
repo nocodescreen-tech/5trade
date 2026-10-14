@@ -718,7 +718,32 @@ function detect(candles, meta = {}, options = {}) {
   const avg = winner.length ? winner.reduce((a, r) => a + r.strength, 0) / winner.length : 0;
   const bonus = 0.1 * Math.max(0, independent - 1);
   const penalty = 0.1 * loser.length;
-  const strength = +Math.max(0, Math.min(avg + bonus - penalty, 1)).toFixed(3);
+  const forceScore = +Math.max(0, Math.min(avg + bonus - penalty, 1)).toFixed(3);
+
+  // ── La force est un SCORE, jamais une probabilité ──
+  // Elle est exposée sous trois formes, pour qu'on ne puisse pas la lire de travers :
+  //   • `strength`    : le score brut 0–1 (nom historique, conservé pour l'API)
+  //   • `forceNiveau` : faible / moyenne / forte — ce qui doit être MONTRÉ
+  //   • `forceDetail` : la composition (moyenne des règles, bonus, malus)
+  // Pourquoi pas un « % » : un trader lit « force 82 % » comme « 82 chances sur 100
+  // de gagner ». Le moteur ne peut pas produire ce chiffre — rien n'a été backtesté,
+  // donc aucune probabilité n'existe. Un signe « % » transforme une opinion en
+  // statistique. Le mot et le score nus ne mentent pas.
+  const forceNiveau = forceScore >= 0.65 ? 'forte' : forceScore >= 0.4 ? 'moyenne' : 'faible';
+  const forceDetail = {
+    score: forceScore,
+    niveau: forceNiveau,
+    moyenneRegles: +avg.toFixed(3),
+    bonusConcordance: +bonus.toFixed(3),
+    malusContradiction: +penalty.toFixed(3),
+    // Champ explicite : le moteur ne produit AUCUNE probabilité. Si un jour un
+    // backtest validé en fournit une, c'est ici qu'elle ira — pas dans `score`.
+    probabilite: null,
+    lecture: `score interne ${forceScore.toFixed(2)} sur 1 (${forceNiveau}) : moyenne des règles`
+      + ` ${avg.toFixed(2)} · concordance +${bonus.toFixed(2)} · contradiction −${penalty.toFixed(2)}`
+      + ' — ce n\'est PAS une probabilité de réussite'
+  };
+  const strength = forceScore;
 
   // Confirmation = règles indépendantes du même côté, au seuil demandé.
   // Une stratégie mono-règle (ex. « order blocks ») ne peut pas croiser deux
@@ -834,6 +859,11 @@ function detect(candles, meta = {}, options = {}) {
     symbol: meta.symbol || null,
     timeframe: meta.timeframe || null,
     status, direction, strength,
+    // La force sous trois formes, pour qu'elle ne se lise pas de travers :
+    // le score brut (0–1), le mot (faible/moyenne/forte) — ce qui doit être MONTRÉ —
+    // et sa composition (moyenne des règles, bonus de concordance, malus).
+    forceNiveau,
+    forceDetail,
     confirmations: independent,
     // Les regles, rangees par categorie : ce qui appuie, ce qui s'oppose, ce qui
     // est neutre, et ce qui n'a rien trouve. Sans ca, « 5 evaluees / 3 d'accord »
