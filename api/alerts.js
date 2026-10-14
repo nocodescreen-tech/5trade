@@ -188,7 +188,7 @@ function compose(v, m, prix, qualite = {}) {
   return {
     subject: `[5trade] ${sens} confirmé — ${m.symbol} ${m.tf} (force ${Math.round(v.strength * 100)} %)`,
     html: `
-<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0b1017;color:#e2e8f0;padding:22px;border-radius:12px;max-width:560px">
+<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#b1017;color:#e2e8f0;padding:22px;border-radius:12px;max-width:560px">
   <div style="font-size:13px;color:#94a3b8;letter-spacing:.4px">5trade — alerte de signal</div>
   <h2 style="margin:10px 0 4px;color:${couleur}">${sens} CONFIRMÉ</h2>
   <div style="color:#94a3b8;font-size:13.5px">${m.symbol} · ${m.tf} · ${v.strength ? Math.round(v.strength * 100) : '?'} % de force
@@ -240,6 +240,7 @@ async function verifier(force = false) {
   const c = config;
   if (!force && !c.actif) return { controle: false, raison: 'alertes désactivées' };
   if (!c.email) return { controle: false, raison: 'aucun destinataire' };
+  if (!c.marches || !c.marches.length) return { controle: false, raison: 'aucun marché surveillé' };
 
   const resultats = [];
   let envoyes = 0;

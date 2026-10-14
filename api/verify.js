@@ -1016,7 +1016,7 @@ function tinyPng(W = 64, H = 40) {
       const s = [];
       for (let i = 0; i < 80; i++) { const p = 100 + Math.sin(i / 5) * 4; s.push({ t: i * 60000, o: p, h: p + 1, l: p - 1, c: p + 0.3, v: 10 }); }
       const f = Sig.filtresDisponibles(St.analyze(s, { symbol: 'T', timeframe: '5m' }));
-      return f.length >= 4 && f.every(x => ['volatilite', 'session', 'range', 'structure'].includes(x.cle)
+      return f.length >= 4 && f.every(x => ['volatilite', 'session', 'range', 'structure', 'spread', 'rsi', 'macd'].includes(x.cle)
         && typeof x.ok === 'boolean' && x.label && x.detail);
     })());
     // La structure a rejoint les filtres : c'est un contexte MESURABLE, pas un vote.

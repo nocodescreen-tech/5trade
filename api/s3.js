@@ -75,6 +75,15 @@ function s3Url(key) {
 
 /** Écrit un objet. Lève une erreur explicite en cas d'échec (pas d'avalage silencieux). */
 async function uploadToS3(buffer, key, contentType) {
+  // Le corps DOIT être un Buffer : `s3Sign` calcule le SHA-256 du corps, et une
+  // chaîne non vide hacherait un contenu différent de celui réellement envoyé
+  // (l'ancien code retombait sur `Buffer.alloc(0)` seulement si le corps était
+  // falsy — une chaîne ne l'est pas). Un seul appelant aujourd'hui, et il passe
+  // bien `Buffer.from(payload)` ; ce garde verrouille l'invariant pour le suivant.
+  if (!Buffer.isBuffer(buffer)) {
+    throw new Error('uploadToS3 : le corps doit être un Buffer '
+      + `(reçu : ${buffer === null ? 'null' : typeof buffer})`);
+  }
   const { url, headers } = s3Sign('PUT', key, buffer);
   const res = await fetch(url, {
     method: 'PUT',

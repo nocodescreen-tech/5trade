@@ -35,6 +35,7 @@ function normalize(input = {}) {
 
   const entry = num(input.entry);
   if (entry === null) throw new Error('« entry » (prix d\'entrée) est requis');
+  if (entry <= 0) throw new Error('« entry » (prix d\'entrée) doit être positif');
   // Un prix nul ou négatif n'existe pas : le laisser passer ferait ensuite des
   // pourcentages absurdes (et un risque négatif dans les statistiques).
   if (entry <= 0) throw new Error('« entry » doit être un prix strictement positif');
@@ -121,14 +122,18 @@ function close(trade, input = {}) {
     if (result === 'loss' && rr > 0) throw new Error('« rr » positif alors que le trade est perdant');
   }
 
+  // GARDE-FOU : si trade.risk est 0 ou null, on ne peut pas déduire rr/pnl.
+  // Sans cette garde, pnl / 0 = Infinity et rr * 0 = 0, ce qui corrompt
+  // toutes les statistiques (rrAvg devient Infinity).
+  const safeRisk = trade.risk && trade.risk > 0 ? trade.risk : null;
   return {
     ...trade,
     status: 'closed',
     exit,
     result,
     // rr fourni, sinon déduit du pnl ; pnl fourni, sinon déduit du rr
-    rr: roundRR(rr !== null ? rr : (pnl !== null && trade.risk ? pnl / trade.risk : null)),
-    pnl: roundPnl(pnl !== null ? pnl : (rr !== null && trade.risk ? rr * trade.risk : null)),
+    rr: roundRR(rr !== null ? rr : (pnl !== null && safeRisk ? pnl / safeRisk : null)),
+    pnl: roundPnl(pnl !== null ? pnl : (rr !== null && safeRisk ? rr * safeRisk : null)),
     closedAt: input.closedAt || new Date().toISOString(),
     notes: input.notes !== undefined ? String(input.notes).slice(0, 2000) : trade.notes
   };
@@ -211,4 +216,174 @@ function computeStats(trades, titles = {}) {
   };
 }
 
-module.exports = { normalize, close, computeStats, num };
+/**
+ * Calcul de la taille de position basée sur le risque en % du capital.
+ *
+ * Formule : taille = (capital × risquePct) / (stopDistance × valeurParUnité)
+ *
+ * @param {object} params
+ * @param {number} params.capital - Capital total du compte
+ * @param {number} params.risquePct - Risque en % du capital (ex: 1 = 1%)
+ * @param {number} params.entry - Prix d'entrée
+ * @param {number} params.stop - Prix du stop loss
+ * @param {number} [params.valeurParUnité] - Valeur d'une unité de position (défaut: 1)
+ * @returns {{ taille: number, risqueMontant: number, stopPct: number }}
+ */
+function positionSizing({ capital, risquePct, entry, stop, valeurParUnite = 1 }) {
+  if (!capital || capital <= 0) throw new Error('Le capital doit être positif');
+  if (!risquePct || risquePct <= 0) throw new Error('Le risque en % doit être positif');
+  if (!entry || entry <= 0) throw new Error('Le prix d\'entrée doit être positif');
+  if (!stop || stop <= 0) throw new Error('Le stop loss doit être positif');
+
+  const stopDistance = Math.abs(entry - stop);
+  if (stopDistance === 0) throw new Error('La distance du stop ne peut pas être zéro');
+
+  const risqueMontant = (capital * risquePct) / 100;
+  const taille = risqueMontant / (stopDistance * valeurParUnite);
+  const stopPct = (stopDistance / entry) * 100;
+
+  return {
+    taille: +taille.toFixed(4),
+    risqueMontant: +risqueMontant.toFixed(2),
+    stopPct: +stopPct.toFixed(3)
+  };
+}
+
+/**
+ * Filtre de spread : un signal dont le spread mange le profit est rejeté.
+ *
+ * @param {object} params
+ * @param {number} params.spread - Spread en pips/points
+ * @param {number} params.targetDistance - Distance en prix jusqu'à l'objectif
+ * @param {number} [params.seuilPct] - Seuil en % du profit (défaut: 0.3 = 30%)
+ * @returns {{ ok: boolean, spreadCoutPct: number, message: string }}
+ */
+function filtreSpread({ spread, targetDistance, seuilPct = 0.3 }) {
+  if (!spread || spread < 0) throw new Error('Le spread doit être positif');
+  if (!targetDistance || targetDistance <= 0) throw new Error('La distance de l\'objectif doit être positif');
+
+  const spreadCoutPct = (spread / targetDistance) * 100;
+  const ok = spreadCoutPct < (seuilPct * 100);
+
+  return {
+    ok,
+    spreadCoutPct: +spreadCoutPct.toFixed(2),
+    message: ok
+      ? `Spread ${spreadCoutPct.toFixed(2)} % du profit — acceptable`
+      : `Spread ${spreadCoutPct.toFixed(2)} % du profit — trop élevé (seuil ${seuilPct * 100} %)`
+  };
+}
+
+/**
+ * Corrélation entre paires : évite les positions doubles sur paires corrélées.
+ *
+ * @param {string} pair1 - Première paire (ex: 'EURUSD')
+ * @param {string} pair2 - Deuxième paire (ex: 'GBPUSD')
+ * @returns {boolean} true si les paires sont corrélées (> 70%)
+ */
+function pairesCorrelees(pair1, pair2) {
+  if (!pair1 || !pair2) return false;
+  const p1 = pair1.toUpperCase();
+  const p2 = pair2.toUpperCase();
+  if (p1 === p2) return true;
+
+  // Paires fortement corrélées (corrélation > 70% sur les dernières années)
+  const correlations = [
+    ['EURUSD', 'GBPUSD'], ['EURUSD', 'AUDUSD'], ['EURUSD', 'NZDUSD'],
+    ['GBPUSD', 'AUDUSD'], ['GBPUSD', 'NZDUSD'], ['AUDUSD', 'NZDUSD'],
+    ['XAUUSD', 'XAGUSD'], ['BTCUSD', 'ETHUSD'], ['BTCUSD', 'SOLUSD'],
+    ['US30', 'NAS100'], ['US30', 'SPX500'], ['NAS100', 'SPX500']
+  ];
+
+  return correlations.some(([a, b]) =>
+    (p1.includes(a) && p2.includes(b)) || (p1.includes(b) && p2.includes(a))
+  );
+}
+
+/**
+ * Backtesting : valider une stratégie sur données historiques.
+ *
+ * Simule l'exécution d'une stratégie sur un historique de bougies et
+ * calcule les statistiques de performance.
+ *
+ * @param {object} params
+ * @param {Array} params.candles - Bougies OHLCV historiques
+ * @param {Function} params.signalFn - Fonction qui prend des bougies et retourne { action: 'BUY'|'SELL'|null, entry: number, sl: number, tp: number }
+ * @param {number} [params.riskPct] - Risque en % du capital par trade (défaut: 1)
+ * @param {number} [params.initialCapital] - Capital initial (défaut: 10000)
+ * @returns {object} Statistiques de performance
+ */
+function backtest({ candles, signalFn, riskPct = 1, initialCapital = 10000 }) {
+  if (!candles || candles.length < 20) throw new Error('Pas assez de bougies pour backtester');
+  if (!signalFn) throw new Error('signalFn est requis');
+
+  let capital = initialCapital;
+  let position = null;
+  const trades = [];
+
+  for (let i = 20; i < candles.length; i++) {
+    const slice = candles.slice(0, i + 1);
+    const signal = signalFn(slice);
+
+    // Gestion de la position ouverte
+    if (position) {
+      const c = candles[i];
+      // Stop loss
+      if ((position.direction === 'BUY' && c.l <= position.sl) ||
+          (position.direction === 'SELL' && c.h >= position.sl)) {
+        const pnl = position.direction === 'BUY'
+          ? (position.sl - position.entry) * position.size
+          : (position.entry - position.sl) * position.size;
+        capital += pnl;
+        trades.push({ ...position, exit: position.sl, pnl, result: pnl > 0 ? 'win' : 'loss', closedAt: c.t });
+        position = null;
+      }
+      // Take profit
+      else if ((position.direction === 'BUY' && c.h >= position.tp) ||
+               (position.direction === 'SELL' && c.l <= position.tp)) {
+        const pnl = position.direction === 'BUY'
+          ? (position.tp - position.entry) * position.size
+          : (position.entry - position.tp) * position.size;
+        capital += pnl;
+        trades.push({ ...position, exit: position.tp, pnl, result: 'win', closedAt: c.t });
+        position = null;
+      }
+    }
+
+    // Nouvelle position
+    if (!position && signal && signal.action) {
+      const stopDist = Math.abs(signal.entry - signal.sl);
+      if (stopDist > 0) {
+        const size = (capital * riskPct / 100) / stopDist;
+        position = {
+          direction: signal.action,
+          entry: signal.entry,
+          sl: signal.sl,
+          tp: signal.tp,
+          size,
+          openedAt: candles[i].t
+        };
+      }
+    }
+  }
+
+  // Clôturer la position ouverte à la dernière bougie
+  if (position) {
+    const last = candles[candles.length - 1];
+    const pnl = position.direction === 'BUY'
+      ? (last.c - position.entry) * position.size
+      : (position.entry - last.c) * position.size;
+    capital += pnl;
+    trades.push({ ...position, exit: last.c, pnl, result: pnl > 0 ? 'win' : 'loss', closedAt: last.t });
+  }
+
+  const stats = computeStats(trades);
+  return {
+    ...stats,
+    capitalFinal: +capital.toFixed(2),
+    rendementPct: +((capital - initialCapital) / initialCapital * 100).toFixed(2),
+    initialCapital
+  };
+}
+
+module.exports = { normalize, close, computeStats, num, positionSizing, filtreSpread, pairesCorrelees, backtest };

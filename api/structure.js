@@ -92,13 +92,19 @@ function marketStructure(candles, w = 2) {
 
   // BOS / CHoCH : cassure de clôture au-delà du dernier swing, dans le sens
   // ou contre la tendance en place.
+  // IMPORTANT : on n'utilise que les bougies CLÔTURÉES. La dernière bougie
+  // est en cours de formation et peut encore repasser — un BOS dessus est faux.
   let event = null;
   const refHigh = lastH[lastH.length - 1];
   const refLow = lastL[lastL.length - 1];
-  if (refHigh && last.c > refHigh.price) {
-    event = { type: trend === 'bullish' ? 'BOS' : 'CHoCH', direction: 'bullish', level: refHigh.price, at: refHigh.i };
-  } else if (refLow && last.c < refLow.price) {
-    event = { type: trend === 'bearish' ? 'BOS' : 'CHoCH', direction: 'bearish', level: refLow.price, at: refLow.i };
+  const closedCandles = candles.filter(c => c && c.closed !== false);
+  const lastClosed = closedCandles.length ? closedCandles[closedCandles.length - 1] : null;
+  if (lastClosed) {
+    if (refHigh && lastClosed.c > refHigh.price) {
+      event = { type: trend === 'bullish' ? 'BOS' : 'CHoCH', direction: 'bullish', level: refHigh.price, at: refHigh.i };
+    } else if (refLow && lastClosed.c < refLow.price) {
+      event = { type: trend === 'bearish' ? 'BOS' : 'CHoCH', direction: 'bearish', level: refLow.price, at: refLow.i };
+    }
   }
 
   return {
@@ -428,6 +434,13 @@ function analyze(candles, meta = {}, options = {}) {
   const closes = (candles || []).filter(c => c && c.closed !== false && isCandle(c));
   const clean = closes.length >= 20 ? closes : (candles || []).filter(isCandle);
   if (clean.length < 20) throw new Error('Pas assez de bougies pour analyser (20 minimum)');
+  // Vérification de l'ordre chronologique : des bougies désordonnées produisent
+  // des swings, FVG, OB, etc. complètement faux.
+  for (let i = 1; i < clean.length; i++) {
+    if (clean[i].t < clean[i - 1].t) {
+      throw new Error('Bougies non triées par ordre chronologique');
+    }
+  }
   const last = clean[clean.length - 1];
 
   // Réglages du moteur : ils changent RÉELLEMENT le calcul, pas seulement le

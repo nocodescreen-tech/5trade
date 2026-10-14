@@ -21,7 +21,8 @@ const FILES = {
   otp:        path.join(DATA_DIR, 'otp.json'),
   history:    path.join(DATA_DIR, 'history.json'),
   strategies: path.join(DATA_DIR, 'strategies.json'),
-  trades:     path.join(DATA_DIR, 'trades.json')
+  trades:     path.join(DATA_DIR, 'trades.json'),
+  comptes:    path.join(DATA_DIR, 'comptes.json')
 };
 
 async function readJSON(file, fallback) {
@@ -153,6 +154,10 @@ const saveOtp = (store)    => kvSet('otp', store);
 const loadHistory = ()     => kvGet('history', []);
 const saveHistory = (h)    => kvSet('history', h);
 
+// ── Comptes de trading (multi-comptes) ──
+const loadComptes = ()     => kvGet('comptes', {});
+const saveComptes = (c)    => kvSet('comptes', c);
+
 // ── Base de connaissance (stratégies) ──
 async function listStrategies() {
   if (usePg) {
@@ -229,6 +234,7 @@ module.exports = {
   loadSessions, saveSessions,
   loadOtp, saveOtp,
   loadHistory, saveHistory,
+  loadComptes, saveComptes,
   listStrategies, saveStrategyRecord, removeStrategyRecord,
   listTrades, saveTradeRecord, removeTradeRecord,
   DATA_DIR

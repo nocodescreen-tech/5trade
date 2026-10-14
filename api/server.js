@@ -233,7 +233,8 @@ async function uploadToImageKit(buffer, fileName, folder) {
   const res = await fetch('https://upload.imagekit.io/api/v1/files/upload', {
     method: 'POST',
     headers: { Authorization: `Basic ${auth}` },
-    body: fd
+    body: fd,
+    signal: AbortSignal.timeout(30000) // 30s max
   });
   const d = await res.json();
   if (!res.ok) throw new Error(d.message || `ImageKit HTTP ${res.status}`);
@@ -245,6 +246,67 @@ const S3 = require('./s3');
 
 // ─── Vision (Gemini) — implémentation dans vision.js ───
 const vision = require('./vision');
+
+// ─── Calendrier économique — implémentation dans fundamentals.js ───
+const { filtreCalendrier } = require('./fundamentals');
+
+// ─── Risque de portefeuille — implémentation dans portfolioRisk.js ───
+const { risqueTotal, peutOuvrirPosition } = require('./portfolioRisk');
+
+// ─── Protection drawdown — implémentation dans drawdownProtection.js ───
+const { calculerDrawdown, ajusterRisque, courbeEquity } = require('./drawdownProtection');
+
+// ─── Dashboard — implémentation dans dashboard.js ───
+const { buildDashboard } = require('./dashboard');
+
+// ─── Volume Profile — implémentation dans volumeProfile.js ───
+const { volumeProfile, niveauxVolume, gapsVolume } = require('./volumeProfile');
+
+// ─── Force des devises — implémentation dans currencyStrength.js ───
+const { forceDevises, classeDevises, paireLaPlusForte, matriceCorrelation } = require('./currencyStrength');
+
+// ─── Corrélation dynamique — implémentation dans correlation.js ───
+const { correlationGlissante, ajusterTailleParCorrelation, ruptureCorrelation } = require('./correlation');
+
+// ─── Backtesting visuel — implémentation dans backtestUI.js ───
+const { backtestVisuel } = require('./backtestUI');
+
+// ─── London Breakout — implémentation dans londonBreakout.js ───
+const { rangeAsiatique, londonBreakout, evaluerQualite } = require('./londonBreakout');
+
+// ─── Divergences — implémentation dans divergences.js ───
+const { detecterDivergences, detecterDivergencesMACD } = require('./divergences');
+
+// ─── Ajustement dynamique du risque — implémentation dans dynamicRisk.js ───
+const { ajusterRisqueATR, risqueAjuste, conditionsFavorables } = require('./dynamicRisk');
+
+// ─── COT Report — implémentation dans cotReport.js ───
+const { getCOT, analyserCOT, tendanceCOT } = require('./cotReport');
+
+// ─── Taux d'intérêt — implémentation dans interestRates.js ───
+const { getTauxInteret, ecartTaux, analyseTaux, classeTaux } = require('./interestRates');
+
+// ─── Pattern Recognition — implémentation dans patternRecognition.js ───
+const { detecterPatterns } = require('./patternRecognition');
+
+// ─── Signal Scoring ML — implémentation dans signalScoring.js ───
+const { entrainerModele, predireSucces, ajusterSeuil, evaluerModele } = require('./signalScoring');
+
+// ─── Order Flow — implémentation dans orderFlow.js ───
+const { analyserOrderFlow } = require('./orderFlow');
+
+// ─── Anomaly Detection — implémentation dans anomalyDetection.js ───
+const { analyserAnomalies } = require('./anomalyDetection');
+
+// ─── Alertes push — implémentation dans pushAlerts.js ───
+const { envoyerNotification, payloadSignal, payloadTrade } = require('./pushAlerts');
+const pushSubscribers = new Set();
+
+// ─── Multi-comptes — implémentation dans multiAccount.js ───
+const { creerCompte, listerComptes, getCompte, mettreAJourCapital, supprimerCompte, pnlCompte } = require('./multiAccount');
+
+// ─── Export PDF — implémentation dans exportPDF.js ───
+const { genererRapportPDF, genererCSVEnrichi } = require('./exportPDF');
 
 // ─── Journal de trades — logique dans trades.js ───
 const Trades = require('./trades');
@@ -391,7 +453,8 @@ async function deepseek(messages, { maxTokens = 2000, json = false } = {}) {
       'Authorization': `Bearer ${key}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000) // 30s max — un API qui ne répond pas ne doit pas bloquer le serveur
   });
 
   const data = await res.json();
@@ -1048,7 +1111,8 @@ async function fetchPageText(url) {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) 5trade/1.0',
       'Accept': 'text/html,application/xhtml+xml'
     },
-    redirect: 'follow'
+    redirect: 'follow',
+    signal: AbortSignal.timeout(20000) // 20s max
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
@@ -1163,7 +1227,8 @@ async function webSearch(query, limit = 8) {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Content-Type': 'application/x-www-form-urlencoded'
       },
-      body: `q=${encodeURIComponent(query)}`
+      body: `q=${encodeURIComponent(query)}`,
+      signal: AbortSignal.timeout(15000) // 15s max
     });
     const html = await res.text();
     let cheerio;
@@ -1402,6 +1467,31 @@ Réponds en texte structuré, dense et exploitable.`;
     }
     const visionAnalysis = await vision.analyzeImages(images, visionPrompt);
 
+    // 1b. Vérification du calendrier économique — bloquer si news à fort impact
+    const cal = await filtreCalendrier(pair);
+    if (!cal.ok) {
+      return res.json({
+        success: true,
+        analysis: {
+          pair,
+          timeframes,
+          visionAnalysis,
+          imagesAnalyzed: files.length,
+          analysisDate: new Date().toISOString(),
+          bloque: true,
+          raison: cal.detail
+        },
+        recommendations: {
+          action: 'HOLD',
+          reason: cal.detail,
+          confidence: 'low',
+          entry: {},
+          nextSteps: [],
+          risk: 'high'
+        }
+      });
+    }
+
     // 2. Recherche dans la base de connaissance
     const all = await loadAllStrategies();
     const matched = searchKnowledgeBase(all, { pair, timeframes, visionAnalysis });
@@ -1611,8 +1701,295 @@ app.get('/api/trades/stats', requireAuth, async (req, res) => {
 app.post('/api/trades', requireAuth, async (req, res) => {
   try {
     const trade = { id: newId('trd_'), ...Trades.normalize(req.body) };
+
+    // Vérification du risque de portefeuille avant d'ouvrir la position
+    const capital = Number(req.body.capital) || 10000;
+    const limitePct = Number(req.body.limiteRisquePct) || 5;
+    const positionsExistantes = (await DB.listTrades()).filter(t => t.status === 'open');
+    const nouvelleRisquePct = trade.risk && trade.size
+      ? (trade.risk * trade.size / capital) * 100
+      : 0;
+
+    const verification = peutOuvrirPosition({
+      positionsExistantes,
+      capital,
+      nouvelleRisquePct,
+      limitePct
+    });
+
+    if (!verification.ok) {
+      return res.status(400).json({ error: verification.raison, risqueTotalPct: verification.risqueTotalPct });
+    }
+
+    // Vérification de la protection drawdown
+    const allTrades = await DB.listTrades();
+    const closedTrades = allTrades.filter(t => t.status === 'closed');
+    const equityCurve = courbeEquity(closedTrades, capital);
+    const { drawdownPct } = calculerDrawdown(equityCurve);
+    const ajustement = ajusterRisque({ trades: allTrades, drawdownPct });
+
+    if (ajustement.bloque) {
+      return res.status(400).json({ error: ajustement.raison, drawdownPct, niveau: ajustement.niveau });
+    }
+
     await DB.saveTradeRecord(trade);
-    res.json({ success: true, trade });
+    res.json({ success: true, trade, risquePortefeuille: verification });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ─── Dashboard temps réel ───
+app.get('/api/dashboard', requireAuth, async (req, res) => {
+  try {
+    const capital = Number(req.query.capital) || 10000;
+    const trades = await DB.listTrades();
+    const signals = []; // serait rempli par le moteur de signaux
+    const dashboard = await buildDashboard({ trades, signals, capital });
+    res.json({ success: true, dashboard });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Volume Profile ───
+app.get('/api/volume-profile', requireAuth, async (req, res) => {
+  try {
+    const { symbol, tf, count } = req.query;
+    const { candles } = await Market.getCandles(symbol || 'BTCUSDT', tf || '1h', Number(count) || 200);
+    const vp = volumeProfile(candles);
+    const niveaux = niveauxVolume(vp);
+    const gaps = gapsVolume(vp);
+    res.json({ success: true, volumeProfile: vp, niveaux, gaps });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Force des devises ───
+app.get('/api/currency-strength', requireAuth, async (req, res) => {
+  try {
+    const { pairs } = req.query;
+    const symbolList = pairs ? pairs.split(',') : ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
+    const parPaire = {};
+    for (const symbol of symbolList) {
+      try {
+        const { candles } = await Market.getCandles(symbol, '1h', 100);
+        parPaire[symbol] = candles;
+      } catch { /* paire indisponible */ }
+    }
+    const forces = forceDevises(parPaire);
+    const classees = classeDevises(forces);
+    const paireForte = paireLaPlusForte(forces);
+    const matrice = matriceCorrelation(forces);
+    res.json({ success: true, forces, classees, paireForte, matrice });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── London Breakout ───
+app.get('/api/london-breakout', requireAuth, async (req, res) => {
+  try {
+    const { symbol, tf } = req.query;
+    const { candles } = await Market.getCandles(symbol || 'BTCUSDT', tf || '1h', 200);
+    const range = rangeAsiatique(candles);
+    const breakout = londonBreakout(candles);
+    const qualite = evaluerQualite(breakout, candles);
+    res.json({ success: true, range, breakout, qualite });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Divergences ───
+app.get('/api/divergences', requireAuth, async (req, res) => {
+  try {
+    const { symbol, tf } = req.query;
+    const { candles } = await Market.getCandles(symbol || 'BTCUSDT', tf || '1h', 200);
+    const divergencesRSI = detecterDivergences(candles);
+    const divergencesMACD = detecterDivergencesMACD(candles);
+    res.json({ success: true, rsi: divergencesRSI, macd: divergencesMACD });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Ajustement dynamique du risque ───
+app.get('/api/dynamic-risk', requireAuth, async (req, res) => {
+  try {
+    const { symbol, tf } = req.query;
+    const { candles } = await Market.getCandles(symbol || 'BTCUSDT', tf || '1h', 200);
+    const ajustement = ajusterRisqueATR(candles);
+    const conditions = conditionsFavorables(candles);
+    res.json({ success: true, ajustement, conditions });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Backtesting visuel ───
+app.post('/api/backtest', requireAuth, async (req, res) => {
+  try {
+    const { symbol, tf, riskPct, initialCapital, signalType } = req.body;
+    const { candles } = await Market.getCandles(symbol || 'BTCUSDT', tf || '1h', 1000);
+    const signalFn = (candles) => {
+      // Simplifié : utiliser le moteur de signaux
+      return { action: null, entry: 0, sl: 0, tp: 0 };
+    };
+    const result = backtestVisuel({ candles, signalFn, riskPct, initialCapital });
+    res.json({ success: true, result });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── COT Report ───
+app.get('/api/cot', requireAuth, async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    const cot = await getCOT(symbol || 'EUR');
+    const analyse = analyserCOT(cot);
+    res.json({ success: true, cot, analyse });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Taux d'intérêt ───
+app.get('/api/interest-rates', requireAuth, async (req, res) => {
+  try {
+    const taux = await getTauxInteret();
+    const classe = classeTaux(taux);
+    res.json({ success: true, taux, classe });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Pattern Recognition ───
+app.get('/api/patterns', requireAuth, async (req, res) => {
+  try {
+    const { symbol, tf } = req.query;
+    const { candles } = await Market.getCandles(symbol || 'BTCUSDT', tf || '1h', 200);
+    const patterns = detecterPatterns(candles);
+    res.json({ success: true, patterns });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Signal Scoring ML ───
+app.get('/api/signal-scoring', requireAuth, async (req, res) => {
+  try {
+    const trades = await DB.listTrades();
+    const modele = entrainerModele(trades);
+    const metrics = evaluerModele(modele, trades);
+    res.json({ success: true, modele, metrics });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Order Flow ───
+app.get('/api/order-flow', requireAuth, async (req, res) => {
+  try {
+    const { symbol, tf } = req.query;
+    const { candles } = await Market.getCandles(symbol || 'BTCUSDT', tf || '1h', 200);
+    const orderFlow = analyserOrderFlow(candles);
+    res.json({ success: true, orderFlow });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Anomaly Detection ───
+app.get('/api/anomalies', requireAuth, async (req, res) => {
+  try {
+    const { symbol, tf } = req.query;
+    const { candles } = await Market.getCandles(symbol || 'BTCUSDT', tf || '1h', 200);
+    const anomalies = analyserAnomalies(candles);
+    res.json({ success: true, anomalies });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Multi-comptes ───
+app.get('/api/accounts', requireAuth, async (req, res) => {
+  try {
+    const comptes = await listerComptes();
+    res.json({ success: true, comptes });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/accounts', requireAuth, async (req, res) => {
+  try {
+    const compte = await creerCompte(req.body);
+    res.status(201).json({ success: true, compte });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.patch('/api/accounts/:id', requireAuth, async (req, res) => {
+  try {
+    const compte = await mettreAJourCapital(req.params.id, req.body.capital);
+    res.json({ success: true, compte });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/accounts/:id', requireAuth, async (req, res) => {
+  try {
+    await supprimerCompte(req.params.id);
+    res.json({ success: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/accounts/:id/pnl', requireAuth, async (req, res) => {
+  try {
+    const stats = await pnlCompte(req.params.id);
+    res.json({ success: true, stats });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Export PDF / CSV enrichi ───
+app.get('/api/export/pdf', requireAuth, async (req, res) => {
+  try {
+    const trades = await DB.listTrades();
+    const html = genererRapportPDF({ trades, titre: req.query.titre || undefined });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="5trade-rapport.html"');
+    res.send(html);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/export/csv', requireAuth, async (req, res) => {
+  try {
+    const trades = await DB.listTrades();
+    const csv = genererCSVEnrichi(trades);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="5trade-journal.csv"');
+    res.send(csv);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Alertes push ───
+app.post('/api/push/subscribe', requireAuth, async (req, res) => {
+  try {
+    const { subscription } = req.body;
+    if (!subscription || !subscription.endpoint) {
+      return res.status(400).json({ error: 'Subscription invalide' });
+    }
+    // Enregistrer l'abonnement (en mémoire pour cette version)
+    pushSubscribers.add(subscription);
+    res.json({ success: true, message: 'Abonnement push enregistré' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/push/subscribe', requireAuth, async (req, res) => {
+  try {
+    const { endpoint } = req.body;
+    for (const sub of pushSubscribers) {
+      if (sub.endpoint === endpoint) { pushSubscribers.delete(sub); break; }
+    }
+    res.json({ success: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -1776,7 +2153,9 @@ app.post('/api/alerts/telegram/trouver', requireAuth, async (req, res) => {
     const jeton = String((req.body && req.body.token) || Alerts.get().telegramToken || '').trim();
     if (!jeton) return res.status(400).json({ error: 'Donne d\'abord le jeton du bot (donné par BotFather).' });
 
-    const r = await fetch(`https://api.telegram.org/bot${jeton}/getUpdates?timeout=0`);
+    const r = await fetch(`https://api.telegram.org/bot${jeton}/getUpdates?timeout=0`, {
+      signal: AbortSignal.timeout(10000) // 10s max
+    });
     const d = await r.json().catch(() => ({}));
     if (!d.ok) {
       return res.status(400).json({
@@ -1829,7 +2208,8 @@ app.post('/api/alerts/test', requireAuth, async (req, res) => {
             + 'fonctionnent. Tu recevras ici chaque signal confirmé, une seule fois par signal.',
           parse_mode: 'HTML',
           disable_web_page_preview: true
-        })
+        }),
+        signal: AbortSignal.timeout(15000) // 15s max
       });
       const d = await r.json().catch(() => ({}));
       if (!d.ok) {

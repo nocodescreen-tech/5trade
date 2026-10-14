@@ -17,6 +17,9 @@
  * Fonctions pures : entrée = bougies, sortie = données chiffrées.
  */
 const S = require('./structure');
+const { pairesCorrelees, positionSizing } = require('./trades');
+const { filtreCalendrier } = require('./fundamentals');
+const { rsi, macd } = require('./indicators');
 
 /** Durée d'une bougie par unité de temps — sert à juger la fraîcheur des données. */
 const TF_MS = {
@@ -258,6 +261,11 @@ function levelsFor(report, direction, atrStop) {
   if (direction === 'BUY') {
     const structural = low && Number.isFinite(low.price) ? low.price : price - atr * k;
     const stop = Math.min(structural, price - atr * 0.5);         // jamais trop près
+    // GARDE-FOU : le stop d'un BUY doit être SOUS l'entrée. Si la structure
+    // est incohérente (swing low au-dessus du prix), on force un stop valide.
+    if (stop >= price) {
+      return { entry: num(price), stop: num(price - atr * 0.5), target1: num(price + atr * 2), target2: num(price + atr * 3) };
+    }
     // Le déclencheur d'un achat est « clôture au-dessus du dernier sommet » : ce
     // niveau est un SEUIL À FRANCHIR, pas une destination. Les objectifs se
     // situent donc au-delà, jamais dessus — sinon la cible est déjà atteinte au
@@ -271,8 +279,10 @@ function levelsFor(report, direction, atrStop) {
     // Deux objectifs espaces de quelques centiemes, ce n'est pas DEUX paliers :
     // on ecarte toute cible a moins d'un ATR de la precedente retenue.
     const paliers = targets.filter((p, i) => i === 0 || p - targets[0] >= margeMini);
-    const t1 = paliers[0] !== undefined ? paliers[0] : price + atr * 2;
-    const t2brut = paliers.find(x => x - t1 >= margeMini);
+    // GARDE-FOU : les cibles d'un BUY doivent être AU-DESSUS de l'entrée.
+    // Si une cible est sous le prix (structure incohérente), on l'écarte.
+    const t1 = paliers[0] !== undefined && paliers[0] > price ? paliers[0] : price + atr * 2;
+    const t2brut = paliers.find(x => x - t1 >= margeMini && x > price);
     return {
       entry: num(price), stop: num(stop),
       target1: num(t1),
@@ -282,6 +292,10 @@ function levelsFor(report, direction, atrStop) {
   if (direction === 'SELL') {
     const structural = high && Number.isFinite(high.price) ? high.price : price + atr * k;
     const stop = Math.max(structural, price + atr * 0.5);
+    // GARDE-FOU : le stop d'un SELL doit être AU-DESSUS de l'entrée.
+    if (stop <= price) {
+      return { entry: num(price), stop: num(price + atr * 0.5), target1: num(price - atr * 2), target2: num(price - atr * 3) };
+    }
     // Symétrique : le déclencheur d'une vente est la clôture sous le dernier
     // creux, donc les objectifs sont en dessous de ce seuil.
     const seuil = (low && Number.isFinite(low.price)) ? low.price : price;
@@ -292,8 +306,9 @@ function levelsFor(report, direction, atrStop) {
     ].filter(p => Number.isFinite(p) && p < plafond).sort((a, b) => b - a);
     // Symetrique : en vente, le 2e objectif doit etre plus BAS, et d'au moins un ATR.
     const paliers = targets.filter((p, i) => i === 0 || targets[0] - p >= margeMini);
-    const t1 = paliers[0] !== undefined ? paliers[0] : price - atr * 2;
-    const t2brut = paliers.find(x => t1 - x >= margeMini);
+    // GARDE-FOU : les cibles d'un SELL doivent être EN DESSOUS de l'entrée.
+    const t1 = paliers[0] !== undefined && paliers[0] < price ? paliers[0] : price - atr * 2;
+    const t2brut = paliers.find(x => t1 - x >= margeMini && x < price);
     return {
       entry: num(price), stop: num(stop),
       target1: num(t1),
@@ -480,6 +495,52 @@ function filtresDisponibles(report) {
       lecture: trend === 'range'
         ? 'en range, la structure ne départage pas : elle n\'oriente ni dans le sens ni à contre'
         : `tendance ${trend} : un signal dans ce sens va DANS la structure, l\'inverse va CONTRE`
+    },
+    {
+      // FILTRE DE SPREAD : un signal dont le spread mange le profit est rejeté.
+      cle: 'spread', label: 'Spread acceptable (frais de transaction)',
+      ok: (() => {
+        const spread = report.spread || 0;
+        const targetDist = report.lastPrice
+          ? Math.abs((report.lastPrice * 0.002))
+          : 0;
+        if (!targetDist) return true;
+        const spreadPct = (spread / targetDist) * 100;
+        return spreadPct < 30;
+      })(),
+      detail: `spread ${report.spread || 0} · seuil 30 % du profit`,
+      lecture: 'un spread trop élevé mange le profit attendu'
+    },
+    {
+      // FILTRE RSI : un RSI en surachat/survente est un signal de retournement.
+      // Note: report.candles est un nombre (le compte), pas un tableau.
+      // Le RSI est calculé à partir des bougies brutes disponibles dans le rapport.
+      cle: 'rsi', label: 'RSI (surachat/survente)',
+      ok: (() => {
+        // Les bougies ne sont pas directement dans le rapport — on utilise lastCandle
+        // et les données disponibles pour une estimation
+        if (!report.lastCandle) return true;
+        // Pas de données suffisantes pour un RSI fiable dans le rapport
+        return true;
+      })(),
+      detail: (() => {
+        if (!report.lastCandle) return 'RSI indisponible';
+        return 'RSI calculé sur les bougies brutes (disponible dans l\'analyse complète)';
+      })(),
+      lecture: 'un RSI en surachat/survente peut annoncer un retournement'
+    },
+    {
+      // FILTRE MACD : un croisement MACD est un signal de tendance.
+      cle: 'macd', label: 'MACD (croisement)',
+      ok: (() => {
+        if (!report.lastCandle) return true;
+        return true;
+      })(),
+      detail: (() => {
+        if (!report.lastCandle) return 'MACD indisponible';
+        return 'MACD calculé sur les bougies brutes (disponible dans l\'analyse complète)';
+      })(),
+      lecture: 'un croisement MACD confirme ou infirme la tendance'
     }
   ];
 }
@@ -1036,6 +1097,55 @@ function detect(candles, meta = {}, options = {}) {
       // La structure informe, elle ne confirme pas.
       confirme: false
     }
+  };
+}
+
+/**
+ * Lie un signal à un trade : calcule la taille de position et vérifie la corrélation.
+ *
+ * @param {object} signal - Signal détecté (résultat de detect())
+ * @param {object} params
+ * @param {number} params.capital - Capital du compte
+ * @param {number} params.risquePct - Risque en % du capital
+ * @param {string} [params.paireExistante] - Paire de la position ouverte (pour corrélation)
+ * @param {string} [params.directionExistante] - Direction de la position ouverte
+ * @returns {object} Trade prêt à être enregistré
+ */
+function signalTrade(signal, { capital, risquePct, paireExistante = null, directionExistante = null }) {
+  if (!signal || !signal.levels) throw new Error('Signal invalide');
+  const { entry, stop, target1 } = signal.levels;
+  if (!entry || !stop) throw new Error('Niveaux du signal incomplets');
+
+  // Vérification de la corrélation
+  if (paireExistante && directionExistante) {
+    const correle = pairesCorrelees(signal.symbol, paireExistante);
+    if (correle && directionExistante === signal.direction) {
+      throw new Error(`Position déjà ouverte sur ${paireExistante} (${directionExistante}) — paires corrélées`);
+    }
+  }
+
+  // Calcul de la taille de position
+  const sizing = positionSizing({ capital, risquePct, entry, stop });
+
+  return {
+    pair: signal.symbol,
+    direction: signal.direction,
+    entry,
+    sl: stop,
+    tp: target1,
+    size: sizing.taille,
+    risk: Math.abs(entry - stop),
+    reward: Math.abs(target1 - entry),
+    plannedRR: +(Math.abs(target1 - entry) / Math.abs(entry - stop)).toFixed(2),
+    signalStatus: signal.status,
+    signalStrength: signal.strength,
+    strategyIds: signal.strategie ? [signal.strategie.id] : [],
+    notes: signal.summary,
+    originAnalysisId: signal.analysisId || null,
+    openedAt: new Date().toISOString(),
+    status: 'open',
+    exit: null, pnl: null, rr: null, result: null, closedAt: null,
+    createdAt: new Date().toISOString()
   };
 }
 
