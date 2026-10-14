@@ -133,17 +133,24 @@ function fvgs(candles) {
  * Order blocks : la dernière bougie de sens opposé avant une impulsion
  * (mouvement qui dépasse le haut/bas des `impulse` bougies précédentes).
  */
-function orderBlocks(candles, impulse = 3) {
+function orderBlocks(candles, impulse = 3, forceMinAtr = 0.3) {
   const out = [];
+  // Une « impulsion » qui dépasse le niveau précédent de 0,01 % est du bruit, pas
+  // une impulsion : elle produisait des order blocks dans tous les sens. On exige
+  // que le dépassement vaille une fraction d'ATR (0,3 par défaut) — la volatilité
+  // de référence, donc un seuil qui s'adapte au marché au lieu d'être un
+  // pourcentage fixe arbitraire.
+  const a = atr(candles, 14);
+  const marge = a ? a * forceMinAtr : 0;
   for (let i = impulse; i < candles.length - 1; i++) {
     const c = candles[i], nxt = candles[i + 1];
     const priorHigh = Math.max(...candles.slice(i - impulse, i).map(x => x.h));
     const priorLow = Math.min(...candles.slice(i - impulse, i).map(x => x.l));
-    if (c.c < c.o && nxt.c > priorHigh) {       // OB haussier
+    if (c.c < c.o && nxt.c > priorHigh + marge) {       // OB haussier
       const zone = { type: 'bullish', low: c.l, high: c.h, i, t: c.t };
       const broken = candles.slice(i + 2).some(x => x.c < zone.low);
       if (!broken) out.push(zone);
-    } else if (c.c > c.o && nxt.c < priorLow) { // OB baissier
+    } else if (c.c > c.o && nxt.c < priorLow - marge) { // OB baissier
       const zone = { type: 'bearish', low: c.l, high: c.h, i, t: c.t };
       const broken = candles.slice(i + 2).some(x => x.c > zone.high);
       if (!broken) out.push(zone);
@@ -251,17 +258,23 @@ function sweeps(candles, w = 2) {
  * une zone de demande cassée devient une zone d'offre, et inversement. C'est la
  * « Breaker ∩ FVG » de la stratégie Unicorn.
  */
-function breakers(candles, impulse = 3) {
+function breakers(candles, impulse = 3, forceMinAtr = 0.3) {
   const out = [];
+  // Même exigence que pour les order blocks : un « breaker » n'a de sens que si
+  // l'impulsion qui l'a créé était réelle. Sans ce filtre, un dépassement de
+  // 0,01 % suffisait à fabriquer une zone — et la stratégie Unicorn (Breaker ∩ FVG)
+  // s'appuyait dessus.
+  const a = atr(candles, 14);
+  const marge = a ? a * forceMinAtr : 0;
   for (let i = impulse; i < candles.length - 1; i++) {
     const c = candles[i], nxt = candles[i + 1];
     const priorHigh = Math.max(...candles.slice(i - impulse, i).map(x => x.h));
     const priorLow = Math.min(...candles.slice(i - impulse, i).map(x => x.l));
-    if (c.c < c.o && nxt.c > priorHigh) {
+    if (c.c < c.o && nxt.c > priorHigh + marge) {
       const k = candles.slice(i + 2).findIndex(x => x.c < c.l);
       if (k >= 0) out.push({ type: 'breaker baissier', low: +c.l.toFixed(6), high: +c.h.toFixed(6),
         i, t: c.t, brokenAt: candles[i + 2 + k].t });
-    } else if (c.c > c.o && nxt.c < priorLow) {
+    } else if (c.c > c.o && nxt.c < priorLow - marge) {
       const k = candles.slice(i + 2).findIndex(x => x.c > c.h);
       if (k >= 0) out.push({ type: 'breaker haussier', low: +c.l.toFixed(6), high: +c.h.toFixed(6),
         i, t: c.t, brokenAt: candles[i + 2 + k].t });

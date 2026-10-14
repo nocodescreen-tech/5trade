@@ -183,7 +183,31 @@ function rulePosition(report) {
   const pd = report.premiumDiscount;
   if (!pd) return null;
   const trend = report.structure.trend;
-  if (pd.position === 'discount' && trend !== 'bearish') {
+  // PREMIUM / DISCOUNT : la FORCE dépend de la tendance.
+  // La condition était `trend !== 'bearish'`, ce qui traitait un range et une
+  // tendance haussière de la même façon : R4 votait 0,4 dans les deux cas, alors
+  // qu'un achat en discount DANS une tendance haussière (continuation) et un
+  // achat au bord bas d'un range (retour à la moyenne) ne se valent pas.
+  // Premier réflexe : faire s'abstenir R4 en range. C'était trop raide — le bord
+  // d'un range est exploitable, simplement moins fiable. On garde donc le vote,
+  // avec une force réduite : la position parle, son poids dit le reste.
+  const dansLeSensDuTrend = (pd.position === 'discount' && trend === 'bullish')
+    || (pd.position === 'premium' && trend === 'bearish');
+  if (!dansLeSensDuTrend && trend === 'range') {
+    // En range : le bord bas s'achète, le bord haut se vend — mais sans tendance
+    // pour porter le mouvement, la force est divisée par deux.
+    return {
+      rule: 'R4',
+      name: pd.position === 'discount' ? 'Discount (bord bas d\'un range)' : 'Premium (bord haut d\'un range)',
+      direction: pd.position === 'discount' ? 'BUY' : 'SELL',
+      strength: 0.2,
+      detail: `prix ${num(report.lastPrice)} ${pd.position === 'discount' ? 'sous' : 'au-dessus de'} l'équilibre ${num(pd.equilibrium)}, sans tendance pour porter le mouvement`,
+      level: num(pd.equilibrium),
+      preuve: `range:${num(pd.low)}-${num(pd.high)}`,
+      source: 'position dans le range (sans tendance)'
+    };
+  }
+  if (pd.position === 'discount' && trend === 'bullish') {
     return {
       rule: 'R4', name: 'Discount (zone basse du range)',
       direction: 'BUY', strength: 0.4,
@@ -194,7 +218,7 @@ function rulePosition(report) {
       preuve: `range:${num(pd.low)}-${num(pd.high)}`, source: 'position dans le range'
     };
   }
-  if (pd.position === 'premium' && trend !== 'bullish') {
+  if (pd.position === 'premium' && trend === 'bearish') {
     return {
       rule: 'R4', name: 'Premium (zone haute du range)',
       direction: 'SELL', strength: 0.4,

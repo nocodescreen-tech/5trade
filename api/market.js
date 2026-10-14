@@ -405,8 +405,14 @@ async function getCandles(symbol, tf, count = 300, providerId) {
   // n'était alimenté que par le flux temps réel : flux mort = buffer figé pour
   // toujours, et toutes les lectures suivantes servaient la même bougie morte.
   const maj = bufferMaj.get(k) || 0;
-  if (buf && buf.length >= Math.min(count, 500) && (Date.now() - maj) < FRAICHEUR_MS) {
-    return { candles: buf.slice(-count), provider: p.id, source: 'live' };
+  // Le buffer n'est servi que s'il couvre la demande ENTIÈRE.
+  // L'ancienne condition était `buf.length >= Math.min(count, 500)` : le plafond
+  // de 500 faisait passer un buffer de 500 bougies pour suffisant alors qu'on en
+  // demandait 1000 — il en manquait la moitié, et la réponse annonçait quand même
+  // `source: 'live'`, sans dire quoi que ce soit. L'analyse raisonne alors sur un
+  // historique tronqué sans le savoir (PDH/PDL, ATR, pivots en dépendent).
+  if (buf && buf.length >= count && (Date.now() - maj) < FRAICHEUR_MS) {
+    return { candles: buf.slice(-count), provider: p.id, source: 'live', fournies: count, demandees: count };
   }
   try {
     const candles = marquerEnCours(await p.candles(symbol, tf, count));

@@ -19,9 +19,12 @@ const cors = require('cors');
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
+const compression = require('compression');
 const DB = require('./db');
+// UN SEUL chargement. Le second appel (fallback « .env dans api/ ») etait inutile
+// et risque : dotenv cherche alors dans le dossier courant et peut ecraser des
+// valeurs deja chargees par un fichier non prevu.
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
-require('dotenv').config(); // fallback si .env présent dans api/
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -61,8 +64,38 @@ app.use(cors({
     cb(null, false);                                                      // tout le reste : non
   }
 }));
-app.use(express.json({ limit: '60mb' }));
-app.use(express.urlencoded({ extended: true, limit: '60mb' }));
+// Compression : les reponses de bougies depassent souvent 100 Ko de JSON, qui se
+// compriment a ~10 %. Sans elle, chaque rafraichissement de graphique transporte
+// l'integralite du texte.
+app.use(compression());
+
+// En-tetes de securite, poses a la main plutot que via helmet : cinq lignes
+// suffisent ici, et ca evite une dependance de plus.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');      // pas d'interpretation abusive du type
+  res.setHeader('X-Frame-Options', 'DENY');                 // l'appli ne s'affiche pas dans une iframe
+  res.setHeader('Referrer-Policy', 'same-origin');          // pas de fuite d'URL vers l'exterieur
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+  next();
+});
+
+// Limite du corps de requete : 60 Mo permettait de saturer la memoire du serveur
+// avec quelques requetes. 12 Mo couvrent les captures d'ecran et les PDF joints ;
+// surchargeable pour un besoin ponctuel.
+const LIMITE_CORPS = process.env.BODY_LIMIT || '12mb';
+app.use(express.json({ limit: LIMITE_CORPS }));
+app.use(express.urlencoded({ extended: true, limit: LIMITE_CORPS }));
+// Sonde de sante : permet de savoir si le serveur repond SANS traverser l'auth.
+// Sans elle, un simple controle de disponibilite devait deviner une route.
+app.get('/health', (req, res) => {
+  res.json({
+    ok: true,
+    uptime: Math.round(process.uptime()),
+    memoireMo: Math.round(process.memoryUsage().rss / 1048576),
+    at: new Date().toISOString()
+  });
+});
+
 app.use('/uploads', express.static(UPLOADS_DIR));
 // Frontend servi sur la même origine (évite les soucis de CORS)
 // Les fichiers statiques. La page HTML ne doit JAMAIS être mise en cache : le

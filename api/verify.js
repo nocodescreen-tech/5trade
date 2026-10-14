@@ -536,6 +536,11 @@ function tinyPng(W = 64, H = 40) {
     const fichierTest = path.join(os.tmpdir(), `5trade-alertes-${process.pid}.json`);
     process.env.ALERTS_FICHIER = fichierTest;
     try { fs.unlinkSync(fichierTest); } catch (e) { /* pas encore créé */ }
+    // try/finally : le nettoyage ci-dessous DOIT s'exécuter même si une étape
+    // leve (une assertion, un appel réseau). Sans le finally, une exception
+    // laissait ALERTS_FICHIER dans l'environnement, et toute lecture d'alertes
+    // ensuite visait le fichier de test.
+    try {
     const Al = require('./alerts.js');
     const serie = () => {
       const out = []; let ts = 0;
@@ -596,8 +601,10 @@ function tinyPng(W = 64, H = 40) {
     ok('alertes : désactivées après les tests (aucun envoi non voulu)', Al.get().actif === false);
     // Le fichier de test est jeté, et l'environnement remis en place : la
     // configuration réelle de l'utilisateur n'a jamais été ouverte.
-    try { fs.unlinkSync(fichierTest); } catch (e) { /* déjà absent */ }
-    delete process.env.ALERTS_FICHIER;
+    } finally {
+      try { fs.unlinkSync(fichierTest); } catch (e) { /* déjà absent */ }
+      delete process.env.ALERTS_FICHIER;
+    }
   }
 
   // ── Mode auto / manuel : les stratégies de la base deviennent des moteurs ──
@@ -1534,6 +1541,48 @@ function tinyPng(W = 64, H = 40) {
       !/force \{\(.*strength \* 100\)/.test(jsx) && !/force \{Math\.round\(\(a\.strength/.test(jsx));
     ok('l\'écran affiche le niveau et le score nu',
       /forceNiveau/.test(jsx) && /strength \|\| 0\)\.toFixed\(2\)/.test(jsx));
+  }
+
+  // ── R4 : LE POIDS D'UNE POSITION DÉPEND DE LA TENDANCE ──
+  // `trend !== 'bearish'` traitait un range et une tendance haussière à égalité :
+  // R4 votait 0,4 dans les deux cas. Un achat en discount DANS une tendance
+  // haussière (continuation) et un achat au bord bas d'un range (retour à la
+  // moyenne) ne se valent pas — la force le dit maintenant.
+  {
+    const R4 = Sig.rulePosition;
+    const prix = 100;
+    const rapport = (trend, position, pd) => ({
+      lastPrice: prix, atr14: 1,
+      structure: { trend },
+      premiumDiscount: { position, equilibrium: 100, low: 96, high: 104, ...(pd || {}) }
+    });
+
+    const enTendance = R4(rapport('bullish', 'discount'));
+    const enRange = R4(rapport('range', 'discount'));
+    const contreTendance = R4(rapport('bearish', 'discount'));
+
+    ok('R4 vote en discount DANS une tendance haussière',
+      enTendance && enTendance.direction === 'BUY', enTendance && enTendance.direction);
+    ok('et avec la force pleine (0,4)',
+      enTendance && enTendance.strength === 0.4, enTendance && String(enTendance.strength));
+
+    ok('R4 vote encore en range — le bord du range est exploitable',
+      enRange && enRange.direction === 'BUY', enRange && enRange.direction);
+    ok('mais avec une force RÉDUITE (0,2) : pas de tendance pour porter le mouvement',
+      enRange && enRange.strength === 0.2, enRange && String(enRange.strength));
+    ok('sa lecture dit pourquoi la force est réduite',
+      enRange && /sans tendance/.test(enRange.detail), enRange && enRange.detail);
+
+    ok('R4 s\'abstient quand la position va CONTRE la tendance',
+      contreTendance === null, JSON.stringify(contreTendance));
+
+    // La symétrie, pour ne pas avoir corrigé un seul côté.
+    const venteRange = R4(rapport('range', 'premium'));
+    ok('en range, un premium se vend aussi (force réduite)',
+      venteRange && venteRange.direction === 'SELL' && venteRange.strength === 0.2,
+      venteRange && venteRange.direction + ' ' + venteRange.strength);
+    ok('en tendance baissière, un premium se vend à force pleine',
+      (() => { const r = R4(rapport('bearish', 'premium')); return r && r.direction === 'SELL' && r.strength === 0.4; })());
   }
 
   // ── L'ABSTENTION D'UNE RÈGLE DOIT LAISSER UNE TRACE ──
