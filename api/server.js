@@ -354,10 +354,19 @@ async function saveStrategy(strategy) {
   return strategy;
 }
 
-async function appendHistory(entry) {
-  const history = await DB.loadHistory();
-  history.unshift(entry);
-  await DB.saveHistory(history.slice(0, 200));
+// Même schéma lecture-modification-écriture que les OTP : `await loadHistory()`
+// puis `await saveHistory()`. Deux analyses lancées en même temps lisaient le
+// même historique et la seconde écrasait la première — une entrée disparaissait
+// sans trace. On enchaîne les ajouts.
+let fileHistoire = Promise.resolve();
+function appendHistory(entry) {
+  const suite = fileHistoire.then(async () => {
+    const history = await DB.loadHistory();
+    history.unshift(entry);
+    await DB.saveHistory(history.slice(0, 200));
+  });
+  fileHistoire = suite.then(() => {}, () => {});
+  return suite;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -539,7 +548,37 @@ function httpError(message, status) {
   return e;
 }
 
-async function issueOtp(username, purpose, { enforceCooldown = true } = {}) {
+/**
+ * SÉRIALISATION DES OPÉRATIONS OTP.
+ *
+ * `issueOtp` et `verifyOtp` suivent tous deux le schéma : lire le store
+ * (`await DB.loadOtp()`) → le modifier → l'écrire (`await DB.saveOtp()`).
+ * Node est mono-thread, mais l'`await` de la lecture ouvre une vraie fenêtre :
+ * deux appels simultanés lisent le MÊME store, et le second écrase le premier.
+ *
+ * Conséquence concrète sur `verifyOtp` : `rec.attempts++` peut être perdu, donc
+ * `OTP_MAX_ATTEMPTS` — la protection contre le bruteforce du code à 6 chiffres —
+ * se contourne en envoyant les tentatives EN PARALLÈLE. Un compteur de sécurité
+ * qui peut être perdu n'est pas un compteur.
+ *
+ * On enchaîne donc ces opérations au lieu de les entrelacer. Le coût est nul
+ * (l'utilisateur est unique, ces appels ne durent pas) et l'invariant redevient
+ * vrai : la dernière écriture part TOUJOURS d'un store à jour.
+ */
+let fileOtp = Promise.resolve();
+function avecOtp(fn) {
+  const suite = fileOtp.then(fn, fn);
+  fileOtp = suite.then(() => {}, () => {});   // la file ne casse jamais
+  return suite;
+}
+function issueOtp(username, purpose, opts) {
+  return avecOtp(() => issueOtpBrut(username, purpose, opts));
+}
+function verifyOtp(username, code, purpose) {
+  return avecOtp(() => verifyOtpBrut(username, code, purpose));
+}
+
+async function issueOtpBrut(username, purpose, { enforceCooldown = true } = {}) {
   const store = await DB.loadOtp();
   const now = Date.now();
   const rec = store[username] || { sends: [] };
@@ -574,7 +613,7 @@ async function issueOtp(username, purpose, { enforceCooldown = true } = {}) {
   return code;
 }
 
-async function verifyOtp(username, code, purpose) {
+async function verifyOtpBrut(username, code, purpose) {
   if (!/^\d{6}$/.test(String(code || ''))) throw httpError('Le code doit contenir 6 chiffres.', 400);
 
   const store = await DB.loadOtp();

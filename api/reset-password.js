@@ -73,7 +73,12 @@ if (issues.length) {
   console.log(`  stockage    : ${DB.isPg() ? 'PostgreSQL' : 'fichiers JSON (data/)'}`);
   console.log(`  utilisateur : ${account.username}`);
   console.log(`  email       : ${account.email}`);
-  console.log(`  mot de passe: ${password}`);
+  // Le mot de passe vient d'un argument (ou du defaut connu) : l'afficher
+  // n'apprend rien a qui l'a tape. On le masque quand meme — une sortie
+  // redirigee dans un fichier ne doit pas y laisser le secret en clair.
+  const voile = password.length <= 4 ? '****'
+    : password.slice(0, 2) + '*'.repeat(Math.max(3, password.length - 4)) + password.slice(-2);
+  console.log(`  mot de passe: ${voile}  (${password.length} caracteres)`);
   console.log('  (codes OTP et sessions purgés — reconnectez-vous ; redémarrez le serveur)');
 
   if (DB.isPg && typeof DB.close === 'function') await DB.close();

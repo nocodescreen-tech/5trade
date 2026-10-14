@@ -1817,6 +1817,81 @@ function tinyPng(W = 64, H = 40) {
     }
   }
 
+  // ── Ordre et continuité des bougies : ce que tout le moteur suppose ──
+  // Douze points du rapport externe n'en faisaient qu'un : `swings`, `fvgs`,
+  // `orderBlocks`, `liquidityPools`, `sweeps`, `breakers`, `displacements`,
+  // `premiumDiscount`, `fibLevels`, `previousLevels`, `sessions`, `lastCandleInfo`
+  // parcourent la liste en supposant une suite CHRONOLOGIQUE ET SANS TROU. Aucun
+  // tri explicite n'existait, et deux bougies de même horodatage faussaient les
+  // pivots en silence. Un swing détecté de part et d'autre d'un trou n'est pas
+  // un swing : ce qui manque doit être COMPTÉ, jamais masqué.
+  {
+    const { assainirBougies } = require('./market.js');
+    const c = (t, h, l) => ({ t, o: 100, h, l, c: 100, v: 1, closed: true });
+    const base = [c(0, 101, 99), c(60000, 102, 100), c(120000, 103, 101)];
+
+    const desordre = assainirBougies([c(120000, 103, 101), c(0, 101, 99), c(60000, 102, 100)], '1m');
+    ok('les bougies sont remises dans l\'ordre chronologique',
+      desordre.bougies.map(x => x.t).join(',') === '0,60000,120000',
+      desordre.bougies.map(x => x.t).join(','));
+
+    const doublon = assainirBougies([c(0, 101, 99), c(60000, 102, 100), c(60000, 999, 998)], '1m');
+    ok('un horodatage en double est dédoublonné',
+      doublon.bougies.length === 2 && doublon.doublons === 1, `${doublon.bougies.length} bougies`);
+    ok('la PLUS RÉCENTE gagne sur le doublon',
+      doublon.bougies[1].h === 999, String(doublon.bougies[1].h));
+
+    const troue = assainirBougies([c(0, 101, 99), c(300000, 105, 104)], '1m');
+    ok('un trou est détecté et compté',
+      troue.trous.length === 1 && troue.trous[0].manquantes === 4,
+      JSON.stringify(troue.trous[0] || null));
+    ok('une suite continue ne signale AUCUN trou',
+      assainirBougies(base, '1m').trous.length === 0);
+    ok('le rapport de getCandles transporte les trous',
+      /trous: a\.trous/.test(fs.readFileSync(path.join(__dirname, 'market.js'), 'utf8')));
+  }
+
+  // ── Flux de marché : ne plus mourir en silence ──
+  // L'erreur WebSocket était avalée par `ws.on('error', () => {})` : le flux se
+  // figeait sans une ligne de log, et le symptôme visible était « le panneau des
+  // ticks bouge, le graphique non ». La reconnexion, elle, était une boucle
+  // toutes les 3 s SANS limite : un fournisseur durablement down était martelé.
+  {
+    const mSrc = fs.readFileSync(path.join(__dirname, 'market.js'), 'utf8');
+    ok('l\'erreur de flux n\'est plus avalée en silence',
+      !/ws\.on\('error', \(\) => \{\}\)/.test(mSrc) && /erreur socket/.test(mSrc));
+    ok('la reconnexion a un compteur de tentatives',
+      /essaisFlux/.test(mSrc) && /MAX_ESSAIS_FLUX/.test(mSrc));
+    ok('l\'attente croît avec les tentatives (backoff)',
+      /Math\.min\(3000 \* essaisFlux/.test(mSrc));
+    ok('le compteur repart à zéro quand le flux s\'ouvre',
+      /essaisFlux = 0/.test(mSrc));
+  }
+
+  // ── Compteurs d'OTP : un compteur de sécurité ne peut pas être perdu ──
+  // `verifyOtp` fait `await loadOtp()` puis `rec.attempts++` puis `await saveOtp()`.
+  // Deux essais EN PARALLÈLE lisaient le même store et le second écrasait le
+  // premier : `OTP_MAX_ATTEMPTS` (la protection contre le bruteforce du code à
+  // 6 chiffres) se contournait en envoyant les tentatives simultanément.
+  {
+    const srvSrc = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('les opérations OTP sont sérialisées (file d\'attente)',
+      /function avecOtp/.test(srvSrc) && /let fileOtp = Promise\.resolve\(\)/.test(srvSrc));
+    ok('issueOtp passe par la file', /function issueOtp\(username, purpose, opts\)/.test(srvSrc));
+    ok('verifyOtp passe par la file', /function verifyOtp\(username, code, purpose\)/.test(srvSrc));
+    ok('les corps d\'origine sont conservés (Brut)',
+      /async function issueOtpBrut/.test(srvSrc) && /async function verifyOtpBrut/.test(srvSrc));
+    ok('les ajouts d\'historique sont sérialisés aussi',
+      /function appendHistory\(entry\)/.test(srvSrc) && /let fileHistoire/.test(srvSrc));
+  }
+
+  // ── Le mot de passe ne traîne plus en clair dans une sortie ──
+  {
+    const rSrc = fs.readFileSync(path.join(__dirname, 'reset-password.js'), 'utf8');
+    ok('le mot de passe est voilé dans le log',
+      !/mot de passe: \$\{password\}/.test(rSrc) && /voile/.test(rSrc));
+  }
+
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──
   // Mesure réelle : 8,7 s pour joindre Telegram depuis cette connexion. Sans
   // reprise, l'alerte échouait sur un appel pourtant valide.

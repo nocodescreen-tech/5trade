@@ -333,6 +333,11 @@ const bufferMaj = new Map();
 const FRAICHEUR_MS = 3000;
 const subscribers = new Set();      // {provider, symbol, tf, onCandle}
 let ws = null, wsProvider = null, wsSymbols = [], wsTf = null, pingTimer = null;
+// Reconnexion du flux : on compte les tentatives CONSECUTIVES pour espacer les
+// essais (3 s, 6 s, 9 s… plafonnees a 30 s) et abandonner au-dela. Sans borne, un
+// fournisseur durablement injoignable etait martele toutes les 3 s, indefiniment.
+const MAX_ESSAIS_FLUX = 8;
+let essaisFlux = 0;
 
 const keyOf = (p, s, tf) => `${p}|${s}|${tf}`;
 
@@ -395,6 +400,40 @@ function marquerEnCours(liste) {
   return liste;
 }
 
+/**
+ * ORDRE ET CONTINUITÉ des bougies — ce que tout le moteur suppose sans le vérifier.
+ *
+ * `swings`, `fvgs`, `orderBlocks`, `liquidityPools`, `sweeps`, `breakers`,
+ * `displacements`, `premiumDiscount`, `fibLevels`, `previousLevels`, `sessions`,
+ * `lastCandleInfo` et l'ATR parcourent la liste en supposant qu'elle est
+ * CHRONOLOGIQUE et SANS TROU. Aucun tri explicite n'existait : Binance et Deriv
+ * renvoient du trié, mais rien ne le garantissait, et deux bougies de même
+ * horodatage faussaient les pivots en silence.
+ *
+ * On trie, on dédoublonne (la plus récente gagne), et on COMPTE les trous — un
+ * swing détecté de part et d'autre d'un trou n'est pas un swing. Ce qui manque
+ * est exposé, jamais masqué : l'analyse reste possible, mais elle le dit.
+ */
+function assainirBougies(liste, tf) {
+  const tri = [...(liste || [])].sort((a, b) => a.t - b.t);
+  const bougies = [];
+  for (const c of tri) {
+    if (bougies.length && c.t === bougies[bougies.length - 1].t) bougies[bougies.length - 1] = c;
+    else bougies.push(c);
+  }
+  const pas = TF_MS[tf];
+  const trous = [];
+  if (pas) {
+    for (let i = 1; i < bougies.length; i++) {
+      const d = bougies[i].t - bougies[i - 1].t;
+      if (d > pas * 1.5) {
+        trous.push({ apres: bougies[i - 1].t, avant: bougies[i].t, manquantes: Math.round(d / pas) - 1 });
+      }
+    }
+  }
+  return { bougies, trous, doublons: tri.length - bougies.length };
+}
+
 async function getCandles(symbol, tf, count = 300, providerId) {
   if (!TF_MS[tf]) throw new Error(`Timeframe inconnu : ${tf} (attendu ${TIMEFRAMES.join(', ')})`);
   const p = providerId ? providerById(providerId) : activeProvider();
@@ -412,22 +451,25 @@ async function getCandles(symbol, tf, count = 300, providerId) {
   // `source: 'live'`, sans dire quoi que ce soit. L'analyse raisonne alors sur un
   // historique tronqué sans le savoir (PDH/PDL, ATR, pivots en dépendent).
   if (buf && buf.length >= count && (Date.now() - maj) < FRAICHEUR_MS) {
-    return { candles: buf.slice(-count), provider: p.id, source: 'live', fournies: count, demandees: count };
+    const a = assainirBougies(buf.slice(-count), tf);
+    return { candles: a.bougies, provider: p.id, source: 'live',
+      fournies: a.bougies.length, demandees: count, trous: a.trous };
   }
   try {
-    const candles = marquerEnCours(await p.candles(symbol, tf, count));
-    buffers.set(k, candles);
+    const a = assainirBougies(marquerEnCours(await p.candles(symbol, tf, count)), tf);
+    buffers.set(k, a.bougies);
     bufferMaj.set(k, Date.now());
     saveCacheSoon();
-    return { candles, provider: p.id, source: 'rest' };
+    return { candles: a.bougies, provider: p.id, source: 'rest', trous: a.trous };
   } catch (e) {
     // HORS LIGNE : on sert ce qu'on a en mémoire, sinon sur disque.
     if (!buf || !buf.length) loadCache();
     const fallback = buffers.get(k);
     if (fallback && fallback.length) {
+      const a = assainirBougies(fallback.slice(-count), tf);
       return {
-        candles: fallback.slice(-count), provider: p.id, source: 'cache',
-        offline: true, error: e.message
+        candles: a.bougies, provider: p.id, source: 'cache',
+        offline: true, error: e.message, trous: a.trous
       };
     }
     throw e;   // rien en cache : l'erreur est légitime
@@ -511,6 +553,8 @@ function reopenStream(p, symbols, tf) {
   catch (e) { console.error('   Marché     : flux indisponible —', e.message); ws = null; return; }
 
   ws.on('open', () => {
+    // Le flux est reparti : les tentatives precedentes ne comptent plus.
+    essaisFlux = 0;
     console.log(`   Marché     : direct ${p.id} ${symbols.join(',')} ${tf}`);
     if (p.onOpen) p.onOpen(ws, symbols, tf);
     // Binance coupe une connexion inactive : on ping toutes les 3 minutes.
@@ -527,12 +571,26 @@ function reopenStream(p, symbols, tf) {
       }
     }
   });
-  ws.on('error', () => {});
+  // ⚠️ NE PAS avaler l'erreur : un WebSocket peut mourir en silence et le flux
+  // s'arrête sans que rien ne le dise — le panneau des ticks se fige, et le
+  // graphique avec lui, sans une ligne de log pour l'expliquer. On la trace.
+  ws.on('error', (e) => {
+    console.error(`   Marché     : flux ${p.id} ${tf} — erreur socket : ${(e && e.message) || e}`);
+  });
   ws.on('close', () => {
     if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
-    // Reconnexion si des abonnés attendent encore ce flux
+    // Reconnexion si des abonnés attendent encore ce flux.
+    // Backoff progressif ET borné : une boucle de reconnexion toutes les 3 s sans
+    // limite martèle le fournisseur indéfiniment quand il est durablement down.
     if (subscribers.size && wsProvider === p.id && wsTf === tf) {
-      setTimeout(() => { if (subscribers.size) reopenStream(p, wsSymbols, wsTf); }, 3000);
+      essaisFlux += 1;
+      if (essaisFlux > MAX_ESSAIS_FLUX) {
+        console.error(`   Marché     : flux ${p.id} ${tf} abandonné après ${MAX_ESSAIS_FLUX} tentatives`
+          + ' — les bougies seront servies par l\'historique REST (moins fraîches).');
+        return;
+      }
+      const attente = Math.min(3000 * essaisFlux, 30000);
+      setTimeout(() => { if (subscribers.size) reopenStream(p, wsSymbols, wsTf); }, attente);
     }
   });
 }
@@ -593,5 +651,8 @@ module.exports = {
   listSymbols, getCandles, watch, watchTicks, probe, providerStatus,
   activeProvider: () => activeProvider().id,
   closeStream,
-  loadCache, cacheInfo
+  loadCache, cacheInfo,
+  // Exposé pour le canonique : l'ordre et la continuité des bougies sont ce que
+  // tout le moteur suppose, ils doivent être testables.
+  assainirBougies
 };
