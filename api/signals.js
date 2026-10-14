@@ -497,9 +497,10 @@ const REGLES_INFO = {
   R1: 'Balayage de liquidité',
   R2: 'Rupture de structure (BOS / CHoCH)',
   R3: 'Zone réactive (order block / FVG)',
-  R4: 'Position dans le range (premium / discount)',
-  R5: 'Sens de la structure (contexte : ne vote pas)'
+  R4: 'Position dans le range (premium / discount)'
 };
+// NB : R5 n'existe plus comme regle. Le sens de la structure est un FILTRE de
+// contexte (voir CLES_FILTRES -> 'structure'), pas une observation qui vote.
 
 const sansAccents = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
@@ -543,7 +544,13 @@ function borner(v, min, max, defaut) {
 
 /** Nettoie un moteur reçu du client : aucune valeur de confiance n'est gardée telle quelle. */
 function normaliserMoteur(m = {}) {
-  const brutes = Array.isArray(m.regles) ? m.regles.filter(r => TOUTES_REGLES[r]) : [];
+  const demandees = Array.isArray(m.regles) ? m.regles : [];
+  const brutes = demandees.filter(r => TOUTES_REGLES[r]);
+  // CE QUI EST ÉCARTÉ DOIT SE VOIR.
+  // R5 (ou tout identifiant inconnu) était filtré sans un mot : une stratégie qui
+  // la demandait semblait l'appliquer, alors qu'elle était jetée. On garde la
+  // trace des demandes non retenues, pour que l'interface puisse le dire.
+  const ecartees = demandees.filter(r => !TOUTES_REGLES[r]);
   // Style de trading : il fixe les unités de temps par défaut.
   const style = (m.style && STYLES[m.style]) ? m.style : null;
   const dStyle = style ? STYLES[style] : null;
@@ -563,7 +570,14 @@ function normaliserMoteur(m = {}) {
 
   return {
     regles: brutes.length ? [...new Set(brutes)] : [],
+    // Demande de règles qui n'existent pas (typiquement « R5 ») : on la remonte au
+    // lieu de la jeter. L'interface peut ainsi écrire noir sur blanc qu'une règle
+    // demandée n'a pas été appliquée, au lieu de laisser croire qu'elle l'est.
+    reglesEcartees: [...new Set(ecartees)],
     seuilForce: borner(m.seuilForce, 0, 1, MOTEUR_DEFAUT.seuilForce),
+    // Les filtres aussi peuvent être mal orthographiés : on garde la trace.
+    filtresEcartes: Array.isArray(m.filtres)
+      ? [...new Set(m.filtres.filter(f => !CLES_FILTRES.includes(f)))].slice(0, 5) : [],
     // Le nombre de règles disponibles n'est pas fixe : une stratégie peut croiser
     // 1, 2, 3… critères. Le seuil suit le nombre réel de règles du moteur.
     seuilRegles: Math.round(borner(m.seuilRegles, 1,
@@ -607,6 +621,11 @@ function profilDepuisStrategie(doc) {
       id: doc.id || null,
       titre: doc.title || null,
       regles,
+      // Ce que la stratégie DEMANDAIT sans l'obtenir (typiquement R5). Sans cette
+      // remontée, une stratégie qui réclamait R5 semblait l'appliquer alors que le
+      // moteur l'avait jetée. L'écran peut désormais le dire.
+      reglesEcartees: m.reglesEcartees || [],
+      filtresEcartes: m.filtresEcartes || [],
       seuilForce: m.seuilForce,
       seuilRegles: m.seuilRegles,
       // La stratégie décide de SON nombre d'unités de temps et du seuil

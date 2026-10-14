@@ -989,7 +989,11 @@ function tinyPng(W = 64, H = 40) {
     // contraire de ce qu'il vérifiait avant — c'est voulu.
     ok('R5 ne vote plus : une stratégie qui la demande ne l\'obtient pas', (() => {
       const profil = Sig.profilDepuisStrategie({ id: 'x', title: 't', moteur: { regles: ['R5'] } });
-      return !profil.regles.includes('R5') && !profil.regles.includes('R5'.toLowerCase());
+      // R5 est retiree des regles... ET sa demande est REMONTEE, sinon elle
+      // disparaissait en silence : la strategie semblait l'appliquer.
+      return !profil.regles.includes('R5')
+        && Array.isArray(profil.reglesEcartees)
+        && profil.reglesEcartees.includes('R5');
     })());
     ok('aucune règle votante n\'est R5', (() => {
       const s = [];
@@ -1487,7 +1491,8 @@ function tinyPng(W = 64, H = 40) {
 
     // Chaque règle doit porter la nature d'empreinte qui lui correspond : c'est ce
     // qui garantit que deux règles de MÊME nature (un niveau) se comparent.
-    const natureAttendue = { R1: 'niveau', R2: 'niveau', R3: 'zone', R4: 'range', R5: 'structure' };
+    // R5 n'est plus une regle : elle est devenue le FILTRE 'structure'.
+    const natureAttendue = { R1: 'niveau', R2: 'niveau', R3: 'zone', R4: 'range' };
     const natures = new Set();
     [vague(),
       (() => { const s = []; for (let i = 0; i < 90; i++) { const p = 100 + i * 0.3 + Math.sin(i / 3) * 2; s.push({ t: i * 60000, o: p, h: p + 1, l: p - 1, c: p + 0.4, v: 9 }); } return s; })(),

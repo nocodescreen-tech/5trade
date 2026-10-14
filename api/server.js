@@ -2162,15 +2162,19 @@ RÈGLES DISPONIBLES (choisis uniquement celles qui correspondent réellement à 
   R2 = rupture de structure (BOS / CHoCH, cassure confirmée par la clôture)
   R3 = zone réactive (order block, FVG, breaker : le prix réagit sur une zone)
   R4 = position dans le range (premium pour vendre, discount pour acheter)
-  R5 = sens de la structure. ATTENTION : ce n'est PAS une regle de confirmation.
-       « la structure est haussiere donc un achat est favorise » ne dit rien de plus que
-       le sens du signal : c'est une tautologie. Elle informe (contexte), elle ne compte pas
-       parmi les confirmations. Ne jamais presenter R5 comme une confirmation du signal.
+
+ATTENTION : il n'existe QUE ces quatre règles. N'invente pas d'identifiant, et ne
+mets jamais « R5 » ni « sens de la structure » dans la liste des règles : le sens de
+la structure est un CONTEXTE, pas une confirmation (voir les filtres ci-dessous —
+c'est le filtre « structure »). Une règle doit être une observation du graphique,
+pas une répétition du sens du signal.
 
 FILTRES (conditions qui ne donnent pas de sens mais dont l'absence invalide) :
   volatilite = la stratégie exige une amplitude exploitable
   session    = elle exige une session active (Londres / New York)
   range      = elle exige un range clairement borné
+  structure = elle exige une structure directionnelle nette (ni range, ni indécise).
+              C'est ici que se dit « je ne prends que dans le sens de la structure ».
 
 STYLES (choisis-en un si c'est indiqué, sinon null) :
   scalping = quelques minutes (1m / 5m / 15m)

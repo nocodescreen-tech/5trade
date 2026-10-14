@@ -2736,6 +2736,18 @@ function LiveMarket({ onToJournal }) {
                   {' · '}{signal.reglesOpposees.length} contre ({signal.reglesOpposees.join(', ')})
                 </span>
               )}
+              {/* UNE RÈGLE DEMANDÉE MAIS INEXISTANTE (typiquement « R5 »). Le
+                  moteur la retire ; sans cette ligne, la stratégie semblait
+                  l'appliquer. Le sens de la structure est un FILTRE, pas une
+                  règle — on le dit au lieu de le taire. */}
+              {((signal.strategieAppliquee && signal.strategieAppliquee.reglesEcartees) || []).length > 0 && (
+                <span title={'Ces identifiants ne correspondent à aucune règle du moteur : ils ont été écartés. ' +
+                  'Le sens de la structure est un filtre de contexte (case « structure »), pas une règle qui vote.'}
+                  style={{ color:'#fbbf24' }}>
+                  {' · '}<i className="fas fa-triangle-exclamation" style={{ fontSize:10 }}></i>{' '}
+                  écartée(s) : {(signal.strategieAppliquee.reglesEcartees || []).join(', ')}
+                </span>
+              )}
             </span>
             <span style={{ flex:'1 1 auto' }}></span>
             <span style={{ fontSize:11.5, color:'var(--dim)' }}>
