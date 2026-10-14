@@ -408,6 +408,11 @@ function filtresDisponibles(report) {
   const deplacements = (report.displacements || []).length;
   const sessionActive = /londres|new ?york|overlap/i.test(String(se.sessionCourante || ''));
   const killZone = se.killZone && se.killZone !== 'aucune en ce moment';
+  // Structure de marche : elle informe (contexte), elle ne vote pas.
+  const st = report.structure || {};
+  const trend = st.trend || 'indéterminée';
+  const swingH = st.lastSwingHigh ? num(st.lastSwingHigh.price) : null;
+  const swingL = st.lastSwingLow ? num(st.lastSwingLow.price) : null;
 
   return [
     {
@@ -428,6 +433,20 @@ function filtresDisponibles(report) {
         && pd.high > pd.low,
       detail: pd.high ? `${pd.low} / ${pd.equilibrium} / ${pd.high}` : 'range indéterminé',
       lecture: 'premium/discount n\'a de sens que si le range est identifié'
+    },
+    {
+      // L'ex-R5 vit ici, et c'est sa place.
+      // « La structure est haussière, donc un achat est favorisé » n'est PAS une
+      // observation : c'est le sens du signal répété. Une tautologie ne peut pas
+      // voter. Mais « la structure est-elle identifiée ? » EST une information de
+      // contexte mesurable — exactement comme la volatilité ou la session : ça ne
+      // dit ni achat ni vente, et une stratégie peut l'exiger.
+      cle: 'structure', label: 'Structure identifiée (tendance nette)',
+      ok: trend === 'bullish' || trend === 'bearish',
+      detail: `structure ${trend}` + (swingH || swingL ? ` · sommet ${swingH} / creux ${swingL}` : ''),
+      lecture: trend === 'range'
+        ? 'en range, la structure ne départage pas : elle n\'oriente ni dans le sens ni à contre'
+        : `tendance ${trend} : un signal dans ce sens va DANS la structure, l\'inverse va CONTRE`
     }
   ];
 }
@@ -461,7 +480,7 @@ const REGLES_INFO = {
 const sansAccents = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 /** Identifiants des filtres exigibles par une stratégie (voir filtresDisponibles). */
-const CLES_FILTRES = ['volatilite', 'session', 'range'];
+const CLES_FILTRES = ['volatilite', 'session', 'range', 'structure'];
 
 /** Unités de temps connues (les sources les acceptent toutes). */
 const TF_VALIDES = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
