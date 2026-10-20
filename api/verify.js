@@ -21,6 +21,11 @@ const ROOT = path.join(__dirname, '..');
 const ENV = path.join(ROOT, '.env');
 const API = 'http://localhost:3001';
 
+// Le journal des signaux ne doit JAMAIS écrire dans les données de production
+// pendant les tests — même leçon qu'ALERTS_FICHIER : un canonique qui écrase un
+// fichier de données réelles détruit le travail de l'utilisateur.
+process.env.JOURNAL_SIGNAUX_FICHIER = path.join(os.tmpdir(), `signaux-journal-test-${process.pid}.json`);
+
 let pass = 0, fail = 0, skip = 0;
 const ok = (name, cond, extra = '') => {
   (cond ? pass++ : fail++);
@@ -82,7 +87,7 @@ function tinyPng(W = 64, H = 40) {
 (async () => {
   // ── 1. Syntaxe ──
   section('[1] Syntaxe');
-  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'market.js', 'structure.js', 'signals.js', 'reset-password.js', 'bootstrap-db.js', 'alerts.js', 'lexique.js', 'expliquer.js', 'concepts.js', 'playbooks.js']) {
+  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'market.js', 'structure.js', 'signals.js', 'reset-password.js', 'bootstrap-db.js', 'alerts.js', 'lexique.js', 'expliquer.js', 'concepts.js', 'playbooks.js', 'couts.js', 'pushAlerts.js']) {
     try {
       require('child_process').execFileSync(process.execPath, ['--check', path.join(__dirname, f)]);
       ok(f, true);
@@ -621,6 +626,26 @@ function tinyPng(W = 64, H = 40) {
       /loss/.test(payT.title) && payT.badge === '/logo.svg' && !!payT.data.url);
     ok('push : sans clés VAPID, aucun envoi réseau',
       await Push.envoyerNotification(fauxSub, payS).then(r => r.success === false));
+
+    // ── Coûts IA : journalisation + plafond, sans réseau ──
+    // Fichier isolé : on ne pollue jamais le vrai journal de coûts.
+    process.env.COUTS_FICHIER = path.join(os.tmpdir(), `5trade-couts-${process.pid}.json`);
+    const Couts = require('./couts');
+    const e1 = Couts.enregistrer({ route: 'test-cout', modele: 'test', entree: 1000000, sortie: 1000000 });
+    ok('coûts : 1M+1M tokens ≈ 1.37 $', Math.abs(e1.cout - 1.37) < 0.001, String(e1.cout));
+    const b1 = Couts.bilan();
+    ok('coûts : bilan du mois cohérent', b1.appels >= 1 && b1.depense > 0 && b1.parRoute['test-cout'] > 0);
+    ok('coûts : estimation d\'entrée', Couts.estimerEntree([{ role: 'user', content: 'abcd' }]) === 1);
+    process.env.BUDGET_MENSUEL_USD = '0.000001';
+    ok('coûts : plafond atteint → 429', (() => {
+      try { Couts.verifierBudget(); return false; } catch (e) { return e.status === 429; }
+    })());
+    delete process.env.BUDGET_MENSUEL_USD;
+    ok('coûts : sans plafond forcé, ça passe', (() => {
+      try { Couts.verifierBudget(); return true; } catch { return false; }
+    })());
+    try { fs.unlinkSync(process.env.COUTS_FICHIER); } catch {}
+    delete process.env.COUTS_FICHIER;
     // Le fichier de test est jeté, et l'environnement remis en place : la
     // configuration réelle de l'utilisateur n'a jamais été ouverte.
     } finally {
@@ -1914,6 +1939,203 @@ function tinyPng(W = 64, H = 40) {
       /async function issueOtpBrut/.test(srvSrc) && /async function verifyOtpBrut/.test(srvSrc));
     ok('les ajouts d\'historique sont sérialisés aussi',
       /function appendHistory\(entry\)/.test(srvSrc) && /let fileHistoire/.test(srvSrc));
+  }
+
+  // ── Motifs de bougie : 14 détecteurs, chacun avec sa valeur mesurée ──
+  // Ces détecteurs n'existaient pas. Un motif sans `conditions` chiffrées
+  // redeviendrait un nom sur un écran, exactement ce que le projet refuse.
+  {
+    const P = require('./patterns.js');
+    const T0 = 1700000000000, MIN = 60000;
+    const c = (i, o, h, l, cl) => ({ t: T0 + i * MIN, o, h, l, c: cl, v: 1, closed: true });
+    const attendus = ['doji', 'marteau', 'etoile-filante', 'marubozu', 'pin-bar',
+      'avalement', 'avalement-baissier', 'harami', 'inside-bar', 'double-top',
+      'double-bottom', 'trendline', 'support-resistance', 'compression'];
+
+    // Série descendante puis marteau net : le motif doit sortir avec un chiffre.
+    const serie = [];
+    let p = 120;
+    for (let i = 0; i < 25; i++) { const o = p, cl = p - 0.8; serie.push(c(i, o, o + 0.15, cl - 0.15, cl)); p = cl; }
+    serie.push(c(25, p, p + 0.1, p - 4.0, p + 0.05));
+    const r = P.analyse(serie);
+    ok('analyse de motifs sans exception', Array.isArray(r.motifs), `${r.motifs.length} motifs`);
+    // Le contrat est la SORTIE : les 14 concepts doivent être produits, qu'ils se
+    // déclenchent ou non (un concept absent de la liste est un concept oublié).
+    const ids = r.motifs.map(x => x.id);
+    const manquants = attendus.filter(id => !ids.includes(id));
+    ok('les 14 concepts sont produits par analyse()', manquants.length === 0, manquants.join(',') || '14/14');
+    const m = r.motifs.find(x => x.id === 'marteau');
+    ok('un marteau net est détecté', !!m && m.ok === true, m ? `force ${m.force}` : 'absent');
+    // Le plafond à 0,95 : un marteau « parfait » atteignait 1,00, un score que
+    // le moteur ne peut pas justifier (aucun backtest derrière).
+    ok('force des motifs plafonnée à 0,95', m && m.force <= 0.95, m ? String(m.force) : '—');
+    ok('aucun motif ne déclare 1,00',
+      r.motifs.every(x => !(x.ok && x.force >= 1)), 'max ' + Math.max(...r.motifs.map(x => x.force)));
+    // Un motif non rempli doit dire POURQUOI : pas de silence.
+    const muet = r.motifs.find(x => !x.ok && !x.raison);
+    ok('tout motif non rempli porte sa raison', !muet, muet ? muet.id : 'aucun muet');
+    // Les conditions exposées portent une valeur mesurée, jamais un nom de règle.
+    const M = require('./signaux.js');
+    const d = r.motifs.find(x => x.ok);
+    const conds = d ? M.conditionsMotif(d) : [];
+    ok('les conditions d\'un motif portent une valeur',
+      conds.length > 0 && conds.every(x => x.valeur !== undefined && x.valeur !== null),
+      `${conds.length} condition(s)`);
+  }
+
+  // ── Multi-signaux : une entrée PAR stratégie, jamais une fusion ──
+  {
+    const M = require('./signaux.js');
+    const T0 = 1700000000000, MIN = 60000;
+    const c = (i, o, h, l, cl) => ({ t: T0 + i * MIN, o, h, l, c: cl, v: 1, closed: true });
+    // Tendance haussière régulière : les règles de structure ont de la matière.
+    const serie = Array.from({ length: 40 }, (_, i) => {
+      const base = 100 + i * 0.6;
+      return c(i, base, base + 0.7, base - 0.5, base + 0.4);
+    });
+    const profils = [
+      { id: 'a', titre: 'Alpha', regles: ['R1', 'R2'], seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: ['5m'], parametres: {} },
+      { id: 'b', titre: 'Beta', regles: ['R3'], seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: ['5m'], parametres: {} },
+      { id: 'c', titre: 'Gamma', regles: ['R4'], seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: ['5m'], parametres: {} }
+    ];
+    const r = M.detecterTout(serie, { symbol: 'TEST', timeframe: '5m' }, { profils });
+    const strats = r.signaux.filter(s => s.source === 'strategie');
+    ok('un signal par stratégie sélectionnée', strats.length === 3, `${strats.length} signaux`);
+    ok('les trois stratégies sont distinctes',
+      new Set(strats.map(s => s.nom)).size === 3, strats.map(s => s.nom).join(' / '));
+    ok('chaque signal porte ses règles', strats.every(s => Array.isArray(s.regles) && s.regles.length > 0));
+
+    // La carte de marché : sans elle, un marteau est une forme sans contexte.
+    ok('la carte de marché est produite', !!r.carte);
+    ok('la carte porte son unité de temps', r.carte && r.carte.timeframe === '5m',
+      r.carte ? String(r.carte.timeframe) : 'absente');
+
+    // Tous les signaux directionnels portent leur contexte structurel.
+    const directionnels = r.signaux.filter(s => s.sens !== 'neutre' && s.status !== 'non-rempli');
+    const sansCtx = directionnels.filter(s => !s.structureContexte);
+    ok('chaque signal directionnel porte son contexte structurel',
+      sansCtx.length === 0, `${sansCtx.length} sans contexte sur ${directionnels.length}`);
+    ok('la force est bornée à 0,98',
+      r.signaux.every(s => s.force <= 0.98), 'max ' + Math.max(...r.signaux.map(s => s.force)));
+
+    // Signaux structurels : fonction PURE, donc déterministe.
+    const carte = {
+      tendance: 'bullish', timeframe: '5m', prix: 110, atr: 2,
+      evenement: { type: 'BOS', sens: 'long', niveau: 105 },
+      zones: [{ type: 'OB bullish', sens: 'long', low: 104, high: 106, centre: 105, distanceAtr: 0.5, dansLaZone: true, origine: 'Order block' }],
+      // distanceAtr 0,5 : DANS le seuil de 0,6 du détecteur. À 1,0 ATR il ne se
+      // déclenche pas — c'est le comportement voulu, pas un bug.
+      liquidite: [{ type: 'EQH', prix: 112, distanceAtr: 0.5, auDessus: true }],
+      balayages: [{ type: 'balayage bas', level: 100, extreme: 99, at: 999, reclaimed: true, depth: 1 }],
+      deplacements: [],
+      position: { zone: 'discount', haut: 120, bas: 100, equilibre: 110, ote: {} }
+    };
+    const st = M.signauxStructure(carte, [{ t: 999, o: 108, h: 110, l: 107, c: 109, closed: true }]);
+    ok('un BOS produit un signal structurel', st.some(s => s.id === 'structure:bos' && s.sens === 'long'));
+    ok('une zone contenant le prix produit un retest', st.some(s => String(s.id).startsWith('structure:retest')));
+    ok('un balayage récent produit un signal', st.some(s => s.id === 'structure:sweep'));
+    ok('un amas de stops proche est signalé', st.some(s => s.id === 'structure:liquidite'));
+    ok('les signaux structurels portent leur unité de temps',
+      st.every(s => s.tf === '5m'), st.map(s => String(s.tf)).join(','));
+    ok('chaque signal structurel a ses conditions chiffrées',
+      st.every(s => Array.isArray(s.conditions) && s.conditions.length > 0 && s.conditions.every(x => x.valeur !== undefined)));
+
+    // Contexte : vendre en premium avec une tendance baissière = favorable.
+    const ctxHaussier = M.contextePour('long', carte);
+    ok('un achat dans une tendance haussière est favorisé', ctxHaussier.ajustement > 0, String(ctxHaussier.ajustement));
+    const ctxBaissier = M.contextePour('short', carte);
+    ok('une vente contre une tendance haussière est pénalisée', ctxBaissier.ajustement < 0, String(ctxBaissier.ajustement));
+    ok('le contexte expose favorables/défavorables',
+      Number.isFinite(ctxHaussier.favorables) && Number.isFinite(ctxHaussier.defavorables));
+  }
+
+  // ── Journal des signaux : le DEVENIR de chaque signal ──
+  // Sans cette trace, une liste de signaux reste une opinion : impossible de
+  // dire si le moteur atteint ses objectifs, ni quelle stratégie fonctionne.
+  {
+    const J = require('./journal-signaux.js');
+    const T0 = 1700000000000, MIN = 60000;
+    const c = (i, o, h, l, cl) => ({ t: T0 + i * MIN, o, h, l, c: cl, v: 1, closed: true });
+    const base = { at: T0, sens: 'long', entree: 100, stop: 98, objectifs: [104, 108], rr: 2 };
+
+    let s = { ...base };
+    J.evaluer(s, [c(1, 100, 104.2, 100, 104), c(2, 104, 108.3, 104, 108)]);
+    ok('objectif 2 atteint → tp2', s.resultat === 'tp2', String(s.resultat));
+    ok('tp2 vaut 4 R', s.r === 4, String(s.r));
+
+    s = { ...base };
+    J.evaluer(s, [c(1, 100, 101, 97.5, 98)]);
+    ok('invalidation touchée → sl', s.resultat === 'sl', String(s.resultat));
+    ok('sl vaut -1 R', s.r === -1, String(s.r));
+
+    s = { ...base };
+    J.evaluer(s, [c(1, 100, 104.2, 100, 104), c(2, 104, 104.5, 99.5, 99.8)]);
+    ok('objectif 1 puis retour à l\'entrée → be', s.resultat === 'be', String(s.resultat));
+
+    s = { ...base };
+    J.evaluer(s, [c(1, 100, 101, 99.5, 100.5)]);
+    ok('rien touché → encore ouvert', s.resultat === 'ouvert', String(s.resultat));
+
+    // Même bougie : le stop et l'objectif → on retient le STOP (cas défavorable).
+    s = { ...base };
+    J.evaluer(s, [c(1, 100, 104.5, 97.5, 100)]);
+    ok('stop et objectif sur la même bougie → le stop gagne', s.resultat === 'sl', String(s.resultat));
+
+    // 60 bougies plates sans objectif → expire (pas « perdu », pas « gagné »).
+    s = { ...base };
+    J.evaluer(s, Array.from({ length: 62 }, (_, i) => c(i + 1, 100, 100.5, 99.9, 100.1)));
+    ok('rien après 60 bougies → expire', s.resultat === 'expire', String(s.resultat));
+
+    // Un signal tranché n'est jamais réévalué.
+    s = { ...base, resultat: 'sl' };
+    J.evaluer(s, [c(1, 100, 200, 100, 200)]);
+    ok('un signal tranché reste inchangé', s.resultat === 'sl', String(s.resultat));
+
+    // Enregistrement : les signaux SANS niveaux doivent être refusés.
+    // `Number(null) === 0` laissait passer entrée 0 / stop 0.
+    const sigValide = { id: 'motif:double-top', source: 'motif', nom: 'Double top', sens: 'short', force: 0.8, entree: 100, stop: 105, objectifs: [95, 90], conditions: [] };
+    const sigSansNiveaux = { id: 'structure:liquidite', source: 'structure', nom: 'Amas', sens: 'long', force: 0.5, entree: null, stop: null, objectifs: [110], conditions: [] };
+    const meta = { symbol: 'TEST', timeframe: '5m', at: 1000 };
+    J.sauver({ version: 1, signaux: [] });
+    const r1 = J.enregistrer([sigSansNiveaux, sigValide], meta);
+    ok('un signal sans niveaux n\'est pas journalisé', r1.ajoutes === 1 && r1.ignores === 1, JSON.stringify(r1));
+    // Le même signal encore OUVERT ne doit pas créer une ligne par bougie.
+    const r2 = J.enregistrer([sigValide], { ...meta, at: 2000 });
+    const r3 = J.enregistrer([sigValide], { ...meta, at: 3000 });
+    ok('pas de doublon tant que le signal est ouvert', r2.ajoutes === 0 && r3.ajoutes === 0, JSON.stringify(r2));
+    ok('une seule ligne au journal', J.charger().signaux.length === 1, String(J.charger().signaux.length));
+    // Une fois tranché, une nouvelle occurrence est de nouveau acceptée.
+    const d = J.charger(); d.signaux[0].resultat = 'sl'; J.sauver(d);
+    const r4 = J.enregistrer([sigValide], { ...meta, at: 4000 });
+    ok('après clôture, une nouvelle occurrence est acceptée', r4.ajoutes === 1, JSON.stringify(r4));
+
+    // Le taux de réussite se calcule sur les trades DÉCIDÉS, pas sur les expirations.
+    const st = J.stats();
+    ok('les statistiques séparent gagnés, perdus et expirés',
+      Number.isFinite(st.gagnes) && Number.isFinite(st.perdus) && Number.isFinite(st.expires),
+      `${st.gagnes} gagné(s) / ${st.perdus} perdu(s) / ${st.expires} expiré(s)`);
+    ok('le taux de réussite ne compte pas les expirations',
+      st.tauxReussite === null || st.tauxReussite === Math.round((st.gagnes / (st.gagnes + st.perdus)) * 1000) / 10,
+      String(st.tauxReussite));
+    try { fs.unlinkSync(process.env.JOURNAL_SIGNAUX_FICHIER); } catch {}
+  }
+
+  // ── Surveillance : la sélection de stratégies ne doit pas être jetée ──
+  // `update()` reconstruit la config clé par clé : une valeur non listée était
+  // silencieusement perdue, et la surveillance restait en mode auto.
+  {
+    const A = require('./alerts.js');
+    const avant = A.get();
+    const maj = A.update({ strategies: ['s1', 's2', 's1', '   ', 's3'] });
+    ok('la surveillance conserve les stratégies choisies',
+      Array.isArray(maj.strategies) && maj.strategies.length === 3, JSON.stringify(maj.strategies));
+    ok('doublons et valeurs vides écartés', maj.strategies.join(',') === 's1,s2,s3', maj.strategies.join(','));
+    ok('la valeur est relue depuis la config', A.get().strategies.length === 3);
+    let refuse = false;
+    try { A.update({ strategies: 'pas une liste' }); } catch { refuse = true; }
+    ok('un type invalide est refusé', refuse);
+    // On remet l'état d'origine : le canonique ne modifie pas la config réelle.
+    A.update({ strategies: Array.isArray(avant.strategies) ? avant.strategies : [] });
   }
 
   // ── Le mot de passe ne traîne plus en clair dans une sortie ──

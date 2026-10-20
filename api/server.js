@@ -29,7 +29,18 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const app = express();
 const PORT = process.env.PORT || 3001;
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
-const DEEPSEEK_URL = 'https://api.deepseek.com/v1/chat/completions';
+// URL surchargeable : pointe-la vers un relai local OpenAI-compatible
+// (ex. Ollama : http://localhost:11434/v1/chat/completions) pour du 0 $.
+const DEEPSEEK_URL = process.env.DEEPSEEK_URL || 'https://api.deepseek.com/v1/chat/completions';
+
+// ─── Budget IA : moins de tokens, et pas deux fois le même appel ───
+// Le plan d'analyse était demandé à 2200 tokens alors que la réponse JSON
+// tient largement en dessous : chaque appel payait de la marge inutilisée.
+const PLAN_MAX_TOKENS = Number(process.env.PLAN_MAX_TOKENS || 1500);
+// Cache de plans : une même analyse relancée ne doit pas être repayée.
+const CACHE_PLAN_MAX = Number(process.env.CACHE_PLAN_MAX || 40);
+const CACHE_PLAN_TTL_MS = Number(process.env.CACHE_PLAN_TTL_MIN || 30) * 60 * 1000;
+const cachePlan = new Map(); // empreinte du prompt -> { at, plan }
 
 // ─────────────────────────────────────────────────────────────
 // Chemins
@@ -246,6 +257,7 @@ const S3 = require('./s3');
 
 // ─── Vision (Gemini) — implémentation dans vision.js ───
 const vision = require('./vision');
+const Couts = require('./couts');
 
 // ─── Calendrier économique — implémentation dans fundamentals.js ───
 const { filtreCalendrier } = require('./fundamentals');
@@ -338,6 +350,14 @@ const Structure = require('./structure');
 
 // ─── Signaux (stratégie appliquée + confirmation achat/vente) ───
 const Signals = require('./signals');
+// Moteur multi-signaux : une liste de signaux (un par stratégie, un par motif)
+// au lieu d'un verdict unique. Voir signaux.js et patterns.js.
+const Multi = require('./signaux');
+const Patterns = require('./patterns');
+// Journal des signaux : persiste chaque signal émis puis enregistre son ISSUE
+// réelle (objectif 1/2, stop, retour à l'entrée). Sans ça, aucune stratégie ne
+// peut être jugée — on ne garde que des opinions.
+const JournalSignaux = require('./journal-signaux');
 const Alerts = require('./alerts');
 const Lexique = require('./lexique');
 // Base de concepts : les définitions des termes, injectées dans l'analyse IA.
@@ -447,11 +467,13 @@ function appendHistory(entry) {
 // ─────────────────────────────────────────────────────────────
 // DeepSeek
 // ─────────────────────────────────────────────────────────────
-async function deepseek(messages, { maxTokens = 2000, json = false } = {}) {
+async function deepseek(messages, { maxTokens = 2000, json = false, route = 'ia' } = {}) {
   const key = process.env.DEEPSEEK_API_KEY;
   if (!key || key.includes('your_deepseek')) {
     throw new Error('DEEPSEEK_API_KEY non configurée dans .env');
   }
+  // Garde-fou : on refuse AVANT de dépenser si le plafond mensuel est atteint.
+  Couts.verifierBudget();
   const body = {
     model: DEEPSEEK_MODEL,
     messages,
@@ -472,9 +494,30 @@ async function deepseek(messages, { maxTokens = 2000, json = false } = {}) {
 
   const data = await res.json();
   if (!res.ok) {
-    throw new Error(data.error?.message || `DeepSeek HTTP ${res.status}`);
+    const msg = data.error?.message || `DeepSeek HTTP ${res.status}`;
+    // Solde épuisé : message actionnable au lieu d'un code obscur.
+    if (res.status === 402 || /insufficient|balance|quota|exceeded|billing/i.test(msg)) {
+      const e = new Error(
+        `Solde IA épuisé (${msg}). L'onglet Direct (moteur local, gratuit) reste ` +
+        `disponible ; recharge ton solde ou pointe DEEPSEEK_URL vers un relai local (Ollama).`
+      );
+      e.status = 503;
+      throw e;
+    }
+    throw new Error(msg);
   }
-  return data.choices[0].message.content;
+  const contenu = data.choices[0].message.content;
+  // Journalisation du coût réel (jamais bloquante).
+  try {
+    const usage = data.usage || {};
+    Couts.enregistrer({
+      route,
+      modele: body.model,
+      entree: Number(usage.prompt_tokens) || Couts.estimerEntree(messages),
+      sortie: Number(usage.completion_tokens) || Couts.estimerTokens(contenu)
+    });
+  } catch { /* le comptage ne doit jamais casser une analyse */ }
+  return contenu;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1174,7 +1217,7 @@ Réponds en JSON strict:
 }`;
 
   try {
-    const out = await deepseek([{ role: 'user', content: prompt }], { maxTokens: 1600, json: true });
+    const out = await deepseek([{ role: 'user', content: prompt }], { maxTokens: 1600, json: true, route: 'structuration-web' });
     const parsed = JSON.parse(out);
     parsed.sourceUrl = sourceUrl;
     return parsed;
@@ -1478,7 +1521,14 @@ Réponds en texte structuré, dense et exploitable.`;
         base64: (await fs.readFile(f.path)).toString('base64')
       });
     }
-    const visionAnalysis = await vision.analyzeImages(images, visionPrompt);
+    // IA visuelle coupée (clé absente, quota épuisé) : on continue en mode
+    // dégradé — recherche locale + plan local — au lieu d'échouer.
+    let visionAnalysis = '';
+    try {
+      visionAnalysis = await vision.analyzeImages(images, visionPrompt);
+    } catch (e) {
+      visionAnalysis = `Analyse visuelle indisponible (${e.message}).`;
+    }
 
     // 1b. Vérification du calendrier économique — bloquer si news à fort impact
     const cal = await filtreCalendrier(pair);
@@ -1679,8 +1729,26 @@ Réponds en JSON strict:
   "risk": "low|medium|high"
 }`;
 
-  const out = await deepseek([{ role: 'user', content: prompt }], { maxTokens: 2200, json: true });
-  return JSON.parse(out);
+  // ── CACHE DE PLAN IA ──────────────────────────────────────────────────
+  // Une même analyse relancée (même paire, mêmes unités de temps, même lecture
+  // visuelle, mêmes stratégies) redonnait exactement le même plan — et repayait
+  // les tokens. Le cache est indexé sur le PROMPT EXACT (empreinte SHA-1) : deux
+  // appels identiques ne coûtent qu'une fois. TTL court (30 min) parce qu'un
+  // plan est daté : au-delà, le contexte de marché a bougé.
+  const empreinte = crypto.createHash('sha1').update(prompt).digest('hex').slice(0, 20);
+  const hit = cachePlan.get(empreinte);
+  if (hit && (Date.now() - hit.at) < CACHE_PLAN_TTL_MS) {
+    return { ...hit.plan, _cache: true };
+  }
+
+  const out = await deepseek([{ role: 'user', content: prompt }], { maxTokens: PLAN_MAX_TOKENS, json: true, route: 'plan-analyse' });
+  const plan = JSON.parse(out);
+  // Mémorise pour les répétitions. Map bornée : on jette la plus ancienne.
+  cachePlan.set(empreinte, { at: Date.now(), plan });
+  if (cachePlan.size > CACHE_PLAN_MAX) {
+    cachePlan.delete(cachePlan.keys().next().value);
+  }
+  return plan;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -2652,7 +2720,7 @@ N'invente rien : si une information n'est pas dans la description, mets null ou 
 
   let fiche;
   try {
-    const out = await deepseek([{ role: 'user', content: consigne }], { maxTokens: 2000, json: true });
+    const out = await deepseek([{ role: 'user', content: consigne }], { maxTokens: 2000, json: true, route: 'description-strategie' });
     fiche = JSON.parse(out);
   } catch (e) {
     throw new Error(`L'analyse du texte a échoué (${e.message}).`)
@@ -2844,6 +2912,11 @@ async function optionsAnalyse(src) {
     mode: 'manuel',
     regles, seuilForce, seuilRegles, parametres,
     timeframes, seuilAlignes, style, filtres,
+    // Les profils COMPLETS, dans l'ordre choisi. `regles` ci-dessus est leur
+    // union (pour la confluence et le verdict de synthèse), mais le moteur
+    // multi-signaux a besoin de chaque profil SÉPARÉMENT : additionner les règles
+    // de cinq stratégies produit un signal qui n'appartient à aucune des cinq.
+    profils,
     strategies: profils.map(p => ({ id: p.id, titre: p.titre, regles: p.regles })),
     strategie: {
       titre: titres.join(' + '),
@@ -2988,7 +3061,50 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
         return;
       }
       const verdict = Signals.detect(done, { symbol, timeframe: tf }, optionsFlux);
-      const key = [verdict.status, verdict.direction, (verdict.rules || []).map(r => r.rule).sort().join(',')].join('|');
+
+      // ── MOTEUR MULTI-SIGNAUX ────────────────────────────────────────
+      // Un verdict unique efface les stratégies : cinq stratégies choisies
+      // donnaient UN signal qui n'appartenait à aucune. Ici chaque stratégie est
+      // évaluée séparément, et chaque motif de bougie devient son propre signal.
+      // `structure:false` : le `verdict` ci-dessus porte déjà la lecture SMC, on
+      // ne la calcule pas deux fois.
+      let multi = null;
+      try {
+        multi = Multi.detecterTout(done, { symbol, timeframe: tf }, {
+          profils: optionsFlux.profils || []
+          // `structure` reste ACTIVÉ : c'est lui qui produit la carte de marché
+          // (tendance, BOS/CHoCH, premium/discount, zones) et le contexte de
+          // chaque signal. Le désactiver ici vidait la moitié de la lecture.
+        });
+      } catch (e) { multi = null; }
+
+      verdict.signaux = multi ? multi.signaux : [];
+      verdict.synthese = multi ? multi.synthese : null;
+      // La carte de marché (tendance, BOS/CHoCH, premium/discount, zones,
+      // liquidité) part avec le flux : l'écran l'affiche en tête.
+      verdict.carte = multi ? multi.carte : null;
+
+      // Journal : on persiste les signaux RETENUS (confirmés / à surveiller) qui
+      // portent des niveaux. Ils seront réévalués sur les bougies suivantes pour
+      // savoir s'ils ont touché leur objectif, leur stop, ou fini au point
+      // d'entrée. C'est la seule façon de mesurer si le moteur a raison.
+      if (multi) {
+        try {
+          JournalSignaux.enregistrer(
+            multi.signaux.filter(s => s.status === 'confirme' || s.status === 'surveiller'),
+            { symbol, timeframe: tf, provider, at: verdict.at }
+          );
+        } catch { /* le journal ne doit jamais casser le flux */ }
+      }
+
+      // La clé de rafraîchissement doit tenir compte des SIGNAUX : sans eux, un
+      // motif qui apparaît (marteau, double bottom) ne changeait pas la clé et
+      // l'écran ne le voyait jamais arriver.
+      const sigKey = multi
+        ? multi.signaux.map(s => `${s.id}:${s.status}:${s.force}`).join('~')
+        : '';
+      const key = [verdict.status, verdict.direction,
+                   (verdict.rules || []).map(r => r.rule).sort().join(','), sigKey].join('|');
       if (key !== lastKey) {
         lastKey = key;
         verdict.strategies = await strategiesForSignal(verdict);
@@ -3024,8 +3140,100 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// STATISTIQUES BASE
+// SIGNAUX MULTIPLES — un signal par stratégie, un par motif
 // ─────────────────────────────────────────────────────────────
+/**
+ * GET /api/signaux?symbol=BTCUSDT&tf=5m&mode=manuel&strategies=id1,id2
+ *
+ * Rend la LISTE complète des signaux au lieu d'un verdict unique. Coût IA : zéro
+ * (moteur local). C'est l'endpoint que consomme l'onglet « Signaux » et celui
+ * que la surveillance Telegram réutilise pour n'alerter que sur les signaux
+ * réellement confirmés, chacun avec sa stratégie.
+ */
+app.get('/api/signaux', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').trim();
+    const tf = String(req.query.tf || '5m').trim();
+    const provider = String(req.query.provider || '').trim() || undefined;
+    if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+    if (!Market.TF_MS[tf]) return res.status(400).json({ error: `Timeframe inconnu : ${tf}` });
+
+    const { candles } = await Market.getCandles(symbol, tf, 300, provider);
+    const done = (candles || []).filter(c => c.closed !== false);
+    if (done.length < 20) {
+      return res.json({
+        symbol, timeframe: tf, signaux: [], motifs: null, structure: null,
+        synthese: { total: 0, confirmes: 0, aSurveiller: 0, nonRemplis: 0, erreurs: 0, long: 0, short: 0, neutre: 0, strategiesEvaluees: [] },
+        indisponible: true,
+        raison: `Données insuffisantes (${done.length} bougie(s)) : marché fermé ou hors séance.`
+      });
+    }
+
+    const options = await optionsAnalyse(req.query);
+    const multi = Multi.detecterTout(done, { symbol, timeframe: tf }, {
+      profils: options.profils || []
+    });
+
+    res.json({
+      ...multi,
+      mode: options.mode,
+      strategie: options.strategie || null,
+      strategieAppliquee: options.strategie || null,
+      strategies: options.strategies || []
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
+// ─────────────────────────────────────────────────────────────
+// JOURNAL DES SIGNAUX — le devenir de chaque signal
+// ─────────────────────────────────────────────────────────────
+/**
+ * GET /api/journal-signaux?symbol=&resultat=&source=&limite=
+ * Rend les signaux enregistrés (du plus récent au plus ancien) et les stats.
+ *
+ * Un signal n'est pas « terminé » quand il s'affiche : il l'est quand le prix a
+ * touché son objectif, son invalidation, ou qu'il est revenu au point d'entrée.
+ * Ce journal est la mémoire du moteur — sans lui, impossible de dire quelle
+ * stratégie fonctionne réellement.
+ */
+app.get('/api/journal-signaux', requireAuth, (req, res) => {
+  try {
+    const limite = Math.min(Number(req.query.limite) || 100, 500);
+    const signaux = JournalSignaux.lister({
+      symbol: req.query.symbol ? String(req.query.symbol) : undefined,
+      resultat: req.query.resultat ? String(req.query.resultat) : undefined,
+      source: req.query.source ? String(req.query.source) : undefined,
+      limite
+    });
+    res.json({ success: true, signaux, stats: JournalSignaux.stats() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/journal-signaux/stats', requireAuth, (req, res) => {
+  try { res.json({ success: true, stats: JournalSignaux.stats() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/** Force une mise à jour (le serveur le fait aussi tout seul, périodiquement). */
+app.post('/api/journal-signaux/maj', requireAuth, async (req, res) => {
+  try {
+    const r = await JournalSignaux.mettreAJour(
+      (symbol, tf, provider) => Market.getCandles(symbol, tf, 300, provider)
+    );
+    res.json({ success: true, ...r, stats: JournalSignaux.stats() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+
+app.get('/api/couts', requireAuth, async (req, res) => {
+  try {
+    res.json({ success: true, ...Couts.bilan() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/stats', requireAuth, async (req, res) => {
   const all = await loadAllStrategies();
   const bySource = {};
@@ -3064,6 +3272,24 @@ async function start() {
   Alerts.start({
     market: Market,
     signals: Signals,
+    // Multi-signaux : permet à la surveillance de dire QUELLE stratégie s'est
+    // déclenchée, et de lister les motifs, au lieu d'un verdict anonyme.
+    signaux: Multi,
+    // Les stratégies que l'utilisateur a choisi de surveiller. Sans ce câblage,
+    // la surveillance tournait en mode « auto » (toutes les règles) et ignorait
+    // complètement les stratégies configurées dans l'app.
+    profilsSurveillance: async () => {
+      try {
+        const c = Alerts.get();
+        const ids = Array.isArray(c.strategies) ? c.strategies.filter(Boolean) : [];
+        if (!ids.length) return [];
+        const strategies = await loadAllStrategies();
+        return ids
+          .map(id => (strategies || []).find(x => x.id === id))
+          .filter(Boolean)
+          .map(doc => Signals.profilDepuisStrategie(doc));
+      } catch { return []; }
+    },
     sendMail,
     sendPush,
     labelOf: id => {
@@ -3071,6 +3297,17 @@ async function start() {
       return s ? s.providerLabel : id;
     }
   });
+
+  // Journal des signaux : suivi périodique des issues. Toutes les deux minutes on
+  // regarde si un signal enregistré a touché son objectif, son invalidation, ou
+  // est revenu au point d'entrée. `unref()` : ce minuteur ne doit pas empêcher
+  // l'arrêt propre du process.
+  const JOURNAL_INTERVALLE_MS = Math.max(60, Number(process.env.JOURNAL_INTERVALLE_SEC || 120)) * 1000;
+  const minuteurJournal = setInterval(() => {
+    JournalSignaux.mettreAJour((symbol, tf, provider) => Market.getCandles(symbol, tf, 300, provider))
+      .catch(() => { /* un marché en échec ne bloque pas les autres */ });
+  }, JOURNAL_INTERVALLE_MS);
+  if (typeof minuteurJournal.unref === 'function') minuteurJournal.unref();
   app.listen(PORT, () => {
     console.log('═══════════════════════════════════════');
     console.log('  5trade — plateforme de trading IA');

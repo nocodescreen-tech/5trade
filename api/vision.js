@@ -50,7 +50,7 @@ async function geminiAnalyze(images, prompt) {
   }
   const corps = JSON.stringify({
     contents: [{ parts }],
-    generationConfig: { temperature: 0.3, maxOutputTokens: 8192 }
+    generationConfig: { temperature: 0.3, maxOutputTokens: Number(process.env.VISION_MAX_TOKENS || 2048) }
   });
 
   // Chaque modèle a son PROPRE quota gratuit. Quand celui du modèle courant est
@@ -105,7 +105,7 @@ async function deepseekAnalyze(images, prompt) {
     body: JSON.stringify({
       model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
       messages: [{ role: 'user', content }],
-      max_tokens: 8192,
+      max_tokens: Number(process.env.VISION_MAX_TOKENS || 2048),
       temperature: 0.3
     })
   });

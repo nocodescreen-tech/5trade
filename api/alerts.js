@@ -46,6 +46,11 @@ const DEFAUT = {
   // téléphone, tout de suite.
   telegramToken: null,       // jeton du bot (BotFather)
   telegramChat: null,        // identifiant de la conversation
+  // Stratégies à appliquer PENDANT la surveillance. Vide = mode auto (toutes
+  // les règles). Renseigné = chaque stratégie est évaluée séparément et l'alerte
+  // dit laquelle s'est déclenchée. Sans ce champ, la surveillance ignorait
+  // complètement les stratégies configurées dans l'app.
+  strategies: [],
   marches: [
     { symbol: 'frxXAUUSD', tf: '15m', provider: 'deriv' },
     { symbol: 'R_75', tf: '15m', provider: 'deriv' },
@@ -140,6 +145,17 @@ function update(patch = {}) {
     }
     c.marches = propres.slice(0, 20);
   }
+  // Stratégies appliquées PENDANT la surveillance. Ce bloc manquait : `update()`
+  // reconstruit la config clé par clé, donc une valeur non listée était
+  // **silencieusement jetée**. `deps.profilsSurveillance` lisait ensuite un
+  // tableau vide et la surveillance retombait en mode auto — le correctif
+  // semblait fait et ne l'était pas.
+  if ('strategies' in patch) {
+    if (!Array.isArray(patch.strategies)) throw new Error('« strategies » doit être une liste');
+    c.strategies = [...new Set(
+      patch.strategies.map(x => String(x || '').trim()).filter(Boolean)
+    )].slice(0, 20);
+  }
   config = c;
   save();
   return config;
@@ -152,6 +168,32 @@ function resetDedup() { config.deja = []; save(); return config; }
  * aucune n'est inventée, et ce qui manque est simplement absent.
  */
 /** Message Telegram : court, chiffré, lisible sur un téléphone. */
+/**
+ * Bloc « signaux détectés » pour Telegram.
+ *
+ * Le message ne doit pas annoncer UN signal : sur un même graphique, plusieurs
+ * stratégies et plusieurs motifs peuvent se déclencher en même temps, chacun avec
+ * son sens. Les fondre en une ligne efface ce que le trader a demandé à voir.
+ * Chaque ligne porte donc : le nom, la stratégie d'origine (ou le motif), le sens
+ * et la force. Les non-remplis sont comptés, pas listés (le message resterait
+ * illisible) — ils restent visibles dans l'app.
+ */
+function blocSignaux(multi) {
+  if (!multi || !Array.isArray(multi.signaux) || !multi.signaux.length) return '';
+  const retenus = multi.signaux.filter(s => s.status === 'confirme' || s.status === 'surveiller');
+  if (!retenus.length) {
+    return `\n\nAucun signal retenu (${multi.signaux.length} concept(s) évalué(s), tous non remplis).`;
+  }
+  const lignes = retenus.slice(0, 10).map(s => {
+    const src = s.source === 'strategie' ? (s.strategie || s.nom) : s.nom;
+    const sens = s.sens === 'long' ? 'achat' : s.sens === 'short' ? 'vente' : 'neutre';
+    const etat = s.status === 'confirme' ? '' : ' (à surveiller)';
+    return `• <b>${src}</b> — ${sens}${etat} · force ${Math.round((s.force || 0) * 100)} %`;
+  });
+  const reste = retenus.length > 10 ? `\n… et ${retenus.length - 10} autre(s)` : '';
+  return `\n\n<b>Signaux détectés (${retenus.length})</b>\n${lignes.join('\n')}${reste}`;
+}
+
 async function envoyerTelegram(c, v, m, qualite = {}) {
   const L = v.levels || {};
   const sens = v.direction === 'BUY' ? 'ACHAT' : 'VENTE';
@@ -167,7 +209,7 @@ async function envoyerTelegram(c, v, m, qualite = {}) {
     `Objectifs : ${L.target1 ?? '—'} puis ${L.target2 ?? '—'}`,
     `${(v.rules || []).map(r => r.name).join(' + ')}${al}${rr}`,
     '5trade — outil d\'analyse, pas un conseil en investissement.'
-  ].join('\n');
+  ].join('\n') + blocSignaux(qualite.multi);
 
   const r = await fetchAvecReprise(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
     method: 'POST',
@@ -228,6 +270,28 @@ function compose(v, m, prix, qualite = {}) {
     ${(v.checklist || []).map(c => `${c.ok ? '✓' : '✗'} ${c.label}`).join(' · ')}
   </div>
 
+  ${(() => {
+    // Liste des signaux : un même graphique peut en porter plusieurs, chacun
+    // avec sa stratégie ou son motif. Les fondre en un seul effacerait
+    // l'information que le trader a demandé à recevoir.
+    const m2 = qualite.multi;
+    if (!m2 || !Array.isArray(m2.signaux)) return '';
+    const retenus = m2.signaux.filter(s => s.status === 'confirme' || s.status === 'surveiller');
+    if (!retenus.length) {
+      return `<div style="font-size:12.5px;color:#94a3b8;margin-top:12px">Aucun signal retenu sur ${m2.signaux.length} concept(s) évalué(s).</div>`;
+    }
+    const lignes = retenus.slice(0, 12).map(s => {
+      const src = s.source === 'strategie' ? (s.strategie || s.nom) : s.nom;
+      const sens = s.sens === 'long' ? 'achat' : s.sens === 'short' ? 'vente' : 'neutre';
+      const couleur2 = s.sens === 'long' ? '#34d399' : s.sens === 'short' ? '#f2545b' : '#94a3b8';
+      return `<li><b>${src}</b> — <span style="color:${couleur2}">${sens}</span>`
+        + `${s.status === 'confirme' ? '' : ' (à surveiller)'} · force ${Math.round((s.force || 0) * 100)} %`
+        + `${s.entree != null ? ` · entrée ${s.entree} / inv. ${s.stop}` : ''}</li>`;
+    }).join('');
+    return `<div style="font-size:13px;color:#cbd5e1;margin:14px 0 6px"><b>Signaux détectés (${retenus.length})</b></div>
+  <ul style="margin:0 0 12px 18px;padding:0;font-size:12.5px;color:#cbd5e1">${lignes}</ul>`;
+  })()}
+
   <div style="margin-top:16px;padding-top:12px;border-top:1px solid #1e293b;font-size:12px;color:#64748b">
     Bougie de déclenchement : ${new Date(v.at).toISOString().replace('T', ' ').slice(0, 16)} UTC<br>
     Vérifie le graphique avant d'agir : cette alerte signale une configuration, pas un ordre.
@@ -268,6 +332,22 @@ async function verifier(force = false) {
         continue;
       }
       const v = deps.signals.detect(closes, { symbol: m.symbol, timeframe: m.tf });
+
+      // ── Signaux MULTIPLES : la liste, pas un verdict seul ──
+      // La surveillance n'utilisait AUCUNE stratégie de l'utilisateur : elle
+      // appelait detect() sans options, donc en mode auto (toutes les règles).
+      // On évalue ici chaque stratégie configurée séparément, plus les motifs,
+      // pour que l'alerte dise QUELLE stratégie s'est déclenchée.
+      let multi = null;
+      if (deps.signaux && typeof deps.signaux.detecterTout === 'function') {
+        try {
+          const profils = typeof deps.profilsSurveillance === 'function'
+            ? (await deps.profilsSurveillance()) : [];
+          multi = deps.signaux.detecterTout(closes, { symbol: m.symbol, timeframe: m.tf },
+            { profils });
+        } catch { multi = null; }
+      }
+
       if (v.status !== 'confirme') { resultats.push({ ...m, verdict: v.status }); continue; }
       if (v.strength < c.forceMin) {
         resultats.push({ ...m, verdict: `confirmé mais force ${Number(v.strength).toFixed(2)}/1 (${v.forceNiveau || '—'}) < seuil` });
@@ -320,10 +400,18 @@ async function verifier(force = false) {
         }
       }
 
-      const cle = `${m.provider}|${m.symbol}|${m.tf}|${v.direction}|${v.at}`;
+      // La clé d'anti-doublon inclut l'ENSEMBLE des signaux confirmés : un motif
+      // qui apparaît en plus (marteau, double bottom) est une information
+      // nouvelle, elle mérite une alerte. Sans suffixe (aucun multi-signal), la
+      // clé reste IDENTIQUE à l'ancienne forme — on ne casse pas le dédoublonnage.
+      const sigKey = multi
+        ? multi.signaux.filter(s => s.status === 'confirme').map(s => s.id).sort().join('+')
+        : '';
+      const cleBase = `${m.provider}|${m.symbol}|${m.tf}|${v.direction}|${v.at}`;
+      const cle = sigKey ? `${cleBase}|${sigKey}` : cleBase;
       if (c.deja.includes(cle)) { resultats.push({ ...m, verdict: 'déjà alerté' }); continue; }
 
-      const msg = compose(v, m, r.candles[r.candles.length - 1].c, { confluence, rr });
+      const msg = compose(v, m, r.candles[r.candles.length - 1].c, { confluence, rr, multi });
       let emailOk = false;
       if (c.email) {
         await deps.sendMail({ to: c.email, subject: msg.subject, html: msg.html });
@@ -346,7 +434,7 @@ async function verifier(force = false) {
       // Telegram en plus : l'email peut attendre, le telephone non. Un echec
       // Telegram ne remet pas en cause l'alerte email deja partie.
       if (c.telegramToken && c.telegramChat) {
-        try { await envoyerTelegram(c, v, m, { confluence, rr }); }
+        try { await envoyerTelegram(c, v, m, { confluence, rr, multi }); }
         catch (e) { resultats.push({ ...m, verdict: 'alerte envoyée, Telegram en échec : ' + e.message }); }
       }
       c.deja.push(cle);

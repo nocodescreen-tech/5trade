@@ -26,6 +26,8 @@
   --brand:     #3b82f6;
   --brand-ink: #ffffff;
   --brand-bg:  #101d33;
+  --ai-purple: #7c3aed;
+  --ai-purple-bg: #1e1333;
   --ok:        #22c55e;
   --warn:      #f59e0b;
   --bad:       #ef4444;
@@ -63,6 +65,8 @@ html[data-theme="light"] {
   --brand:     #2563eb;
   --brand-ink: #ffffff;
   --brand-bg:  #eaf1fe;
+  --ai-purple: #6d28d9;
+  --ai-purple-bg: #f1eafe;
   --ok:        #16a34a;
   --warn:      #d97706;
   --bad:       #dc2626;

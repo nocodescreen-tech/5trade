@@ -58,3 +58,6 @@ audit-*.cjs
 hermes-*.cjs
 *-signal.json
 
+srv.log
+srv.err
+.codex/

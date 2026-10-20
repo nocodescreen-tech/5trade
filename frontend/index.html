@@ -1390,7 +1390,7 @@ function AddKnowledge({ refresh }) {
       <SpotlightCard className="panel" spotlightColor="rgba(124,58,237,.2)">
         <div style={{ padding:'22px' }}>
           <h2 style={{ fontSize:18, fontWeight:800, marginBottom:14, display:'flex', alignItems:'center', gap:10 }}>
-            <i className="fas fa-brain" style={{ color:'#a78bfa' }}></i>Ajouter à la base de connaissance
+            <i className="fas fa-brain" style={{ color:'var(--ai-purple)' }}></i>Ajouter à la base de connaissance
           </h2>
 
           <div className="nav" style={{ marginBottom:20 }}>
@@ -1563,8 +1563,8 @@ function AddKnowledge({ refresh }) {
           {busy && (
             <div style={{ marginTop:18, display:'flex', alignItems:'center', gap:12 }}>
               {LatticeLoader
-                ? <LatticeLoader label="Traitement" status="working" color="#a78bfa" fontSize={12} />
-                : <><Spinner size={18} color="#a78bfa" /><span style={{color:'var(--muted)',fontSize:13}}>Traitement…</span></>}
+                ? <LatticeLoader label="Traitement" status="working" color="var(--ai-purple)" fontSize={12} />
+                : <><Spinner size={18} color="var(--ai-purple)" /><span style={{color:'var(--muted)',fontSize:13}}>Traitement…</span></>}
             </div>
           )}
 
@@ -2286,6 +2286,10 @@ function LiveMarket({ onToJournal }) {
   const [ticks, setTicks] = useState(0);          // preuve visible que ça bouge
   const [lastUpdate, setLastUpdate] = useState(null);
   const [signal, setSignal] = useState(null);      // verdict en direct
+  // Liste des signaux : par défaut on n'affiche QUE ceux qui ont un sens
+  // exploitable. Un graphique produit une quinzaine de concepts évalués, dont la
+  // plupart sont vides — les montrer tous noierait les deux qui comptent.
+  const [voirToutSignaux, setVoirToutSignaux] = useState(false);
   // Mode d'analyse : 'auto' (l'app combine toutes les règles) ou 'manuel'
   // (uniquement les règles d'une stratégie choisie dans la base).
   const [mode, setMode] = useState('auto');
@@ -2497,7 +2501,10 @@ function LiveMarket({ onToJournal }) {
       } catch {}
     });
     return () => es.close();
-  }, [symbol, tf, provider]);
+    // `mode` et les stratégies SONT dans les dépendances : sans eux, choisir
+    // cinq stratégies ne rouvrait pas le flux et l'écran continuait d'afficher
+    // le verdict du mode précédent. La sélection semblait sans effet.
+  }, [symbol, tf, provider, mode, strategiesChoisies.join(',')]);
 
   const analyser = async () => {
     setBusy(true); setErr('');
@@ -2962,6 +2969,183 @@ function LiveMarket({ onToJournal }) {
           </div>
         )}
 
+        {/* ── STRUCTURE DU MARCHÉ ─────────────────────────────────────────
+            Avant de lister des signaux, il faut savoir OÙ est le marché :
+            tendance, dernière cassure de structure, position dans le range,
+            zone la plus proche, liquidité, session. Sans ce cadre, un marteau
+            est une forme ; avec ce cadre, c'est une décision. */}
+        {signal && signal.carte && (() => {
+          const k = signal.carte;
+          const tend = k.tendance === 'bullish' ? 'haussière' : k.tendance === 'bearish' ? 'baissière' : 'range';
+          const col = k.tendance === 'bullish' ? '#34d399' : k.tendance === 'bearish' ? '#f87171' : '#94a3b8';
+          const ev = k.evenement;
+          const pos = k.position;
+          const z = k.zoneLaPlusProche;
+          const liq = (k.liquidite || []).slice().sort((a, b) => (a.distanceAtr ?? 99) - (b.distanceAtr ?? 99))[0];
+          const item = (label, valeur, couleur) => (
+            <div style={{ display:'flex', flexDirection:'column', gap:2, minWidth:120 }}>
+              <span style={{ fontSize:10.5, color:'var(--dim)', textTransform:'uppercase', letterSpacing:'.3px' }}>{label}</span>
+              <span style={{ fontSize:12.5, color:couleur || '#e2e8f0', fontWeight:600 }}>{valeur}</span>
+            </div>
+          );
+          return (
+            <div className="panel" style={{ padding:'12px 16px', marginBottom:14 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:9, marginBottom:10, flexWrap:'wrap' }}>
+                <i className="fas fa-sitemap" style={{ color:'#60a5fa' }}></i>
+                <b style={{ fontSize:13, color:'#fff' }}>Structure du marché</b>
+                {signal.synthese && signal.synthese.biais && (
+                  <span className="badge" style={{ fontSize:10, background:'rgba(96,165,250,.13)', color:'#93c5fd' }}
+                    title="Comptage des signaux retenus par sens">
+                    biais {signal.synthese.biais}
+                  </span>
+                )}
+                {k.session && k.session.killZone && k.session.killZone !== 'aucune en ce moment' && (
+                  <span className="badge" style={{ fontSize:10, background:'rgba(245,158,11,.14)', color:'#fbbf24' }}
+                    title={`Session : ${k.session.courante}`}>
+                    kill zone {k.session.killZone}
+                  </span>
+                )}
+              </div>
+              <div style={{ display:'flex', gap:22, flexWrap:'wrap' }}>
+                {item('Tendance', tend, col)}
+                {ev ? item('Dernière cassure', `${ev.type} ${ev.sens === 'long' ? 'haussier' : 'baissier'} @ ${fmt(ev.niveau)}`,
+                  ev.sens === 'long' ? '#34d399' : '#f87171')
+                  : item('Dernière cassure', 'aucune (range)', 'var(--muted)')}
+                {pos ? item('Position', `${pos.zone} · équilibre ${fmt(pos.equilibre)}`, pos.zone === 'premium' ? '#fca5a5' : '#6ee7b7') : null}
+                {z ? item('Zone la plus proche', `${z.type} à ${z.distanceAtr} ATR${z.dansLaZone ? ' (dedans)' : ''}`,
+                  z.sens === 'long' ? '#34d399' : '#f87171') : null}
+                {liq ? item('Liquidité', `${liq.type} ${fmt(liq.prix)} (${liq.distanceAtr} ATR)`, '#fbbf24') : null}
+                {Number.isFinite(k.atr) ? item('ATR', fmt(k.atr), 'var(--muted)') : null}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── SIGNAUX DÉTECTÉS ────────────────────────────────────────────
+            Le signal n'est pas UN : chaque stratégie sélectionnée rend son
+            propre verdict, et chaque motif de bougie (doji, marteau, double
+            bottom, trendline…) est un signal à part entière, avec SON sens et
+            SES conditions. Les fondre en un seul verdict effaçait le travail de
+            l'utilisateur : il choisissait cinq stratégies et n'en voyait aucune. */}
+        {signal && Array.isArray(signal.signaux) && signal.signaux.length > 0 && (() => {
+          const tous = signal.signaux;
+          const rang = s => (s.status === 'confirme' ? 0 : s.status === 'surveiller' ? 1 : 2);
+          const tries = [...tous].sort((a, b) =>
+            rang(a) - rang(b) || (Number(b.force) || 0) - (Number(a.force) || 0));
+          const actifs = tries.filter(s => rang(s) < 2);
+          const montres = voirToutSignaux ? tries : actifs;
+          const nbAchat = actifs.filter(s => s.sens === 'long').length;
+          const nbVente = actifs.filter(s => s.sens === 'short').length;
+          const nbStrat = tous.filter(s => s.source === 'strategie').length;
+          const nbMotif = tous.length - nbStrat;
+          const teinte = s => s.sens === 'long' ? '#34d399' : s.sens === 'short' ? '#f87171' : '#94a3b8';
+          const fond = s => s.status === 'confirme'
+            ? (s.sens === 'long' ? 'rgba(34,211,138,.07)' : s.sens === 'short' ? 'rgba(242,84,91,.07)' : 'rgba(148,163,184,.05)')
+            : 'rgba(148,163,184,.035)';
+          const bord = s => s.status === 'confirme'
+            ? (s.sens === 'long' ? 'rgba(34,211,138,.34)' : s.sens === 'short' ? 'rgba(242,84,91,.34)' : 'rgba(148,163,184,.2)')
+            : 'rgba(148,163,184,.12)';
+          return (
+            <div style={{ marginTop:16 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:9, flexWrap:'wrap', marginBottom:9 }}>
+                <i className="fas fa-layer-group" style={{ color:'#60a5fa' }}></i>
+                <b style={{ fontSize:13, color:'#fff' }}>Signaux détectés ({tous.length})</b>
+                <span className="badge" style={{ fontSize:10, background:'rgba(167,139,250,.13)', color:'#c4b5fd' }}
+                  title="Une entrée par stratégie que tu as sélectionnée.">
+                  {nbStrat} stratégie(s)
+                </span>
+                <span className="badge" style={{ fontSize:10, background:'rgba(96,165,250,.13)', color:'#93c5fd' }}
+                  title="Doji, marteau, avalement, double top/bottom, trendline, support/résistance, compression…">
+                  {nbMotif} motif(s)
+                </span>
+                {nbAchat > 0 && <span className="badge" style={{ fontSize:10, border:'1px solid rgba(34,211,138,.45)', background:'transparent', color:'#34d399' }}>{nbAchat} achat</span>}
+                {nbVente > 0 && <span className="badge" style={{ fontSize:10, border:'1px solid rgba(242,84,91,.45)', background:'transparent', color:'#f87171' }}>{nbVente} vente</span>}
+                <span style={{ flex:'1 1 auto' }}></span>
+                {tous.length > actifs.length && (
+                  <button className="btn-ghost" onClick={() => setVoirToutSignaux(v => !v)}
+                    style={{ fontSize:11.5, whiteSpace:'nowrap' }}>
+                    {voirToutSignaux ? 'masquer les non-remplis' : `voir les ${tous.length - actifs.length} non-remplis`}
+                  </button>
+                )}
+              </div>
+
+              {montres.length === 0 && (
+                <div style={{ fontSize:12.5, color:'var(--muted)', padding:'8px 10px', borderRadius:8, background:'rgba(148,163,184,.05)' }}>
+                  <i className="fas fa-circle-minus" style={{ marginRight:7 }}></i>
+                  Aucun signal exploitable sur cette bougie : {tous.length} concept(s) évalué(s), conditions non remplies.
+                  C'est une information — le moteur ne force pas un signal quand le marché n'en donne pas.
+                </div>
+              )}
+
+              <div style={{ display:'grid', gap:6 }}>
+                {montres.map(s => {
+                  const ok = (s.conditions || []).filter(c => c.ok).length;
+                  const tot = (s.conditions || []).length;
+                  return (
+                    <div key={s.id} style={{ padding:'8px 10px', borderRadius:8, background:fond(s), border:`1px solid ${bord(s)}` }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                        <span className="badge" style={{ fontSize:9.5,
+                          background: s.source === 'strategie' ? 'rgba(167,139,250,.15)' : s.source === 'structure' ? 'rgba(245,158,11,.15)' : 'rgba(96,165,250,.15)',
+                          color: s.source === 'strategie' ? '#c4b5fd' : s.source === 'structure' ? '#fbbf24' : '#93c5fd' }}>
+                          {s.source === 'strategie' ? 'STRATÉGIE' : s.source === 'structure' ? 'STRUCTURE' : 'MOTIF'}
+                        </span>
+                        <b style={{ fontSize:12.5, color:'#e2e8f0' }}>{s.nom}</b>
+                        <span className="badge" style={{ fontSize:9.5, background:'transparent', border:`1px solid ${teinte(s)}`, color:teinte(s) }}>
+                          {s.sens === 'long' ? 'ACHAT' : s.sens === 'short' ? 'VENTE' : 'NEUTRE'}
+                        </span>
+                        <span style={{ fontSize:11, color: s.status === 'confirme' ? '#34d399' : s.status === 'surveiller' ? '#fbbf24' : 'var(--dim)' }}>
+                          {s.status === 'confirme' ? 'confirmé' : s.status === 'surveiller' ? 'à surveiller' : 'non rempli'}
+                        </span>
+                        {tot > 0 && (
+                          <span style={{ fontSize:11, color:'var(--dim)', title:'Conditions remplies sur conditions évaluées' }}>
+                            {ok}/{tot} condition(s)
+                          </span>
+                        )}
+                        <span style={{ flex:'1 1 auto' }}></span>
+                        <span style={{ fontSize:11, color:'var(--muted)' }} title="Score interne de solidité, PAS une probabilité de réussite.">
+                          force {Number(s.force || 0).toFixed(2)}
+                        </span>
+                      </div>
+
+                      {tot > 0 && (
+                        <div style={{ display:'flex', gap:'4px 14px', flexWrap:'wrap', marginTop:5, fontSize:11 }}>
+                          {(s.conditions || []).map((c, i) => (
+                            <span key={i} style={{ color: c.ok ? '#6ee7b7' : '#94a3b8' }}>
+                              <i className={`fas ${c.ok ? 'fa-check' : 'fa-xmark'}`} style={{ fontSize:9, marginRight:4 }}></i>
+                              {c.nom} = {String(c.valeur)}{c.seuil ? ` (seuil ${c.seuil})` : ''}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {s.entree != null && (
+                        <div style={{ marginTop:4, fontSize:11, color:'var(--muted)' }}>
+                          entrée {fmt(s.entree)} · invalidation <span style={{ color:'#f87171' }}>{fmt(s.stop)}</span>
+                          {(s.objectifs || []).length > 0 && <> · objectifs <span style={{ color:'#34d399' }}>{(s.objectifs || []).map(fmt).join(' / ')}</span></>}
+                          {Number.isFinite(s.rr) && s.rr > 0 ? ` · G/R ${s.rr.toFixed(2)}` : ''}
+                        </div>
+                      )}
+
+                      {s.structureContexte && (
+                        <div style={{ marginTop:3, fontSize:10.5,
+                          color: s.structureContexte.ajustement >= 0 ? '#6ee7b7' : '#fca5a5' }}
+                          title={`Force ${s.forceDetail ? s.forceDetail.avant : '—'} ajustée de ${s.structureContexte.ajustement} par la structure`}>
+                          <i className="fas fa-sitemap" style={{ fontSize:9, marginRight:5 }}></i>
+                          {s.structureContexte.lecture}
+                        </div>
+                      )}
+
+                      {s.status !== 'confirme' && s.raison && (
+                        <div style={{ marginTop:3, fontSize:10.5, color:'var(--dim)' }}>{s.raison}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
         {signal && signal.strategies && signal.strategies.length > 0 && (
           <div style={{ marginTop:12 }}>
             <div style={{ fontSize:12, color:'var(--muted)', marginBottom:6 }}>
@@ -3033,7 +3217,7 @@ function LiveMarket({ onToJournal }) {
             <div className="panel" style={{ padding:'12px 14px', marginTop:12 }}>
               <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:9, flexWrap:'wrap' }}>
                 <b style={{ fontSize:13 }}>
-                  <i className="fas fa-route" style={{ marginRight:6, color:'#a78bfa' }}></i>
+                  <i className="fas fa-route" style={{ marginRight:6, color:'var(--ai-purple)' }}></i>
                   Cheminement du signal
                 </b>
                 <select className="fld" style={{ width:'auto', margin:0, padding:'3px 8px', fontSize:12 }}
@@ -3334,7 +3518,7 @@ function LiveMarket({ onToJournal }) {
 
           <div className="panel" style={{ padding:18 }}>
             <h3 style={{ margin:'0 0 10px', fontSize:14 }}>
-              <i className="fas fa-ruler-combined" style={{ color:'#a78bfa', marginRight:8 }}></i>
+              <i className="fas fa-ruler-combined" style={{ color:'var(--ai-purple)', marginRight:8 }}></i>
               {report.levels.length} niveaux exploitables
             </h3>
             <div style={{ maxHeight:210, overflowY:'auto', display:'grid', gap:6 }}>
@@ -3413,6 +3597,160 @@ function ResultBadge({ result, status }) {
   const s = TRADE_R[result] || { label:result || '—', color:'#94a3b8', bg:'rgba(148,163,184,.13)', icon:'fa-circle' };
   return <span className="badge" style={{ background:s.bg, color:s.color }}>
     <i className={`fas ${s.icon}`}></i>{s.label}</span>;
+}
+
+// ── Journal des SIGNAUX (suivi automatique des issues) ──────────────────
+// Différent du journal de trades : ici personne ne saisit rien. Chaque signal
+// émis par le moteur est enregistré avec ses niveaux, puis réévalué sur les
+// bougies suivantes. On voit donc si l'objectif 1 a été atteint, si le stop a
+// été touché, ou si le prix est revenu au point d'entrée (BE).
+function JournalSignauxPanel() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [filtre, setFiltre] = useState('tout');
+
+  const px = p => (p === null || p === undefined || !Number.isFinite(Number(p)))
+    ? '—' : (Number(p) >= 1000 ? Number(p).toFixed(2) : Number(p).toFixed(5));
+
+  const charger = async () => {
+    try {
+      const r = await (await api('/journal-signaux?limite=150')).json();
+      if (!r.success) throw new Error(r.error || 'lecture impossible');
+      setData(r); setErr('');
+    } catch (e) { setErr(e.message); }
+  };
+  useEffect(() => { charger(); }, []);
+
+  const maj = async () => {
+    setBusy(true);
+    try {
+      await api('/journal-signaux/maj', { method: 'POST' });
+      await charger();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const st = data && data.stats;
+  const libelle = { tp2: 'Objectif 2', tp1: 'Objectif 1', be: 'Retour entrée (BE)', sl: 'Stop touché', expire: 'Expiré', ouvert: 'En cours' };
+  const teinte = { tp2: '#34d399', tp1: '#6ee7b7', be: '#fbbf24', sl: '#f87171', expire: '#94a3b8', ouvert: '#60a5fa' };
+
+  const liste = (data && data.signaux ? data.signaux : [])
+    .filter(s => filtre === 'tout' ? true : filtre === 'clos' ? s.resultat !== 'ouvert' : s.resultat === 'ouvert');
+
+  return (
+    <div className="panel" style={{ padding:'14px 18px', marginBottom:16 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', marginBottom:10 }}>
+        <i className="fas fa-clipboard-check" style={{ color:'#60a5fa' }}></i>
+        <b style={{ fontSize:13.5, color:'#fff' }}>Signaux suivis automatiquement</b>
+        {st && (
+          <>
+            <span className="badge" style={{ fontSize:10, background:'rgba(96,165,250,.13)', color:'#93c5fd' }}>{st.total} enregistré(s)</span>
+            <span className="badge" style={{ fontSize:10, background:'rgba(148,163,184,.12)', color:'var(--muted)' }}>{st.ouverts} en cours</span>
+            {st.tauxReussite !== null && (
+              <span className="badge" style={{ fontSize:10,
+                background: st.tauxReussite >= 50 ? 'rgba(34,211,138,.14)' : 'rgba(245,158,11,.14)',
+                color: st.tauxReussite >= 50 ? '#34d399' : '#fbbf24' }}>
+                {st.tauxReussite} % de réussite
+              </span>
+            )}
+            {st.rTotal !== 0 && (
+              <span className="badge" style={{ fontSize:10, background:'transparent', border:'1px solid rgba(148,163,184,.3)', color: st.rTotal >= 0 ? '#34d399' : '#f87171' }}>
+                {st.rTotal >= 0 ? '+' : ''}{st.rTotal} R cumulés
+              </span>
+            )}
+          </>
+        )}
+        <span style={{ flex:'1 1 auto' }}></span>
+        <select className="fld" style={{ width:130, fontSize:12 }} value={filtre} onChange={e => setFiltre(e.target.value)}>
+          <option value="tout">Tous</option>
+          <option value="clos">Tranchés</option>
+          <option value="ouvert">En cours</option>
+        </select>
+        <button className="btn ghost sm" onClick={maj} disabled={busy}>
+          {busy ? <Spinner /> : <i className="fas fa-rotate"></i>} Actualiser
+        </button>
+      </div>
+
+      {err && <div style={{ fontSize:12.5, color:'#fca5a5' }}>{err}</div>}
+
+      {st && st.clos > 0 && (
+        <div style={{ display:'flex', gap:14, flexWrap:'wrap', fontSize:12, color:'var(--muted)', marginBottom:10 }}>
+          {['tp2','tp1','be','sl','expire'].map(k => (
+            <span key={k} style={{ color: teinte[k] }}>
+              <i className="fas fa-circle" style={{ fontSize:7, marginRight:5 }}></i>
+              {libelle[k]} : {st.parResultat[k] || 0}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {liste.length === 0 && (
+        <div style={{ fontSize:12.5, color:'var(--muted)' }}>
+          Aucun signal enregistré pour l'instant. Laisse le flux « Direct » tourner : chaque signal retenu
+          est enregistré avec ses niveaux, puis son issue est vérifiée automatiquement sur les bougies suivantes.
+        </div>
+      )}
+
+      <div style={{ display:'grid', gap:5 }}>
+        {liste.slice(0, 40).map(s => (
+          <div key={s.cle} style={{ display:'flex', alignItems:'center', gap:9, flexWrap:'wrap',
+            padding:'6px 9px', borderRadius:7, background:'rgba(148,163,184,.04)',
+            border:`1px solid ${s.resultat === 'ouvert' ? 'rgba(96,165,250,.22)' : 'rgba(148,163,184,.13)'}` }}>
+            <span className="badge" style={{ fontSize:9, background:'rgba(148,163,184,.12)', color:'var(--muted)' }}>
+              {s.symbol} {s.timeframe}
+            </span>
+            <b style={{ fontSize:12, color:'#e2e8f0' }}>{(s.strategie || s.nom || '').slice(0, 40)}</b>
+            <span className="badge" style={{ fontSize:9, background:'transparent', border:`1px solid ${s.sens === 'long' ? '#34d399' : '#f87171'}`, color: s.sens === 'long' ? '#34d399' : '#f87171' }}>
+              {s.sens === 'long' ? 'ACHAT' : 'VENTE'}
+            </span>
+            <span style={{ fontSize:11, color: teinte[s.resultat] || 'var(--muted)', fontWeight:600 }}>
+              {libelle[s.resultat] || s.resultat}
+              {Number.isFinite(s.r) ? ` · ${s.r >= 0 ? '+' : ''}${s.r} R` : ''}
+            </span>
+            <span style={{ fontSize:10.5, color:'var(--dim)' }}>
+              entrée {px(s.entree)} · stop {px(s.stop)} · obj. {(s.objectifs || []).map(px).join(' / ')}
+            </span>
+            <span style={{ flex:'1 1 auto' }}></span>
+            <span style={{ fontSize:10.5, color:'var(--dim)' }}>
+              {s.bougiesSuivies ? `${s.bougiesSuivies} bougie(s) suivie(s)` : ''}
+              {s.atteintTP1 && s.resultat === 'ouvert' ? ' · TP1 déjà touché' : ''}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {st && Object.keys(st.parStrategie || {}).length > 0 && (
+        <div style={{ marginTop:12 }}>
+          <div style={{ fontSize:12, color:'var(--muted)', marginBottom:6 }}>
+            <i className="fas fa-chart-simple" style={{ marginRight:6 }}></i>Résultats par stratégie / concept
+          </div>
+          <div style={{ display:'grid', gap:4 }}>
+            {Object.entries(st.parStrategie)
+              .sort((a, b) => b[1].total - a[1].total)
+              .slice(0, 8)
+              .map(([nom, v]) => {
+                const taux = (v.gagnes + v.perdus) ? Math.round((v.gagnes / (v.gagnes + v.perdus)) * 100) : null;
+                return (
+                  <div key={nom} style={{ display:'flex', alignItems:'center', gap:10, fontSize:11.5 }}>
+                    <span style={{ flex:'1 1 220px', color:'#e2e8f0' }}>{nom.slice(0, 52)}</span>
+                    <span style={{ color:'#34d399' }}>{v.gagnes}✓</span>
+                    <span style={{ color:'#f87171' }}>{v.perdus}✗</span>
+                    {v.be > 0 && <span style={{ color:'#fbbf24' }}>{v.be} BE</span>}
+                    <span style={{ color: (taux ?? 0) >= 50 ? '#34d399' : '#fbbf24', minWidth:44, textAlign:'right' }}>
+                      {taux === null ? '—' : taux + ' %'}
+                    </span>
+                    <span style={{ color:'var(--dim)', minWidth:56, textAlign:'right' }}>
+                      {v.r >= 0 ? '+' : ''}{v.r.toFixed(1)} R
+                    </span>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Journal({ prefill, onPrefillUsed, strategies = [] }) {
@@ -3546,11 +3884,15 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
 
   return (
     <>
+      {/* Le devenir des signaux du moteur, en tête du journal : c'est la seule
+          partie qui ne dépend pas d'une saisie manuelle. */}
+      <JournalSignauxPanel />
+
       <div className="stat-grid" style={{ marginBottom:18 }}>
         <StatTile icon="fa-receipt" label="Trades enregistrés" value={stats?.total || 0} color="#60a5fa" delay={0} />
         <StatTile icon="fa-bullseye" label="Taux de réussite" value={stats?.winRate ?? 0} decimals={1} suffix=" %" color="#34d399" delay={70} />
         <StatTile icon="fa-scale-balanced" label="PnL cumulé" value={stats?.pnlTotal ?? 0} decimals={2} color="#f59e0b" delay={140} />
-        <StatTile icon="fa-wave-square" label="RR moyen" value={stats?.rrAvg ?? 0} decimals={2} color="#a78bfa" delay={210} />
+        <StatTile icon="fa-wave-square" label="RR moyen" value={stats?.rrAvg ?? 0} decimals={2} color="var(--ai-purple)" delay={210} />
       </div>
 
       {stats && (stats.wins > 0 || stats.losses > 0) && (
@@ -3903,6 +4245,10 @@ class Garde extends React.Component {
 
 function Alertes() {
   const [cfg, setCfg] = useState(null);
+  // Stratégies de la base : la surveillance peut les appliquer, au lieu de
+  // tourner en mode auto (toutes les règles) et d'ignorer la sélection.
+  const [profils, setProfils] = useState([]);
+  const [stratOuvert, setStratOuvert] = useState(false);
   // Les marchés proposés viennent de la même source que l'onglet Direct.
   const [meta, setMeta] = useState({ symbols: [], timeframes: [] });
   const [busy, setBusy] = useState(false);
@@ -3975,6 +4321,17 @@ function Alertes() {
         const r = await api('/market/symbols');
         const d = await r.json();
         if (d.success) setMeta({ symbols: d.symbols || [], timeframes: d.timeframes || [] });
+      } catch (e) {}
+    })();
+  }, []);
+
+  // Profils de stratégies : mêmes que l'onglet Direct (une seule source).
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api('/strategies/profiles');
+        const d = await r.json();
+        if (d.success) setProfils(d.profils || []);
       } catch (e) {}
     })();
   }, []);
@@ -4102,6 +4459,86 @@ function Alertes() {
 
   return (
     <div style={{ display:'grid', gap:16 }}>
+      {/* Quelles stratégies la SURVEILLANCE applique. Sans ce panneau, le moteur
+          de fond recevait la config mais rien à l'écran ne pouvait la remplir :
+          la surveillance restait en mode auto et ignorait les stratégies. */}
+      <Reveal>
+        <div className="panel" style={{ padding:20 }}>
+          <h2 style={{ fontSize:17, fontWeight:800, margin:'0 0 6px' }}>
+            <i className="fas fa-list-check" style={{ color:'#60a5fa', marginRight:9 }}></i>Stratégies appliquées à la surveillance
+          </h2>
+          <p style={{ margin:'0 0 14px', fontSize:12.5, color:'var(--muted)' }}>
+            Choisis les stratégies que la surveillance doit évaluer. Chacune rend son
+            propre signal, avec ses règles et ses unités de temps. Aucune sélectionnée =
+            mode auto (toutes les règles confondues).
+          </p>
+
+          <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', marginBottom:10 }}>
+            <button className="btn ghost sm" onClick={() => setStratOuvert(o => !o)}>
+              <i className="fas fa-chevron-down"></i>
+              {(cfg.strategies || []).length
+                ? `${(cfg.strategies || []).length} stratégie(s) surveillée(s)`
+                : 'Choisir les stratégies'}
+            </button>
+            {(cfg.strategies || []).length > 0 && (
+              <button className="btn ghost sm" disabled={busy}
+                onClick={() => sauver({ strategies: [] })}>
+                <i className="fas fa-rotate-left"></i> Revenir au mode auto
+              </button>
+            )}
+            <span style={{ fontSize:11.5, color:'var(--dim)' }}>
+              {profils.length} disponible(s) dans la base
+            </span>
+          </div>
+
+          {(cfg.strategies || []).length > 0 && (
+            <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:10 }}>
+              {(cfg.strategies || []).map(id => {
+                const p = profils.find(x => x.id === id);
+                return (
+                  <span key={id} className="tag" title={p ? (p.regles || []).join('+') : id}
+                    style={{ borderColor:'rgba(96,165,250,.4)', color:'#93c5fd' }}>
+                    {(p && p.titre ? p.titre : id).slice(0, 46)}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          {stratOuvert && (
+            <div style={{ maxHeight:300, overflowY:'auto', padding:'10px 12px',
+              borderRadius:10, background:'rgba(148,163,184,.04)',
+              border:'1px solid rgba(148,163,184,.16)' }}>
+              {profils.length === 0 && (
+                <div style={{ fontSize:12.5, color:'var(--muted)' }}>
+                  Aucune stratégie dans la base. Ajoute-en dans l'onglet « Ajouter ».
+                </div>
+              )}
+              {profils.map(p => {
+                const coche = (cfg.strategies || []).includes(p.id);
+                return (
+                  <label key={p.id} style={{ display:'flex', gap:9, alignItems:'center',
+                    padding:'5px 2px', fontSize:12.5, cursor:'pointer' }}>
+                    <input type="checkbox" checked={coche} readOnly onClick={() => {
+                      const actuelles = cfg.strategies || [];
+                      const suivantes = coche
+                        ? actuelles.filter(x => x !== p.id)
+                        : [...actuelles, p.id];
+                      sauver({ strategies: suivantes });
+                    }} />
+                    <span style={{ flex:1 }}>{p.titre}</span>
+                    <span className="tag" style={{ fontSize:10 }}>{(p.regles || []).join('+')}</span>
+                    {(p.timeframes || []).length > 0 && (
+                      <span style={{ fontSize:10, color:'var(--dim)' }}>{p.timeframes.join('/')}</span>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </Reveal>
+
       <Reveal>
         <div className="panel" style={{ padding:20 }}>
           <h2 style={{ fontSize:17, fontWeight:800, margin:'0 0 6px' }}>
@@ -4925,7 +5362,7 @@ function Dashboard({ user, onLogout }) {
             <div className="stat-grid" style={{ marginBottom:18 }}>
               <StatTile icon="fa-database" label="Stratégies" value={stats?.total || 0} color="#60a5fa" delay={0} />
               <StatTile icon="fa-globe" label="Scrapées du web" value={(stats?.bySource?.search||0)+(stats?.bySource?.scrape||0)}
-                color="#a78bfa" delay={70} />
+                color="var(--ai-purple)" delay={70} />
               <StatTile icon="fa-clock-rotate-left" label="Analyses" value={history.length} color="#34d399" delay={140} />
             </div>
             <Analyzer onDone={setResult} />
