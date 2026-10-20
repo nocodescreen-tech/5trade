@@ -358,6 +358,9 @@ const Patterns = require('./patterns');
 // réelle (objectif 1/2, stop, retour à l'entrée). Sans ça, aucune stratégie ne
 // peut être jugée — on ne garde que des opinions.
 const JournalSignaux = require('./journal-signaux');
+// Backtest : rejoue le moteur sur l'historique avec le MÊME code que le direct,
+// pour répondre à la seule question qui compte — est-ce que ça gagne ?
+const Backtest = require('./backtest');
 const Alerts = require('./alerts');
 const Lexique = require('./lexique');
 // Base de concepts : les définitions des termes, injectées dans l'analyse IA.
@@ -3188,6 +3191,50 @@ app.get('/api/signaux', requireAuth, async (req, res) => {
 
 
 // ─────────────────────────────────────────────────────────────
+// BACKTEST — le moteur rejoué sur l'historique
+// ─────────────────────────────────────────────────────────────
+/**
+ * GET /api/backtest?symbol=BTCUSDT&tf=5m&pas=2&bougies=400&strategies=id1,id2
+ *
+ * Rejoue le moteur bougie par bougie sur un historique réel, avec le MÊME code
+ * que le direct (aucune règle réécrite pour l'occasion), puis mesure : objectifs
+ * atteints, stops, BE, expirations, R total et espérance par trade.
+ *
+ * Coût IA : zéro (calcul local). C'est ce qui permet de dire si le moteur gagne,
+ * au lieu de le supposer.
+ */
+app.get('/api/backtest', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').trim();
+    const tf = String(req.query.tf || '5m').trim();
+    const provider = String(req.query.provider || '').trim() || undefined;
+    if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+    if (!Market.TF_MS[tf]) return res.status(400).json({ error: `Timeframe inconnu : ${tf}` });
+
+    const bougies = Math.min(Math.max(Number(req.query.bougies) || 400, 80), Backtest.MAX_BOUGIES);
+    const pas = Math.min(Math.max(Number(req.query.pas) || 2, 1), 10);
+
+    const { candles } = await Market.getCandles(symbol, tf, bougies, provider);
+    const options = await optionsAnalyse(req.query);
+    const r = Backtest.lancer(candles, { symbol, timeframe: tf }, {
+      profils: options.profils || [],
+      pas,
+      maxBougies: bougies
+    });
+
+    res.json({
+      success: true,
+      ...r,
+      mode: options.mode,
+      strategie: options.strategie || null,
+      strategies: options.strategies || []
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
 // JOURNAL DES SIGNAUX — le devenir de chaque signal
 // ─────────────────────────────────────────────────────────────
 /**
@@ -3275,6 +3322,9 @@ async function start() {
     // Multi-signaux : permet à la surveillance de dire QUELLE stratégie s'est
     // déclenchée, et de lister les motifs, au lieu d'un verdict anonyme.
     signaux: Multi,
+    // Le journal des signaux : la surveillance l'alimente aussi, sinon il ne
+    // contient que ce qui a été vu pendant que l'onglet « Direct » était ouvert.
+    journal: JournalSignaux,
     // Les stratégies que l'utilisateur a choisi de surveiller. Sans ce câblage,
     // la surveillance tournait en mode « auto » (toutes les règles) et ignorait
     // complètement les stratégies configurées dans l'app.
@@ -3298,7 +3348,8 @@ async function start() {
     }
   });
 
-  // Journal des signaux : suivi périodique des issues. Toutes les deux minutes on
+// ─────────────────────────────────────────────────────────────
+// Journal des signaux : suivi périodique des issues. Toutes les deux minutes on
   // regarde si un signal enregistré a touché son objectif, son invalidation, ou
   // est revenu au point d'entrée. `unref()` : ce minuteur ne doit pas empêcher
   // l'arrêt propre du process.

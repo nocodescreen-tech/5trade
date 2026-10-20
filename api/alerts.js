@@ -194,6 +194,21 @@ function blocSignaux(multi) {
   return `\n\n<b>Signaux détectés (${retenus.length})</b>\n${lignes.join('\n')}${reste}`;
 }
 
+function blocContexte(multi) {
+  const k = multi && multi.carte;
+  if (!k) return '';
+  const tend = k.tendance === 'bullish' ? 'haussière' : k.tendance === 'bearish' ? 'baissière' : 'range';
+  const pos = k.position ? k.position.zone : null;
+  const z = k.zoneLaPlusProche;
+  const morceaux = [
+    `tendance ${tend}`,
+    pos ? `prix en ${pos}` : null,
+    z ? `${z.type} à ${z.distanceAtr} ATR` : null,
+    Number.isFinite(k.atr) ? `ATR ${k.atr}` : null
+  ].filter(Boolean);
+  return morceaux.length ? `\nContexte : ${morceaux.join(' · ')}` : '';
+}
+
 async function envoyerTelegram(c, v, m, qualite = {}) {
   const L = v.levels || {};
   const sens = v.direction === 'BUY' ? 'ACHAT' : 'VENTE';
@@ -209,7 +224,7 @@ async function envoyerTelegram(c, v, m, qualite = {}) {
     `Objectifs : ${L.target1 ?? '—'} puis ${L.target2 ?? '—'}`,
     `${(v.rules || []).map(r => r.name).join(' + ')}${al}${rr}`,
     '5trade — outil d\'analyse, pas un conseil en investissement.'
-  ].join('\n') + blocSignaux(qualite.multi);
+  ].join('\n') + blocContexte(qualite.multi) + blocSignaux(qualite.multi);
 
   const r = await fetchAvecReprise(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
     method: 'POST',
@@ -346,6 +361,20 @@ async function verifier(force = false) {
           multi = deps.signaux.detecterTout(closes, { symbol: m.symbol, timeframe: m.tf },
             { profils });
         } catch { multi = null; }
+      }
+
+      // Le journal se remplit ICI aussi, pas seulement quand l'onglet « Direct »
+      // est ouvert. Sans ça, un signal émis pendant que l'app est fermée
+      // n'entrait jamais dans le journal : les statistiques ne décrivaient qu'une
+      // partie de la réalité, et le backtest seul ne pouvait rien dire du live.
+      // Le dédoublonnage par identité évite le doublon avec le flux.
+      if (multi && deps.journal && typeof deps.journal.enregistrer === 'function') {
+        try {
+          deps.journal.enregistrer(
+            multi.signaux.filter(x => x.status === 'confirme' || x.status === 'surveiller'),
+            { symbol: m.symbol, timeframe: m.tf, provider: m.provider, at: v.at }
+          );
+        } catch { /* le journal ne doit jamais bloquer une alerte */ }
       }
 
       if (v.status !== 'confirme') { resultats.push({ ...m, verdict: v.status }); continue; }

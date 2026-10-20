@@ -2120,6 +2120,56 @@ function tinyPng(W = 64, H = 40) {
     try { fs.unlinkSync(process.env.JOURNAL_SIGNAUX_FICHIER); } catch {}
   }
 
+  // ── Backtest : le moteur rejoué, et une définition UNIQUE du succès ──
+  {
+    const B = require('./backtest.js');
+    const T0 = 1700000000000, MIN = 60000;
+    const c = (i, o, h, l, cl) => ({ t: T0 + i * MIN, o, h, l, c: cl, v: 1, closed: true });
+
+    // Historique trop court : on le dit, on ne plante pas.
+    const court = B.lancer([c(0, 100, 101, 99, 100), c(1, 100, 101, 99, 100)], { symbol: 'X', timeframe: '5m' });
+    ok('un historique trop court est annoncé', court.indisponible === true, court.raison);
+
+    // Série réelle : montée puis respiration, assez longue pour être jugée.
+    const serie = [];
+    for (let i = 0; i < 140; i++) {
+      const base = 100 + Math.sin(i / 6) * 3 + i * 0.05;
+      serie.push(c(i, base, base + 0.6, base - 0.6, base + (i % 2 ? 0.3 : -0.2)));
+    }
+    const profils = [{ id: 'p', titre: 'Test', regles: ['R1', 'R2'], seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: ['5m'], parametres: {} }];
+    const r = B.lancer(serie, { symbol: 'TEST', timeframe: '5m' }, { profils, pas: 3, maxBougies: 120 });
+    ok('le backtest produit des prises', !r.indisponible && r.total > 0, `${r.total} prise(s)`);
+    ok('les prises résolues ne dépassent pas le total', r.clos <= r.total, `${r.clos}/${r.total}`);
+    ok('le taux de réussite reste entre 0 et 100',
+      r.tauxReussite === null || (r.tauxReussite >= 0 && r.tauxReussite <= 100), String(r.tauxReussite));
+    ok('l\'espérance est un nombre', r.esperance === null || Number.isFinite(r.esperance), String(r.esperance));
+    ok('la courbe de capital est une suite', Array.isArray(r.courbeR) && r.courbeR.length === r.clos, `${(r.courbeR || []).length} point(s)`);
+    ok('les trades non résolus sont exclus du taux', r.enCours >= 0, `${r.enCours} en cours`);
+    // Les doublons d'un signal qui persiste ne doivent pas gonfler l'échantillon.
+    ok('les occurrences répétées sont décomptées', Number.isFinite(r.ignoresDoublons), `${r.ignoresDoublons} évitée(s)`);
+
+    // Définition du succès : BE et expiration ne sont NI gagnés NI perdus.
+    const faux = [
+      { at: 1, resultat: 'tp1', r: 2, sens: 'long', source: 'motif', nom: 'M', strategie: null },
+      { at: 2, resultat: 'tp2', r: 4, sens: 'long', source: 'motif', nom: 'M', strategie: null },
+      { at: 3, resultat: 'sl', r: -1, sens: 'long', source: 'motif', nom: 'M', strategie: null },
+      { at: 4, resultat: 'be', r: 1, sens: 'long', source: 'motif', nom: 'M', strategie: null },
+      { at: 5, resultat: 'expire', r: 0, sens: 'long', source: 'motif', nom: 'M', strategie: null }
+    ];
+    const s = B.resumer(faux, { symbol: 'X', timeframe: '5m' });
+    ok('BE compté à part, pas comme un gain', s.gagnes === 2 && s.be === 1, `${s.gagnes} gagné(s), ${s.be} BE`);
+    ok('expiration comptée à part', s.expires === 1, String(s.expires));
+    ok('taux = objectifs / (objectifs + stops)', s.tauxReussite === 66.7, String(s.tauxReussite));
+    ok('total en R exact', s.rTotal === 6, String(s.rTotal));
+
+    // La même définition doit régner dans le journal, sinon deux écrans mentent.
+    const J = require('./journal-signaux.js');
+    const stJ = J.stats();
+    ok('journal et backtest exposent les mêmes indicateurs',
+      'be' in stJ && 'gagnes' in stJ && 'esperance' in stJ,
+      `journal : ${stJ.gagnes} gagné(s), ${stJ.be} BE`);
+  }
+
   // ── Surveillance : la sélection de stratégies ne doit pas être jetée ──
   // `update()` reconstruit la config clé par clé : une valeur non listée était
   // silencieusement perdue, et la surveillance restait en mode auto.

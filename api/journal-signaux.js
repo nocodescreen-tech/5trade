@@ -319,24 +319,37 @@ function stats() {
     return m;
   };
 
-  // Un « gagné » = objectif touché (tp1, tp2) ou trade protégé (be). Un « perdu »
-  // = stop. Les expirations ne sont ni l'un ni l'autre : elles sont comptées à
-  // part, sinon un moteur qui ne se déclenche jamais aurait 0 % de pertes.
-  const gagnes = clos.filter(s => s.resultat === 'tp1' || s.resultat === 'tp2' || s.resultat === 'be');
+  // Un « gagné » = objectif ATTEINT (tp1 ou tp2). Un « perdu » = stop. Le BE
+  // (objectif 1 pris puis retour à l'entrée) n'est ni l'un ni l'autre, et une
+  // expiration non plus : les compter comme des gains gonflait le taux — un
+  // moteur qui ne se déclenche jamais aurait affiché de bons chiffres.
+  // Définition identique dans backtest.js : les deux écrans ne doivent jamais
+  // raconter deux vérités différentes.
+  const gagnes = clos.filter(s => s.resultat === 'tp1' || s.resultat === 'tp2');
   const perdus = clos.filter(s => s.resultat === 'sl');
+  const be = clos.filter(s => s.resultat === 'be');
   const decides = gagnes.length + perdus.length;
   const rTotal = clos.reduce((a, s) => a + (Number.isFinite(s.r) ? s.r : 0), 0);
 
   const parStrategie = {};
   for (const s of clos) {
     const k = s.strategie || (s.source === 'motif' ? `motif : ${s.nom}` : s.source === 'structure' ? 'structure du marché' : s.nom);
-    if (!parStrategie[k]) parStrategie[k] = { total: 0, gagnes: 0, perdus: 0, be: 0, r: 0 };
+    if (!parStrategie[k]) parStrategie[k] = { total: 0, gagnes: 0, perdus: 0, be: 0, expires: 0, r: 0 };
     const p = parStrategie[k];
     p.total++;
     p.r += Number.isFinite(s.r) ? s.r : 0;
     if (s.resultat === 'sl') p.perdus++;
     else if (s.resultat === 'be') p.be++;
+    else if (s.resultat === 'expire') p.expires++;
     else p.gagnes++;
+  }
+  // Le taux est calculé sur les décidés (objectif ou stop), jamais sur les BE
+  // ni les expirations — sinon la même règle ne s'applique pas partout.
+  for (const k of Object.keys(parStrategie)) {
+    const p = parStrategie[k];
+    const d = p.gagnes + p.perdus;
+    p.tauxReussite = d ? +((p.gagnes / d) * 100).toFixed(1) : null;
+    p.rMoyen = p.total ? +(p.r / p.total).toFixed(2) : null;
   }
 
   return {
@@ -346,12 +359,15 @@ function stats() {
     parResultat: compte(tous, 'resultat'),
     gagnes: gagnes.length,
     perdus: perdus.length,
+    be: be.length,
     expires: clos.filter(s => s.resultat === 'expire').length,
-    // Taux de réussite calculé sur les trades DÉCIDÉS (gain ou perte), pas sur
-    // les expirations : mélanger les deux rendrait le chiffre flatteur à tort.
+    // Taux de réussite calculé sur les trades DÉCIDÉS (objectif ou stop), pas sur
+    // les BE ni les expirations : mélanger les trois rendrait le chiffre
+    // flatteur à tort.
     tauxReussite: decides ? +((gagnes.length / decides) * 100).toFixed(1) : null,
     rTotal: +rTotal.toFixed(2),
     rMoyen: clos.length ? +(rTotal / clos.length).toFixed(2) : null,
+    esperance: clos.length ? +(rTotal / clos.length).toFixed(2) : null,
     parSens: compte(clos, 'sens'),
     parSource: compte(clos, s => s.source),
     parMarche: compte(clos, s => `${s.symbol} ${s.timeframe}`),
