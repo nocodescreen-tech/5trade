@@ -53,7 +53,7 @@ function sauver(data) {
 function enregistrer(signaux, meta = {}, options = {}) {
   const data = charger();
   const existants = new Set(data.signaux.map(s => s.cle));
-  let ajoutes = 0, ignores = 0;
+  let ajoutes = 0, ignores = 0, fusionnes = 0;
 
   for (const s of signaux || []) {
     // ATTENTION : `Number(null)` vaut 0, pas NaN. Un signal sans niveaux (un
@@ -75,6 +75,30 @@ function enregistrer(signaux, meta = {}, options = {}) {
     // ouvertes, et le journal se remplissait du même signal répété — jusqu'à
     // saturer les 800 entrées et jeter l'historique utile.
     const identite = `${meta.symbol}|${meta.timeframe}|${s.id}|${s.sens}`;
+
+    // ── Trades CORRÉLÉS : plusieurs détecteurs, une seule prise ─────────────
+    // Mesuré sur le journal réel : 13 groupes de signaux partageaient la MÊME
+    // entrée ET le MÊME stop (Harami + Pin bar + Étoile filante sur la même
+    // bougie). Trois lignes pour un trade : le taux de réussite et l'espérance
+    // comptaient trois fois le même résultat, ce qui donnait un échantillon
+    // faussement large et faussement fiable. On fusionne, en gardant la trace
+    // des concepts qui se sont rejoints.
+    const atSignal = s.at || meta.at || null;
+    const memeTrade = data.signaux.find(x =>
+      x.symbol === (meta.symbol || null)
+      && x.timeframe === (meta.timeframe || null)
+      && Number(x.at) === Number(atSignal)
+      && x.sens === s.sens
+      && Number(x.entree) === e
+      && Number(x.stop) === st);
+    if (memeTrade) {
+      memeTrade.concepts = Array.isArray(memeTrade.concepts) ? memeTrade.concepts : [memeTrade.nom];
+      if (!memeTrade.concepts.includes(s.nom)) memeTrade.concepts.push(s.nom);
+      fusionnes++;
+      ignores++;
+      continue;
+    }
+
     const dejaVivante = data.signaux.some(x =>
       (x.identite || String(x.cle || '').split('|').slice(0, 4).join('|')) === identite
       && x.resultat === 'ouvert');
@@ -96,6 +120,8 @@ function enregistrer(signaux, meta = {}, options = {}) {
       source: s.source,
       id: s.id,
       nom: s.nom,
+      // Concepts qui ont rejoint ce trade (voir la fusion des signaux corrélés).
+      concepts: [s.nom],
       strategie: s.strategie || null,
       concept: s.concept || null,
       sens: s.sens,
@@ -127,13 +153,13 @@ function enregistrer(signaux, meta = {}, options = {}) {
     ajoutes++;
   }
 
-  if (ajoutes) {
+  if (ajoutes || fusionnes) {
     if (data.signaux.length > MAX_ENTREES) {
       data.signaux = data.signaux.slice(-MAX_ENTREES);
     }
     sauver(data);
   }
-  return { ajoutes, ignores };
+  return { ajoutes, ignores, fusionnes };
 }
 
 // ─── Évaluation ──────────────────────────────────────────────────────────

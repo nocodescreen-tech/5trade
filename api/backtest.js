@@ -72,6 +72,9 @@ function lancer(candles, meta = {}, options = {}) {
     evaluations++;
 
     const futurs = serie.slice(i + 1);
+    // Plusieurs détecteurs peuvent décrire le MÊME trade sur cette bougie
+    // (même entrée, même stop) : une seule prise, les concepts se cumulent.
+    const parCle = new Map();
     for (const s of r.signaux) {
       if (s.status !== 'confirme' && s.status !== 'surveiller') continue;
       if (!s.entree || !s.stop || !Array.isArray(s.objectifs) || !s.objectifs.length) continue;
@@ -82,6 +85,11 @@ function lancer(candles, meta = {}, options = {}) {
       // Encore ouverte au moment où on la retrouve : on ne rouvre pas.
       if (dejaResolueA !== undefined && dejaResolueA > i) { ignoresDoublons++; continue; }
 
+      // Même entrée ET même stop sur cette bougie = un seul trade.
+      const cleTrade = `${s.sens}|${Number(s.entree)}|${Number(s.stop)}`;
+      const jumeau = parCle.get(cleTrade);
+      if (jumeau) { jumeau.concepts.push(s.nom); continue; }
+
       const trade = {
         at: serie[i].t,
         index: i,
@@ -89,6 +97,7 @@ function lancer(candles, meta = {}, options = {}) {
         id: s.id,
         source: s.source,
         nom: s.nom,
+        concepts: [s.nom],
         strategie: s.strategie || null,
         concept: s.concept || null,
         sens: s.sens,
@@ -107,6 +116,7 @@ function lancer(candles, meta = {}, options = {}) {
 
       Journal.evaluer(trade, futurs);
       trades.push(trade);
+      parCle.set(cleTrade, trade);
 
       // On mémorise jusqu'où cette occurrence court, pour ne pas la recompter.
       const idxFin = trade.leveLe

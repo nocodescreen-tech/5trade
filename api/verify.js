@@ -1104,7 +1104,7 @@ function tinyPng(W = 64, H = 40) {
     ok('la navigation d\'ordinateur est masquée sur mobile', /\.nav\{display:none\}/.test(htmlSrc));
     ok('au plus cinq cibles au pouce (le reste dans « Plus »)',
       /NAV_PRINCIPAL = \['live', 'analyze', 'strategies', 'journal'\]/.test(jsx)
-      && /NAV_SECONDAIRE = \['add', 'history', 'termes', 'alerts', 'outils'\]/.test(jsx));
+      && /NAV_SECONDAIRE = \[[^\]]+\]/.test(jsx));
     ok('cibles tactiles d\'au moins 44 px', /min-height:44px/.test(htmlSrc));
     ok('encoche et barre gestuelle respectées (safe-area)',
       /env\(safe-area-inset-bottom\)/.test(htmlSrc));
@@ -1182,8 +1182,18 @@ function tinyPng(W = 64, H = 40) {
     ok('la barre mobile se limite à cinq cibles', /repeat\(5,1fr\)/.test(htmlSrc));
     ok('les onglets secondaires passent dans « Plus »',
       /NAV_PRINCIPAL/.test(jsx) && /NAV_SECONDAIRE/.test(jsx) && /mobile-plus/.test(jsx));
-    ok('les onglets rangés sont bien les cinq secondaires',
-      /\['add', 'history', 'termes', 'alerts', 'outils'\]/.test(jsx));
+    // Assertion de COMPORTEMENT et non de littéral : chaque onglet déclaré dans
+    // NAV doit avoir un rendu. C'est ce qui compte (un onglet sans page est un
+    // bouton mort), et ça n'interdit plus d'ajouter un onglet secondaire.
+    // On isole le bloc NAV : un `id:'…'` isolé matcherait aussi OUTILS_GET et
+    // les modes de stratégie, qui ne sont pas des onglets.
+    const debutNav = jsx.indexOf('const NAV = [');
+    const blocNav = jsx.slice(debutNav, jsx.indexOf('];', debutNav));
+    const idsOnglets = [...blocNav.matchAll(/id:'([a-z-]+)'/g)].map(m => m[1]);
+    const sansRendu = idsOnglets.filter(id => !new RegExp(`tab === '${id}'`).test(jsx));
+    ok('chaque onglet déclaré a son rendu',
+      idsOnglets.length >= 8 && sansRendu.length === 0,
+      sansRendu.length ? sansRendu.join(',') : `${idsOnglets.length} onglet(s)`);
     ok('onglet « Outils » déclaré avec son composant',
       /id:'outils'/.test(jsx) && /function Outils\(\)/.test(jsx)
       && /tab === 'outils' && <Outils/.test(jsx));
@@ -2118,6 +2128,64 @@ function tinyPng(W = 64, H = 40) {
       st.tauxReussite === null || st.tauxReussite === Math.round((st.gagnes / (st.gagnes + st.perdus)) * 1000) / 10,
       String(st.tauxReussite));
     try { fs.unlinkSync(process.env.JOURNAL_SIGNAUX_FICHIER); } catch {}
+  }
+
+  // ── Niveaux : pas de risque nul, pas de stop à contre-sens, pas de doublon ──
+  {
+    const M = require('./signaux.js');
+
+    // Précision adaptative : sur un prix de 1,12, un arrondi à 2 décimales
+    // rendait l'entrée et le stop IDENTIQUES (61 trades sur 62 sur EUR/USD).
+    const c = [{ t: 1, o: 1.1230, h: 1.1240, l: 1.1225, c: 1.1234, closed: true }];
+    const n = M.niveauxMotif({ id: 'marteau', ok: true, sens: 'long', chiffres: {} }, c, 0.0012);
+    ok('un prix bas garde un risque non nul', !!n && n.entree !== n.stop,
+      n ? `${n.entree} / ${n.stop}` : 'null');
+    ok('la précision s\'adapte au prix', !!n && String(n.entree).split('.')[1]?.length >= 4,
+      n ? String(n.entree) : '—');
+
+    // Garde : stop trop près → élargi à 0,5 ATR. Testée DIRECTEMENT, parce que
+    // pour Support/Résistance le plancher est déjà dans la formule (le stop est
+    // le plus éloigné du niveau et de 0,5 ATR) : le drapeau ne s'y déclenche
+    // jamais, et un test via ce détecteur vérifiait donc autre chose.
+    const garde = M.assainirNiveaux({ entree: 100, stop: 99.5, objectifs: [102] }, 'long', 2);
+    ok('un stop trop proche est élargi à 0,5 ATR',
+      !!garde && garde.stopElargi === true && Math.abs(garde.entree - garde.stop) >= 1 - 1e-9,
+      garde ? `stop ${garde.stop} (risque ${Math.abs(garde.entree - garde.stop)})` : 'null');
+
+    // Un stop déjà assez loin n'est PAS touché.
+    const intact = M.assainirNiveaux({ entree: 100, stop: 97, objectifs: [105] }, 'long', 2);
+    ok('un stop correctement placé n\'est pas modifié',
+      !!intact && !intact.stopElargi && intact.stop === 97, intact ? String(intact.stop) : 'null');
+
+    // Stop du mauvais côté (achat avec stop au-dessus) → refusé.
+    ok('un stop à contre-sens est refusé',
+      M.assainirNiveaux({ entree: 100, stop: 101, objectifs: [105] }, 'long', 2) === null);
+
+    // Garde : prix du mauvais côté du niveau → pas de trade (achat sous le support).
+    const faux = M.niveauxMotif(
+      { id: 'support-resistance', ok: true, sens: 'long', chiffres: { niveau: 4118.44, touches: 3 } },
+      [{ t: 1, o: 4116, h: 4117, l: 4115, c: 4116.54, closed: true }], 4
+    );
+    ok('acheter SOUS le support ne produit pas de niveaux', faux === null);
+
+    // Le backtest ne doit produire ni risque nul, ni stop inversé, ni doublon.
+    const B = require('./backtest.js');
+    const T0 = 1700000000000, MIN = 60000;
+    const cb = (i, o, h, l, cl) => ({ t: T0 + i * MIN, o, h, l, c: cl, v: 1, closed: true });
+    const serie = [];
+    for (let i = 0; i < 140; i++) {
+      const base = 1.1200 + Math.sin(i / 5) * 0.004 + i * 0.00005;
+      serie.push(cb(i, base, base + 0.0008, base - 0.0008, base + (i % 2 ? 0.0004 : -0.0003)));
+    }
+    const profils = [{ id: 'p', titre: 'Devises', regles: ['R1', 'R2', 'R3', 'R4'], seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: ['5m'], parametres: {} }];
+    const r = B.lancer(serie, { symbol: 'EURUSD', timeframe: '5m' }, { profils, pas: 2, maxBougies: 120 });
+    const tr = r.trades || [];
+    ok('le backtest rend des trades sur un actif à petit prix', tr.length > 0, `${tr.length} trade(s)`);
+    ok('aucun trade sans risque', tr.every(t => Math.abs(t.entree - t.stop) > 0), String(tr.length));
+    ok('aucun stop à contre-sens',
+      tr.every(t => (t.sens === 'long' ? t.stop < t.entree : t.stop > t.entree)));
+    const cles = new Set(tr.map(t => `${t.at}|${t.sens}|${t.entree}|${t.stop}`));
+    ok('aucun trade en double', cles.size === tr.length, `${tr.length} trades, ${cles.size} clés`);
   }
 
   // ── Backtest : le moteur rejoué, et une définition UNIQUE du succès ──

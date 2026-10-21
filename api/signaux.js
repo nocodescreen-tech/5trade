@@ -29,6 +29,14 @@ const Structure = require('./structure');
 const Patterns = require('./patterns');
 
 const r2 = x => (Number.isFinite(x) ? +x.toFixed(2) : null);
+// Précision ADAPTATIVE pour les PRIX. `r2` (2 décimales) est correct pour un
+// multiple d'ATR ou un ratio, mais faux pour un prix : sur EUR/USD à 1,1234,
+// l'entrée et le stop arrondis valaient TOUS DEUX 1,12 — mesuré, 61 risques sur
+// 62 à zéro sur cet actif, et le stop « élargi » retombait sur la même valeur.
+// Un prix se lit donc avec assez de décimales pour que le risque existe.
+const arrondiPrix = x => (Number.isFinite(x)
+  ? +x.toFixed(Math.abs(x) >= 100 ? 2 : Math.abs(x) >= 1 ? 4 : 6)
+  : null);
 
 /** BUY/SELL (vocabulaire du moteur) → long/short (vocabulaire du trader). */
 const sensDe = dir => (dir === 'BUY' ? 'long' : dir === 'SELL' ? 'short' : 'neutre');
@@ -52,7 +60,53 @@ function statutDe(status) {
  *   • support/résistance → le niveau lui-même ;
  *   • compression/doji/inside → aucune direction : pas de niveaux, et on le dit.
  */
+/**
+ * Assainit des niveaux avant de les publier.
+ *
+ * Deux défauts mesurés sur le journal réel (276 signaux) :
+ *  1. **Stop trop près.** 11 % des stops étaient à moins de 0,5 ATR de l'entrée,
+ *     les pires à 0,09 ATR. Un tel stop n'est pas une invalidation, c'est du
+ *     bruit : il se fait balayer par la mèche suivante, et il gonfle ensuite le
+ *     R des gains (un risque de 0,1 ATR transforme +1 ATR en +10 R).
+ *     Cause précise : pour Support/Résistance le stop était calculé depuis le
+ *     NIVEAU (`niveau ∓ 0,5 ATR`) et non depuis l'entrée — quand le prix était
+ *     collé au niveau, le risque tombait à presque rien.
+ *  2. **Stop du mauvais côté.** Un achat avec un stop AU-DESSUS de l'entrée
+ *     n'est pas un trade : c'est une géométrie cassée. On refuse.
+ *
+ * @param {{entree:number, stop:number, objectifs:number[]}} niv
+ * @param {'long'|'short'} sens
+ * @param {number} atr
+ * @param {number} [risqueMini] plancher en multiples d'ATR (0,5 par défaut)
+ */
+function assainirNiveaux(niv, sens, atr, risqueMini = 0.5) {
+  if (!niv || !Number.isFinite(niv.entree) || !Number.isFinite(niv.stop)) return niv;
+  const long = sens === 'long';
+
+  // Stop du mauvais côté : la configuration est incohérente, on ne la publie pas.
+  if (long ? niv.stop >= niv.entree : niv.stop <= niv.entree) return null;
+
+  if (!(atr > 0)) return niv;
+  const ecart = Math.abs(niv.entree - niv.stop);
+  const mini = atr * risqueMini;
+  if (ecart >= mini) return niv;
+
+  const stop = long ? niv.entree - mini : niv.entree + mini;
+  return {
+    ...niv,
+    stop: arrondiPrix(stop),
+    stopElargi: true,
+    base: [niv.base, `stop élargi à ${risqueMini}× ATR (le niveau était à ${arrondiPrix(ecart)} du prix)`]
+      .filter(Boolean).join(' · ')
+  };
+}
+
 function niveauxMotif(motif, candles, atr) {
+  const brut = niveauxMotifBrut(motif, candles, atr);
+  return assainirNiveaux(brut, motif.sens, atr);
+}
+
+function niveauxMotifBrut(motif, candles, atr) {
   const dernier = candles[candles.length - 1];
   if (!dernier || !atr) return null;
   const close = dernier.c;
@@ -71,9 +125,9 @@ function niveauxMotif(motif, candles, atr) {
       const hauteur = col - creux;
       if (!Number.isFinite(creux) || !Number.isFinite(col) || hauteur <= 0) return null;
       return {
-        entree: r2(close), stop: r2(creux - 0.2 * atr),
-        objectifs: [r2(col + hauteur), r2(col + 2 * hauteur)],
-        base: `creux ${r2(creux)} · col ${r2(col)} · hauteur ${r2(hauteur)}`
+        entree: arrondiPrix(close), stop: arrondiPrix(creux - 0.2 * atr),
+        objectifs: [arrondiPrix(col + hauteur), arrondiPrix(col + 2 * hauteur)],
+        base: `creux ${arrondiPrix(creux)} · col ${arrondiPrix(col)} · hauteur ${arrondiPrix(hauteur)}`
       };
     }
     case 'double-top': {
@@ -82,9 +136,9 @@ function niveauxMotif(motif, candles, atr) {
       const hauteur = sommet - col;
       if (!Number.isFinite(sommet) || !Number.isFinite(col) || hauteur <= 0) return null;
       return {
-        entree: r2(close), stop: r2(sommet + 0.2 * atr),
-        objectifs: [r2(col - hauteur), r2(col - 2 * hauteur)],
-        base: `sommets ${r2(sommet)} · col ${r2(col)} · hauteur ${r2(hauteur)}`
+        entree: arrondiPrix(close), stop: arrondiPrix(sommet + 0.2 * atr),
+        objectifs: [arrondiPrix(col - hauteur), arrondiPrix(col - 2 * hauteur)],
+        base: `sommets ${arrondiPrix(sommet)} · col ${arrondiPrix(col)} · hauteur ${arrondiPrix(hauteur)}`
       };
     }
     case 'marteau':
@@ -94,45 +148,55 @@ function niveauxMotif(motif, candles, atr) {
       // L'invalidation est l'extrême bas (achat) ou haut (vente) de la bougie.
       const stop = long ? dernier.l - 0.2 * atr : dernier.h + 0.2 * atr;
       return {
-        entree: r2(close), stop: r2(stop),
-        objectifs: [r2(close + sens * atr), r2(close + sens * 2 * atr)],
-        base: `extrême de la bougie ${long ? r2(dernier.l) : r2(dernier.h)} ± 0,2× ATR`
+        entree: arrondiPrix(close), stop: arrondiPrix(stop),
+        objectifs: [arrondiPrix(close + sens * atr), arrondiPrix(close + sens * 2 * atr)],
+        base: `extrême de la bougie ${long ? arrondiPrix(dernier.l) : arrondiPrix(dernier.h)} ± 0,2× ATR`
       };
     }
     case 'etoile-filante':
     case 'avalement-baissier': {
       const stop = dernier.h + 0.2 * atr;
       return {
-        entree: r2(close), stop: r2(stop),
-        objectifs: [r2(close - atr), r2(close - 2 * atr)],
-        base: `extrême haut ${r2(dernier.h)} ± 0,2× ATR`
+        entree: arrondiPrix(close), stop: arrondiPrix(stop),
+        objectifs: [arrondiPrix(close - atr), arrondiPrix(close - 2 * atr)],
+        base: `extrême haut ${arrondiPrix(dernier.h)} ± 0,2× ATR`
       };
     }
     case 'marubozu': {
       const stop = long ? dernier.l - 0.2 * atr : dernier.h + 0.2 * atr;
       return {
-        entree: r2(close), stop: r2(stop),
-        objectifs: [r2(close + sens * atr), r2(close + sens * 2 * atr)],
+        entree: arrondiPrix(close), stop: arrondiPrix(stop),
+        objectifs: [arrondiPrix(close + sens * atr), arrondiPrix(close + sens * 2 * atr)],
         base: `momentum : corps ${c.corpsRatio} du range`
       };
     }
     case 'trendline': {
       const depasse = Number(c.depassement);
       return {
-        entree: r2(close), stop: r2(close - sens * Math.max(atr * 0.5, depasse * 0.5)),
-        objectifs: [r2(close + sens * atr), r2(close + sens * 2 * atr)],
-        base: `dépassement mesuré ${r2(depasse)}`
+        entree: arrondiPrix(close), stop: arrondiPrix(close - sens * Math.max(atr * 0.5, depasse * 0.5)),
+        objectifs: [arrondiPrix(close + sens * atr), arrondiPrix(close + sens * 2 * atr)],
+        base: `dépassement mesuré ${arrondiPrix(depasse)}`
       };
     }
     case 'support-resistance': {
       const niveau = Number(c.niveau);
       if (!Number.isFinite(niveau)) return null;
-      // On joue le rebond : invalidation de l'autre côté du niveau.
-      const stop = long ? niveau - 0.5 * atr : niveau + 0.5 * atr;
+      // Un « rebond » n'existe que si le prix est du BON côté du niveau. Un
+      // achat SOUS le support n'est pas un rebond, c'est une cassure : mesuré
+      // sur le journal (Support 4118.44, prix 4116.54), ces signaux étaient
+      // faux dès l'émission et se faisaient invalider en une bougie.
+      if (long && close <= niveau) return null;
+      if (!long && close >= niveau) return null;
+      // Stop sous le niveau ET à au moins 0,5 ATR de l'entrée : on prend le plus
+      // ÉLOIGNÉ des deux. Avant, le stop venait du niveau seul, donc un prix
+      // collé au niveau donnait un risque de 0,09 ATR.
+      const stop = long
+        ? Math.min(niveau - 0.25 * atr, close - 0.5 * atr)
+        : Math.max(niveau + 0.25 * atr, close + 0.5 * atr);
       return {
-        entree: r2(close), stop: r2(stop),
-        objectifs: [r2(close + sens * atr), r2(close + sens * 2 * atr)],
-        base: `niveau ${r2(niveau)} touché ${c.touches} fois`
+        entree: arrondiPrix(close), stop: arrondiPrix(stop),
+        objectifs: [arrondiPrix(close + sens * atr), arrondiPrix(close + sens * 2 * atr)],
+        base: `niveau ${arrondiPrix(niveau)} touché ${c.touches} fois`
       };
     }
     default:
@@ -294,7 +358,21 @@ function signalStrategie(candles, meta, profil) {
     conditions.push({ nom: `Filtre ${f.cle}`, valeur: f.ok ? 'ok' : (f.detail || 'non'), seuil: 'ok', ok: !!f.ok });
   }
 
-  const niveaux = v.levels || null;
+  // Les niveaux d'une STRATÉGIE viennent de `Signals.levelsFor` et n'avaient pas
+  // passé la garde `assainirNiveaux` : mesuré, 61 trades sur 62 d'EUR/USD
+  // sortaient avec une entrée ÉGALE au stop (arrondi à 2 décimales sur un prix
+  // de 1,12). Un trade sans risque n'est pas un trade — on assainit ici aussi,
+  // avec le même plancher que les motifs et la structure.
+  const sensSignal = sensDe(v.direction);
+  const atrNiveaux = Number.isFinite(v.atr) ? v.atr
+    : (() => { try { return Structure.atr(candles, 14); } catch { return null; } })();
+  const brut = v.levels ? {
+    entree: arrondiPrix(v.levels.entry),
+    stop: arrondiPrix(v.levels.stop),
+    objectifs: [arrondiPrix(v.levels.target1), arrondiPrix(v.levels.target2)].filter(Number.isFinite)
+  } : null;
+  const niveaux = assainirNiveaux(brut, sensSignal, atrNiveaux);
+
   return {
     id: `strat:${profil.id || profil.titre}`,
     source: 'strategie',
@@ -302,14 +380,14 @@ function signalStrategie(candles, meta, profil) {
     strategie: profil.titre || null,
     concept: null,
     tf: meta.timeframe || null,
-    sens: sensDe(v.direction),
+    sens: sensSignal,
     status: statutDe(v.status),
     force: r2(v.strength) || 0,
     conditions,
     preuves: v.preuves || [],
-    entree: niveaux ? r2(niveaux.entry) : null,
-    stop: niveaux ? r2(niveaux.stop) : null,
-    objectifs: niveaux ? [r2(niveaux.target1), r2(niveaux.target2)].filter(Number.isFinite) : [],
+    entree: niveaux ? niveaux.entree : null,
+    stop: niveaux ? niveaux.stop : null,
+    objectifs: niveaux ? niveaux.objectifs : [],
     rr: null,
     raison: v.summary || null,
     // Ce que la stratégie DEMANDAIT sans l'obtenir (R5 jetée, filtre inconnu) :
@@ -531,13 +609,25 @@ function signauxStructure(carte, candles) {
   const dernier = candles && candles.length ? candles[candles.length - 1] : null;
   if (!Number.isFinite(prix)) return out;
 
-  const niveaux = (sens, stop, obj1, obj2) => {
-    const e = r2(prix), s = r2(stop), o1 = r2(obj1), o2 = r2(obj2);
-    const risque = Number.isFinite(s) ? Math.abs(e - s) : null;
-    return { entree: e, stop: s, objectifs: [o1, o2].filter(Number.isFinite),
-      rr: risque > 0 && Number.isFinite(o1) ? +((Math.abs(o1 - e) / risque).toFixed(2)) : null };
-  };
   const a = Number.isFinite(atr) ? atr : 0;
+
+  const niveaux = (sens, stop, obj1, obj2) => {
+    const brut = {
+      entree: arrondiPrix(prix), stop: arrondiPrix(stop),
+      objectifs: [arrondiPrix(obj1), arrondiPrix(obj2)].filter(Number.isFinite)
+    };
+    // Même garde que pour les motifs : pas de stop à moins de 0,5 ATR, pas de
+    // stop du mauvais côté. Une seule règle pour tous les émetteurs de niveaux.
+    const n = assainirNiveaux(brut, sens, a);
+    if (!n) return { entree: null, stop: null, objectifs: [], rr: null };
+    const risque = Math.abs(n.entree - n.stop);
+    const o1 = n.objectifs[0];
+    return {
+      ...n,
+      rr: risque > 0 && Number.isFinite(o1)
+        ? +((Math.abs(o1 - n.entree) / risque).toFixed(2)) : null
+    };
+  };
 
   // 1. BOS / CHoCH — cassure de structure confirmée par la clôture.
   if (carte.evenement && Number.isFinite(carte.evenement.niveau)) {
@@ -802,5 +892,8 @@ function detecterTout(candles, meta = {}, options = {}) {
 module.exports = {
   detecterTout, signalStrategie, signauxMotifs, conditionsMotif,
   niveauxMotif, rrDe, sensDe, statutDe,
-  carteMarche, contextePour, signauxStructure
+  carteMarche, contextePour, signauxStructure,
+  // Garde des niveaux, exportée pour être testée seule : c'est le point unique
+  // où l'on garantit « pas de risque nul, pas de stop à contre-sens ».
+  assainirNiveaux, arrondiPrix
 };

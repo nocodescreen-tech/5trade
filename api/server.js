@@ -361,6 +361,8 @@ const JournalSignaux = require('./journal-signaux');
 // Backtest : rejoue le moteur sur l'historique avec le MÊME code que le direct,
 // pour répondre à la seule question qui compte — est-ce que ça gagne ?
 const Backtest = require('./backtest');
+// Actualités et calendrier économique : flux publics, sans clé ni compte.
+const News = require('./news');
 const Alerts = require('./alerts');
 const Lexique = require('./lexique');
 // Base de concepts : les définitions des termes, injectées dans l'analyse IA.
@@ -1911,34 +1913,12 @@ app.get('/api/dynamic-risk', requireAuth, async (req, res) => {
 });
 
 // ─── Backtesting visuel ───
-app.post('/api/backtest', requireAuth, async (req, res) => {
-  try {
-    const { symbol, tf, riskPct, initialCapital } = req.body;
-    const { candles } = await Market.getCandles(symbol || 'BTCUSDT', tf || '1h', 1000);
-    // Le backtest rejoue le vrai moteur : chaque tranche est analysée avec
-    // Signals.detect, et seuls les signaux confirmés ouvrent une position.
-    const signalFn = (slice) => {
-      try {
-        const v = Signals.detect(slice, { symbol: symbol || 'BTCUSDT', timeframe: tf || '1h' });
-        if (v.status !== 'confirme' || !v.levels || v.levels.entry == null) {
-          return { action: null, entry: 0, sl: 0, tp: 0 };
-        }
-        return {
-          action: v.direction,
-          entry: v.levels.entry,
-          sl: v.levels.stop,
-          tp: v.levels.target1
-        };
-      } catch {
-        return { action: null, entry: 0, sl: 0, tp: 0 };
-      }
-    };
-    const result = backtestVisuel({ candles, signalFn, riskPct, initialCapital });
-    res.json({ success: true, result });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+// Le backtest vit plus bas (`GET/POST /api/backtest`, section « BACKTEST ») :
+// il rejoue le moteur MULTI-SIGNAUX et enregistre les issues avec la même
+// fonction que le journal. Il y avait ici une seconde implémentation, limitée
+// au verdict unique de `Signals.detect` : sur BTCUSDT 1h elle annonçait
+// 0 trade ET +10,02 % de rendement — un chiffre impossible, affiché tel quel.
+// Deux backtests qui se contredisent valent moins qu'un seul qui rend des comptes.
 
 // ─── COT Report ───
 app.get('/api/cot', requireAuth, async (req, res) => {
@@ -3191,6 +3171,62 @@ app.get('/api/signaux', requireAuth, async (req, res) => {
 
 
 // ─────────────────────────────────────────────────────────────
+// ACTUALITÉS ET CALENDRIER — le contexte extérieur du marché
+// ─────────────────────────────────────────────────────────────
+/**
+ * GET /api/news/panorama?marche=crypto|forex|macro&impact=1|2|3&force=1
+ * Rend les dépêches ET le calendrier économique en un appel (ce que consomme
+ * l'onglet News) : le trader voit dans la même vue ce qui se dit et ce qui
+ * tombe dans les 24 h.
+ *
+ * Coût : zéro (RSS publics + calendrier ForexFactory). Cache 5 min sur les
+ * dépêches, 30 min sur le calendrier.
+ */
+app.get('/api/news/panorama', requireAuth, async (req, res) => {
+  try {
+    const marche = req.query.marche ? String(req.query.marche) : undefined;
+    const impactMin = Number(req.query.impact) || 0;
+    const force = req.query.force === '1';
+    const p = await News.panorama({ marche, impactMin, force });
+    res.json({ success: true, ...p });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.get('/api/news', requireAuth, async (req, res) => {
+  try {
+    const r = await News.chargerFlux(req.query.force === '1');
+    let items = r.items || [];
+    if (req.query.marche && req.query.marche !== 'tout') {
+      const m = String(req.query.marche);
+      items = items.filter(a => (a.marches || []).includes(m)
+        || (a.actifs || []).includes(m.toUpperCase()));
+    }
+    res.json({ success: true, at: r.at, articles: items.slice(0, 80), sources: r.sources, degrade: !!r.degrade });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.get('/api/calendrier', requireAuth, async (req, res) => {
+  try {
+    const r = await News.chargerCalendrier(req.query.force === '1');
+    const impactMin = Number(req.query.impact) || 0;
+    res.json({
+      success: true,
+      at: r.at,
+      jours: News.parJour(r.evenements || [], { impactMin }),
+      degrade: !!r.degrade,
+      erreur: r.erreur || null
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+
+// ─────────────────────────────────────────────────────────────
 // BACKTEST — le moteur rejoué sur l'historique
 // ─────────────────────────────────────────────────────────────
 /**
@@ -3203,35 +3239,79 @@ app.get('/api/signaux', requireAuth, async (req, res) => {
  * Coût IA : zéro (calcul local). C'est ce qui permet de dire si le moteur gagne,
  * au lieu de le supposer.
  */
-app.get('/api/backtest', requireAuth, async (req, res) => {
-  try {
-    const symbol = String(req.query.symbol || '').trim();
-    const tf = String(req.query.tf || '5m').trim();
-    const provider = String(req.query.provider || '').trim() || undefined;
-    if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
-    if (!Market.TF_MS[tf]) return res.status(400).json({ error: `Timeframe inconnu : ${tf}` });
-
-    const bougies = Math.min(Math.max(Number(req.query.bougies) || 400, 80), Backtest.MAX_BOUGIES);
-    const pas = Math.min(Math.max(Number(req.query.pas) || 2, 1), 10);
-
-    const { candles } = await Market.getCandles(symbol, tf, bougies, provider);
-    const options = await optionsAnalyse(req.query);
-    const r = Backtest.lancer(candles, { symbol, timeframe: tf }, {
-      profils: options.profils || [],
-      pas,
-      maxBougies: bougies
-    });
-
-    res.json({
-      success: true,
-      ...r,
-      mode: options.mode,
-      strategie: options.strategie || null,
-      strategies: options.strategies || []
-    });
-  } catch (e) {
-    res.status(500).json({ success: false, error: e.message });
+/** Courbe de capital à partir des R : chaque prise risque `riskPct` % du compte. */
+function compteDepuisR(courbeR, initialCapital, riskPct) {
+  let cap = initialCapital;
+  const serie = [ +cap.toFixed(2) ];
+  // ATTENTION : `courbeR` est CUMULÉE (chaque point = le total depuis le début).
+  // La parcourir comme une suite de gains isolés composait le cumul à chaque
+  // prise : 10 000 € devenaient 1 241 milliards. On ne compose que le DELTA.
+  let precedent = 0;
+  for (const cumul of courbeR) {
+    const r = (Number.isFinite(cumul) ? cumul : 0) - precedent;
+    precedent = Number.isFinite(cumul) ? cumul : precedent;
+    cap = cap * (1 + (riskPct / 100) * r);
+    if (!(cap > 0)) cap = 0;              // un compte ne descend pas sous zéro
+    serie.push(+cap.toFixed(2));
   }
+  return {
+    initial: +initialCapital.toFixed(2),
+    final: +cap.toFixed(2),
+    gainPct: initialCapital > 0 ? +(((cap - initialCapital) / initialCapital) * 100).toFixed(2) : null,
+    risqueParPrisePct: riskPct,
+    serie
+  };
+}
+
+/**
+ * GET/POST /api/backtest
+ *   GET  ?symbol=&tf=&pas=&bougies=&strategies=   → résultats en R
+ *   POST {symbol, tf, riskPct, initialCapital}    → idem + courbe de capital
+ * La page Outils appelait déjà ce POST avec un capital de départ ; il ne
+ * répondait rien. Les deux formes partagent le même calcul.
+ */
+async function executerBacktest(src = {}) {
+  const symbol = String(src.symbol || '').trim();
+  const tf = String(src.tf || '5m').trim();
+  const provider = String(src.provider || '').trim() || undefined;
+  if (!symbol) { const e = new Error('Paramètre « symbol » requis'); e.code = 400; throw e; }
+  if (!Market.TF_MS[tf]) { const e = new Error(`Timeframe inconnu : ${tf}`); e.code = 400; throw e; }
+
+  const bougies = Math.min(Math.max(Number(src.bougies) || 400, 80), Backtest.MAX_BOUGES);
+  const pas = Math.min(Math.max(Number(src.pas) || 2, 1), 10);
+  const initialCapital = Number(src.initialCapital) || 0;
+  const riskPct = Number(src.riskPct) || 0;
+
+  const { candles } = await Market.getCandles(symbol, tf, bougies, provider);
+  const options = await optionsAnalyse(src);
+  const r = Backtest.lancer(candles, { symbol, timeframe: tf }, {
+    profils: options.profils || [],
+    pas,
+    maxBougies: bougies
+  });
+
+  const resultat = {
+    success: true,
+    ...r,
+    mode: options.mode,
+    strategie: options.strategie || null,
+    strategies: options.strategies || []
+  };
+  // Le compte n'a de sens que s'il y a des prises et un capital de départ.
+  if (initialCapital > 0 && riskPct > 0 && Array.isArray(r.courbeR)) {
+    resultat.compte = compteDepuisR(r.courbeR, initialCapital, riskPct);
+  }
+  return resultat;
+}
+
+app.get('/api/backtest', requireAuth, async (req, res) => {
+  try { res.json(await executerBacktest(req.query)); }
+  catch (e) { res.status(e.code || 500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/backtest', requireAuth, async (req, res) => {
+  try { res.json(await executerBacktest({ ...req.body, ...req.query })); }
+  catch (e) { res.status(e.code || 500).json({ success: false, error: e.message }); }
 });
 
 // ─────────────────────────────────────────────────────────────

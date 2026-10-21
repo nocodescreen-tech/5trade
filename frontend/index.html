@@ -3931,6 +3931,201 @@ function BacktestPanel() {
   );
 }
 
+// ── Actualités et calendrier économique ────────────────────────────────
+// Le contexte extérieur du marché : ce qui se dit (dépêches) et ce qui tombe
+// (annonces). Une annonce d'inflation décroche un stop en une bougie, et le
+// graphique ne l'avait pas dit.
+function NewsPage() {
+  const [data, setData] = useState(null);
+  const [marche, setMarche] = useState('tout');
+  const [impact, setImpact] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const charger = async (force = false) => {
+    setBusy(true); setErr('');
+    try {
+      const q = `?marche=${marche}&impact=${impact}${force ? '&force=1' : ''}`;
+      const d = await (await api('/news/panorama' + q)).json();
+      if (!d.success) throw new Error(d.error || 'flux indisponible');
+      setData(d);
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => { charger(); }, [marche, impact]);
+
+  const ilYA = ts => {
+    if (!Number.isFinite(ts)) return '';
+    const m = Math.round((Date.now() - ts) / 60000);
+    if (m < 1) return "à l'instant";
+    if (m < 60) return `il y a ${m} min`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `il y a ${h} h`;
+    return `il y a ${Math.round(h / 24)} j`;
+  };
+  const heure = ts => Number.isFinite(ts)
+    ? new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+    : '—';
+  const jourLisible = j => {
+    const d = new Date(j + 'T12:00:00');
+    const auj = new Date().toISOString().slice(0, 10);
+    if (j === auj) return "Aujourd'hui";
+    const demain = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    if (j === demain) return 'Demain';
+    return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'short' });
+  };
+  const teinteImpact = n => n === 3 ? '#f87171' : n === 2 ? '#fbbf24' : '#94a3b8';
+
+  const articles = (data && data.articles) || [];
+  const jours = (data && data.calendrier) || [];
+  const prochaines = (data && data.prochaines24h) || [];
+  const elevees = prochaines.filter(e => e.impactNiveau >= 3);
+
+  return (
+    <div style={{ display:'grid', gap:16 }}>
+      <div className="panel" style={{ padding:'14px 18px' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+          <i className="fas fa-newspaper" style={{ color:'#60a5fa' }}></i>
+          <b style={{ fontSize:13.5, color:'#fff' }}>Actualités et calendrier économique</b>
+          <span className="badge" style={{ fontSize:10, background:'rgba(52,211,153,.14)', color:'#34d399' }}
+            title="Flux RSS publics et calendrier ForexFactory : aucune clé, aucun abonnement.">
+            sources gratuites
+          </span>
+          {data && data.etat && data.etat.fluxAt && (
+            <span style={{ fontSize:11, color:'var(--dim)' }}>dépêches {ilYA(data.etat.fluxAt)}</span>
+          )}
+          {data && data.etat && data.etat.degrade && (
+            <span className="badge" style={{ fontSize:10, background:'rgba(245,158,11,.14)', color:'#fbbf24' }}>
+              flux partiel — dernier état conservé
+            </span>
+          )}
+          <span style={{ flex:'1 1 auto' }}></span>
+          <button className="btn ghost sm" onClick={() => charger(true)} disabled={busy}>
+            {busy ? <Spinner /> : <i className="fas fa-rotate"></i>} Actualiser
+          </button>
+        </div>
+
+        {/* Ce qui peut décrocher un stop dans les 24 h : la seule ligne qui doit
+            être vue avant d'ouvrir un trade. */}
+        {prochaines.length > 0 && (
+          <div style={{ marginTop:11, padding:'9px 12px', borderRadius:9,
+            background: elevees.length ? 'rgba(248,113,113,.08)' : 'rgba(148,163,184,.06)',
+            border: `1px solid ${elevees.length ? 'rgba(248,113,113,.35)' : 'rgba(148,163,184,.16)'}` }}>
+            <div style={{ fontSize:12.5, color: elevees.length ? '#fca5a5' : 'var(--muted)' }}>
+              <i className="fas fa-triangle-exclamation" style={{ marginRight:7 }}></i>
+              <b>Dans les 24 h :</b> {prochaines.length} annonce(s)
+              {elevees.length > 0 && <> dont <b style={{ color:'#f87171' }}>{elevees.length} à impact élevé</b></>}
+            </div>
+            <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginTop:5, fontSize:11.5 }}>
+              {prochaines.slice(0, 5).map((e, i) => (
+                <span key={i} style={{ color:'var(--muted)' }}>
+                  <span style={{ color: teinteImpact(e.impactNiveau) }}>●</span>{' '}
+                  {heure(e.date)} · {e.devise || e.pays || '—'} · {e.titre.slice(0, 44)}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:11 }}>
+          {[['tout','Tout'],['crypto','Crypto'],['forex','Forex'],['macro','Macro']].map(([id, label]) => (
+            <button key={id} className="btn ghost sm" onClick={() => setMarche(id)}
+              style={{ borderColor: marche === id ? 'rgba(96,165,250,.55)' : undefined,
+                color: marche === id ? '#93c5fd' : undefined }}>
+              {label}
+            </button>
+          ))}
+          <span style={{ width:1, background:'rgba(148,163,184,.2)', margin:'0 4px' }}></span>
+          {[[0,'Tout impact'],[2,'Moyen et +'],[3,'Élevé']].map(([n, label]) => (
+            <button key={n} className="btn ghost sm" onClick={() => setImpact(n)}
+              style={{ borderColor: impact === n ? 'rgba(245,158,11,.55)' : undefined,
+                color: impact === n ? '#fbbf24' : undefined }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {err && <div style={{ marginTop:10, fontSize:12.5, color:'#fca5a5' }}>{err}</div>}
+      </div>
+
+      <div style={{ display:'grid', gap:16, gridTemplateColumns:'repeat(auto-fit,minmax(340px,1fr))' }}>
+        {/* Dépêches */}
+        <div className="panel" style={{ padding:'14px 18px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+            <i className="fas fa-rss" style={{ color:'#f59e0b' }}></i>
+            <b style={{ fontSize:13, color:'#fff' }}>Dépêches ({articles.length})</b>
+          </div>
+          {articles.length === 0 && (
+            <div style={{ fontSize:12.5, color:'var(--muted)' }}>
+              Aucune dépêche pour ce filtre. Les flux publics répondent parfois lentement : réessaie dans un instant.
+            </div>
+          )}
+          <div style={{ display:'grid', gap:7, maxHeight:620, overflowY:'auto' }}>
+            {articles.map((a, i) => (
+              <a key={i} href={a.lien} target="_blank" rel="noopener noreferrer"
+                style={{ display:'block', padding:'8px 10px', borderRadius:8, textDecoration:'none',
+                  background:'rgba(148,163,184,.04)', border:'1px solid rgba(148,163,184,.12)' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:7, flexWrap:'wrap', marginBottom:3 }}>
+                  <span className="badge" style={{ fontSize:9, background:'rgba(148,163,184,.14)', color:'var(--muted)' }}>
+                    {a.source}
+                  </span>
+                  <span style={{ fontSize:10.5, color:'var(--dim)' }}>{ilYA(a.date)}</span>
+                  {a.impact && (
+                    <span className="badge" style={{ fontSize:9, background:'rgba(245,158,11,.14)', color:'#fbbf24' }}
+                      title="Le texte contient un mot-clé à fort retentissement (CPI, FOMC, hack, ETF…)">
+                      à impact
+                    </span>
+                  )}
+                  {(a.actifs || []).map(x => (
+                    <span key={x} className="tag" style={{ fontSize:9 }}>{x}</span>
+                  ))}
+                </div>
+                <div style={{ fontSize:12.5, color:'#e2e8f0', lineHeight:1.45 }}>{a.titre}</div>
+              </a>
+            ))}
+          </div>
+        </div>
+
+        {/* Calendrier */}
+        <div className="panel" style={{ padding:'14px 18px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+            <i className="fas fa-calendar-day" style={{ color:'#a78bfa' }}></i>
+            <b style={{ fontSize:13, color:'#fff' }}>Calendrier économique</b>
+            <span style={{ fontSize:10.5, color:'var(--dim)' }}>heures locales</span>
+          </div>
+          {jours.length === 0 && (
+            <div style={{ fontSize:12.5, color:'var(--muted)' }}>Calendrier indisponible pour l'instant.</div>
+          )}
+          <div style={{ display:'grid', gap:12, maxHeight:620, overflowY:'auto' }}>
+            {jours.map(j => (
+              <div key={j.jour}>
+                <div style={{ fontSize:11.5, color:'var(--muted)', textTransform:'capitalize', marginBottom:5 }}>
+                  {jourLisible(j.jour)}
+                </div>
+                <div style={{ display:'grid', gap:4 }}>
+                  {j.evenements.map((e, i) => (
+                    <div key={i} style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap',
+                      fontSize:11.5, padding:'4px 7px', borderRadius:6,
+                      background: e.impactNiveau >= 3 ? 'rgba(248,113,113,.06)' : 'transparent' }}>
+                      <span style={{ color:'var(--dim)', minWidth:42 }}>{heure(e.date)}</span>
+                      <span style={{ color: teinteImpact(e.impactNiveau), minWidth:8 }}>●</span>
+                      <span style={{ color:'var(--muted)', minWidth:34 }}>{e.devise || e.pays || '—'}</span>
+                      <span style={{ flex:'1 1 140px', color:'#e2e8f0' }}>{e.titre}</span>
+                      {e.reel && <span style={{ color:'#34d399' }}>réel {e.reel}</span>}
+                      {!e.reel && e.prevision && <span style={{ color:'var(--dim)' }}>prév. {e.prevision}</span>}
+                      {e.precedent && <span style={{ color:'var(--dim)' }}>préc. {e.precedent}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Journal({ prefill, onPrefillUsed, strategies = [] }) {
   const [trades, setTrades] = useState([]);
   const [stats, setStats] = useState(null);
@@ -5462,7 +5657,7 @@ function Dashboard({ user, onLogout }) {
 
   // Onglets toujours visibles sur mobile, et ceux ranges dans « Plus ».
   const NAV_PRINCIPAL = ['live', 'analyze', 'strategies', 'journal'];
-  const NAV_SECONDAIRE = ['add', 'history', 'termes', 'alerts', 'outils'];
+  const NAV_SECONDAIRE = ['add', 'history', 'news', 'termes', 'alerts', 'outils'];
 
   const NAV = [
     { id:'live',       label:'Direct',    icon:'fa-satellite-dish' },
@@ -5470,6 +5665,9 @@ function Dashboard({ user, onLogout }) {
     { id:'add',        label:'Ajouter',   icon:'fa-circle-plus' },
     { id:'strategies', label:'Stratégies',icon:'fa-book' },
     { id:'journal',    label:'Journal',   icon:'fa-receipt' },
+    // Les news sont une entrée de premier niveau : un système de trading qui
+    // ignore le calendrier économique trade dans le vide.
+    { id:'news',       label:'News',      icon:'fa-newspaper' },
     { id:'history',    label:'Historique',icon:'fa-clock-rotate-left' },
     { id:'termes',     label:'Termes',    icon:'fa-graduation-cap' },
     { id:'alerts',     label:'Alertes',    icon:'fa-bell' },
@@ -5555,6 +5753,7 @@ function Dashboard({ user, onLogout }) {
             {tab === 'journal' && <Journal prefill={prefill} onPrefillUsed={()=>setPrefill(null)} strategies={strategies} />}
             {tab === 'history' && <History history={history} />}
             {tab === 'termes' && <Termes />}
+            {tab === 'news' && <NewsPage />}
             {tab === 'alerts' && <Alertes />}
             {tab === 'outils' && <Outils />}
           </Garde>
