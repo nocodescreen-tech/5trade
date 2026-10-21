@@ -18,6 +18,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const Frais = require('./frais');
 
 const FICHIER = process.env.JOURNAL_SIGNAUX_FICHIER
   || path.join(__dirname, '..', 'data', 'signaux-journal.json');
@@ -249,7 +250,20 @@ function evaluer(sig, bougies) {
 
   sig.extremumFavorable = maxFav;
   sig.extremumDefavorable = maxDef;
-  sig.r = multipleR(sig);
+
+  // ── Coûts de transaction ────────────────────────────────────────────────
+  // Le R brut est celui des prix du graphique. Le R NET retire le spread et la
+  // commission : c'est le seul chiffre qui dit ce qu'un compte gagne vraiment.
+  // Tant qu'aucun frais n'est configuré (data/frais.json), net === brut et
+  // aucun verdict existant ne change — mais le brut reste écrit, pour qu'on
+  // puisse toujours mesurer l'écart au lieu de le deviner.
+  sig.rBrut = multipleR(sig);
+  const risque = Math.abs(Number(sig.entree) - Number(sig.stop));
+  const cout = Frais.coutEnR(sig.symbol, sig.entree, risque);
+  sig.cout = cout.total > 0 ? cout : null;
+  sig.r = (sig.rBrut !== null && cout.enR !== null)
+    ? +(sig.rBrut - cout.enR).toFixed(2)
+    : sig.rBrut;
   return sig;
 }
 
@@ -357,6 +371,23 @@ function stats() {
   const decides = gagnes.length + perdus.length;
   const rTotal = clos.reduce((a, s) => a + (Number.isFinite(s.r) ? s.r : 0), 0);
 
+  // ── Brut contre net : on ne cache pas l'effet des frais ──────────────────
+  // Les lignes écrites avant l'arrivée des coûts n'ont pas de `rBrut` : leur
+  // R était déjà net de rien, donc brut === net pour elles. Les inventer
+  // autrement reviendrait à réécrire l'histoire.
+  const brutDe = s => (Number.isFinite(s.rBrut) ? s.rBrut : s.r);
+  const rTotalBrut = clos.reduce((a, s) => a + (Number.isFinite(brutDe(s)) ? brutDe(s) : 0), 0);
+  const avecCout = clos.filter(s => s.cout && Number.isFinite(s.cout.enR));
+  const fraisMoyenR = avecCout.length
+    ? +(avecCout.reduce((a, s) => a + s.cout.enR, 0) / avecCout.length).toFixed(4)
+    : 0;
+  // Coût total par trade qui annulerait l'espérance.
+  // Il est exprimé en R, pas en unités de prix : un spread de 0,30 sur l'or et
+  // un de 0,01 sur Bitcoin ne sont pas comparables, alors qu'un coût de 0,3 R
+  // l'est. La version par marché (en unités de prix, celle qu'on peut comparer
+  // au spread du courtier) est calculée plus bas.
+  const critique = clos.length ? +(rTotalBrut / clos.length).toFixed(4) : null;
+
   const parStrategie = {};
   for (const s of clos) {
     const k = s.strategie || (s.source === 'motif' ? `motif : ${s.nom}` : s.source === 'structure' ? 'structure du marché' : s.nom);
@@ -378,6 +409,22 @@ function stats() {
     p.rMoyen = p.total ? +(p.r / p.total).toFixed(2) : null;
   }
 
+  // Par marché : le coût (en unités de prix) qui annulerait l'espérance — donc
+  // le spread maximal acceptable, comparable à celui du courtier.
+  const critiqueParMarche = {};
+  {
+    const groupes = {};
+    for (const s of clos) {
+      if (!s.symbol) continue;
+      const risque = Math.abs(Number(s.entree) - Number(s.stop));
+      if (!(risque > 0) || !Number.isFinite(brutDe(s))) continue;
+      (groupes[s.symbol] = groupes[s.symbol] || []).push({ rBrut: brutDe(s), risque });
+    }
+    for (const [k, arr] of Object.entries(groupes)) {
+      critiqueParMarche[k] = Frais.coutCritique(arr);
+    }
+  }
+
   return {
     total: tous.length,
     ouverts: tous.filter(s => s.resultat === 'ouvert').length,
@@ -394,6 +441,17 @@ function stats() {
     rTotal: +rTotal.toFixed(2),
     rMoyen: clos.length ? +(rTotal / clos.length).toFixed(2) : null,
     esperance: clos.length ? +(rTotal / clos.length).toFixed(2) : null,
+    // Ce que les mêmes trades auraient donné SANS frais, et ce que les frais
+    // coûtent réellement : sans ces deux chiffres à côté du net, on ne sait pas
+    // si un gain vient du moteur ou d'un spread oublié.
+    rTotalBrut: +rTotalBrut.toFixed(2),
+    esperanceBrute: clos.length ? +(rTotalBrut / clos.length).toFixed(2) : null,
+    fraisMoyenR,
+    fraisActifs: Frais.actifs(),
+    coutCritique: critique,
+    // En unités de prix, par marché : au-delà de ce coût par trade, ce marché
+    // n'est plus rentable avec le moteur actuel.
+    coutCritiqueParMarche: critiqueParMarche,
     parSens: compte(clos, 'sens'),
     parSource: compte(clos, s => s.source),
     parMarche: compte(clos, s => `${s.symbol} ${s.timeframe}`),

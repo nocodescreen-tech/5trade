@@ -3315,6 +3315,66 @@ app.post('/api/backtest', requireAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// FRAIS DE TRANSACTION — spread et commission
+// ─────────────────────────────────────────────────────────────
+/**
+ * GET /api/frais
+ * Rend la configuration courante, les ordres de grandeur à vérifier, et
+ * l'effet RÉEL sur le journal : brut contre net. Tant que rien n'est
+ * configuré, les deux colonnes sont identiques — c'est voulu, et c'est ce qui
+ * prouve qu'aucun verdict n'a été changé en douce.
+ */
+app.get('/api/frais', requireAuth, (req, res) => {
+  try {
+    const Frais = require('./frais.js');
+    const Journal = require('./journal-signaux.js');
+    const st = Journal.stats();
+    res.json({
+      success: true,
+      configuration: Frais.configuration(),
+      references: Frais.REFERENCES_A_VERIFIER,
+      actifs: Frais.actifs(),
+      journal: {
+        trades: st.clos,
+        esperance: st.esperance,
+        esperanceBrute: st.esperanceBrute,
+        rTotal: st.rTotal,
+        rTotalBrut: st.rTotalBrut,
+        fraisMoyenR: st.fraisMoyenR,
+        coutCritique: st.coutCritique,
+        coutCritiqueParMarche: st.coutCritiqueParMarche
+      }
+    });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+/**
+ * POST /api/frais
+ * Enregistre les frais. `parSymbole` remplace les symboles fournis (les autres
+ * sont conservés) : envoyer { parSymbole: { frxXAUUSD: { spread: 0.30 } } }
+ * ne doit pas effacer la configuration des autres marchés.
+ */
+app.post('/api/frais', requireAuth, (req, res) => {
+  try {
+    const Frais = require('./frais.js');
+    const body = req.body || {};
+    const actuel = Frais.configuration();
+    const parSymbole = { ...actuel.parSymbole };
+    if (body.parSymbole && typeof body.parSymbole === 'object') {
+      for (const [sym, val] of Object.entries(body.parSymbole)) {
+        parSymbole[sym] = val;
+      }
+    }
+    const cfg = Frais.configurer({
+      defaut: 'defaut' in body ? body.defaut : actuel.defaut,
+      commissionDefaut: 'commissionDefaut' in body ? body.commissionDefaut : actuel.commissionDefaut,
+      parSymbole
+    });
+    res.json({ success: true, configuration: cfg, actifs: Frais.actifs() });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────
 // JOURNAL DES SIGNAUX — le devenir de chaque signal
 // ─────────────────────────────────────────────────────────────
 /**

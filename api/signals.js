@@ -28,6 +28,10 @@ const TF_MS = {
 
 const num = v => (Number.isFinite(v) ? +v.toFixed(6) : null);
 
+// Frais de transaction : le filtre `spread` lit désormais une valeur RÉELLE
+// (data/frais.json) au lieu d un champ que personne n écrivait.
+const Frais = require('./frais');
+
 /** R1 — balayage de liquidité (« sweep ») sur la dernière bougie clôturée. */
 function ruleSweep(candles, report) {
   const last = candles[candles.length - 1];
@@ -455,6 +459,12 @@ function filtresDisponibles(report) {
   const deplacements = (report.displacements || []).length;
   const sessionActive = /londres|new ?york|overlap/i.test(String(se.sessionCourante || ''));
   const killZone = se.killZone && se.killZone !== 'aucune en ce moment';
+  // Spread RÉEL du symbole, lu dans la configuration des frais. Avant, le
+  // filtre ci-dessous lisait `report.spread`, un champ que personne n écrivait :
+  // il valait donc toujours 0 et affichait toujours « acceptable ». Un filtre
+  // qui ne peut pas échouer n est pas un filtre — c est une case verte
+  // décorative, et elle faisait croire que les frais étaient pris en compte.
+  const spreadReel = Frais.fraisPour(report.symbol, prix).total;
   // Structure de marche : elle informe (contexte), elle ne vote pas.
   const st = report.structure || {};
   const trend = st.trend || 'indéterminée';
@@ -499,15 +509,14 @@ function filtresDisponibles(report) {
       // FILTRE DE SPREAD : un signal dont le spread mange le profit est rejeté.
       cle: 'spread', label: 'Spread acceptable (frais de transaction)',
       ok: (() => {
-        const spread = report.spread || 0;
         const targetDist = report.lastPrice
           ? Math.abs((report.lastPrice * 0.002))
           : 0;
         if (!targetDist) return true;
-        const spreadPct = (spread / targetDist) * 100;
+        const spreadPct = (spreadReel / targetDist) * 100;
         return spreadPct < 30;
       })(),
-      detail: `spread ${report.spread || 0} · seuil 30 % du profit`,
+      detail: `spread ${spreadReel} · seuil 30 % du profit`,
       lecture: 'un spread trop élevé mange le profit attendu'
     },
     {

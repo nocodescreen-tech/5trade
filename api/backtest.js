@@ -24,6 +24,7 @@
 
 const Multi = require('./signaux');
 const Journal = require('./journal-signaux');
+const Frais = require('./frais');
 
 const DEPART_MIN = 30;        // bougies nécessaires avant de juger
 const MAX_BOUGIES = 800;
@@ -93,6 +94,10 @@ function lancer(candles, meta = {}, options = {}) {
       const trade = {
         at: serie[i].t,
         index: i,
+        // Le symbole est nécessaire pour appliquer le BON spread : sans lui,
+        // tous les trades tombaient sur le coût par défaut.
+        symbol: meta.symbol || null,
+        timeframe: meta.timeframe || null,
         identite,
         id: s.id,
         source: s.source,
@@ -155,6 +160,16 @@ function resumer(trades, meta = {}) {
   const decides = gagnes.length + perdus.length;
   const rTotal = clos.reduce((a, t) => a + (Number.isFinite(t.r) ? t.r : 0), 0);
 
+  // Brut contre net : le backtest doit pouvoir dire ce que les frais coûtent,
+  // et à partir de quel spread le système cesse d'être rentable.
+  const brutDe = t => (Number.isFinite(t.rBrut) ? t.rBrut : t.r);
+  const rTotalBrut = clos.reduce((a, t) => a + (Number.isFinite(brutDe(t)) ? brutDe(t) : 0), 0);
+  const avecCout = clos.filter(t => t.cout && Number.isFinite(t.cout.enR));
+  const fraisMoyenR = avecCout.length
+    ? +(avecCout.reduce((a, t) => a + t.cout.enR, 0) / avecCout.length).toFixed(4)
+    : 0;
+  const critique = clos.length ? +(rTotalBrut / clos.length).toFixed(4) : null;
+
   const agreger = (cle) => {
     const m = {};
     for (const t of clos) {
@@ -207,6 +222,11 @@ function resumer(trades, meta = {}) {
     // Espérance par trade PRIS (BE et expirations compris) : c'est le chiffre
     // qui dit si le moteur vaut quelque chose, bien plus qu'un taux de réussite.
     esperance: clos.length ? +(rTotal / clos.length).toFixed(2) : null,
+    rTotalBrut: +rTotalBrut.toFixed(2),
+    esperanceBrute: clos.length ? +(rTotalBrut / clos.length).toFixed(2) : null,
+    fraisMoyenR,
+    fraisActifs: Frais.actifs(),
+    coutCritique: critique,
     parSource: agreger(t => t.source),
     parSens: agreger(t => t.sens),
     parStrategie: agreger(t => t.strategie || (t.source === 'motif' ? t.nom : 'structure du marché')),

@@ -25,6 +25,9 @@ const API = 'http://localhost:3001';
 // pendant les tests — même leçon qu'ALERTS_FICHIER : un canonique qui écrase un
 // fichier de données réelles détruit le travail de l'utilisateur.
 process.env.JOURNAL_SIGNAUX_FICHIER = path.join(os.tmpdir(), `signaux-journal-test-${process.pid}.json`);
+// Même règle pour les frais de transaction : le canonique ne doit pas écrire
+// les spreads réels de l'utilisateur. Variable posée AVANT tout require.
+process.env.FRAIS_FICHIER = path.join(os.tmpdir(), `frais-test-${process.pid}.json`);
 
 let pass = 0, fail = 0, skip = 0;
 const ok = (name, cond, extra = '') => {
@@ -2127,6 +2130,84 @@ function tinyPng(W = 64, H = 40) {
     ok('le taux de réussite ne compte pas les expirations',
       st.tauxReussite === null || st.tauxReussite === Math.round((st.gagnes / (st.gagnes + st.perdus)) * 1000) / 10,
       String(st.tauxReussite));
+    try { fs.unlinkSync(process.env.JOURNAL_SIGNAUX_FICHIER); } catch {}
+  }
+
+  // ── Frais de transaction : le R net, et le spread critique ──
+  // Le défaut corrigé : le journal et le backtest jugeaient les trades sur les
+  // prix bruts, donc le R affiché ignorait le spread. Un système peut sembler
+  // rentable et perdre en réalité ; et un modèle entraîné sur ces chiffres
+  // apprend un avantage qui n'existe pas.
+  {
+    const F = require('./frais.js');
+    const J = require('./journal-signaux.js');
+    try { fs.unlinkSync(process.env.FRAIS_FICHIER); } catch {}
+
+    // La variable posée en tête de fichier doit être CELLE que le module lit :
+    // un nom inventé ferait écrire les tests dans les données réelles.
+    ok('le module de frais vise bien le fichier de test',
+      F.FICHIER === process.env.FRAIS_FICHIER, F.FICHIER);
+
+    // 1. Sans configuration, aucun coût : net === brut, rien ne change.
+    ok('sans frais configurés, les frais sont inactifs', F.actifs() === false);
+    const TF = 1700000000000, MINF = 60000;
+    const cf = (i, o, h, l, cl) => ({ t: TF + i * MINF, o, h, l, c: cl, v: 1, closed: true });
+    const baseF = { at: TF, symbol: 'frxXAUUSD', sens: 'long', entree: 100, stop: 98, objectifs: [104, 108], rr: 2 };
+
+    let sf = { ...baseF };
+    J.evaluer(sf, [cf(1, 100, 104.2, 100, 104), cf(2, 104, 108.3, 104, 108)]);
+    ok('sans frais, le R net vaut le R brut',
+      sf.resultat === 'tp2' && sf.r === 4 && sf.rBrut === 4, `net ${sf.r} / brut ${sf.rBrut}`);
+    ok('sans frais, aucun coût n est écrit', sf.cout === null, JSON.stringify(sf.cout));
+
+    // 2. Spread de 0,4 pour un risque de 2 → 0,2 R de coût.
+    F.configurer({ parSymbole: { frxXAUUSD: { spread: 0.4 } } });
+    const cf2 = F.coutEnR('frxXAUUSD', 100, 2);
+    ok('le coût en R vaut spread / risque', cf2.enR === 0.2, `${cf2.total} / 2 = ${cf2.enR}`);
+    sf = { ...baseF };
+    J.evaluer(sf, [cf(1, 100, 104.2, 100, 104), cf(2, 104, 108.3, 104, 108)]);
+    ok('le R net retire le coût', sf.r === 3.8 && sf.rBrut === 4, `net ${sf.r} / brut ${sf.rBrut}`);
+    ok('le coût est écrit sur le trade', !!sf.cout && sf.cout.enR === 0.2, JSON.stringify(sf.cout));
+
+    // Un symbole non configuré n hérite PAS du spread d un voisin.
+    const autreF = F.coutEnR('BTCUSDT', 100, 2);
+    ok('un symbole non configuré reste à zéro', autreF.total === 0, JSON.stringify(autreF));
+
+    // 3. Coût critique : celui qui annule l espérance. E[R] / E[1/risque].
+    ok('coût critique = espérance / moyenne(1/risque)',
+      F.coutCritique([{ rBrut: 1, risque: 2 }, { rBrut: 1, risque: 2 }]) === 2,
+      String(F.coutCritique([{ rBrut: 1, risque: 2 }, { rBrut: 1, risque: 2 }])));
+    ok('sans trade, pas de coût critique', F.coutCritique([]) === null);
+
+    // 4. Les stats portent le brut ET le net, sur un journal connu.
+    J.sauver({
+      version: 1,
+      signaux: [
+        { ...baseF, cle: 'a', identite: 'a', resultat: 'tp2', r: 3.8, rBrut: 4, cout: { spread: 0.4, total: 0.4, enR: 0.2 } },
+        { ...baseF, cle: 'b', identite: 'b', resultat: 'sl', r: -1.2, rBrut: -1, cout: { spread: 0.4, total: 0.4, enR: 0.2 } }
+      ]
+    });
+    const stF = J.stats();
+    ok('les stats séparent le R brut du R net',
+      stF.rTotalBrut === 3 && stF.rTotal === 2.6, `brut ${stF.rTotalBrut} / net ${stF.rTotal}`);
+    ok('les stats donnent les deux espérances',
+      stF.esperanceBrute === 1.5 && stF.esperance === 1.3, `brut ${stF.esperanceBrute} / net ${stF.esperance}`);
+    ok('les stats signalent que les frais sont actifs', stF.fraisActifs === true, String(stF.fraisActifs));
+    // Coût critique : la version globale est en R (comparable entre marchés),
+    // la version par marché en unités de prix (comparable au spread). Les deux
+    // échelles ne doivent JAMAIS être mélangées : un spread de 0,30 sur l or et
+    // un de 0,01 sur Bitcoin ne disent rien l un de l autre.
+    ok('le coût critique global est exprimé en R',
+      stF.coutCritique === 1.5, `${stF.coutCritique} R`);
+    ok('le coût critique par marché est en unités de prix',
+      !!stF.coutCritiqueParMarche && stF.coutCritiqueParMarche.frxXAUUSD === 3,
+      JSON.stringify(stF.coutCritiqueParMarche));
+    ok('le fichier de frais de test existe', fs.existsSync(process.env.FRAIS_FICHIER), process.env.FRAIS_FICHIER);
+
+    // Remise à zéro : les blocs suivants ne doivent pas hériter d un spread.
+    F.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
+    ok('la configuration des frais peut être remise à zéro', F.actifs() === false);
+    try { fs.unlinkSync(process.env.FRAIS_FICHIER); } catch {}
     try { fs.unlinkSync(process.env.JOURNAL_SIGNAUX_FICHIER); } catch {}
   }
 
