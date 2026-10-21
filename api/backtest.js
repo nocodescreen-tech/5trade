@@ -60,6 +60,7 @@ function lancer(candles, meta = {}, options = {}) {
   const resolues = new Map();
   let evaluations = 0;
   let ignoresDoublons = 0;
+  let ecartesFrais = 0;
 
   for (let i = DEPART_MIN; i < n - 1; i += pas) {
     const fenetre = serie.slice(0, i + 1);
@@ -71,6 +72,10 @@ function lancer(candles, meta = {}, options = {}) {
       continue;                 // une fenêtre qui échoue ne doit pas arrêter le reste
     }
     evaluations++;
+
+    // Combien de configurations ont été refusées parce que le coût dépasse le
+    // risque : c'est la réponse à « ce marché est-il seulement tradable ? ».
+    ecartesFrais += (r.ecartesFrais || []).length;
 
     const futurs = serie.slice(i + 1);
     // Plusieurs détecteurs peuvent décrire le MÊME trade sur cette bougie
@@ -138,7 +143,8 @@ function lancer(candles, meta = {}, options = {}) {
     bougies: n,
     pas,
     evaluations,
-    ignoresDoublons
+    ignoresDoublons,
+    ecartesFrais
   };
 }
 

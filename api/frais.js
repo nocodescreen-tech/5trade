@@ -30,7 +30,18 @@ const path = require('path');
 
 const FICHIER = process.env.FRAIS_FICHIER || path.join(__dirname, '..', 'data', 'frais.json');
 
-const DEFAUT = { defaut: 0, commissionDefaut: 0, parSymbole: {} };
+const DEFAUT = { defaut: 0, commissionDefaut: 0, parSymbole: {}, partMax: 0.15 };
+
+/**
+ * Part maximale du RISQUE qu'un coût peut représenter. Au-delà, le trade est
+ * refusé : ce n'est plus une opération, c'est une donation au courtier.
+ *
+ * Pourquoi 15 % : mesuré sur le journal réel, l'or sort à 14,2 % de coût par
+ * trade et reste à peine positif (+0,066 R). Un seuil à 10 % aurait supprimé
+ * l'or, un seuil à 20 % aurait laissé passer des cas déjà condamnés.
+ * Modifiable dans data/frais.json (`partMax`).
+ */
+const PART_MAX_COUT = 0.15;
 
 /**
  * Ordres de grandeur à VÉRIFIER chez son courtier — ce ne sont pas des mesures.
@@ -77,7 +88,12 @@ function normaliser(brut) {
     // gratuit », ce qui n'est pas la même chose que « on ne sait pas ».
     parSymbole[String(sym)] = e;
   }
-  return { defaut: nombre(j.defaut, 0), commissionDefaut: nombre(j.commissionDefaut, 0), parSymbole };
+  // partMax doit rester une FRACTION strictement entre 0 et 1 : une valeur
+  // absurde (50 pour « 50 % ») ferait refuser tous les trades ou aucun.
+  const partMaxBrut = Number(j.partMax);
+  const partMax = Number.isFinite(partMaxBrut) && partMaxBrut > 0 && partMaxBrut < 1
+    ? partMaxBrut : PART_MAX_COUT;
+  return { defaut: nombre(j.defaut, 0), commissionDefaut: nombre(j.commissionDefaut, 0), parSymbole, partMax };
 }
 
 /** Configuration courante. Relue si le fichier a changé (édition à la main prise en compte). */
@@ -170,7 +186,48 @@ function coutCritique(paires) {
   return +(moyenneR / moyenneInv).toFixed(6);
 }
 
+/**
+ * Un trade dont le risque est plus petit que les frais n'est pas un trade.
+ *
+ * Mesuré sur le journal réel : sur BTCUSDT en 5m le stop vaut 0,127 % du prix
+ * quand la commission aller-retour en vaut 0,2 % — le risque est DANS le coût.
+ * Ces 106 trades sortaient à −2,49 R chacun, par construction, pas par malchance.
+ *
+ * Le seuil n'est pas un refus sec : on rend le chiffre qui explique le refus,
+ * pour que l'écarté soit visible au lieu de disparaître (même doctrine que
+ * `reglesEcartees`).
+ *
+ * @returns {null|{ok:boolean, cout:number, risque:number, enR:number, part:number,
+ *                 partMax:number, exigence:number, raison:string|null}}
+ */
+function plafondCout(entree, stop, symbol, partMax = null) {
+  const e = Number(entree), s = Number(stop);
+  if (!Number.isFinite(e) || !Number.isFinite(s)) return null;
+  const risque = Math.abs(e - s);
+  if (!(risque > 0)) return null;            // pas de risque : déjà refusé ailleurs
+  const seuil = Number.isFinite(partMax) && partMax > 0 && partMax < 1
+    ? partMax : configuration().partMax;
+  const cout = fraisPour(symbol, e).total;
+  if (!(cout > 0)) {
+    return { ok: true, cout: 0, risque: +risque.toFixed(6), enR: 0, part: 0, partMax: seuil, exigence: 0, raison: null };
+  }
+  const enR = +(cout / risque).toFixed(4);
+  const exigence = +(cout / seuil).toFixed(6);
+  const ok = risque >= exigence - 1e-9;
+  return {
+    ok,
+    cout: +cout.toFixed(6),
+    risque: +risque.toFixed(6),
+    enR,
+    part: +((cout / risque) * 100).toFixed(2),
+    partMax: +(seuil * 100).toFixed(2),
+    exigence,
+    raison: ok ? null
+      : `frais ${enR} R : le coût (${cout.toFixed(4)}) dépasse ${(seuil * 100).toFixed(0)} % du risque (${risque.toFixed(4)}) — il faudrait un stop à ${exigence.toFixed(4)} minimum`
+  };
+}
+
 module.exports = {
-  FICHIER, REFERENCES_A_VERIFIER, DEFAUT,
-  configuration, configurer, fraisPour, coutEnR, actifs, coutCritique, normaliser
+  FICHIER, REFERENCES_A_VERIFIER, DEFAUT, PART_MAX_COUT,
+  configuration, configurer, fraisPour, coutEnR, actifs, coutCritique, normaliser, plafondCout
 };

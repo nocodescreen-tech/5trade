@@ -27,6 +27,10 @@ const Signals = require('./signals');
 // signal : c'est une figure géométrique.
 const Structure = require('./structure');
 const Patterns = require('./patterns');
+// Frais de transaction : le plafond de coût (étape 5 de detecterTout) a besoin
+// de la configuration réelle. Sans ce require, `Frais is not defined` ne casse
+// pas la syntaxe — le canonique meurt seulement à l exécution.
+const Frais = require('./frais');
 
 const r2 = x => (Number.isFinite(x) ? +x.toFixed(2) : null);
 // Précision ADAPTATIVE pour les PRIX. `r2` (2 décimales) est correct pour un
@@ -838,6 +842,34 @@ function detecterTout(candles, meta = {}, options = {}) {
     }
   }
 
+  // 5. PLAFOND DE COÛT — un risque plus petit que les frais n'est pas un trade.
+  //    Un seul point d'application, comme pour la confluence : tous les émetteurs
+  //    de niveaux (motifs, structure, stratégies) passent ici.
+  //    Les signaux ne sont PAS supprimés : ils restent dans la liste, sans
+  //    niveaux, avec le chiffre qui explique le refus. Un trade qui disparaît
+  //    en silence laisse croire que le moteur n'a rien vu.
+  const ecartesFrais = [];
+  for (const s of signaux) {
+    const verdict = Frais.plafondCout(s.entree, s.stop, meta.symbol);
+    if (!verdict || verdict.ok) continue;
+    ecartesFrais.push({
+      id: s.id, nom: s.nom, source: s.source, sens: s.sens,
+      cout: verdict.cout, risque: verdict.risque, enR: verdict.enR,
+      part: verdict.part, partMax: verdict.partMax, exigence: verdict.exigence,
+      raison: verdict.raison
+    });
+    s.ecarteFrais = verdict;
+    s.entree = null;
+    s.stop = null;
+    s.objectifs = [];
+    s.rr = null;
+    s.raison = [s.raison, verdict.raison].filter(Boolean).join(' — ');
+    // Le statut d'un signal sans niveaux ne peut plus être « confirmé » : on
+    // garde le statut de lecture mais on l'annote, sinon l'écran annonce un
+    // trade que le moteur vient de refuser.
+    if (s.status === 'confirme') s.status = 'surveiller';
+  }
+
   // Tri : confirmés d'abord, puis surveiller, puis non remplis ; à statut égal,
   // la force décroissante. C'est l'ordre de lecture d'un trader.
   const ordre = { confirme: 0, surveiller: 1, 'non-rempli': 2, erreur: 3 };
@@ -862,6 +894,9 @@ function detecterTout(candles, meta = {}, options = {}) {
       motifs: signaux.filter(s => s.source === 'motif').length,
       structure: signaux.filter(s => s.source === 'structure').length
     },
+    // Combien de signaux ont été refusés parce que le coût dépasse le risque :
+    // le trader doit voir que le marché est tradable ou non, pas le deviner.
+    ecartesFrais: ecartesFrais.length,
     // Le marché parle-t-il d'une seule voix ? Compte des signaux RETENUS par sens.
     biais: (() => {
       const l = retenus.filter(s => s.sens === 'long').length;
@@ -885,7 +920,9 @@ function detecterTout(candles, meta = {}, options = {}) {
     // L'écran l'affiche en tête, avant la liste des signaux.
     carte,
     motifs: analyseMotifs,
-    structure: vStructure
+    structure: vStructure,
+    // Le détail de ce que les frais ont fait écarter, avec les chiffres.
+    ecartesFrais
   };
 }
 

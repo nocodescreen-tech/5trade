@@ -2204,6 +2204,34 @@ function tinyPng(W = 64, H = 40) {
       JSON.stringify(stF.coutCritiqueParMarche));
     ok('le fichier de frais de test existe', fs.existsSync(process.env.FRAIS_FICHIER), process.env.FRAIS_FICHIER);
 
+    // 5. Le plafond de coût : un risque plus petit que les frais n'est pas un trade.
+    const sansFrais = F.plafondCout(57000, 56928, 'BTCUSDT');
+    ok('sans frais, le plafond laisse passer', !!sansFrais && sansFrais.ok === true,
+      JSON.stringify(sansFrais));
+
+    F.configurer({ parSymbole: {
+      BTCUSDT: { spread: 0.01, commissionPct: 0.001 },
+      frxXAUUSD: { spread: 0.30 }
+    } });
+    // Cas réel mesuré : stop de 72 points sur BTC, commission de 114 points.
+    const btc = F.plafondCout(57000, 56928, 'BTCUSDT');
+    ok('un stop plus petit que la commission est refusé', !!btc && btc.ok === false,
+      btc ? `${btc.enR} R · exige ${btc.exigence}` : 'null');
+    ok('le plafond chiffre le stop minimum exigé',
+      !!btc && Math.abs(btc.exigence - 760.066667) < 0.01, btc ? String(btc.exigence) : '—');
+    ok('le refus explique par un chiffre', !!btc && /frais/.test(btc.raison || ''),
+      btc ? btc.raison.slice(0, 60) : '—');
+    // L'or reste acceptable : 0,30 de spread sur 2,915 de risque = 10,3 %.
+    const or = F.plafondCout(4100, 4097.085, 'frxXAUUSD');
+    ok('un coût sous le plafond laisse passer', !!or && or.ok === true, or ? `${or.part} %` : '—');
+    // Une part absurde (50 au lieu de 0,5) ne doit pas désactiver le plafond.
+    ok('une part maximale invalide retombe sur la valeur sûre',
+      F.normaliser({ partMax: 50 }).partMax === F.PART_MAX_COUT,
+      String(F.normaliser({ partMax: 50 }).partMax));
+    ok('une part maximale valide est respectée',
+      F.normaliser({ partMax: 0.05 }).partMax === 0.05,
+      String(F.normaliser({ partMax: 0.05 }).partMax));
+
     // Remise à zéro : les blocs suivants ne doivent pas hériter d un spread.
     F.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
     ok('la configuration des frais peut être remise à zéro', F.actifs() === false);
@@ -2267,6 +2295,18 @@ function tinyPng(W = 64, H = 40) {
       tr.every(t => (t.sens === 'long' ? t.stop < t.entree : t.stop > t.entree)));
     const cles = new Set(tr.map(t => `${t.at}|${t.sens}|${t.entree}|${t.stop}`));
     ok('aucun trade en double', cles.size === tr.length, `${tr.length} trades, ${cles.size} clés`);
+
+    // Coût disproportionné : le backtest ne doit produire AUCUN trade, et le
+    // refus doit être COMPTÉ — un trade qui disparaît en silence laisse croire
+    // que le moteur n a rien vu.
+    const Fr = require('./frais.js');
+    Fr.configurer({ defaut: 5 });   // 5 points de coût pour un prix de 1,12
+    const rCout = B.lancer(serie, { symbol: 'EURUSD', timeframe: '5m' }, { profils, pas: 2, maxBougies: 120 });
+    ok('un coût écrasant ne produit aucun trade', (rCout.trades || []).length === 0,
+      `${(rCout.trades || []).length} trade(s)`);
+    ok('les configurations écartées par les frais sont comptées',
+      rCout.ecartesFrais > 0, String(rCout.ecartesFrais));
+    Fr.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
   }
 
   // ── Backtest : le moteur rejoué, et une définition UNIQUE du succès ──
