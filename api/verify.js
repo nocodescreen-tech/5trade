@@ -28,6 +28,9 @@ process.env.JOURNAL_SIGNAUX_FICHIER = path.join(os.tmpdir(), `signaux-journal-te
 // Même règle pour les frais de transaction : le canonique ne doit pas écrire
 // les spreads réels de l'utilisateur. Variable posée AVANT tout require.
 process.env.FRAIS_FICHIER = path.join(os.tmpdir(), `frais-test-${process.pid}.json`);
+// L'historique long et le jeu de données écrivent aussi hors des données réelles.
+process.env.HISTORIQUE_DOSSIER = path.join(os.tmpdir(), `histo-test-${process.pid}`);
+process.env.DATASET_DOSSIER = path.join(os.tmpdir(), `dataset-test-${process.pid}`);
 
 let pass = 0, fail = 0, skip = 0;
 const ok = (name, cond, extra = '') => {
@@ -2237,6 +2240,70 @@ function tinyPng(W = 64, H = 40) {
     ok('la configuration des frais peut être remise à zéro', F.actifs() === false);
     try { fs.unlinkSync(process.env.FRAIS_FICHIER); } catch {}
     try { fs.unlinkSync(process.env.JOURNAL_SIGNAUX_FICHIER); } catch {}
+  }
+
+  // ── Historique long et jeu de données : la matière première de l'apprentissage ──
+  // Le journal ne gardait que trois attributs structurels et un COMPTE de
+  // conditions. Sans le vecteur complet, aucun modèle ne peut être entraîné —
+  // ces contrôles garantissent que la donnée écrite est bien celle mesurée.
+  {
+    const H = require('./historique.js');
+    const D = require('./dataset.js');
+    const fsx = require('fs');
+
+    // 1. Écriture/lecture d'un historique, et robustesse aux lignes abîmées.
+    fsx.mkdirSync(process.env.HISTORIQUE_DOSSIER, { recursive: true });
+    const fichier = H.nomFichier('testprov', 'PAIRE/BIZARRE', '5m');
+    ok('le nom de fichier est assaini', /testprov-PAIRE_BIZARRE-5m\.jsonl$/.test(fichier), fichier);
+    const lignes = [];
+    for (let i = 0; i < 300; i++) {
+      const p = 100 + Math.sin(i / 6) * 3 + i * 0.02;
+      lignes.push(JSON.stringify({ t: 1700000000000 + i * 300000, o: p, h: p + 0.4, l: p - 0.4, c: p + 0.1, v: 1, closed: true }));
+    }
+    lignes.splice(10, 0, '{"t": 1, "o": "cassé"');   // une ligne abîmée au milieu
+    fsx.writeFileSync(fichier, lignes.join('\n') + '\n');
+    const relu = H.charger('testprov', 'PAIRE/BIZARRE', '5m');
+    ok('une ligne abîmée n empêche pas de lire le reste', relu.length === 300, `${relu.length} bougies`);
+    ok('les bougies relues sont triées', relu.every((c, i) => i === 0 || relu[i - 1].t <= c.t), 'ordre croissant');
+    ok('une série absente rend un tableau vide', H.charger('testprov', 'ABSENT', '5m').length === 0);
+    ok('lister() voit le fichier écrit', H.lister().some(x => x.symbol === 'PAIRE_BIZARRE'), JSON.stringify(H.lister().map(x => x.bougies)));
+
+    // 2. Le jeu de données : features complètes, étiquettes, aucune fuite.
+    const bougies = relu;
+    const rows = D.generer({ bougies, symbol: 'PAIRE/BIZARRE', tf: '5m', provider: 'testprov', pas: 2 });
+    ok('le jeu de données contient des trades', rows.length > 0, `${rows.length} ligne(s)`);
+
+    const avecConditions = rows.filter(r => (r.conditions || []).length > 0);
+    ok('les conditions sont écrites AVEC leur nom et leur valeur',
+      avecConditions.length > 0 && avecConditions.every(r => r.conditions.every(c => c.nom && 'valeur' in c && 'seuil' in c)),
+      `${avecConditions.length} ligne(s) avec conditions`);
+    // Le défaut corrigé : on n écrivait que le NOMBRE (`conditions: 8`).
+    const libelles = new Set();
+    for (const r of rows) for (const c of (r.conditions || [])) libelles.add(c.nom);
+    ok('plusieurs features distinctes, pas un simple compte', libelles.size >= 5, `${libelles.size} libellé(s)`);
+
+    ok('chaque ligne porte une issue tranchée',
+      rows.every(r => ['tp1', 'tp2', 'be', 'sl', 'expire'].includes(r.issue.resultat)),
+      [...new Set(rows.map(r => r.issue.resultat))].join(','));
+    ok('chaque ligne porte son index de bougie', rows.every(r => Number.isFinite(r.index)), String(rows[0].index));
+    ok('aucune ligne sans niveaux', rows.every(r => Number.isFinite(r.niveaux.entree) && Number.isFinite(r.niveaux.stop)));
+
+    // Anti-fuite : l'issue ne peut être jugée que sur des bougies POSTÉRIEURES.
+    ok('l issue ne consomme jamais plus que l historique disponible',
+      rows.every(r => r.index + (r.issue.bougiesSuivies || 0) <= bougies.length - 1),
+      `max index+suivi = ${Math.max(...rows.map(r => r.index + (r.issue.bougiesSuivies || 0)))} / ${bougies.length - 1}`);
+
+    // 3. Écriture atomique + résumé cohérent.
+    const res = D.ecrire(rows, { provider: 'testprov', symbol: 'PAIRE/BIZARRE', tf: '5m' });
+    ok('le fichier du jeu de données est écrit', fsx.existsSync(res.fichier), res.fichier);
+    ok('le résumé compte les mêmes lignes que le fichier',
+      fsx.readFileSync(res.fichier, 'utf8').trim().split('\n').length === rows.length, String(rows.length));
+    ok('le résumé expose le taux et l espérance',
+      Number.isFinite(res.tauxReussite) && Number.isFinite(res.esperance),
+      `${res.tauxReussite} % · ${res.esperance} R`);
+
+    try { fsx.rmSync(process.env.HISTORIQUE_DOSSIER, { recursive: true, force: true }); } catch {}
+    try { fsx.rmSync(process.env.DATASET_DOSSIER, { recursive: true, force: true }); } catch {}
   }
 
   // ── Niveaux : pas de risque nul, pas de stop à contre-sens, pas de doublon ──
