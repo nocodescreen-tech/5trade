@@ -2377,6 +2377,9 @@ function tinyPng(W = 64, H = 40) {
   // ou d'avoir mis trois fois le même pari.
   {
     const R = require('./risque.js');
+    // Chaque bloc de verify.js est une portée : `J` de la section journal n'est
+    // pas visible ici (leçon déjà payée avec `srv2`).
+    const J = require('./journal-signaux.js');
     try { fs.unlinkSync(process.env.RISQUE_FICHIER); } catch {}
 
     // Taille : risque fixe en capital, pas en taille de position.
@@ -2438,8 +2441,43 @@ function tinyPng(W = 64, H = 40) {
     ok('le plafond de perte journalière arrête les prises',
       refusJour.ok === false && /perte du jour/.test(refusJour.raison), refusJour.raison);
 
+    // 7. Simulation honnête : les plafonds s'appliquent DANS la courbe.
+    // La composition naïve annonçait +120 % sur le journal réel ; avec les
+    // plafonds, 12,7 % des trades seulement passent. Un chiffre flatteur qui
+    // décrit une stratégie qu'on n'a pas suivie est pire qu'aucun chiffre.
+    R.configurer({ maxSimultanes: 1, maxLevier: 30, maxRisqueMarchePct: 100, maxRisqueTotalPct: 100 });
+    const serieSim = [
+      { ...base, at: TF2, leveLe: TF2 + 300000, resultat: 'tp2', r: 2 },
+      { ...base, at: TF2 + 60000, leveLe: TF2 + 360000, resultat: 'sl', r: -1 },
+      { ...base, at: TF2 + 120000, leveLe: TF2 + 420000, resultat: 'tp1', r: 1 }
+    ];
+    const sim = R.simuler(serieSim, { capital: 1000, risquePct: 1 });
+    ok('la simulation applique les plafonds', sim.prises === 1 && sim.refusees === 2,
+      `${sim.prises} pris / ${sim.refusees} refusés`);
+    ok('la simulation expose le chiffre naïf ET son avertissement',
+      Number.isFinite(sim.naif.capital) && /plafonds/.test(sim.naif.avertissement || ''),
+      `naïf ${sim.naif.gainPct} % vs simulé ${sim.gainPct} %`);
+    const simLiberee = R.simuler([
+      { ...base, at: TF2, leveLe: TF2 + 60000, resultat: 'tp2', r: 2 },
+      { ...base, at: TF2 + 120000, leveLe: TF2 + 240000, resultat: 'sl', r: -1 }
+    ], { capital: 1000, risquePct: 1 });
+    ok('une position libérée rend sa place', simLiberee.prises === 2, `${simLiberee.prises} pris`);
+
+    // 8. Péremption : une position dont la fenêtre est écoulée ne reste pas ouverte.
+    J.sauver({ version: 1, signaux: [
+      { ...base, cle: 'vieux', identite: 'vieux', resultat: 'ouvert',
+        at: Date.now() - 400 * 60000, timeframe: '5m', r: null },
+      { ...base, cle: 'recent', identite: 'recent', resultat: 'ouvert',
+        at: Date.now() - 2 * 60000, timeframe: '5m', r: null }
+    ] });
+    const perimes = J.perimer();
+    const apresPer = J.charger().signaux;
+    ok('une position trop ancienne est périmée', perimes === 1 && apresPer[0].resultat !== 'ouvert',
+      `${perimes} périmée(s), résultat ${apresPer[0].resultat}`);
+    ok('une position récente reste ouverte', apresPer[1].resultat === 'ouvert', apresPer[1].resultat);
+
     R.configurer({ capital: 1000, risquePct: 1, maxPerteJourPct: 3, maxSimultanes: 5,
-      maxRisqueMarchePct: 2, maxRisqueTotalPct: 5, maxLevier: 10, maxRisqueTradePct: 2 });
+      maxRisqueMarchePct: 2, maxRisqueTotalPct: 5, maxLevier: 30, maxRisqueTradePct: 2 });
     try { fs.unlinkSync(process.env.RISQUE_FICHIER); } catch {}
   }
 

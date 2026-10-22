@@ -2265,9 +2265,16 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
 
 function LiveMarket({ onToJournal }) {
   const [meta, setMeta] = useState({ symbols: [], timeframes: ['1m', '5m', '15m', '1h'] });
-  const [symbol, setSymbol] = useState('BTCUSDT');
-  const [provider, setProvider] = useState('binance');
-  const [tf, setTf] = useState('5m');
+  // Le direct s'ouvre sur la configuration MESURÉE comme la meilleure : R_75 en
+  // 1h. En 5m le coût mangeait l'avantage (0,12 R de coût par trade) et le
+  // modèle cessait de trier au-delà du seuil ; en 1h le coût tombe à 0,002 R et
+  // l'écart entre un bon et un mauvais signal redevient lisible. L'utilisateur
+  // peut changer — le défaut, lui, ne doit pas être le pire des cas.
+  const [symbol, setSymbol] = useState('R_75');
+  // R_75 est un synthétique Deriv : le fournisseur doit suivre le symbole, sinon
+  // le direct demande R_75 à Binance et n'affiche rien.
+  const [provider, setProvider] = useState('deriv');
+  const [tf, setTf] = useState('1h');
   const [candles, setCandles] = useState([]);
   const [status, setStatus] = useState(null);
   const [report, setReport] = useState(null);
@@ -3060,6 +3067,26 @@ function LiveMarket({ onToJournal }) {
                 </span>
                 {nbAchat > 0 && <span className="badge" style={{ fontSize:10, border:'1px solid rgba(34,211,138,.45)', background:'transparent', color:'#34d399' }}>{nbAchat} achat</span>}
                 {nbVente > 0 && <span className="badge" style={{ fontSize:10, border:'1px solid rgba(242,84,91,.45)', background:'transparent', color:'#f87171' }}>{nbVente} vente</span>}
+                {/* Ce que le moteur a REFUSÉ doit se voir : un signal qui disparaît
+                    en silence laisse croire qu'il n'a jamais existé. */}
+                {signal.synthese && signal.synthese.ecartesFrais > 0 && (
+                  <span className="badge" style={{ fontSize:10, background:'rgba(245,158,11,.14)', color:'#fbbf24' }}
+                    title="Configurations refusées : le spread dépasse une part trop grande du risque.">
+                    {signal.synthese.ecartesFrais} écarté(s) par les frais
+                  </span>
+                )}
+                {signal.synthese && signal.synthese.ecartesModele > 0 && (
+                  <span className="badge" style={{ fontSize:10, background:'rgba(167,139,250,.14)', color:'#c4b5fd' }}
+                    title="Configurations refusées : le modèle leur attribue une espérance négative (ou sous le seuil).">
+                    {signal.synthese.ecartesModele} écarté(s) par le modèle
+                  </span>
+                )}
+                {signal.synthese && signal.synthese.modele && signal.synthese.modele.disponible && (
+                  <span className="badge" style={{ fontSize:10, background:'rgba(34,211,138,.12)', color:'#34d399' }}
+                    title={`Modèle v${signal.synthese.modele.version} · marchés ${(signal.synthese.modele.marches || []).join(', ')}`}>
+                    modèle actif
+                  </span>
+                )}
                 <span style={{ flex:'1 1 auto' }}></span>
                 {tous.length > actifs.length && (
                   <button className="btn-ghost" onClick={() => setVoirToutSignaux(v => !v)}
@@ -3102,6 +3129,37 @@ function LiveMarket({ onToJournal }) {
                           </span>
                         )}
                         <span style={{ flex:'1 1 auto' }}></span>
+                        {/* Le R attendu du modèle, à côté de la force : c'est le
+                            chiffre qui dit si le trade vaut le risque. Absent si
+                            le marché n'est pas couvert par le modèle. */}
+                        {s.modele && Number.isFinite(s.modele.rAttendu) && (
+                          <span className="badge" style={{ fontSize:10,
+                            background: s.modele.rAttendu > 0 ? 'rgba(34,211,138,.12)' : 'rgba(242,84,91,.12)',
+                            color: s.modele.rAttendu > 0 ? '#34d399' : '#f87171' }}
+                            title={`R attendu d'après le modèle v${s.modele.version} (${s.modele.marche}) — ce n'est pas une probabilité.`}>
+                            {s.modele.rAttendu > 0 ? '+' : ''}{s.modele.rAttendu} R attendu
+                          </span>
+                        )}
+                        {s.ecarteModele && (
+                          <span className="badge" style={{ fontSize:10, background:'rgba(242,84,91,.14)', color:'#f87171' }}
+                            title={s.raison || 'espérance négative selon le modèle'}>
+                            écarté par le modèle
+                          </span>
+                        )}
+                        {s.ecarteFrais && (
+                          <span className="badge" style={{ fontSize:10, background:'rgba(245,158,11,.14)', color:'#fbbf24' }}
+                            title={s.raison || 'coût trop élevé face au risque'}>
+                            écarté par les frais
+                          </span>
+                        )}
+                        {/* Marché absent du modèle : il faut le DIRE, sinon l'absence
+                            de R attendu se lit comme une panne du modèle. */}
+                        {s.modele && s.modele.horsPerimetre && (
+                          <span className="badge" style={{ fontSize:10, background:'rgba(148,163,184,.12)', color:'#94a3b8' }}
+                            title="Le modèle n'a pas été entraîné sur ce marché : aucune note, et aucun filtrage par le modèle.">
+                            modèle : marché non couvert
+                          </span>
+                        )}
                         <span style={{ fontSize:11, color:'var(--muted)' }} title="Score interne de solidité, PAS une probabilité de réussite.">
                           force {Number(s.force || 0).toFixed(2)}
                         </span>
@@ -5477,6 +5535,219 @@ const OUTILS_GET = [
   { id:'anomalies',        label:'Anomalies',        icon:'fa-triangle-exclamation', url:'/anomalies',        params:['symbol','tf'] }
 ];
 
+/* ══════════════ SYSTÈME : MODÈLE + RISQUE ══════════════
+   Deux choses que l'écran ne montrait nulle part, et sans lesquelles le produit
+   reste une liste de signaux : ce que le MODÈLE attend de chaque trade (et s'il
+   tient parole), et ce que le COMPTE risque vraiment (taille, exposition,
+   plafonds). Un système de trading qui cache ses deux chiffres n'en est pas un. */
+function Systeme() {
+  const [modele, setModele] = useState(null);
+  const [risque, setRisque] = useState(null);
+  const [erreur, setErreur] = useState('');
+  const [chargement, setChargement] = useState(true);
+
+  const charger = async () => {
+    setChargement(true); setErreur('');
+    try {
+      const [m, r] = await Promise.all([api('/modele'), api('/risque')]);
+      const dm = await m.json().catch(() => ({}));
+      const dr = await r.json().catch(() => ({}));
+      if (dm?.success === false) throw new Error(dm.error || 'modèle indisponible');
+      setModele(dm?.success ? dm : null);
+      setRisque(dr?.success ? dr : null);
+      if (!dm?.success && !dr?.success) throw new Error(dm?.error || dr?.error || 'réponse vide');
+    } catch (e) { setErreur(e.message); }
+    finally { setChargement(false); }
+  };
+  useEffect(() => { charger(); }, []);
+
+  const bloc = (titre, icone, children) => (
+    <div className="panel" style={{ padding:'14px 16px', marginBottom:14 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:9, marginBottom:10 }}>
+        <i className={`fas ${icone}`} style={{ color:'#60a5fa' }}></i>
+        <b style={{ fontSize:13, color:'#fff' }}>{titre}</b>
+      </div>
+      {children}
+    </div>
+  );
+  const ligne = (label, valeur, teinte) => (
+    <div style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'4px 0', fontSize:12.5 }}>
+      <span style={{ color:'var(--muted)' }}>{label}</span>
+      <span style={{ color: teinte || 'var(--txt)', fontWeight:600 }}>{valeur}</span>
+    </div>
+  );
+
+  if (chargement) return <div style={{ padding:20, color:'var(--muted)' }}>Chargement de l'état du système…</div>;
+  if (erreur) return (
+    <div className="panel" style={{ padding:16 }}>
+      <div style={{ color:'#f87171', fontSize:13, marginBottom:8 }}>
+        <i className="fas fa-triangle-exclamation" style={{ marginRight:8 }}></i>{erreur}
+      </div>
+      <button className="btn-ghost" onClick={charger} style={{ fontSize:12 }}>Réessayer</button>
+    </div>
+  );
+
+  const m = modele?.modele || {};
+  const cal = modele?.calibration;
+  const et = risque?.etat || {};
+  const pl = et.plafonds || {};
+  const sim = risque?.simulation || {};
+
+  return (
+    <div>
+      <div className="panel" style={{ padding:'12px 16px', marginBottom:14, display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+        <i className="fas fa-shield-halved" style={{ color:'#c4b5fd' }}></i>
+        <b style={{ fontSize:13, color:'#fff' }}>Système</b>
+        <span className="badge" style={{ fontSize:10, background:'rgba(167,139,250,.13)', color:'#c4b5fd' }}>
+          modèle v{m.version || '?'}
+        </span>
+        {m.marches && <span className="badge" style={{ fontSize:10, background:'rgba(96,165,250,.13)', color:'#93c5fd' }}>
+          {m.marches.join(' · ')}
+        </span>}
+        <span style={{ flex:'1 1 auto' }}></span>
+        <button className="btn-ghost" onClick={charger} style={{ fontSize:11.5 }}>
+          <i className="fas fa-rotate" style={{ marginRight:6 }}></i>rafraîchir
+        </button>
+      </div>
+
+      {modele && bloc('Modèle — R attendu', 'fa-brain', (
+        <div>
+          <div style={{ display:'flex', gap:24, flexWrap:'wrap', marginBottom:10 }}>
+            <div style={{ minWidth:190 }}>
+              {ligne('Arbres', m.arbres ?? '—')}
+              {ligne('Features mesurées', m.features ?? '—')}
+              {ligne('Seuil appliqué', `${modele.seuilApplique} R`)}
+              {ligne('Seuil du décile', `${modele.seuilTop10} R`)}
+            </div>
+            <div style={{ flex:'1 1 260px', fontSize:11.5, color:'var(--dim)', lineHeight:1.5 }}>
+              Le modèle note chaque signal en R attendu, à partir de 6 mois d'historique.
+              Il ne remplace pas les règles : il refuse ce dont l'espérance est négative
+              et laisse le reste au jugement. Un seuil à 0 ne refuse que le négatif ;
+              le décile est la sélection la plus stricte validée.
+            </div>
+          </div>
+
+          {!cal && (
+            <div style={{ fontSize:12, color:'var(--muted)', padding:'8px 10px', borderRadius:8, background:'rgba(148,163,184,.05)' }}>
+              <i className="fas fa-hourglass-half" style={{ marginRight:7 }}></i>
+              Pas encore assez de trades notés pour mesurer la calibration
+              (20 minimum). C'est normal au démarrage : la promesse du modèle se
+              vérifie sur les trades tranchés, pas sur son passé d'entraînement.
+            </div>
+          )}
+
+          {cal && (
+            <div>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8, flexWrap:'wrap' }}>
+                <span className="badge" style={{ fontSize:10,
+                  background: cal.monotone ? 'rgba(34,211,138,.14)' : 'rgba(242,84,91,.14)',
+                  color: cal.monotone ? '#34d399' : '#f87171' }}>
+                  {cal.monotone ? 'le modèle trie' : 'le modèle ne trie plus'}
+                </span>
+                <span style={{ fontSize:11.5, color:'var(--muted)' }}>
+                  {cal.trades} trade(s) noté(s) · biais moyen {cal.biaisMoyen} R
+                </span>
+              </div>
+              <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11.5 }}>
+                  <thead>
+                    <tr style={{ color:'var(--dim)', textAlign:'left' }}>
+                      <th style={{ padding:'4px 8px', fontWeight:500 }}>tranche</th>
+                      <th style={{ padding:'4px 8px', fontWeight:500 }}>n</th>
+                      <th style={{ padding:'4px 8px', fontWeight:500 }}>R annoncé</th>
+                      <th style={{ padding:'4px 8px', fontWeight:500 }}>R réel</th>
+                      <th style={{ padding:'4px 8px', fontWeight:500 }}>biais</th>
+                      <th style={{ padding:'4px 8px', fontWeight:500 }}>réussite</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cal.tranches.map(t => (
+                      <tr key={t.rang} style={{ borderTop:'1px solid rgba(148,163,184,.12)' }}>
+                        <td style={{ padding:'4px 8px', color:'var(--muted)' }}>{t.rang}</td>
+                        <td style={{ padding:'4px 8px' }}>{t.n}</td>
+                        <td style={{ padding:'4px 8px', color:'#93c5fd' }}>{t.rAttenduMoyen}</td>
+                        <td style={{ padding:'4px 8px', color: t.rReelMoyen >= 0 ? '#34d399' : '#f87171' }}>{t.rReelMoyen}</td>
+                        <td style={{ padding:'4px 8px', color:'var(--dim)' }}>{t.biais}</td>
+                        <td style={{ padding:'4px 8px', color:'var(--dim)' }}>{t.tauxReussite ?? '—'} %</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ fontSize:11, color:'var(--dim)', marginTop:6 }}>
+                {cal.lecture}
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {risque && bloc('Risque — compte simulé', 'fa-scale-balanced', (
+        <div>
+          {et.positionsOuvertes > (pl.maxSimultanes || 0) && (
+            <div style={{ fontSize:12, color:'#fbbf24', padding:'8px 10px', borderRadius:8,
+              background:'rgba(245,158,11,.08)', border:'1px solid rgba(245,158,11,.25)', marginBottom:10 }}>
+              <i className="fas fa-lock" style={{ marginRight:7 }}></i>
+              Livre au-delà du plafond : {et.positionsOuvertes} positions ouvertes pour
+              {' '}{pl.maxSimultanes} autorisées. <b>Toute nouvelle prise est bloquée</b>
+              {' '}jusqu'à ce que des positions se clôturent (60 bougies maximum).
+              C'est le garde-fou qui fonctionne, pas une panne.
+            </div>
+          )}
+          <div style={{ display:'flex', gap:26, flexWrap:'wrap' }}>
+            <div style={{ minWidth:220 }}>
+              <div style={{ fontSize:11, color:'var(--dim)', marginBottom:2 }}>
+                Performance simulée — plafonds appliqués
+              </div>
+              {ligne('Capital', `${sim.capital} (${sim.gainPct >= 0 ? '+' : ''}${sim.gainPct} %)`,
+                sim.gainPct >= 0 ? '#34d399' : '#f87171')}
+              {ligne('Drawdown max', `${sim.drawdownPct} %`, '#fbbf24')}
+              {ligne('Trades pris', `${sim.prises} / ${sim.tradesJournal}`)}
+              {ligne('Refusés par les plafonds', sim.refusees, '#fbbf24')}
+            </div>
+            <div style={{ minWidth:200 }}>
+              <div style={{ fontSize:11, color:'var(--dim)', marginBottom:2 }}>
+                Livre courant — maintenant
+              </div>
+              {ligne('Positions ouvertes', `${et.positionsOuvertes ?? 0} / ${pl.maxSimultanes ?? '—'}`)}
+              {ligne('Risque engagé', `${et.risqueEngage} (${et.risqueEngagePct} %)`)}
+              {ligne('Exposition', `${et.expositionTotale} · levier ${et.levier}×`)}
+              {ligne('Perte du jour', `${et.perteJourPct} %`,
+                et.perteJourPct >= (pl.maxPerteJourPct || 0) ? '#f87171' : 'var(--txt)')}
+            </div>
+            <div style={{ flex:'1 1 240px', fontSize:11.5, color:'var(--dim)', lineHeight:1.5 }}>
+              La taille se déduit du risque, pas l'inverse : un stop large donne une
+              petite position. Les plafonds (perte du jour, positions simultanées,
+              risque par marché, levier) bloquent AVANT la prise, avec le chiffre
+              qui explique le refus. Aucun ordre n'est passé : c'est la simulation
+              de ce que le journal aurait donné.
+              {sim.naif && (
+                <div style={{ marginTop:8, color:'#fbbf24' }}>
+                  <i className="fas fa-circle-info" style={{ marginRight:6 }}></i>
+                  Sans plafonds, le même journal afficherait {sim.naif.gainPct >= 0 ? '+' : ''}{sim.naif.gainPct} % —
+                  ce chiffre n'est pas atteignable : il compte des trades que le compte n'aurait pas pris.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {et.risqueParMarche && Object.keys(et.risqueParMarche).length > 0 && (
+            <div style={{ marginTop:10, fontSize:11.5 }}>
+              <div style={{ color:'var(--dim)', marginBottom:4 }}>Risque engagé par marché</div>
+              {Object.entries(et.risqueParMarche).map(([sym, val]) => (
+                <div key={sym} style={{ display:'flex', justifyContent:'space-between', padding:'3px 0', borderTop:'1px solid rgba(148,163,184,.1)' }}>
+                  <span style={{ color:'var(--muted)' }}>{sym}</span>
+                  <span>{val}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Outils() {
   const [outil, setOutil] = useState(OUTILS_GET[0].id);
   const [symbol, setSymbol] = useState('BTCUSDT');
@@ -5665,7 +5936,7 @@ function Dashboard({ user, onLogout }) {
 
   // Onglets toujours visibles sur mobile, et ceux ranges dans « Plus ».
   const NAV_PRINCIPAL = ['live', 'analyze', 'strategies', 'journal'];
-  const NAV_SECONDAIRE = ['add', 'history', 'news', 'termes', 'alerts', 'outils'];
+  const NAV_SECONDAIRE = ['add', 'history', 'news', 'termes', 'alerts', 'outils', 'systeme'];
 
   const NAV = [
     { id:'live',       label:'Direct',    icon:'fa-satellite-dish' },
@@ -5679,7 +5950,11 @@ function Dashboard({ user, onLogout }) {
     { id:'history',    label:'Historique',icon:'fa-clock-rotate-left' },
     { id:'termes',     label:'Termes',    icon:'fa-graduation-cap' },
     { id:'alerts',     label:'Alertes',    icon:'fa-bell' },
-    { id:'outils',     label:'Outils',     icon:'fa-toolbox' }
+    { id:'outils',     label:'Outils',     icon:'fa-toolbox' },
+    // Le modèle et le risque sont deux entrées de premier niveau du produit :
+    // ce sont les seules qui disent si un signal vaut quelque chose et de quelle
+    // taille le prendre.
+    { id:'systeme',    label:'Système',    icon:'fa-shield-halved' }
   ];
 
     return (
@@ -5764,6 +6039,7 @@ function Dashboard({ user, onLogout }) {
             {tab === 'news' && <NewsPage />}
             {tab === 'alerts' && <Alertes />}
             {tab === 'outils' && <Outils />}
+            {tab === 'systeme' && <Systeme />}
           </Garde>
         </>)}
       </main>

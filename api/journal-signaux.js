@@ -19,6 +19,10 @@
 const fs = require('fs');
 const path = require('path');
 const Frais = require('./frais');
+const Risque = require('./risque');
+// Les durées d'unité de temps servent à périmer une position dont la fenêtre de
+// suivi est écoulée (voir `perimer`).
+const { TF_MS } = require('./market');
 
 const FICHIER = process.env.JOURNAL_SIGNAUX_FICHIER
   || path.join(__dirname, '..', 'data', 'signaux-journal.json');
@@ -55,6 +59,14 @@ function enregistrer(signaux, meta = {}, options = {}) {
   const data = charger();
   const existants = new Set(data.signaux.map(s => s.cle));
   let ajoutes = 0, ignores = 0, fusionnes = 0;
+  const refusesRisque = [];
+
+  // État du compte AVANT la fournée. Les plafonds sont vérifiés ICI, à la prise,
+  // pas seulement à l'affichage : mesuré, sans ce contrôle le journal a accumulé
+  // 31 positions ouvertes pour un plafond de 5, 30 % de risque engagé pour un
+  // plafond de 5 %, et un levier de 150×. Un journal qui accepte tout n'est pas
+  // un registre de trades, c'est un fichier de logs.
+  let etatCourant = options.ignorerRisque ? null : Risque.etat(data.signaux);
 
   for (const s of signaux || []) {
     // ATTENTION : `Number(null)` vaut 0, pas NaN. Un signal sans niveaux (un
@@ -110,6 +122,35 @@ function enregistrer(signaux, meta = {}, options = {}) {
     const cle = `${identite}|${s.at || meta.at || ''}`;
     if (existants.has(cle)) { ignores++; continue; }
 
+    // ── Les plafonds de risque s'appliquent AVANT d'ouvrir la ligne ────────
+    // Un trade refusé n'entre pas dans le registre : il ne consomme pas de
+    // place, ne sera pas évalué, et son refus est remonté à l'appelant avec le
+    // chiffre qui l'explique.
+    if (etatCourant) {
+      const verdict = Risque.verifierPrise({ entree: e, stop: st, symbol: meta.symbol }, etatCourant);
+      if (!verdict.ok) {
+        refusesRisque.push({
+          cle, nom: s.nom, sens: s.sens, symbol: meta.symbol || null,
+          raison: verdict.raison
+        });
+        ignores++;
+        continue;
+      }
+      // On met à jour l'état LOCAL : sinon dix signaux de la même fournée
+      // passeraient tous les plafonds en étant chacun le premier.
+      const sym = meta.symbol || '?';
+      etatCourant = {
+        ...etatCourant,
+        positionsOuvertes: etatCourant.positionsOuvertes + 1,
+        risqueEngage: +(etatCourant.risqueEngage + (verdict.risqueMontant || 0)).toFixed(2),
+        expositionTotale: +(etatCourant.expositionTotale + (verdict.exposition || 0)).toFixed(2),
+        risqueParMarche: {
+          ...etatCourant.risqueParMarche,
+          [sym]: +(((etatCourant.risqueParMarche[sym] || 0) + (verdict.risqueMontant || 0))).toFixed(2)
+        }
+      };
+    }
+
     data.signaux.push({
       cle,
       identite,
@@ -138,6 +179,20 @@ function enregistrer(signaux, meta = {}, options = {}) {
         version: s.modele.version || null,
         marche: s.modele.marche || null
       } : null,
+      // Dimensionnement AU MOMENT de l'émission : la taille qu'on aurait prise
+      // avec le capital courant. C'est ce qui transforme le journal en registre
+      // de paper-trading plutôt qu'en liste de prédictions.
+      risque: (() => {
+        const d = Risque.dimensionner(e, st);
+        if (d.taille === null) return null;
+        return {
+          taille: d.taille,
+          risqueMontant: d.risqueMontant,
+          exposition: d.exposition,
+          capital: Risque.configuration().capital,
+          risquePct: d.risquePct
+        };
+      })(),
       structure: s.structureContexte ? {
         alignement: s.structureContexte.alignement,
         position: s.structureContexte.position,
@@ -169,7 +224,7 @@ function enregistrer(signaux, meta = {}, options = {}) {
     }
     sauver(data);
   }
-  return { ajoutes, ignores, fusionnes };
+  return { ajoutes, ignores, fusionnes, refusesRisque };
 }
 
 // ─── Évaluation ──────────────────────────────────────────────────────────
@@ -302,13 +357,47 @@ function multipleR(sig) {
 }
 
 /**
+ * Périmption des positions dont la fenêtre de suivi est écoulée.
+ *
+ * Un signal suivi sur 60 bougies ne peut pas rester « ouvert » indéfiniment :
+ * si son marché n'est plus interrogé (symbole retiré de la surveillance), aucune
+ * mise à jour ne le clôt, et il consomme une place pour toujours. Mesuré :
+ * 31 positions ouvertes pour un plafond de 5, dont aucune n'était plus suivie.
+ * On les clôt en « expire » — l'issue qu'elles auraient eue, pas un gain.
+ *
+ * @returns {number} nombre de lignes périmées
+ */
+function perimer(maintenant = Date.now()) {
+  const data = charger();
+  let n = 0;
+  for (const s of data.signaux) {
+    if (s.resultat !== 'ouvert') continue;
+    const ms = TF_MS[s.timeframe] || TF_MS['5m'];
+    const horizon = MAX_BOUGIES_SUIVI * ms;
+    // Marge : une bougie de plus, le temps que la mise à jour passe.
+    if (s.at && maintenant - s.at > horizon + ms) {
+      s.resultat = s.atteintTP1 ? 'tp1' : 'expire';
+      s.leveLe = s.at + horizon;
+      s.bougiesSuivies = MAX_BOUGIES_SUIVI;
+      s.r = multipleR(s);
+      n++;
+    }
+  }
+  if (n) sauver(data);
+  return n;
+}
+
+/**
  * Met à jour les signaux encore ouverts.
  * @param {Function} getBougies async (symbol, tf, provider) => candles
  */
 async function mettreAJour(getBougies, options = {}) {
+  // D'abord : clore ce qui ne peut plus être suivi. Sans ça, un marché retiré de
+  // la surveillance laisse ses positions ouvertes pour toujours.
+  const perimes = perimer();
   const data = charger();
   const ouverts = data.signaux.filter(s => s.resultat === 'ouvert');
-  if (!ouverts.length) return { maj: 0, restants: 0 };
+  if (!ouverts.length) return { maj: 0, restants: 0, perimes };
 
   // Regroupe par (symbol, tf, provider) pour ne charger chaque série qu'UNE fois.
   const groupes = new Map();
@@ -338,7 +427,7 @@ async function mettreAJour(getBougies, options = {}) {
     data.majLe = Date.now();
     sauver(data);
   }
-  return { maj, restants: data.signaux.filter(s => s.resultat === 'ouvert').length };
+  return { maj, restants: data.signaux.filter(s => s.resultat === 'ouvert').length, perimes };
 }
 
 // ─── Lecture et statistiques ─────────────────────────────────────────────
@@ -522,6 +611,6 @@ function stats() {
 }
 
 module.exports = {
-  FICHIER, enregistrer, evaluer, mettreAJour, lister, stats, charger, sauver,
+  FICHIER, enregistrer, evaluer, mettreAJour, perimer, lister, stats, charger, sauver,
   MAX_BOUGIES_SUIVI
 };

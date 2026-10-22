@@ -3337,6 +3337,12 @@ app.get('/api/risque', requireAuth, (req, res) => {
         capital: req.query.capital ? Number(req.query.capital) : null,
         risquePct: req.query.risquePct ? Number(req.query.risquePct) : null
       }),
+      // La VRAIE performance : le journal rejoué avec les plafonds appliqués.
+      // Distincte de `etat`, qui décrit le livre courant (positions ouvertes).
+      simulation: Risque.simuler(signaux, {
+        capital: req.query.capital ? Number(req.query.capital) : null,
+        risquePct: req.query.risquePct ? Number(req.query.risquePct) : null
+      }),
       exemple: Risque.dimensionner(100, 98)
     });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }

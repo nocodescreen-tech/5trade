@@ -50,7 +50,13 @@ const DEFAUT = {
   // stop qui mesure le danger, pas la taille de la position.
   maxRisqueMarchePct: 2,  // risque cumulé par marché, en % du capital
   maxRisqueTotalPct: 5,   // risque cumulé tous marchés, en % du capital
-  maxLevier: 10,          // notionnel total / capital (garde-fou de marge)
+  // Le levier n'est qu'un garde-fou de MARGE : il ne dit pas le danger (c'est le
+  // risque engagé qui le dit). Calibré sur les données : un stop à 1 ATR implique
+  // mécaniquement `prix / stop × risque%` de levier — 0,8× sur R_75, 8× sur BTC,
+  // et **13,7× sur l'or**. Un plafond à 10× refusait donc 270 trades sur 536,
+  // presque tous de l'or. 30× laisse passer les stops serrés légitimes sans
+  // autoriser l'absurde.
+  maxLevier: 30,
   maxRisqueTradePct: 2    // un trade ne peut pas risquer plus que ça
 };
 
@@ -268,6 +274,115 @@ function verifierPrise(trade, etatCourant, options = {}) {
   };
 }
 
+/**
+ * SIMULATION HONNÊTE : rejouer le journal comme le COMPTE l'aurait vécu, avec
+ * les plafonds appliqués à chaque prise.
+ *
+ * Pourquoi ce n'est pas la même chose que composer tous les R : mesuré sur le
+ * journal réel, la composition naïve de 531 trades affichait **+127 %** de
+ * capital. Or 29 positions étaient ouvertes en même temps pour un plafond de 5 :
+ * la plupart de ces trades n'auraient jamais été pris. Un chiffre flatteur qui
+ * décrit une stratégie qu'on n'a pas suivie est pire qu'aucun chiffre.
+ *
+ * On avance donc dans le temps : on libère les positions dont la sortie est
+ * antérieure, on vérifie les plafonds, et on ne compose QUE ce qui passe.
+ */
+function simuler(signaux, options = {}) {
+  const cfg = configuration();
+  const capital0 = (options.capital === null || options.capital === undefined)
+    || !Number.isFinite(Number(options.capital)) ? cfg.capital : Number(options.capital);
+  const pct = (options.risquePct === null || options.risquePct === undefined)
+    || !Number.isFinite(Number(options.risquePct)) ? cfg.risquePct : Number(options.risquePct);
+
+  const trades = (Array.isArray(signaux) ? signaux : [])
+    .filter(s => Number.isFinite(s.r) && s.resultat !== 'ouvert' && Number.isFinite(s.at))
+    .slice().sort((a, b) => a.at - b.at);
+
+  let capital = capital0;
+  let pic = capital0;
+  let pireDrawdown = 0;
+  let prises = 0, refusees = 0;
+  const raisonsRefus = {};
+  const ouvertes = [];     // {sortie, risque, marche}
+  const courbe = [];
+
+  for (const t of trades) {
+    // 1. Libérer ce qui s'est clôturé avant cette entrée.
+    for (let i = ouvertes.length - 1; i >= 0; i--) {
+      if (ouvertes[i].sortie <= t.at) ouvertes.splice(i, 1);
+    }
+    // 2. État à cet instant, calculé sur les positions encore ouvertes.
+    const risqueParMarche = {};
+    const expositionParMarche = {};
+    let risqueEngage = 0, expositionTotale = 0;
+    for (const p of ouvertes) {
+      risqueParMarche[p.marche] = (risqueParMarche[p.marche] || 0) + p.risque;
+      expositionParMarche[p.marche] = (expositionParMarche[p.marche] || 0) + p.exposition;
+      risqueEngage += p.risque;
+      expositionTotale += p.exposition;
+    }
+    const instantane = {
+      capital, positionsOuvertes: ouvertes.length, risqueEngage, risqueParMarche,
+      expositionTotale, expositionParMarche, perteJourPct: 0
+    };
+    // 3. Vérifier les plafonds.
+    const verdict = verifierPrise(
+      { entree: t.entree, stop: t.stop, symbol: t.symbol },
+      instantane, { capital, risquePct: pct }
+    );
+    if (!verdict.ok) {
+      refusees++;
+      const motif = (verdict.refus && verdict.refus[0]) || 'refusé';
+      const cle = /positions ouvertes/.test(motif) ? 'positions simultanées'
+        : /risque .* plafond/.test(motif) ? 'risque par marché'
+        : /risque total/.test(motif) ? 'risque total'
+        : /levier/.test(motif) ? 'levier'
+        : /perte du jour/.test(motif) ? 'perte journalière' : 'autre';
+      raisonsRefus[cle] = (raisonsRefus[cle] || 0) + 1;
+      continue;
+    }
+    // 4. Prise : on compose et on mémorise l'occupation.
+    const horizon = (t.leveLe && t.leveLe > t.at) ? t.leveLe : t.at + 60 * 5 * 60 * 1000;
+    ouvertes.push({
+      sortie: horizon,
+      risque: verdict.risqueMontant || 0,
+      exposition: verdict.exposition || 0,
+      marche: t.symbol || '?'
+    });
+    capital *= (1 + (t.r * pct) / 100);
+    pic = Math.max(pic, capital);
+    if (pic > 0) pireDrawdown = Math.min(pireDrawdown, (capital - pic) / pic);
+    prises++;
+    courbe.push({ at: t.at, r: t.r, capital: +capital.toFixed(2) });
+  }
+
+  return {
+    capitalInitial: capital0,
+    capital: +capital.toFixed(2),
+    gainPct: capital0 > 0 ? +(((capital - capital0) / capital0) * 100).toFixed(2) : null,
+    pic: +pic.toFixed(2),
+    drawdownPct: +(pireDrawdown * 100).toFixed(2),
+    tradesJournal: trades.length,
+    prises,
+    refusees,
+    tauxPrise: trades.length ? +((prises / trades.length) * 100).toFixed(1) : null,
+    raisonsRefus,
+    risquePct: pct,
+    plafonds: cfg,
+    courbe: courbe.slice(-200),
+    // Comparaison : ce que donnerait la composition naïve (sans plafonds).
+    naif: (() => {
+      let c = capital0;
+      for (const t of trades) c *= (1 + (t.r * pct) / 100);
+      return {
+        capital: +c.toFixed(2),
+        gainPct: capital0 > 0 ? +(((c - capital0) / capital0) * 100).toFixed(2) : null,
+        avertissement: 'compose TOUS les trades, y compris ceux que les plafonds auraient refusés'
+      };
+    })()
+  };
+}
+
 module.exports = {
-  FICHIER, DEFAUT, configuration, configurer, dimensionner, etat, verifierPrise, normaliser
+  FICHIER, DEFAUT, configuration, configurer, dimensionner, etat, verifierPrise, simuler, normaliser
 };
