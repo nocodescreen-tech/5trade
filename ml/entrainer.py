@@ -191,6 +191,10 @@ def main(chemins):
 if __name__ == "__main__":
     args = sys.argv[1:] or [
         "../data/dataset/deriv-R_75-5m.jsonl",
+        "../data/dataset/deriv-R_75-15m.jsonl",
+        "../data/dataset/deriv-R_75-1h.jsonl",
         "../data/dataset/deriv-frxXAUUSD-5m.jsonl",
+        "../data/dataset/deriv-frxXAUUSD-15m.jsonl",
+        "../data/dataset/deriv-frxXAUUSD-1h.jsonl",
     ]
     sys.exit(main(args))

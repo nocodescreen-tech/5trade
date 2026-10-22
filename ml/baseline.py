@@ -112,7 +112,8 @@ def spec_features(lignes):
         {"col": "nb_balayages", "genre": "chemin_num", "chemin": "carte.balayages", "defaut": 0},
         {"col": "nb_deplacements", "genre": "chemin_num", "chemin": "carte.deplacements", "defaut": 0},
     ]
-    for champ, chemin in (("tendance", "carte.tendance"), ("position", "carte.positionZone"),
+    for champ, chemin in (("symbole", "symbol"), ("tf", "tf"),
+                          ("tendance", "carte.tendance"), ("position", "carte.positionZone"),
                           ("alignement", "structure.alignement"), ("source", "source"),
                           ("session", "carte.session"), ("killzone", "carte.killZone"),
                           ("id", "id")):
