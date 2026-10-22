@@ -3329,20 +3329,22 @@ app.get('/api/risque', requireAuth, (req, res) => {
   try {
     const Risque = require('./risque.js');
     const Journal = require('./journal-signaux.js');
-    const signaux = Journal.charger().signaux || [];
-    res.json({
-      success: true,
-      configuration: Risque.configuration(),
-      etat: Risque.etat(signaux, {
-        capital: req.query.capital ? Number(req.query.capital) : null,
-        risquePct: req.query.risquePct ? Number(req.query.risquePct) : null
-      }),
-      // La VRAIE performance : le journal rejoué avec les plafonds appliqués.
-      // Distincte de `etat`, qui décrit le livre courant (positions ouvertes).
-      simulation: Risque.simuler(signaux, {
-        capital: req.query.capital ? Number(req.query.capital) : null,
-        risquePct: req.query.risquePct ? Number(req.query.risquePct) : null
-      }),
+      const journal = Journal.charger();
+      res.json({
+        success: true,
+        configuration: Risque.configuration(),
+        etat: Risque.etat(journal.signaux || [], {
+          capital: req.query.capital ? Number(req.query.capital) : null,
+          risquePct: req.query.risquePct ? Number(req.query.risquePct) : null,
+          depuis: journal.reinitialiseLe
+        }),
+        // La VRAIE performance : le journal rejoué avec les plafonds appliqués.
+        // Distincte de `etat`, qui décrit le livre courant (positions ouvertes).
+        simulation: Risque.simuler(journal.signaux || [], {
+          capital: req.query.capital ? Number(req.query.capital) : null,
+          risquePct: req.query.risquePct ? Number(req.query.risquePct) : null,
+          depuis: journal.reinitialiseLe
+        }),
       exemple: Risque.dimensionner(100, 98)
     });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }

@@ -2399,12 +2399,15 @@ function tinyPng(W = 64, H = 40) {
     ok('un risque par trade au-delà du plafond est refusé',
       R.dimensionner(100, 98, 1000, 5).taille === null, String(R.dimensionner(100, 98, 1000, 5).raison));
 
-    // État : composition du capital, perte du jour, risque engagé.
+    // État : le capital suit la SIMULATION (trades réellement pris), plus la
+    // composition naïve. On ouvre largement les plafonds ici pour isoler la
+    // composition elle-même.
     const TF2 = 1700000000000;
     const base = { entree: 100, stop: 98, symbol: 'R_75', at: TF2 };
     const trois = [
       { ...base, resultat: 'tp2', r: 2 }, { ...base, resultat: 'sl', r: -1 }, { ...base, resultat: 'tp1', r: 1 }
     ];
+    R.configurer({ maxRisqueMarchePct: 100, maxRisqueTotalPct: 100 });
     const e = R.etat(trois, { capital: 1000, risquePct: 1 });
     ok('le capital est composé trade par trade',
       Math.abs(e.capital - 1000 * 1.02 * 0.99 * 1.01) < 0.01, String(e.capital));
@@ -2412,9 +2415,12 @@ function tinyPng(W = 64, H = 40) {
 
     const avecOuverts = R.etat([...trois, { ...base, resultat: 'ouvert' }], { capital: 1000, risquePct: 1 });
     ok('le risque engagé est celui des positions ouvertes',
-      Math.abs(avecOuverts.risqueEngage - 10.2) < 0.05, String(avecOuverts.risqueEngage));
+      Math.abs(avecOuverts.risqueEngage - avecOuverts.capital * 0.01) < 0.05,
+      `${avecOuverts.risqueEngage} pour 1 % de ${avecOuverts.capital}`);
 
     // Plafonds : risque par marché, risque total, nombre de positions.
+    // On resserre : trois positions à 1 % dépassent déjà le plafond de 2 %.
+    R.configurer({ maxRisqueMarchePct: 2, maxRisqueTotalPct: 5 });
     const charge = R.etat([
       { ...base, resultat: 'ouvert' }, { ...base, resultat: 'ouvert' }, { ...base, resultat: 'ouvert' }
     ], { capital: 1000, risquePct: 1 });

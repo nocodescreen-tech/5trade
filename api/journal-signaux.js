@@ -66,7 +66,8 @@ function enregistrer(signaux, meta = {}, options = {}) {
   // 31 positions ouvertes pour un plafond de 5, 30 % de risque engagé pour un
   // plafond de 5 %, et un levier de 150×. Un journal qui accepte tout n'est pas
   // un registre de trades, c'est un fichier de logs.
-  let etatCourant = options.ignorerRisque ? null : Risque.etat(data.signaux);
+  let etatCourant = options.ignorerRisque ? null
+    : Risque.etat(data.signaux, { depuis: data.reinitialiseLe });
 
   for (const s of signaux || []) {
     // ATTENTION : `Number(null)` vaut 0, pas NaN. Un signal sans niveaux (un

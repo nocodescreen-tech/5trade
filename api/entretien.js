@@ -78,6 +78,15 @@ if (commande === 'etat') {
   J.sauver(data);
   console.log(`${ouverts.length} position(s) héritée(s) close(s) et exclue(s) des statistiques.`);
   etat();
+} else if (commande === 'reinitialiser') {
+  // Repartir d'un compte papier propre : la perte du jour se mesure à partir de
+  // cet instant. Sans cela, le stop journalier bloque la journée entière à cause
+  // de trades qui appartenaient au compte précédent.
+  const data = J.charger();
+  data.reinitialiseLe = Date.now();
+  J.sauver(data);
+  console.log(`Compte papier réinitialisé à ${new Date(data.reinitialiseLe).toISOString()}.`);
+  etat();
 } else {
   console.log('commande inconnue. Attendu : etat | perimer | heritage');
   process.exit(1);

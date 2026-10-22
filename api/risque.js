@@ -183,9 +183,17 @@ function etat(signaux, options = {}) {
   // plafonds auraient laissé passer. Additionner tous les trades du jour
   // déclenchait le stop sur des pertes jamais encaissées (mesuré : 27,48 % avec
   // un livre vide, parce que le journal d'avant les garde-fous avait tout pris).
-  const simJour = simuler(liste, { capital: capitalInitial, risquePct: pct });
+  const simJour = simuler(liste, { capital: capitalInitial, risquePct: pct, depuis: options.depuis });
   const rJour = simJour.rJour;
   const perteJourPct = simJour.perteJourPct;
+
+  // Le capital de référence est celui de la SIMULATION, pas la composition
+  // naïve : dimensionner sur un capital gonflé par des trades qu'on n'aurait pas
+  // pris donnait des tailles trop grosses (mesuré : 21,90 de risque pour 1 % d'un
+  // capital affiché 2 190, alors que le compte simulé en vaut 918).
+  capital = simJour.capital;
+  pic = simJour.pic;
+  pireDrawdown = simJour.drawdownPct / 100;
 
   // Risque engagé : ce qu'on perd si TOUS les stops sont touchés. C'est le seul
   // chiffre qui mesure le danger d'un ensemble de positions — le notionnel ne
@@ -305,7 +313,13 @@ function simuler(signaux, options = {}) {
   let rJour = 0;
   const debutJour = new Date();
   debutJour.setHours(0, 0, 0, 0);
-  const debutJourMs = debutJour.getTime();
+  // `depuis` : instant de remise à zéro du compte papier (voir entretien.js
+  // heritage). Après une remise à zéro, la perte du jour repart de zéro — sinon
+  // le stop journalier bloquerait la journée entière à cause de trades qui
+  // appartenaient au compte précédent.
+  const depuis = Number.isFinite(Number(options.depuis)) && Number(options.depuis) > 0
+    ? Number(options.depuis) : 0;
+  const debutJourMs = Math.max(debutJour.getTime(), depuis);
   const raisonsRefus = {};
   const ouvertes = [];     // {sortie, risque, marche}
   const courbe = [];
