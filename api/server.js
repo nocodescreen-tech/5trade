@@ -3315,6 +3315,43 @@ app.post('/api/backtest', requireAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// RISQUE — taille de position, plafonds, état du compte
+// ─────────────────────────────────────────────────────────────
+/**
+ * GET /api/risque
+ * L'état du compte déduit du journal (capital composé, drawdown, perte du jour,
+ * risque engagé par marché, levier) et les plafonds en vigueur.
+ *
+ * Ce n'est PAS un compte réel : aucune exécution n'a lieu. C'est la simulation
+ * de ce que le journal aurait donné avec un risque fixe par trade.
+ */
+app.get('/api/risque', requireAuth, (req, res) => {
+  try {
+    const Risque = require('./risque.js');
+    const Journal = require('./journal-signaux.js');
+    const signaux = Journal.charger().signaux || [];
+    res.json({
+      success: true,
+      configuration: Risque.configuration(),
+      etat: Risque.etat(signaux, {
+        capital: req.query.capital ? Number(req.query.capital) : null,
+        risquePct: req.query.risquePct ? Number(req.query.risquePct) : null
+      }),
+      exemple: Risque.dimensionner(100, 98)
+    });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+/** POST /api/risque — règle les plafonds. Rendus relus depuis le disque. */
+app.post('/api/risque', requireAuth, (req, res) => {
+  try {
+    const Risque = require('./risque.js');
+    const cfg = Risque.configurer(req.body || {});
+    res.json({ success: true, configuration: cfg });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────
 // MODÈLE (R attendu) — état et calibration
 // ─────────────────────────────────────────────────────────────
 /**

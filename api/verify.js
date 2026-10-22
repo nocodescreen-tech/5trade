@@ -31,6 +31,8 @@ process.env.FRAIS_FICHIER = path.join(os.tmpdir(), `frais-test-${process.pid}.js
 // L'historique long et le jeu de données écrivent aussi hors des données réelles.
 process.env.HISTORIQUE_DOSSIER = path.join(os.tmpdir(), `histo-test-${process.pid}`);
 process.env.DATASET_DOSSIER = path.join(os.tmpdir(), `dataset-test-${process.pid}`);
+// Le risque aussi : le canonique ne doit pas modifier les plafonds réels.
+process.env.RISQUE_FICHIER = path.join(os.tmpdir(), `risque-test-${process.pid}.json`);
 
 let pass = 0, fail = 0, skip = 0;
 const ok = (name, cond, extra = '') => {
@@ -2368,6 +2370,77 @@ function tinyPng(W = 64, H = 40) {
 
     try { fsx.rmSync(process.env.HISTORIQUE_DOSSIER, { recursive: true, force: true }); } catch {}
     try { fsx.rmSync(process.env.DATASET_DOSSIER, { recursive: true, force: true }); } catch {}
+  }
+
+  // ── Risque : taille, plafonds, état ─────────────────────────────────────
+  // Sans cette couche, un avantage statistique meurt d'une seule série perdante
+  // ou d'avoir mis trois fois le même pari.
+  {
+    const R = require('./risque.js');
+    try { fs.unlinkSync(process.env.RISQUE_FICHIER); } catch {}
+
+    // Taille : risque fixe en capital, pas en taille de position.
+    // 1000 de capital, 1 % de risque, stop à 2 points → 10 de risque, 5 unités.
+    const d = R.dimensionner(100, 98, 1000, 1);
+    ok('la taille se déduit du risque et de la distance au stop',
+      !!d && d.taille === 5 && d.risqueMontant === 10, JSON.stringify(d));
+    // Un stop deux fois plus large divise la taille par deux : le risque reste 10.
+    const dLarge = R.dimensionner(100, 96, 1000, 1);
+    ok('un stop plus large réduit la taille, pas le risque',
+      !!dLarge && dLarge.taille === 2.5 && dLarge.risqueMontant === 10, JSON.stringify(dLarge));
+    // ⚠️ Piège payé : Number(null) vaut 0 → sans garde, la taille tombait à zéro.
+    ok('sans capital fourni, les défauts sont utilisés (pas zéro)',
+      R.dimensionner(100, 98).taille === 5, String(R.dimensionner(100, 98).taille));
+    ok('un risque nul ne produit pas de position',
+      R.dimensionner(100, 100).taille === null, String(R.dimensionner(100, 100).raison));
+    ok('un risque par trade au-delà du plafond est refusé',
+      R.dimensionner(100, 98, 1000, 5).taille === null, String(R.dimensionner(100, 98, 1000, 5).raison));
+
+    // État : composition du capital, perte du jour, risque engagé.
+    const TF2 = 1700000000000;
+    const base = { entree: 100, stop: 98, symbol: 'R_75', at: TF2 };
+    const trois = [
+      { ...base, resultat: 'tp2', r: 2 }, { ...base, resultat: 'sl', r: -1 }, { ...base, resultat: 'tp1', r: 1 }
+    ];
+    const e = R.etat(trois, { capital: 1000, risquePct: 1 });
+    ok('le capital est composé trade par trade',
+      Math.abs(e.capital - 1000 * 1.02 * 0.99 * 1.01) < 0.01, String(e.capital));
+    ok('le drawdown est mesuré', e.drawdownPct <= 0, `${e.drawdownPct} %`);
+
+    const avecOuverts = R.etat([...trois, { ...base, resultat: 'ouvert' }], { capital: 1000, risquePct: 1 });
+    ok('le risque engagé est celui des positions ouvertes',
+      Math.abs(avecOuverts.risqueEngage - 10.2) < 0.05, String(avecOuverts.risqueEngage));
+
+    // Plafonds : risque par marché, risque total, nombre de positions.
+    const charge = R.etat([
+      { ...base, resultat: 'ouvert' }, { ...base, resultat: 'ouvert' }, { ...base, resultat: 'ouvert' }
+    ], { capital: 1000, risquePct: 1 });
+    const refus = R.verifierPrise({ ...base }, charge, { capital: 1000, risquePct: 1 });
+    ok('le plafond de risque par marché bloque la 4e position',
+      refus.ok === false && /risque/.test(refus.raison), refus.raison);
+    ok('le refus est chiffré, jamais un simple non',
+      /\d/.test(refus.raison) && /plafond/.test(refus.raison), refus.raison);
+
+    const plafondSimultanes = R.configurer({ maxSimultanes: 2 });
+    ok('le plafond de positions simultanées est réglable', plafondSimultanes.maxSimultanes === 2);
+    const deuxOuvertes = R.etat([{ ...base, resultat: 'ouvert' }, { ...base, resultat: 'ouvert' }],
+      { capital: 1000, risquePct: 1 });
+    const refusSim = R.verifierPrise({ ...base }, deuxOuvertes, { capital: 1000, risquePct: 1 });
+    ok('deux positions ouvertes pour deux autorisées : refus',
+      refusSim.ok === false && /positions ouvertes/.test(refusSim.raison), refusSim.raison);
+
+    // Perte journalière : plafond atteint → plus aucune prise.
+    R.configurer({ maxSimultanes: 5, maxPerteJourPct: 0.5 });
+    const jourPerdu = R.etat([{ ...base, resultat: 'sl', r: -1, leveLe: Date.now() }],
+      { capital: 1000, risquePct: 1 });
+    ok('la perte du jour est calculée', jourPerdu.perteJourPct === 1, `${jourPerdu.perteJourPct} %`);
+    const refusJour = R.verifierPrise({ ...base }, jourPerdu, { capital: 1000, risquePct: 1 });
+    ok('le plafond de perte journalière arrête les prises',
+      refusJour.ok === false && /perte du jour/.test(refusJour.raison), refusJour.raison);
+
+    R.configurer({ capital: 1000, risquePct: 1, maxPerteJourPct: 3, maxSimultanes: 5,
+      maxRisqueMarchePct: 2, maxRisqueTotalPct: 5, maxLevier: 10, maxRisqueTradePct: 2 });
+    try { fs.unlinkSync(process.env.RISQUE_FICHIER); } catch {}
   }
 
   // ── Modèle exporté : la parité Node ↔ Python est la seule chose qui protège ──
