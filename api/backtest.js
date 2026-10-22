@@ -271,6 +271,26 @@ function resumer(trades, meta = {}) {
     parStrategie: agreger(t => t.strategie || (t.source === 'motif' ? t.nom : 'structure du marché')),
     parMotif: agreger(t => (t.source === 'motif' ? t.nom : null)),
     courbeR: courbe,
+    // ── Le chiffre qui décide, et qui était invisible ──────────────────────
+    // Un BE (objectif 1 pris, puis retour à l'entrée) est crédité de la MOITIÉ
+    // du premier objectif : c'est une convention de gestion (clôture partielle,
+    // stop à l'entrée), pas une certitude. Mesuré sur l'or 15m : +26,6 R avec
+    // la convention, −70,0 R si un BE vaut zéro. Le signe du résultat tient donc
+    // à cette seule hypothèse — elle doit être affichée, pas enfouie.
+    ...(() => {
+      const sommeBE = clos.filter(t => t.resultat === 'be')
+        .reduce((a, t) => a + (Number.isFinite(t.r) ? t.r : 0), 0);
+      const sansGestion = rTotal - sommeBE;
+      return {
+        beSomme: +sommeBE.toFixed(2),
+        rTotalSansGestion: +sansGestion.toFixed(2),
+        esperanceSansGestion: clos.length ? +(sansGestion / clos.length).toFixed(4) : null,
+        // Part du résultat qui vient de la convention (en % de |total|).
+        poidsBePct: Math.abs(rTotal) > 0 ? +((sommeBE / Math.abs(rTotal)) * 100).toFixed(0) : null,
+        // Le drapeau qui compte : la convention change-t-elle le SIGNE ?
+        signeDependDuBE: (rTotal > 0) !== (sansGestion > 0)
+      };
+    })(),
     // Combien de TYPES de configuration : 727 trades peuvent venir de 28
     // concepts seulement, répétés à des prix différents. Et surtout, la part que
     // représentent les trois types les plus fréquents — si trois motifs font 60 %

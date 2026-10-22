@@ -2628,6 +2628,16 @@ function tinyPng(W = 64, H = 40) {
       && rLong.concentrationTop3 >= 0 && rLong.concentrationTop3 <= 100,
       `top 3 = ${rLong.concentrationTop3} %`);
 
+    // La convention BE décide du signe du résultat : elle doit être chiffrée.
+    ok('le poids de la convention BE est exposé',
+      Number.isFinite(rLong.beSomme) && Number.isFinite(rLong.rTotalSansGestion),
+      `BE ${rLong.beSomme} R · sans gestion ${rLong.rTotalSansGestion} R`);
+    ok('le total sans gestion est cohérent avec le total et le BE',
+      Math.abs((rLong.rTotal - rLong.beSomme) - rLong.rTotalSansGestion) < 0.05,
+      `${rLong.rTotal} - ${rLong.beSomme} = ${rLong.rTotalSansGestion}`);
+    ok('le drapeau « le signe dépend du BE » est calculé',
+      typeof rLong.signeDependDuBE === 'boolean', String(rLong.signeDependDuBE));
+
     // Le nom exporté est MAX_BOUGIES. Lire MAX_BOUGES (sans le I) donnait
     // `undefined`, donc un nombre de bougies NaN, donc le minimum du courtier :
     // 93 bougies pour tous les backtests de l'écran. Un test statique sur le
