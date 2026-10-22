@@ -3111,7 +3111,21 @@ function LiveMarket({ onToJournal }) {
               )}
 
               <div style={{ display:'grid', gap:6 }}>
-                {montres.map(s => {
+                {(() => {
+                  // UNE configuration = une décision. Quinze concepts peuvent
+                  // décrire le MÊME trade (même sens, même entrée, même stop) :
+                  // les afficher quinze fois fait croire à quinze opportunités.
+                  // On garde le premier (la liste est déjà triée par espérance) et
+                  // on compte les autres — rien n'est caché, tout est replié.
+                  const parCle = new Map();
+                  for (const s of montres) {
+                    const aDesNiveaux = Number.isFinite(s.entree) && Number.isFinite(s.stop);
+                    const cle = aDesNiveaux ? `${s.sens}|${s.entree}|${s.stop}` : `id:${s.id}`;
+                    if (!parCle.has(cle)) parCle.set(cle, { ...s, _memes: [] });
+                    else parCle.get(cle)._memes.push(s.nom || s.id);
+                  }
+                  return [...parCle.values()];
+                })().map(s => {
                   const ok = (s.conditions || []).filter(c => c.ok).length;
                   const tot = (s.conditions || []).length;
                   return (
@@ -3123,6 +3137,12 @@ function LiveMarket({ onToJournal }) {
                           {s.source === 'strategie' ? 'STRATÉGIE' : s.source === 'structure' ? 'STRUCTURE' : 'MOTIF'}
                         </span>
                         <b style={{ fontSize:12.5, color:'#e2e8f0' }}>{s.nom}</b>
+                        {s._memes && s._memes.length > 0 && (
+                          <span className="badge" style={{ fontSize:9, background:'rgba(148,163,184,.12)', color:'var(--muted)' }}
+                            title={`Même sens, même entrée, même stop : ${s._memes.join(' · ')}`}>
+                            +{s._memes.length} concept(s) sur cette configuration
+                          </span>
+                        )}
                         <span className="badge" style={{ fontSize:9.5, background:'transparent', border:`1px solid ${teinte(s)}`, color:teinte(s) }}>
                           {s.sens === 'long' ? 'ACHAT' : s.sens === 'short' ? 'VENTE' : 'NEUTRE'}
                         </span>
@@ -3775,6 +3795,24 @@ function JournalSignauxPanel() {
             <span style={{ fontSize:10.5, color:'var(--dim)' }}>
               entrée {px(s.entree)} · stop {px(s.stop)} · obj. {(s.objectifs || []).map(px).join(' / ')}
             </span>
+            {/* Ce que le modèle attendait et la taille qu'on aurait prise : sans
+                ces deux chiffres, le journal est une liste de prédictions, pas un
+                registre de paper-trading. */}
+            {s.modele && Number.isFinite(s.modele.rAttendu) && (
+              <span className="badge" style={{ fontSize:9,
+                background: s.modele.rAttendu > 0 ? 'rgba(34,211,138,.12)' : 'rgba(242,84,91,.12)',
+                color: s.modele.rAttendu > 0 ? '#34d399' : '#f87171' }}
+                title={`R attendu au moment de l'émission (modèle v${s.modele.version})`}>
+                annoncé {s.modele.rAttendu > 0 ? '+' : ''}{s.modele.rAttendu} R
+                {Number.isFinite(s.r) ? ` · réel ${s.r > 0 ? '+' : ''}${s.r} R` : ''}
+              </span>
+            )}
+            {s.risque && Number.isFinite(s.risque.taille) && (
+              <span className="badge" style={{ fontSize:9, background:'rgba(96,165,250,.12)', color:'#93c5fd' }}
+                title={`Taille calculée à l'émission : ${s.risque.risqueMontant} risqués (${s.risque.risquePct} % de ${s.risque.capital})`}>
+                {s.risque.taille} unité(s) · {s.risque.risqueMontant} risqués
+              </span>
+            )}
             <span style={{ flex:'1 1 auto' }}></span>
             <span style={{ fontSize:10.5, color:'var(--dim)' }}>
               {s.bougiesSuivies ? `${s.bougiesSuivies} bougie(s) suivie(s)` : ''}
