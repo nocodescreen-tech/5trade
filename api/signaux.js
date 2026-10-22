@@ -916,9 +916,17 @@ function detecterTout(candles, meta = {}, options = {}) {
   }
 
   // Tri : confirmés d'abord, puis surveiller, puis non remplis ; à statut égal,
-  // la force décroissante. C'est l'ordre de lecture d'un trader.
+  // le R ATTENDU décroissant (ce qui vaut le plus passe en tête), puis la force.
+  // Trier par force seule mettait en avant un signal « solide » que le modèle
+  // juge perdant : c'est l'espérance qui décide de l'ordre de lecture.
   const ordre = { confirme: 0, surveiller: 1, 'non-rempli': 2, erreur: 3 };
-  signaux.sort((a, b) => (ordre[a.status] ?? 9) - (ordre[b.status] ?? 9) || (b.force || 0) - (a.force || 0));
+  // Sentinelle finie : `-Infinity - -Infinity` vaut NaN et un comparateur NaN
+  // laisse l'ordre indéterminé.
+  const rAtt = s => (s.modele && Number.isFinite(s.modele.rAttendu) ? s.modele.rAttendu : -999);
+  signaux.sort((a, b) =>
+    (ordre[a.status] ?? 9) - (ordre[b.status] ?? 9)
+    || rAtt(b) - rAtt(a)
+    || (b.force || 0) - (a.force || 0));
 
   const retenus = signaux.filter(s => s.status === 'confirme' || s.status === 'surveiller');
   const synthese = {
