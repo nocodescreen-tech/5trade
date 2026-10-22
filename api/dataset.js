@@ -43,6 +43,19 @@ const DOSSIER = process.env.DATASET_DOSSIER
 const FENETRE_MIN = 120;      // bougies d'échauffement avant de juger
 const PAS_DEFAUT = 2;         // on n'évalue pas chaque bougie (coût inutile)
 
+/**
+ * Bougies vues par le moteur à chaque pas.
+ *
+ * Sans cette borne, chaque pas réanalysait TOUT l'historique : le coût d'un
+ * passage est proportionnel à la fenêtre, donc sur 50 000 bougies le rejeu
+ * devenait quadratique et durait des heures. Or le direct ne voit de toute
+ * façon que ~300 bougies (`getCandles(symbol, tf, 300)`) : borner à 400 est
+ * PLUS fidèle au comportement réel, et non un raccourci.
+ * Le prix payé : PDH/PDL et les pivots ne remontent plus au-delà de la fenêtre.
+ * 400 bougies en 5m couvrent 33 h, donc la veille est incluse.
+ */
+const FENETRE_MAX = 400;
+
 function nomFichier(provider, symbol, tf) {
   const propre = s => String(s).replace(/[^A-Za-z0-9_.-]/g, '_');
   return path.join(DOSSIER, `${propre(provider)}-${propre(symbol)}-${propre(tf)}.jsonl`);
@@ -121,7 +134,8 @@ function features(s, carte) {
  * Rejoue l'historique et rend les lignes. N'écrit rien : l'appelant décide.
  * @returns {Array<object>}
  */
-function generer({ bougies, symbol, tf, provider = null, profils = [], pas = PAS_DEFAUT, maxBougies = null }) {
+function generer({ bougies, symbol, tf, provider = null, profils = [], pas = PAS_DEFAUT,
+                   maxBougies = null, debut = 0, fenetreMax = FENETRE_MAX }) {
   const serie = (bougies || [])
     .filter(c => c && Number.isFinite(c.t) && Number.isFinite(c.h) && Number.isFinite(c.l) && Number.isFinite(c.c))
     .sort((a, b) => a.t - b.t);
@@ -130,14 +144,17 @@ function generer({ bougies, symbol, tf, provider = null, profils = [], pas = PAS
 
   const saut = Math.max(1, Math.round(Number(pas) || PAS_DEFAUT));
   const limite = Number.isFinite(maxBougies) && maxBougies > 0 ? Math.min(maxBougies, n) : n;
-  const debut = Math.max(FENETRE_MIN, n - limite);
+  const debutRun = Math.max(FENETRE_MIN, Math.min(n - 2, Math.round(Number(debut) || 0)));
+  const finRun = Math.min(n, debutRun + limite);
+  const largeur = Math.max(FENETRE_MIN, Math.round(Number(fenetreMax) || FENETRE_MAX));
 
   const lignes = [];
   const resolues = new Map();     // identite -> index de résolution
   const meta = { symbol, timeframe: tf, provider };
 
-  for (let i = debut; i < n - 1; i += saut) {
-    const fenetre = serie.slice(0, i + 1);
+  for (let i = debutRun; i < finRun - 1; i += saut) {
+    // Fenêtre BORNÉE : ce que le direct voit, pas tout l'historique.
+    const fenetre = serie.slice(Math.max(0, i - largeur + 1), i + 1);
     let r;
     try { r = Multi.detecterTout(fenetre, meta, { profils }); }
     catch { continue; }           // une fenêtre qui échoue ne doit pas arrêter le reste
@@ -203,14 +220,46 @@ function generer({ bougies, symbol, tf, provider = null, profils = [], pas = PAS
   return lignes;
 }
 
-/** Écrit les lignes en JSONL (atomique) et rend le résumé. */
-function ecrire(lignes, { provider, symbol, tf }) {
+/**
+ * Écrit les lignes en JSONL (atomique) et rend le résumé.
+ *
+ * `ajouter` fusionne avec le fichier existant : c'est ce qui permet de traiter
+ * un très long historique en TRANCHES (le rejeu de 50 000 bougies ne tient pas
+ * dans une seule exécution raisonnable). La fusion déduplique sur
+ * `id|sens|at` — sans ça, une tranche qui chevauche la précédente compterait
+ * deux fois les mêmes trades aux frontières.
+ */
+function ecrire(lignes, { provider, symbol, tf, ajouter = false } = {}) {
   fs.mkdirSync(DOSSIER, { recursive: true });
   const fichier = nomFichier(provider, symbol, tf);
+  let toutes = lignes;
+  if (ajouter && fs.existsSync(fichier)) {
+    toutes = fusionner(lire(fichier), lignes);
+  }
+  toutes = toutes.slice().sort((a, b) => a.at - b.at || String(a.id).localeCompare(String(b.id)));
   const tmp = `${fichier}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, lignes.map(l => JSON.stringify(l)).join('\n') + (lignes.length ? '\n' : ''));
+  fs.writeFileSync(tmp, toutes.map(l => JSON.stringify(l)).join('\n') + (toutes.length ? '\n' : ''));
   fs.renameSync(tmp, fichier);
-  return { fichier, ...resume(lignes) };
+  return { fichier, ...resume(toutes) };
+}
+
+function lire(fichier) {
+  const out = [];
+  let brut;
+  try { brut = fs.readFileSync(fichier, 'utf8'); } catch { return out; }
+  for (const ligne of brut.split('\n')) {
+    if (!ligne.trim()) continue;
+    try { out.push(JSON.parse(ligne)); } catch { /* ligne abîmée : ignorée */ }
+  }
+  return out;
+}
+
+function fusionner(anciennes, nouvelles) {
+  const parCle = new Map();
+  for (const l of [...anciennes, ...nouvelles]) {
+    parCle.set(`${l.id}|${l.sens}|${l.at}`, l);   // la plus récente gagne
+  }
+  return [...parCle.values()];
 }
 
 const CLOS = new Set(['tp1', 'tp2', 'be', 'sl', 'expire']);
@@ -253,36 +302,42 @@ function resume(lignes) {
 }
 
 /** Tout en un : lit l'historique stocké, génère, écrit, résume. */
-function construire({ provider, symbol, tf = '5m', pas = PAS_DEFAUT, maxBougies = null, profils = [] }) {
+function construire({ provider, symbol, tf = '5m', pas = PAS_DEFAUT, maxBougies = null,
+                      profils = [], debut = 0, ajouter = false, fenetreMax = FENETRE_MAX }) {
   const src = Historique.sourcePour(symbol, provider);
   const bougies = Historique.charger(src, symbol, tf);
   if (!bougies.length) {
-    throw new Error(`Aucun historique pour ${symbol} ${tf} (${src}). Lancez : node historique.js ${symbol} ${tf} 8000`);
+    throw new Error(`Aucun historique pour ${symbol} ${tf} (${src}). Lancez : node historique.js ${symbol} ${tf} 50000`);
   }
-  const lignes = generer({ bougies, symbol, tf, provider: src, profils, pas, maxBougies });
-  const r = ecrire(lignes, { provider: src, symbol, tf });
-  return { ...r, bougies: bougies.length };
+  const lignes = generer({ bougies, symbol, tf, provider: src, profils, pas, maxBougies, debut, fenetreMax });
+  const r = ecrire(lignes, { provider: src, symbol, tf, ajouter });
+  return { ...r, bougies: bougies.length, tranche: lignes.length, debut, maxBougies };
 }
 
 module.exports = {
-  DOSSIER, nomFichier, generer, ecrire, resume, construire, features, FENETRE_MIN
+  DOSSIER, nomFichier, generer, ecrire, resume, construire, features, lire, fusionner,
+  FENETRE_MIN, FENETRE_MAX
 };
 
-// ─── Ligne de commande : node dataset.js R_75 5m 8000 2 ──────────────────
+// ─── Ligne de commande : node dataset.js R_75 5m 12000 2 <debut> [--ajouter] ──
 if (require.main === module) {
-  const [symbol, tf = '5m', maxBougies = '', pas = ''] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const ajouter = args.includes('--ajouter');
+  const [symbol, tf = '5m', maxBougies = '', pas = '', debut = ''] =
+    args.filter(a => !a.startsWith('--'));
   if (!symbol) {
-    console.log('usage : node dataset.js <symbole> [tf] [maxBougies] [pas]');
+    console.log('usage : node dataset.js <symbole> [tf] [maxBougies] [pas] [debut] [--ajouter]');
     process.exit(1);
   }
   try {
     const t0 = Date.now();
     const r = construire({
-      symbol, tf,
+      symbol, tf, ajouter,
       maxBougies: maxBougies ? Number(maxBougies) : null,
-      pas: pas ? Number(pas) : PAS_DEFAUT
+      pas: pas ? Number(pas) : PAS_DEFAUT,
+      debut: debut ? Number(debut) : 0
     });
-    console.log(JSON.stringify({ ...r, ms: Date.now() - t0 }, null, 2));
+    console.log(JSON.stringify({ ...r, ms: Date.now() - t0 }, null, 1));
   } catch (e) {
     console.error('ERREUR :', e.message);
     process.exit(1);

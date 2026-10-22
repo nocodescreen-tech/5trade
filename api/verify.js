@@ -2302,6 +2302,41 @@ function tinyPng(W = 64, H = 40) {
       Number.isFinite(res.tauxReussite) && Number.isFinite(res.esperance),
       `${res.tauxReussite} % · ${res.esperance} R`);
 
+    // 4. Tranches : c'est ce qui permet de rejouer 50 000 bougies sans tenir
+    //    une exécution de 40 minutes. La fusion doit dédupliquer aux frontières,
+    //    sinon les trades de recouvrement comptent deux fois.
+    //    Les deux tranches doivent couvrir des PLAGES DIFFÉRENTES : avec la même
+    //    plage, la fusion rendrait le même nombre de lignes et le test ne
+    //    prouverait rien.
+    const d1 = D.generer({ bougies, symbol: 'PAIRE/BIZARRE', tf: '5m', provider: 'testprov', pas: 2, maxBougies: 160, debut: 0 });
+    const d2 = D.generer({ bougies, symbol: 'PAIRE/BIZARRE', tf: '5m', provider: 'testprov', pas: 2, maxBougies: 100, debut: 200 });
+    ok('une tranche décalée ne rend que des index au-delà du début',
+      d2.length > 0 && d2.every(r => r.index >= 200), d2.length ? `min index ${Math.min(...d2.map(r => r.index))}` : 'vide');
+    ok('les deux tranches couvrent bien des plages différentes',
+      Math.max(...d1.map(r => r.index)) > Math.min(...d2.map(r => r.index)),
+      `${Math.min(...d1.map(r => r.index))}-${Math.max(...d1.map(r => r.index))} vs ${Math.min(...d2.map(r => r.index))}-${Math.max(...d2.map(r => r.index))}`);
+
+    D.ecrire(d1, { provider: 'testprov', symbol: 'PAIRE/BIZARRE', tf: '5m' });          // écrase
+    const r1 = D.ecrire(d1, { provider: 'testprov', symbol: 'PAIRE/BIZARRE', tf: '5m', ajouter: true });
+    ok('réécrire la même tranche ne double pas les lignes', r1.lignes === d1.length, `${r1.lignes} / ${d1.length}`);
+
+    const r2 = D.ecrire(d2, { provider: 'testprov', symbol: 'PAIRE/BIZARRE', tf: '5m', ajouter: true });
+    const apres = D.lire(D.nomFichier('testprov', 'PAIRE/BIZARRE', '5m'));
+    const cles = new Set(apres.map(l => `${l.id}|${l.sens}|${l.at}`));
+    ok('la fusion de deux tranches ne crée aucun doublon', cles.size === apres.length,
+      `${apres.length} lignes, ${cles.size} clés`);
+    ok('la fusion ajoute réellement la seconde tranche',
+      r2.lignes > Math.max(d1.length, d2.length), `${r2.lignes} lignes (${d1.length} + ${d2.length})`);
+
+    // Fenêtre bornée : ce que le direct voit, et le levier de vitesse du rejeu.
+    ok('la fenêtre du moteur est bornée et exportée',
+      Number.isFinite(D.FENETRE_MAX) && D.FENETRE_MAX >= D.FENETRE_MIN && D.FENETRE_MAX <= 1000,
+      `${D.FENETRE_MIN} → ${D.FENETRE_MAX} bougies`);
+    const borne = D.generer({ bougies, symbol: 'PAIRE/BIZARRE', tf: '5m', provider: 'testprov', pas: 2, maxBougies: 220, fenetreMax: 150 });
+    ok('une fenêtre plus courte reste exploitable et sans fuite',
+      borne.length > 0 && borne.every(r => r.index + (r.issue.bougiesSuivies || 0) <= bougies.length - 1),
+      `${borne.length} ligne(s)`);
+
     try { fsx.rmSync(process.env.HISTORIQUE_DOSSIER, { recursive: true, force: true }); } catch {}
     try { fsx.rmSync(process.env.DATASET_DOSSIER, { recursive: true, force: true }); } catch {}
   }

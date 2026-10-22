@@ -254,68 +254,83 @@ def main(chemins):
     # Prédire « gagne / perd » optimise le TAUX DE RÉUSSITE, pas le résultat.
     # Mesuré : les trades que le classifieur préfère ont un petit objectif —
     # donc un gain fréquent mais minuscule, et le R moyen des trades retenus
-    # devient négatif alors que le taux monte. On prédit donc directement le R.
-    preds_r, reels_r = [], []
-    for i in range(len(bornes) - 1):
-        debut_test, fin_test = bornes[i], bornes[i + 1]
-        if debut_test < 200:
-            continue
-        t_debut = at[debut_test]
-        idx_train = np.where(at[:debut_test] < (t_debut - embargo_ms))[0]
-        if len(idx_train) < 200:
-            continue
-        m = HistGradientBoostingRegressor(
+    # devient négatif alors que le taux monte.
+    #
+    # Trois formulations sont comparées, parce que le R est une cible TRÈS
+    # asymétrique (perte bornée à −1, gain jusqu'à +4) :
+    #  a) moindres carrés        : la plus simple, mais dominée par les gros gains
+    #  b) erreur absolue         : prédit la MÉDIANE, insensible aux extrêmes
+    #  c) classes puis espérance : P(tp2/tp1/be/perte) × R moyen de chaque classe,
+    #     ce qui respecte la structure de paiement au lieu de la moyenner
+    def classe_de(resultat):
+        if resultat == 'tp2': return 'tp2'
+        if resultat == 'tp1': return 'tp1'
+        if resultat == 'be': return 'be'
+        return 'perte'
+
+    y_cls = np.array([classe_de((r.get('issue') or {}).get('resultat')) for r in lignes])
+
+    approches = {
+        "R (moindres carrés)": lambda: HistGradientBoostingRegressor(
             max_depth=3, max_iter=200, learning_rate=0.05, min_samples_leaf=50,
-            l2_regularization=1.0, loss="squared_error", random_state=0)
-        m.fit(X[idx_train], r_net[idx_train])
-        preds_r.append(m.predict(X[debut_test:fin_test]))
-        reels_r.append(r_net[debut_test:fin_test])
+            l2_regularization=1.0, loss="squared_error", random_state=0),
+        "R (erreur absolue)": lambda: HistGradientBoostingRegressor(
+            max_depth=3, max_iter=200, learning_rate=0.05, min_samples_leaf=50,
+            l2_regularization=1.0, loss="absolute_error", random_state=0),
+        "R attendu par classes": None,      # traitement séparé ci-dessous
+    }
 
-    if preds_r:
-        pr = np.concatenate(preds_r)
-        rr = np.concatenate(reels_r)
-        corr = float(np.corrcoef(pr, rr)[0, 1]) if np.std(pr) > 0 else 0.0
-        print("\n── R attendu (régression sur le R net)")
-        print(f"   corrélation prédit / réel : {corr:+.3f}")
+    print("\n── Viser le R (au lieu du taux de réussite)")
+    print(f"   référence : {n} trades, R net moyen {r_net.mean():+.3f}")
+    print("   (gain = R net du top 10 % MOINS le R net du pli, quantile calculé DANS le pli)")
 
-        # STABILITÉ PAR PLI — le point qui décide si le gain est réel.
-        # Un gain moyen porté par UN seul pli n'est pas un gain : c'est un
-        # accident de calendrier. Le quantile est calculé DANS chaque pli, pas
-        # sur le pool (le pool mélangerait des périodes de volatilité
-        # différentes et flatterait le résultat).
-        print("   par pli (quantile calculé dans le pli) :")
-        gains_10, gains_20 = [], []
-        for k, (p_k, r_k) in enumerate(zip(preds_r, reels_r), 1):
-            if len(r_k) < 50:
+    for nom, fabrique in approches.items():
+        gains = []
+        for i in range(len(bornes) - 1):
+            debut_test, fin_test = bornes[i], bornes[i + 1]
+            if debut_test < 200:
                 continue
-            base_k = r_k.mean()
-            for part, cible in ((0.10, gains_10), (0.20, gains_20)):
-                seuil = np.quantile(p_k, 1 - part)
-                sel = p_k >= seuil
-                if sel.sum() >= 10:
-                    cible.append((k, float(r_k[sel].mean() - base_k), int(sel.sum())))
-        for nom_part, gains in (("top 10 %", gains_10), ("top 20 %", gains_20)):
-            if not gains:
+            t_debut = at[debut_test]
+            idx_train = np.where(at[:debut_test] < (t_debut - embargo_ms))[0]
+            if len(idx_train) < 300:
                 continue
-            vals = [g[1] for g in gains]
-            positifs = sum(1 for v in vals if v > 0)
-            print(f"   {nom_part} : gain par pli " + ", ".join(f"{v:+.3f}" for v in vals)
-                  + f"  → {positifs}/{len(vals)} plis positifs, moyenne {np.mean(vals):+.3f}")
+            Xtr, Xte = X[idx_train], X[debut_test:fin_test]
+            rtr, rte = r_net[idx_train], r_net[debut_test:fin_test]
+            if len(rte) < 50:
+                continue
 
-        # Vue pooled (pour mémoire) : combien de trades, quel R.
-        for libelle, masque in (
-            ("R attendu > 0", pr > 0.0),
-            ("meilleurs 20 %", pr >= np.quantile(pr, 0.80)),
-            ("meilleurs 10 %", pr >= np.quantile(pr, 0.90)),
-        ):
-            sel = np.where(masque)[0]
-            if len(sel) < 20:
-                print(f"   {libelle:22} : trop peu de trades ({len(sel)})")
-                continue
-            gain = rr[sel].mean() - rr.mean()
-            print(f"   {libelle:22} : {len(sel):5} trades  R net {rr[sel].mean():+.3f}  "
-                  f"({gain:+.3f} vs tout prendre)")
-        print()
+            if fabrique is None:
+                # (c) classes puis espérance de gain
+                clf = HistGradientBoostingClassifier(
+                    max_depth=3, max_iter=200, learning_rate=0.05,
+                    min_samples_leaf=50, l2_regularization=1.0, random_state=0)
+                clf.fit(Xtr, y_cls[idx_train])
+                probas = clf.predict_proba(Xte)
+                etiquettes = list(clf.classes_)
+                moyennes = np.array([
+                    rtr[y_cls[idx_train] == c].mean() if (y_cls[idx_train] == c).any() else 0.0
+                    for c in etiquettes
+                ])
+                pred = probas @ moyennes
+            else:
+                m = fabrique()
+                m.fit(Xtr, rtr)
+                pred = m.predict(Xte)
+
+            seuil_q = np.quantile(pred, 0.90)
+            sel = pred >= seuil_q
+            if sel.sum() >= 10:
+                gains.append(float(rte[sel].mean() - rte.mean()))
+
+        if not gains:
+            print(f"   {nom:24} : aucun pli exploitable")
+            continue
+        positifs = sum(1 for g in gains if g > 0)
+        moyenne = float(np.mean(gains))
+        verdict = "STABLE" if positifs >= len(gains) - 1 and moyenne > 0.03 else "instable"
+        print(f"   {nom:24} : plis " + ", ".join(f"{g:+.3f}" for g in gains)
+              + f"  → {positifs}/{len(gains)} positifs, moyenne {moyenne:+.3f}  [{verdict}]")
+    print()
     meilleur = max((v["auc"] for v in resultats.values() if v["auc"]), default=None)
     if meilleur is not None:
         print(f"\nmeilleur AUC : {meilleur:.3f} — "
