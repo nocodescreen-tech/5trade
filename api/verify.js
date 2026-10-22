@@ -2570,27 +2570,73 @@ function tinyPng(W = 64, H = 40) {
     const B = require('./backtest.js');
     const T0 = 1700000000000, MIN = 60000;
     const cb = (i, o, h, l, cl) => ({ t: T0 + i * MIN, o, h, l, c: cl, v: 1, closed: true });
+    // Fixture à prix RÉALISTE (R_75 ≈ 40 000). L'ancienne série jouait sur 1,12
+    // avec un ATR de 0,0015 : à cette échelle les objectifs s'arrondissent sur
+    // l'entrée, les signaux n'ont plus d'objectif exploitable, et le backtest
+    // fabriquait des trades SANS objectif — impossibles à gagner. Ce cas reste
+    // testé plus bas, mais il ne peut pas servir à vérifier les invariants d'un
+    // vrai trade.
     const serie = [];
+    for (let i = 0; i < 200; i++) {
+      const base = 40000 + Math.sin(i / 5) * 300 + i * 0.8;
+      serie.push(cb(i, base, base + 150, base - 150, base + (i % 2 ? 90 : -75)));
+    }
+    const serieFine = [];
     for (let i = 0; i < 140; i++) {
       const base = 1.1200 + Math.sin(i / 5) * 0.004 + i * 0.00005;
-      serie.push(cb(i, base, base + 0.0008, base - 0.0008, base + (i % 2 ? 0.0004 : -0.0003)));
+      serieFine.push(cb(i, base, base + 0.0008, base - 0.0008, base + (i % 2 ? 0.0004 : -0.0003)));
     }
     const profils = [{ id: 'p', titre: 'Devises', regles: ['R1', 'R2', 'R3', 'R4'], seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: ['5m'], parametres: {} }];
-    const r = B.lancer(serie, { symbol: 'EURUSD', timeframe: '5m' }, { profils, pas: 2, maxBougies: 120 });
+    const r = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' }, { profils, pas: 2, maxBougies: 160 });
     const tr = r.trades || [];
-    ok('le backtest rend des trades sur un actif à petit prix', tr.length > 0, `${tr.length} trade(s)`);
+    ok('le backtest rend des trades exploitables', tr.length > 0, `${tr.length} trade(s)`);
     ok('aucun trade sans risque', tr.every(t => Math.abs(t.entree - t.stop) > 0), String(tr.length));
     ok('aucun stop à contre-sens',
       tr.every(t => (t.sens === 'long' ? t.stop < t.entree : t.stop > t.entree)));
+    ok('chaque trade a un objectif', tr.every(t => (t.objectifs || []).length > 0),
+      tr.map(t => (t.objectifs || []).length).join(', '));
     const cles = new Set(tr.map(t => `${t.at}|${t.sens}|${t.entree}|${t.stop}`));
     ok('aucun trade en double', cles.size === tr.length, `${tr.length} trades, ${cles.size} clés`);
 
+    // Porte du rapport risque/rendement : mesurée par tranche de rr sur 110 000
+    // trades, elle écarte les configurations dont l'objectif vaut moins que le
+    // risque. Elle doit être OPTIONNELLE (défaut 0) et ne jamais laisser passer un
+    // trade sous le seuil.
+    const rrTous = tr.map(t => t.rr).filter(Number.isFinite);
+    ok('chaque trade porte son rapport risque/rendement', rrTous.length === tr.length,
+      `${rrTous.length}/${tr.length}`);
+    ok('aucun trade avec un rapport nul ou négatif',
+      tr.every(t => Number.isFinite(t.rr) && t.rr > 0),
+      tr.map(t => t.rr).join(', '));
+    const rSansPorte = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' },
+      { profils, pas: 2, maxBougies: 160 });
+    ok('sans seuil, seules les configurations inutilisables sont écartées',
+      rSansPorte.trades.length === tr.length,
+      `${rSansPorte.ecartesRR} écartée(s) pour objectif inutilisable`);
+    const rPorte = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' },
+      { profils, pas: 2, maxBougies: 160, rrMin: 1.5 });
+    ok('la porte du rapport écarte et le compte',
+      rPorte.ecartesRR > rSansPorte.ecartesRR && (rPorte.trades || []).length > 0,
+      `${rPorte.ecartesRR} écartée(s), ${(rPorte.trades || []).length} gardé(s)`);
+    ok('aucun trade gardé sous le seuil de rapport',
+      (rPorte.trades || []).every(t => !Number.isFinite(t.rr) || t.rr >= 1.5),
+      (rPorte.trades || []).map(t => t.rr).slice(0, 6).join(', '));
+
+    // Un signal dont l'objectif s'arrondit sur l'entrée n'est PAS un trade : il
+    // ne peut rien gagner. Sur un prix de 1,12 avec un ATR de 0,0015, tous les
+    // signaux de cette série sont dans ce cas — le backtest doit le compter.
+    const rFine = B.lancer(serieFine, { symbol: 'EURUSD', timeframe: '5m' },
+      { profils, pas: 2, maxBougies: 120 });
+    ok('un objectif inutilisable ne devient pas un trade',
+      (rFine.trades || []).length === 0 && rFine.ecartesRR > 0,
+      `${(rFine.trades || []).length} trade(s), ${rFine.ecartesRR} écartée(s)`);
+
     // Coût disproportionné : le backtest ne doit produire AUCUN trade, et le
     // refus doit être COMPTÉ — un trade qui disparaît en silence laisse croire
-    // que le moteur n a rien vu.
+    // que le moteur n a rien vu. Sur un prix de 40 000, il faut un coût énorme.
     const Fr = require('./frais.js');
-    Fr.configurer({ defaut: 5 });   // 5 points de coût pour un prix de 1,12
-    const rCout = B.lancer(serie, { symbol: 'EURUSD', timeframe: '5m' }, { profils, pas: 2, maxBougies: 120 });
+    Fr.configurer({ defaut: 5000 });
+    const rCout = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' }, { profils, pas: 2, maxBougies: 160 });
     ok('un coût écrasant ne produit aucun trade', (rCout.trades || []).length === 0,
       `${(rCout.trades || []).length} trade(s)`);
     ok('les configurations écartées par les frais sont comptées',

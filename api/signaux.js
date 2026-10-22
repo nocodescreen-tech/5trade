@@ -872,6 +872,43 @@ function detecterTout(candles, meta = {}, options = {}) {
     if (s.status === 'confirme') s.status = 'surveiller';
   }
 
+  // 5 bis. RAPPORT RISQUE/RENDEMENT MINIMUM — mesuré, pas supposé.
+  //    Analyse des 110 000 trades du jeu de données, par tranche de rr :
+  //      rr 0,25-0,5 : XAU 15m **−0,027 R** (479 trades), R_75 15m **−0,073 R**
+  //                    (359), XAU 5m +0,018, R_75 5m +0,004 — nul ou négatif.
+  //      rr 0,75-1   : +0,10 à +0,14 R
+  //      rr 1,5-2    : +0,16 à +0,30 R  ← la tranche qui paie
+  //    Le marché ne rémunère pas les objectifs trop proches : gagner souvent ne
+  //    compense pas la perte rare quand l'objectif vaut moins que le risque.
+  //    Un seul point d'application, comme les frais et le modèle.
+  const rrMin = Number.isFinite(Number(options.rrMin)) ? Number(options.rrMin) : 0;
+  const ecartesRR = [];
+  for (const s of signaux) {
+    if (s.entree === null || s.stop === null) continue;
+    // ⚠️ `Number(null)` vaut 0 : sans ce test, un signal sans objectif passait
+    // pour un rr de zéro. Règle de cohérence, PAS un réglage : un trade dont
+    // l'objectif est au niveau de l'entrée ne peut rien gagner. Mesuré : 9 % des
+    // trades de R_75 1h étaient dans ce cas et faussaient l'espérance.
+    const brut = s.rr;
+    const rr = (brut === null || brut === undefined) ? null : Number(brut);
+    const tropFaible = rr !== null && Number.isFinite(rr) && rr > 0 && rrMin > 0 && rr < rrMin;
+    const invalide = rr === null || !Number.isFinite(rr) || rr <= 0;
+    if (!invalide && !tropFaible) continue;
+    const motif = invalide
+      ? `objectif inutilisable : rapport risque/rendement ${rr === null || !Number.isFinite(rr) ? 'inconnu' : rr.toFixed(2)} (aucun gain possible)`
+      : `rapport risque/rendement ${rr.toFixed(2)} < ${rrMin} exigé`;
+    ecartesRR.push({ id: s.id, nom: s.nom, source: s.source, sens: s.sens,
+      rr: (rr !== null && Number.isFinite(rr)) ? rr : null, rrMin,
+      invalide, raison: motif });
+    s.ecarteRR = { rr: (rr !== null && Number.isFinite(rr)) ? rr : null, rrMin, invalide, raison: motif };
+    s.entree = null;
+    s.stop = null;
+    s.objectifs = [];
+    s.rr = null;
+    s.raison = [s.raison, motif].filter(Boolean).join(' — ');
+    if (s.status === 'confirme') s.status = 'surveiller';
+  }
+
   // 6. LE MODÈLE PONDÈRE — R attendu.
   //    Les règles disent POURQUOI un signal existe ; le modèle dit COMBIEN il
   //    vaut, en R, d'après 6 mois et ~98 000 trades. Il ne remplace pas les
@@ -952,6 +989,10 @@ function detecterTout(candles, meta = {}, options = {}) {
     ecartesFrais: ecartesFrais.length,
     // Idem pour le modèle : combien de configurations ont une espérance négative.
     ecartesModele: ecartesModele.length,
+    // Combien de configurations refusées parce que l'objectif ne valait pas le
+    // risque : c'est un refus de construction, pas de marché.
+    ecartesRR: ecartesRR.length,
+    rrMin,
     modele: modeleDispo
       ? { disponible: true, version: (Modele.modele() || {}).version || 1, marches: Modele.marches() }
       : { disponible: false, version: null, marches: [] },
@@ -982,7 +1023,9 @@ function detecterTout(candles, meta = {}, options = {}) {
     // Le détail de ce que les frais ont fait écarter, avec les chiffres.
     ecartesFrais,
     // Et ce que le modèle a refusé, avec son R attendu.
-    ecartesModele
+    ecartesModele,
+    // Et ce que le rapport risque/rendement a refusé, avec le chiffre.
+    ecartesRR
   };
 }
 

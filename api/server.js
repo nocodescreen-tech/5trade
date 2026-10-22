@@ -3054,10 +3054,14 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
       let multi = null;
       try {
         multi = Multi.detecterTout(done, { symbol, timeframe: tf }, {
-          profils: optionsFlux.profils || []
+          profils: optionsFlux.profils || [],
           // `structure` reste ACTIVÉ : c'est lui qui produit la carte de marché
           // (tendance, BOS/CHoCH, premium/discount, zones) et le contexte de
           // chaque signal. Le désactiver ici vidait la moitié de la lecture.
+          // Porte du rapport risque/rendement : optionnelle et chiffrée
+          // (`rrMin=1`). Mesurée : elle améliore R_75 sur les trois unités de
+          // temps, et dégrade légèrement l'or en 1h — donc pas de défaut imposé.
+          rrMin: Number.isFinite(Number(req.query.rrMin)) ? Number(req.query.rrMin) : undefined
         });
       } catch (e) { multi = null; }
 

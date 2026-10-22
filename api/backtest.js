@@ -70,6 +70,7 @@ function lancer(candles, meta = {}, options = {}) {
   let ignoresDoublons = 0;
   let ecartesFrais = 0;
   let ecartesModele = 0;
+  let ecartesRR = 0;
 
   for (let i = DEPART_MIN; i < n - 1; i += pas) {
     const fenetre = serie.slice(Math.max(0, i - largeur + 1), i + 1);
@@ -79,7 +80,10 @@ function lancer(candles, meta = {}, options = {}) {
       r = Multi.detecterTout(fenetre, meta, {
         profils,
         modele: options.modele,
-        modeleSeuil: options.modeleSeuil
+        modeleSeuil: options.modeleSeuil,
+        // Porte du rapport risque/rendement : absente en direct par défaut,
+        // mesurée ici pour comparer les configurations.
+        rrMin: options.rrMin
       });
     } catch {
       continue;                 // une fenêtre qui échoue ne doit pas arrêter le reste
@@ -90,6 +94,7 @@ function lancer(candles, meta = {}, options = {}) {
     // risque : c'est la réponse à « ce marché est-il seulement tradable ? ».
     ecartesFrais += (r.ecartesFrais || []).length;
     ecartesModele += (r.ecartesModele || []).length;
+    ecartesRR += (r.ecartesRR || []).length;
 
     const futurs = serie.slice(i + 1);
     // Plusieurs détecteurs peuvent décrire le MÊME trade sur cette bougie
@@ -133,6 +138,10 @@ function lancer(candles, meta = {}, options = {}) {
         entree: Number(s.entree),
         stop: Number(s.stop),
         objectifs: s.objectifs.map(Number).filter(Number.isFinite),
+        // ⚠️ `Number(null)` vaut 0 : un trade sans objectif se retrouvait avec un
+        // rapport de ZÉRO et passait pour un vrai trade dans les statistiques.
+        rr: (s.rr === null || s.rr === undefined || !Number.isFinite(Number(s.rr)))
+          ? null : Number(s.rr),
         resultat: 'ouvert',
         atteintTP1: false, atteintTP2: false, toucheSL: false, retourEntree: false,
         bougiesSuivies: 0
@@ -159,7 +168,8 @@ function lancer(candles, meta = {}, options = {}) {
     evaluations,
     ignoresDoublons,
     ecartesFrais,
-    ecartesModele
+    ecartesModele,
+    ecartesRR
   };
 }
 

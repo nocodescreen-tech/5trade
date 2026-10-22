@@ -3081,6 +3081,12 @@ function LiveMarket({ onToJournal }) {
                     {signal.synthese.ecartesModele} écarté(s) par le modèle
                   </span>
                 )}
+                {signal.synthese && signal.synthese.ecartesRR > 0 && (
+                  <span className="badge" style={{ fontSize:10, background:'rgba(56,189,248,.14)', color:'#7dd3fc' }}
+                    title="Configurations refusées : objectif inutilisable, ou rapport risque/rendement sous le seuil demandé.">
+                    {signal.synthese.ecartesRR} objectif(s) inutilisable(s)
+                  </span>
+                )}
                 {signal.synthese && signal.synthese.modele && signal.synthese.modele.disponible && (
                   <span className="badge" style={{ fontSize:10, background:'rgba(34,211,138,.12)', color:'#34d399' }}
                     title={`Modèle v${signal.synthese.modele.version} · marchés ${(signal.synthese.modele.marches || []).join(', ')}`}>
