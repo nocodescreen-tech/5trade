@@ -160,7 +160,8 @@ function lancer(candles, meta = {}, options = {}) {
   }
 
   return {
-    ...resumer(trades, { symbol: meta.symbol, timeframe: meta.timeframe }),
+    ...resumer(trades, { symbol: meta.symbol, timeframe: meta.timeframe,
+      limiteTrades: options.limiteTrades }),
     at: n ? serie[n - 1].t : null,
     debut: n ? serie[0].t : null,
     bougies: n,
@@ -263,7 +264,12 @@ function resumer(trades, meta = {}) {
     parStrategie: agreger(t => t.strategie || (t.source === 'motif' ? t.nom : 'structure du marché')),
     parMotif: agreger(t => (t.source === 'motif' ? t.nom : null)),
     courbeR: courbe,
-    trades: trades.slice().sort((a, b) => b.at - a.at).slice(0, 200)
+    // La liste rendue est plafonnée : une réponse HTTP de 20 000 trades n'a pas
+    // de sens pour l'écran. Mais l'analyse hors ligne, elle, a besoin de TOUT —
+    // mesurer une courbe de capital sur les 200 trades les plus récents ne dit
+    // rien de la période. `limiteTrades` (défaut 200) lève le plafond.
+    trades: trades.slice().sort((a, b) => b.at - a.at)
+      .slice(0, Math.max(1, Math.round(Number(meta.limiteTrades) || 200)))
   };
 }
 

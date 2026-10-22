@@ -2598,6 +2598,14 @@ function tinyPng(W = 64, H = 40) {
     const cles = new Set(tr.map(t => `${t.at}|${t.sens}|${t.entree}|${t.stop}`));
     ok('aucun trade en double', cles.size === tr.length, `${tr.length} trades, ${cles.size} clés`);
 
+    // La liste rendue est plafonnée à 200 par défaut (réponse HTTP), mais
+    // l'analyse hors ligne doit pouvoir tout récupérer, sinon une courbe de
+    // capital se calcule sur la fin de la période sans qu'on le sache.
+    const rTout = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' },
+      { profils, pas: 2, maxBougies: 160, limiteTrades: 100000 });
+    ok('la limite de trades est réglable', (rTout.trades || []).length === rTout.clos,
+      `${(rTout.trades || []).length} rendus pour ${rTout.clos} clos`);
+
     // Porte du rapport risque/rendement : mesurée par tranche de rr sur 110 000
     // trades, elle écarte les configurations dont l'objectif vaut moins que le
     // risque. Elle doit être OPTIONNELLE (défaut 0) et ne jamais laisser passer un
