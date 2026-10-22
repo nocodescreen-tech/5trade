@@ -179,13 +179,13 @@ function etat(signaux, options = {}) {
     courbe.push({ at: s.at || null, r: s.r, capital: +capital.toFixed(2) });
   }
 
-  // Perte du jour : somme des R des trades tranchés aujourd'hui.
-  const debutJour = new Date();
-  debutJour.setHours(0, 0, 0, 0);
-  const rJour = clos
-    .filter(s => (s.leveLe || s.at || 0) >= debutJour.getTime())
-    .reduce((a, s) => a + s.r, 0);
-  const perteJourPct = -(rJour * pct);
+  // Perte du jour : celle qu'on a RÉELLEMENT subie, donc celle des trades que les
+  // plafonds auraient laissé passer. Additionner tous les trades du jour
+  // déclenchait le stop sur des pertes jamais encaissées (mesuré : 27,48 % avec
+  // un livre vide, parce que le journal d'avant les garde-fous avait tout pris).
+  const simJour = simuler(liste, { capital: capitalInitial, risquePct: pct });
+  const rJour = simJour.rJour;
+  const perteJourPct = simJour.perteJourPct;
 
   // Risque engagé : ce qu'on perd si TOUS les stops sont touchés. C'est le seul
   // chiffre qui mesure le danger d'un ensemble de positions — le notionnel ne
@@ -302,6 +302,10 @@ function simuler(signaux, options = {}) {
   let pic = capital0;
   let pireDrawdown = 0;
   let prises = 0, refusees = 0;
+  let rJour = 0;
+  const debutJour = new Date();
+  debutJour.setHours(0, 0, 0, 0);
+  const debutJourMs = debutJour.getTime();
   const raisonsRefus = {};
   const ouvertes = [];     // {sortie, risque, marche}
   const courbe = [];
@@ -353,6 +357,9 @@ function simuler(signaux, options = {}) {
     pic = Math.max(pic, capital);
     if (pic > 0) pireDrawdown = Math.min(pireDrawdown, (capital - pic) / pic);
     prises++;
+    // La perte du jour ne compte QUE les trades que le compte a réellement pris.
+    // Sinon le stop journalier se déclenche sur des pertes qu'on n'a pas subies.
+    if ((t.leveLe || t.at) >= debutJourMs) rJour += t.r;
     courbe.push({ at: t.at, r: t.r, capital: +capital.toFixed(2) });
   }
 
@@ -368,6 +375,10 @@ function simuler(signaux, options = {}) {
     tauxPrise: trades.length ? +((prises / trades.length) * 100).toFixed(1) : null,
     raisonsRefus,
     risquePct: pct,
+    // Perte du jour RÉELLEMENT subie (trades pris seulement) : c'est elle qui
+    // doit arrêter la journée, pas la somme de tout ce qui a été détecté.
+    rJour: +rJour.toFixed(2),
+    perteJourPct: +(-(rJour * pct)).toFixed(2),
     plafonds: cfg,
     courbe: courbe.slice(-200),
     // Comparaison : ce que donnerait la composition naïve (sans plafonds).

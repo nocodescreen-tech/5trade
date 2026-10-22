@@ -444,7 +444,10 @@ const CLOS = new Set(['tp1', 'tp2', 'be', 'sl', 'expire']);
 
 function stats() {
   const data = charger();
-  const tous = data.signaux;
+  // Les lignes closes par `entretien.js heritage` n'ont pas d'issue connue :
+  // elles restent tracées mais sortent des statistiques. Compter un R inventé
+  // serait la seule vraie triche possible dans ce fichier.
+  const tous = data.signaux.filter(s => !s.excluHeritage);
   const clos = tous.filter(s => CLOS.has(s.resultat));
 
   const compte = (arr, cle) => {
