@@ -3810,7 +3810,8 @@ function JournalSignauxPanel() {
             {s.risque && Number.isFinite(s.risque.taille) && (
               <span className="badge" style={{ fontSize:9, background:'rgba(96,165,250,.12)', color:'#93c5fd' }}
                 title={`Taille calculée à l'émission : ${s.risque.risqueMontant} risqués (${s.risque.risquePct} % de ${s.risque.capital})`}>
-                {s.risque.taille} unité(s) · {s.risque.risqueMontant} risqués
+                {/* 4 chiffres significatifs : « 0,1969 unité(s) », pas 0,19685039 */}
+                {+Number(s.risque.taille).toPrecision(4)} unité(s) · {s.risque.risqueMontant} risqués
               </span>
             )}
             <span style={{ flex:'1 1 auto' }}></span>
