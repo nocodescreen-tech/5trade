@@ -61,3 +61,7 @@ hermes-*.cjs
 srv.log
 srv.err
 .codex/
+
+# Python (baseline ML) : environnement local, jamais versionne
+ml/.venv/
+ml/__pycache__/
