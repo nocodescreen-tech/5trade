@@ -2235,6 +2235,35 @@ function tinyPng(W = 64, H = 40) {
       F.normaliser({ partMax: 0.05 }).partMax === 0.05,
       String(F.normaliser({ partMax: 0.05 }).partMax));
 
+    // 6. Calibration en direct : le modèle tient-il ses promesses ?
+    // Sans ce contrôle, un modèle peut se dégrader des semaines sans qu'on le voie.
+    const baseCal = { at: TF, symbol: 'frxXAUUSD', sens: 'long', entree: 100, stop: 98,
+      objectifs: [104, 108], rr: 2, entree2: null };
+    const lot = [];
+    for (let i = 0; i < 25; i++) {
+      lot.push({
+        ...baseCal, cle: `c${i}`, identite: `c${i}`, resultat: i % 2 ? 'tp2' : 'sl',
+        r: +(-0.2 + i * 0.03).toFixed(2), rBrut: +(-0.2 + i * 0.03).toFixed(2),
+        modele: { rAttendu: +(-0.2 + i * 0.03).toFixed(2), seuil: 0, version: 1, marche: 'frxXAUUSD' }
+      });
+    }
+    J.sauver({ version: 1, signaux: lot });
+    let cal = J.stats().calibration;
+    ok('la calibration est calculée sur les trades notés', !!cal && cal.trades === 25,
+      cal ? `${cal.trades} trades` : 'null');
+    ok('la calibration est en quintiles', !!cal && cal.tranches.length === 5,
+      cal ? String(cal.tranches.length) : '—');
+    ok('un modèle bien ordonné est reconnu comme monotone', !!cal && cal.monotone === true,
+      cal ? cal.lecture : '—');
+    ok('le biais moyen est exposé', !!cal && Number.isFinite(cal.biaisMoyen), cal ? String(cal.biaisMoyen) : '—');
+
+    // Le même jeu avec des R réels INVERSÉS : le modèle ne trie plus, et il faut
+    // que ça se voie (c'est le signal qu'il faut réentraîner).
+    J.sauver({ version: 1, signaux: lot.map((x, i) => ({ ...x, r: +(0.5 - i * 0.03).toFixed(2) })) });
+    cal = J.stats().calibration;
+    ok('un modèle qui ne trie plus est signalé', !!cal && cal.monotone === false,
+      cal ? cal.lecture : '—');
+
     // Remise à zéro : les blocs suivants ne doivent pas hériter d un spread.
     F.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
     ok('la configuration des frais peut être remise à zéro', F.actifs() === false);

@@ -3315,6 +3315,32 @@ app.post('/api/backtest', requireAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// MODÈLE (R attendu) — état et calibration
+// ─────────────────────────────────────────────────────────────
+/**
+ * GET /api/modele
+ * Ce que le modèle sait de lui-même : version, marchés, seuil, métriques
+ * d'entraînement, et surtout sa CALIBRATION en direct — le R annoncé comparé au
+ * R réellement obtenu, par quintile. Un modèle qui ne trie plus se voit ici
+ * avant de coûter de l'argent.
+ */
+app.get('/api/modele', requireAuth, (req, res) => {
+  try {
+    const Modele = require('./modele.js');
+    const Journal = require('./journal-signaux.js');
+    const st = Journal.stats();
+    res.json({
+      success: true,
+      modele: Modele.info(),
+      seuilApplique: Modele.seuil(),
+      seuilTop10: Modele.seuilTop10(),
+      calibration: st.calibration,
+      journal: { trades: st.clos, esperance: st.esperance, esperanceBrute: st.esperanceBrute }
+    });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────
 // FRAIS DE TRANSACTION — spread et commission
 // ─────────────────────────────────────────────────────────────
 /**

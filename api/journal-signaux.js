@@ -129,6 +129,15 @@ function enregistrer(signaux, meta = {}, options = {}) {
       force: s.force,
       conditions: (s.conditions || []).length,
       conditionsOk: (s.conditions || []).filter(c => c.ok).length,
+      // Ce que le MODÈLE avait prédit au moment de l'émission. Sans cette trace,
+      // impossible de savoir en direct si le modèle tient ses promesses : on
+      // saurait seulement qu'il « avait l'air » bon à l'entraînement.
+      modele: s.modele ? {
+        rAttendu: s.modele.rAttendu,
+        seuil: s.modele.seuil !== undefined ? s.modele.seuil : null,
+        version: s.modele.version || null,
+        marche: s.modele.marche || null
+      } : null,
       structure: s.structureContexte ? {
         alignement: s.structureContexte.alignement,
         position: s.structureContexte.position,
@@ -409,6 +418,55 @@ function stats() {
     p.rMoyen = p.total ? +(p.r / p.total).toFixed(2) : null;
   }
 
+  // ── Calibration du modèle en direct ─────────────────────────────────────
+  // Le modèle annonce un R attendu. La seule preuve qu'il ne dérive pas est de
+  // comparer, sur les trades réellement tranchés, ce qu'il annonçait à ce qui
+  // s'est passé. Sans ce bloc, un modèle peut se dégrader pendant des semaines
+  // sans que personne le voie.
+  const notables = clos.filter(s => s.modele && Number.isFinite(s.modele.rAttendu)
+    && Number.isFinite(s.r));
+  let calibration = null;
+  if (notables.length >= 20) {
+    const tries = notables.slice().sort((a, b) => a.modele.rAttendu - b.modele.rAttendu);
+    const parts = 5;                          // quintiles : 20 % par tranche
+    const tranches = [];
+    for (let i = 0; i < parts; i++) {
+      const debut = Math.floor((i * tries.length) / parts);
+      const fin = Math.floor(((i + 1) * tries.length) / parts);
+      const lot = tries.slice(debut, fin);
+      if (!lot.length) continue;
+      tranches.push({
+        rang: i + 1,
+        n: lot.length,
+        rAttenduMoyen: +(lot.reduce((a, s) => a + s.modele.rAttendu, 0) / lot.length).toFixed(3),
+        rReelMoyen: +(lot.reduce((a, s) => a + s.r, 0) / lot.length).toFixed(3),
+        biais: +(lot.reduce((a, s) => a + (s.r - s.modele.rAttendu), 0) / lot.length).toFixed(3),
+        tauxReussite: (() => {
+          const g = lot.filter(s => s.resultat === 'tp1' || s.resultat === 'tp2').length;
+          const d = g + lot.filter(s => s.resultat === 'sl').length;
+          return d ? +((g / d) * 100).toFixed(1) : null;
+        })()
+      });
+    }
+    // Le modèle est-il monotone ? Le R réel doit croître avec le R annoncé.
+    // S'il ne l'est pas, le classement du modèle ne vaut rien même si sa moyenne
+    // est bonne — c'est la différence entre « savoir » et « trier ».
+    let monotone = true;
+    for (let i = 1; i < tranches.length; i++) {
+      if (tranches[i].rReelMoyen < tranches[i - 1].rReelMoyen) monotone = false;
+    }
+    calibration = {
+      trades: notables.length,
+      tranches,
+      monotone,
+      biaisMoyen: +(notables.reduce((a, s) => a + (s.r - s.modele.rAttendu), 0) / notables.length).toFixed(3),
+      version: notables[notables.length - 1].modele.version || null,
+      lecture: monotone
+        ? 'le R réel croît avec le R annoncé : le modèle trie correctement'
+        : 'le R réel ne suit PAS le R annoncé : le modèle ne trie pas (à réentraîner)'
+    };
+  }
+
   // Par marché : le coût (en unités de prix) qui annulerait l'espérance — donc
   // le spread maximal acceptable, comparable à celui du courtier.
   const critiqueParMarche = {};
@@ -452,6 +510,9 @@ function stats() {
     // En unités de prix, par marché : au-delà de ce coût par trade, ce marché
     // n'est plus rentable avec le moteur actuel.
     coutCritiqueParMarche: critiqueParMarche,
+    // Le modèle tient-il ses promesses en direct ? (null si trop peu de trades
+    // portent une prédiction — un biais calculé sur 5 trades ne dit rien.)
+    calibration,
     parSens: compte(clos, 'sens'),
     parSource: compte(clos, s => s.source),
     parMarche: compte(clos, s => `${s.symbol} ${s.timeframe}`),
