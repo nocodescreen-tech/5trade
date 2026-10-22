@@ -37,7 +37,15 @@ const MAX_BOUGIES = 800;
 function lancer(candles, meta = {}, options = {}) {
   const profils = Array.isArray(options.profils) ? options.profils.filter(Boolean) : [];
   const pas = Math.max(1, Math.round(Number(options.pas) || 2));
-  const maxBougies = Math.min(Number(options.maxBougies) || 400, MAX_BOUGIES);
+  // Plafond surchargeable — réservé aux outils HORS LIGNE (mesure, dataset).
+  // La route HTTP ne le passe jamais : un client ne doit pas pouvoir demander
+  // 50 000 bougies et figer le serveur.
+  const plafond = Math.min(Math.max(1, Number(options.plafond) || MAX_BOUGIES), 20000);
+  const maxBougies = Math.min(Number(options.maxBougies) || 400, plafond);
+  // Fenêtre vue par le moteur à chaque pas. Le direct ne voit que ~300 bougies :
+  // laisser la fenêtre grandir jusqu'à tout l'historique rendait le backtest
+  // quadratique ET infidèle au comportement réel.
+  const largeur = Math.max(DEPART_MIN, Math.round(Number(options.fenetreMax) || MAX_BOUGIES));
 
   const propres = (candles || [])
     .filter(c => c && Number.isFinite(c.h) && Number.isFinite(c.l) && Number.isFinite(c.c))
@@ -61,13 +69,18 @@ function lancer(candles, meta = {}, options = {}) {
   let evaluations = 0;
   let ignoresDoublons = 0;
   let ecartesFrais = 0;
+  let ecartesModele = 0;
 
   for (let i = DEPART_MIN; i < n - 1; i += pas) {
-    const fenetre = serie.slice(0, i + 1);
+    const fenetre = serie.slice(Math.max(0, i - largeur + 1), i + 1);
 
     let r;
     try {
-      r = Multi.detecterTout(fenetre, meta, { profils });
+      r = Multi.detecterTout(fenetre, meta, {
+        profils,
+        modele: options.modele,
+        modeleSeuil: options.modeleSeuil
+      });
     } catch {
       continue;                 // une fenêtre qui échoue ne doit pas arrêter le reste
     }
@@ -76,6 +89,7 @@ function lancer(candles, meta = {}, options = {}) {
     // Combien de configurations ont été refusées parce que le coût dépasse le
     // risque : c'est la réponse à « ce marché est-il seulement tradable ? ».
     ecartesFrais += (r.ecartesFrais || []).length;
+    ecartesModele += (r.ecartesModele || []).length;
 
     const futurs = serie.slice(i + 1);
     // Plusieurs détecteurs peuvent décrire le MÊME trade sur cette bougie
@@ -144,7 +158,8 @@ function lancer(candles, meta = {}, options = {}) {
     pas,
     evaluations,
     ignoresDoublons,
-    ecartesFrais
+    ecartesFrais,
+    ecartesModele
   };
 }
 

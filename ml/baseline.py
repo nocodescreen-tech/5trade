@@ -71,8 +71,21 @@ def nombre_depuis_texte(txt):
     return float(m.group(0).replace(",", ".")) if m else None
 
 
-def construire_matrices(lignes):
-    """Features numériques + indicatrices. Aucune donnée de l'issue n'entre ici."""
+def spec_features(lignes):
+    """
+    Décrit COMMENT fabriquer chaque colonne, au lieu de la fabriquer.
+
+    Raison : le serveur Node doit calculer exactement les mêmes features que
+    l'entraînement. Deux implémentations écrites à la main divergent tôt ou
+    tard, en silence. Ici la liste est produite UNE fois, exportée avec le
+    modèle, et Node se contente d'appliquer chaque ligne de la spec. Un test de
+    parité vérifie ensuite, sur de vraies lignes, que les deux donnent le même
+    vecteur.
+
+    Genres : direct (champ scalaire), cond_ok / cond_val / cond_ratio
+    (condition repérée par son nom), dummy (indicatrice d'égalité).
+    """
+    # Les noms de conditions dépendent des données : ils viennent du jeu lui-même.
     noms_conditions = []
     vus = set()
     for r in lignes:
@@ -81,66 +94,124 @@ def construire_matrices(lignes):
                 vus.add(c["nom"])
                 noms_conditions.append(c["nom"])
 
-    def valeur_numerique(c):
-        v = c.get("valeur")
-        if isinstance(v, (int, float)) and not isinstance(v, bool):
-            return float(v)
+    spec = [
+        {"col": "force", "genre": "direct", "champ": "force", "defaut": 0.0},
+        {"col": "force_avant", "genre": "direct", "champ": "forceAvant", "defaut": 0.0},
+        {"col": "ajustement", "genre": "direct", "champ": "ajustement", "defaut": 0.0},
+        {"col": "conditions_ok", "genre": "direct", "champ": "conditionsOk", "defaut": 0},
+        {"col": "conditions_total", "genre": "compte", "champ": "conditions"},
+        {"col": "sens_long", "genre": "egal", "chemin": "sens", "valeur": "long"},
+        {"col": "risque_pct_prix", "genre": "chemin_num", "chemin": "niveaux.risquePctPrix", "defaut": 0.0},
+        {"col": "rr", "genre": "chemin_num", "chemin": "niveaux.rr", "defaut": 0.0},
+        {"col": "atr_rel", "genre": "atr_relatif"},
+        {"col": "ajust_structure", "genre": "chemin_num", "chemin": "structure.ajustement", "defaut": 0.0},
+        {"col": "favorables", "genre": "chemin_num", "chemin": "structure.favorables", "defaut": 0},
+        {"col": "defavorables", "genre": "chemin_num", "chemin": "structure.defavorables", "defaut": 0},
+        {"col": "nb_zones", "genre": "chemin_num", "chemin": "carte.zones", "defaut": 0},
+        {"col": "nb_liquidites", "genre": "chemin_num", "chemin": "carte.liquidites", "defaut": 0},
+        {"col": "nb_balayages", "genre": "chemin_num", "chemin": "carte.balayages", "defaut": 0},
+        {"col": "nb_deplacements", "genre": "chemin_num", "chemin": "carte.deplacements", "defaut": 0},
+    ]
+    for champ, chemin in (("tendance", "carte.tendance"), ("position", "carte.positionZone"),
+                          ("alignement", "structure.alignement"), ("source", "source"),
+                          ("session", "carte.session"), ("killzone", "carte.killZone"),
+                          ("id", "id")):
+        spec.append({"col": f"{champ}=", "genre": "dummies", "chemin": chemin, "prefixe": f"{champ}="})
+
+    for nom in noms_conditions:
+        spec.append({"col": f"ok:{nom}", "genre": "cond_ok", "nom": nom})
+        spec.append({"col": f"val:{nom}", "genre": "cond_val", "nom": nom})
+        spec.append({"col": f"ratio:{nom}", "genre": "cond_ratio", "nom": nom})
+    return spec
+
+
+def _chemin(objet, chemin, defaut=None):
+    courant = objet
+    for morceau in chemin.split("."):
+        if not isinstance(courant, dict) or morceau not in courant:
+            return defaut
+        courant = courant[morceau]
+    return defaut if courant is None else courant
+
+
+def _nombre(txt):
+    if txt is None:
         return None
+    if isinstance(txt, (int, float)) and not isinstance(txt, bool):
+        return float(txt)
+    m = re.search(r"-?\d+(?:[.,]\d+)?", str(txt).replace("\u202f", ""))
+    return float(m.group(0).replace(",", ".")) if m else None
 
-    lignes_x = []
-    for r in lignes:
-        f = {}
-        f["force"] = r.get("force") or 0.0
-        f["force_avant"] = r.get("forceAvant") or 0.0
-        f["ajustement"] = r.get("ajustement") or 0.0
-        f["conditions_ok"] = r.get("conditionsOk") or 0
-        f["conditions_total"] = len(r.get("conditions") or [])
-        f["sens_long"] = 1.0 if r.get("sens") == "long" else 0.0
-        niv = r.get("niveaux") or {}
-        f["risque_pct_prix"] = niv.get("risquePctPrix") or 0.0
-        f["rr"] = niv.get("rr") or 0.0
-        carte = r.get("carte") or {}
-        st = r.get("structure") or {}
-        f["atr_rel"] = (carte.get("atr") or 0.0) / (carte.get("prix") or 1.0)
-        f["ajust_structure"] = st.get("ajustement") or 0.0
-        f["favorables"] = st.get("favorables") or 0
-        f["defavorables"] = st.get("defavorables") or 0
-        f["nb_zones"] = carte.get("zones") or 0
-        f["nb_liquidites"] = carte.get("liquidites") or 0
-        f["nb_balayages"] = carte.get("balayages") or 0
-        f["nb_deplacements"] = carte.get("deplacements") or 0
 
-        for cle, champ in (
-            ("tendance", carte.get("tendance")),
-            ("position", carte.get("positionZone")),
-            ("alignement", st.get("alignement")),
-            ("source", r.get("source")),
-            ("session", carte.get("session")),
-            ("killzone", carte.get("killZone")),
-            ("id", r.get("id")),
-        ):
-            f[f"{cle}={champ}"] = 1.0
+def construire_matrices(lignes, spec=None):
+    """
+    Construit X à partir de la spec. Rend (X, spec, colonnes).
 
-        par_nom = {c.get("nom"): c for c in (r.get("conditions") or [])}
-        for nom in noms_conditions:
-            c = par_nom.get(nom)
+    Utilise par l'entraînement ET par l'export : la spec part avec le modèle, et
+    `api/modele.js` applique la même liste. C'est ce qui rend la parité
+    vérifiable au lieu d'être espérée.
+    """
+    spec = spec or spec_features(lignes)
+
+    # Les indicatrices ont besoin de connaître les modalités présentes.
+    modalites = []
+    for item in spec:
+        if item["genre"] == "dummies":
+            valeurs = []
+            for r in lignes:
+                v = _chemin(r, item["chemin"])
+                if isinstance(v, str) and v and v not in valeurs:
+                    valeurs.append(v)
+                elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                    valeurs.append(str(v))
+            for v in sorted(set(str(x) for x in valeurs)):
+                modalites.append({"col": f"{item['prefixe']}{v}", "genre": "dummy",
+                                  "chemin": item["chemin"], "valeur": v})
+
+    toutes = [i for i in spec if i["genre"] != "dummies"] + modalites
+    # Les indicatrices de modalités viennent juste après leur famille : l'ordre
+    # n'a pas d'importance pour le modèle, mais il doit être STABLE et identique
+    # des deux côtés, donc il est figé ici et exporté tel quel.
+
+    def valeur(item, r):
+        g = item["genre"]
+        if g == "direct":
+            v = r.get(item["champ"])
+            return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else float(item["defaut"])
+        if g == "compte":
+            v = r.get(item["champ"])
+            return float(len(v)) if isinstance(v, list) else 0.0
+        if g == "egal":
+            return 1.0 if _chemin(r, item["chemin"]) == item["valeur"] else 0.0
+        if g == "dummy":
+            v = _chemin(r, item["chemin"])
+            return 1.0 if v is not None and str(v) == item["valeur"] else 0.0
+        if g == "chemin_num":
+            v = _chemin(r, item["chemin"])
+            return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else float(item["defaut"])
+        if g == "atr_rel":
+            atr = _chemin(r, "carte.atr", 0.0) or 0.0
+            prix = _chemin(r, "carte.prix", 1.0) or 1.0
+            return float(atr) / float(prix)
+        if g in ("cond_ok", "cond_val", "cond_ratio"):
+            c = next((x for x in (r.get("conditions") or []) if x.get("nom") == item["nom"]), None)
             if not c:
-                continue
-            f[f"ok:{nom}"] = 1.0 if c.get("ok") else 0.0
-            v = valeur_numerique(c)
-            if v is not None:
-                f[f"val:{nom}"] = v
-                seuil = nombre_depuis_texte(c.get("seuil"))
-                if seuil:
-                    # Écart RELATIF au seuil : c'est ce qui distingue « 34 pour un
-                    # seuil de 48 » de « 47 pour un seuil de 48 », que la valeur
-                    # brute seule ne dit pas.
-                    f[f"ratio:{nom}"] = v / seuil if seuil else 0.0
-        lignes_x.append(f)
+                return 0.0
+            if g == "cond_ok":
+                return 1.0 if c.get("ok") else 0.0
+            v = c.get("valeur")
+            num = float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+            if g == "cond_val":
+                return num if num is not None else 0.0
+            seuil = _nombre(c.get("seuil"))
+            if num is None or not seuil:
+                return 0.0
+            return num / seuil
+        return 0.0
 
-    colonnes = sorted({k for f in lignes_x for k in f})
-    X = np.array([[f.get(c, 0.0) for c in colonnes] for f in lignes_x], dtype=float)
-    return X, colonnes
+    colonnes = [i["col"] for i in toutes]
+    X = np.array([[valeur(item, r) for item in toutes] for r in lignes], dtype=float)
+    return X, toutes, colonnes
 
 
 def cout_en_r(r):
@@ -161,7 +232,7 @@ def main(chemins):
         print("aucune ligne : lancer dataset.js d'abord")
         return 1
 
-    X, colonnes = construire_matrices(lignes)
+    X, spec, colonnes = construire_matrices(lignes)
     y = np.array([1 if r.get("gagne") else 0 for r in lignes], dtype=int)
     r_brut = np.array([float((r.get("issue") or {}).get("r") or 0.0) for r in lignes])
     couts = np.array([cout_en_r(r) for r in lignes])

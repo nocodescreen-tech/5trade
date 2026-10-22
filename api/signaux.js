@@ -31,6 +31,8 @@ const Patterns = require('./patterns');
 // de la configuration réelle. Sans ce require, `Frais is not defined` ne casse
 // pas la syntaxe — le canonique meurt seulement à l exécution.
 const Frais = require('./frais');
+// Modèle exporté (R attendu) : pondère les signaux sans remplacer les règles.
+const Modele = require('./modele');
 
 const r2 = x => (Number.isFinite(x) ? +x.toFixed(2) : null);
 // Précision ADAPTATIVE pour les PRIX. `r2` (2 décimales) est correct pour un
@@ -870,6 +872,49 @@ function detecterTout(candles, meta = {}, options = {}) {
     if (s.status === 'confirme') s.status = 'surveiller';
   }
 
+  // 6. LE MODÈLE PONDÈRE — R attendu.
+  //    Les règles disent POURQUOI un signal existe ; le modèle dit COMBIEN il
+  //    vaut, en R, d'après 6 mois et ~98 000 trades. Il ne remplace pas les
+  //    règles : il refuse ce dont l'espérance est négative, et il note le reste.
+  //    Un marché absent du modèle ne reçoit AUCUNE note (pas d'extrapolation) et
+  //    n'est donc jamais filtré par lui.
+  const modeleDispo = options.modele !== false && Modele.disponible();
+  const ecartesModele = [];
+  // Seuil d'acceptation : 0 = on ne refuse que l'espérance négative.
+  // `options.modeleSeuil` / MODELE_SEUIL='top10' applique le décile supérieur
+  // validé en walk-forward — au prix de ~90 % de signaux en moins.
+  const seuilModele = Number.isFinite(Number(options.modeleSeuil))
+    ? Number(options.modeleSeuil)
+    : Modele.seuil();
+  if (modeleDispo) {
+    for (const s of signaux) {
+      // Un signal déjà écarté (coût) n'a plus de niveaux : rien à noter.
+      if (s.entree === null || s.stop === null) continue;
+      const note = Modele.noter(s, meta.symbol, carte);
+      if (!note) continue;
+      note.seuil = seuilModele;
+      s.modele = note;
+      if (note.horsPerimetre || note.rAttendu === null) continue;
+      if (note.rAttendu >= seuilModele) continue;
+
+      const motifRefus = seuilModele > 0
+        ? `sous le seuil (${note.rAttendu} R attendu < ${seuilModele} R exigé, modèle v${note.version} sur ${note.marche})`
+        : `espérance négative (${note.rAttendu} R attendu, modèle v${note.version} sur ${note.marche})`;
+      ecartesModele.push({
+        id: s.id, nom: s.nom, source: s.source, sens: s.sens,
+        rAttendu: note.rAttendu, seuil: seuilModele,
+        marche: note.marche, version: note.version, raison: motifRefus
+      });
+      s.ecarteModele = note;
+      s.entree = null;
+      s.stop = null;
+      s.objectifs = [];
+      s.rr = null;
+      s.raison = [s.raison, motifRefus].filter(Boolean).join(' — ');
+      if (s.status === 'confirme') s.status = 'surveiller';
+    }
+  }
+
   // Tri : confirmés d'abord, puis surveiller, puis non remplis ; à statut égal,
   // la force décroissante. C'est l'ordre de lecture d'un trader.
   const ordre = { confirme: 0, surveiller: 1, 'non-rempli': 2, erreur: 3 };
@@ -897,6 +942,11 @@ function detecterTout(candles, meta = {}, options = {}) {
     // Combien de signaux ont été refusés parce que le coût dépasse le risque :
     // le trader doit voir que le marché est tradable ou non, pas le deviner.
     ecartesFrais: ecartesFrais.length,
+    // Idem pour le modèle : combien de configurations ont une espérance négative.
+    ecartesModele: ecartesModele.length,
+    modele: modeleDispo
+      ? { disponible: true, version: (Modele.modele() || {}).version || 1, marches: Modele.marches() }
+      : { disponible: false, version: null, marches: [] },
     // Le marché parle-t-il d'une seule voix ? Compte des signaux RETENUS par sens.
     biais: (() => {
       const l = retenus.filter(s => s.sens === 'long').length;
@@ -922,7 +972,9 @@ function detecterTout(candles, meta = {}, options = {}) {
     motifs: analyseMotifs,
     structure: vStructure,
     // Le détail de ce que les frais ont fait écarter, avec les chiffres.
-    ecartesFrais
+    ecartesFrais,
+    // Et ce que le modèle a refusé, avec son R attendu.
+    ecartesModele
   };
 }
 

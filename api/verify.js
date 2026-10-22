@@ -2341,6 +2341,47 @@ function tinyPng(W = 64, H = 40) {
     try { fsx.rmSync(process.env.DATASET_DOSSIER, { recursive: true, force: true }); } catch {}
   }
 
+  // ── Modèle exporté : la parité Node ↔ Python est la seule chose qui protège ──
+  // Un modèle sérialisé dans un autre langage dérive silencieusement : les
+  // prédictions restent plausibles et deviennent fausses. Ce contrôle rejoue des
+  // lignes RÉELLES du jeu de données et compare à la prédiction de sklearn,
+  // exportée en même temps que le modèle.
+  {
+    const M = require('./modele.js');
+    const fsx = require('fs');
+    const cheminEch = path.join(ROOT, 'models', 'echantillon-parite.json');
+
+    if (!M.disponible() || !fsx.existsSync(cheminEch)) {
+      skipped('parité modèle Node ↔ Python', 'models/ absent — lancer ml/entrainer.py');
+    } else {
+      const ech = JSON.parse(fsx.readFileSync(cheminEch, 'utf8'));
+      let pire = 0;
+      let compares = 0;
+      for (const e of ech) {
+        const r = M.noterLigne(e.entree, e.entree.symbol);
+        if (!r || r.prediction === undefined) continue;
+        pire = Math.max(pire, Math.abs(r.prediction - e.attendu));
+        compares++;
+      }
+      ok('le modèle exporté est lisible', M.info().arbres > 0 && M.info().features > 0,
+        `${M.info().arbres} arbres, ${M.info().features} features`);
+      ok('les marchés du modèle sont nommés', M.marches().length > 0, M.marches().join(', '));
+      ok('les lignes de parité sont toutes comparées', compares === ech.length,
+        `${compares}/${ech.length}`);
+      ok('Node reproduit sklearn à 1e-6 près', pire < 1e-6, `écart max ${pire.toExponential(2)}`);
+
+      // Hors périmètre : aucune prédiction, donc aucun filtrage indu.
+      const inconnu = M.noterLigne({ force: 0.5, conditions: [], niveaux: {} }, 'MARCHE_INCONNU');
+      ok('un marché hors périmètre ne reçoit aucune note',
+        !!inconnu && inconnu.horsPerimetre === true && inconnu.rAttendu === null);
+
+      // Le seuil par défaut ne refuse que l'espérance négative.
+      ok('le seuil par défaut est zéro', M.seuil() === 0, String(M.seuil()));
+      ok('le décile supérieur est exposé', Number.isFinite(M.seuilTop10()),
+        String(M.seuilTop10()));
+    }
+  }
+
   // ── Niveaux : pas de risque nul, pas de stop à contre-sens, pas de doublon ──
   {
     const M = require('./signaux.js');

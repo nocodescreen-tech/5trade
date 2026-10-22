@@ -36,6 +36,7 @@ const path = require('path');
 const Multi = require('./signaux');
 const Journal = require('./journal-signaux');
 const Historique = require('./historique');
+const { aplatir } = require('./ligne-signal');
 
 const DOSSIER = process.env.DATASET_DOSSIER
   || path.join(__dirname, '..', 'data', 'dataset');
@@ -62,72 +63,15 @@ function nomFichier(provider, symbol, tf) {
 }
 
 /**
- * Le vecteur de features d'un signal — écrit tel qu'il est, sans arrondi
- * cosmétique. Ce qui n'a pas été mesuré reste null : une colonne vide est une
- * information (« le moteur ne savait pas »), une colonne inventée est un poison.
+ * Le vecteur de features d'un signal — DÉLÉGUÉ à `ligne-signal.js`.
+ *
+ * Cette fonction ne redéfinit plus la forme : elle l'emprunte. La même ligne
+ * sert à écrire le jeu de données et à noter un signal en direct, donc les deux
+ * ne peuvent pas diverger. (La version précédente la définissait ici, avec le
+ * risque — vérifié — de deviner des noms de champs faux.)
  */
 function features(s, carte) {
-  return {
-    force: Number.isFinite(s.force) ? s.force : null,
-    forceAvant: s.forceDetail ? s.forceDetail.avant : null,
-    ajustement: s.forceDetail ? s.forceDetail.ajustement : null,
-    plafonnee: s.forceDetail ? !!s.forceDetail.plafonnee : null,
-    // Toutes les conditions avec LEUR VALEUR mesurée et LEUR SEUIL, pas
-    // seulement leur nombre. La forme réelle d'une condition est
-    // {nom, valeur, seuil, ok} — pas {libelle, ...} : vérifié sur une sortie
-    // réelle de detecterTout avant d'écrire cette ligne.
-    conditions: (s.conditions || []).map(c => ({
-      nom: c.nom !== undefined ? c.nom : c.libelle,
-      valeur: c.valeur !== undefined ? c.valeur : null,
-      seuil: c.seuil !== undefined ? c.seuil : null,
-      ok: !!c.ok
-    })),
-    conditionsOk: (s.conditions || []).filter(c => c.ok).length,
-    structure: s.structureContexte ? {
-      alignement: s.structureContexte.alignement,
-      position: s.structureContexte.position,
-      ajustement: s.structureContexte.ajustement,
-      favorables: s.structureContexte.favorables,
-      defavorables: s.structureContexte.defavorables,
-      // `zone` est un LIBELLÉ (« FVG bearish »), pas un objet avec une distance.
-      zone: s.structureContexte.zone || null,
-      lecture: s.structureContexte.lecture || null
-    } : null,
-    // La carte de marché a ses propres noms de champs : tendance / atr / prix /
-    // session. Les deviner (« trend », « atr14 », « lastPrice ») produisait une
-    // colonne entièrement nulle alors que la donnée existait.
-    carte: carte ? {
-      tendance: carte.tendance || null,
-      // `position` est un OBJET {zone, equilibre, bas, haut, ote}, pas une
-      // chaîne : on extrait la zone, sinon la colonne contient un objet entier.
-      positionZone: carte.position
-        ? (typeof carte.position === 'string' ? carte.position : (carte.position.zone || null))
-        : null,
-      atr: Number.isFinite(carte.atr) ? carte.atr : null,
-      prix: Number.isFinite(carte.prix) ? carte.prix : null,
-      // `session` est un OBJET {courante, killZone}.
-      session: carte.session
-        ? (typeof carte.session === 'string' ? carte.session : (carte.session.courante || null))
-        : null,
-      killZone: carte.session && typeof carte.session === 'object' ? (carte.session.killZone || null) : null,
-      zones: Array.isArray(carte.zones) ? carte.zones.length : null,
-      liquidites: Array.isArray(carte.liquidite) ? carte.liquidite.length : null,
-      balayages: Array.isArray(carte.balayages) ? carte.balayages.length : null,
-      deplacements: Array.isArray(carte.deplacements) ? carte.deplacements.length : null,
-      zoneProche: carte.zoneLaPlusProche ? (carte.zoneLaPlusProche.type || null) : null,
-      evenement: carte.evenement ? (carte.evenement.type || null) : null
-    } : null,
-    niveaux: {
-      entree: s.entree,
-      stop: s.stop,
-      objectifs: s.objectifs,
-      rr: Number.isFinite(s.rr) ? s.rr : null,
-      risque: Math.abs(Number(s.entree) - Number(s.stop)),
-      risquePctPrix: Number(s.entree)
-        ? +((Math.abs(Number(s.entree) - Number(s.stop)) / Number(s.entree)) * 100).toFixed(4)
-        : null
-    }
-  };
+  return aplatir(s, carte);
 }
 
 /**
@@ -156,7 +100,12 @@ function generer({ bougies, symbol, tf, provider = null, profils = [], pas = PAS
     // Fenêtre BORNÉE : ce que le direct voit, pas tout l'historique.
     const fenetre = serie.slice(Math.max(0, i - largeur + 1), i + 1);
     let r;
-    try { r = Multi.detecterTout(fenetre, meta, { profils }); }
+    try {
+      // `modele: false` est ESSENTIEL ici : le jeu de données sert à ENTRAÎNER
+      // le modèle. S'il était filtré par le modèle, la donnée dépendrait du
+      // modèle — contamination circulaire et rejeu non reproductible.
+      r = Multi.detecterTout(fenetre, meta, { profils, modele: false });
+    }
     catch { continue; }           // une fenêtre qui échoue ne doit pas arrêter le reste
 
     const futurs = serie.slice(i + 1);
