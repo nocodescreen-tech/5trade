@@ -2602,9 +2602,44 @@ function tinyPng(W = 64, H = 40) {
     // l'analyse hors ligne doit pouvoir tout récupérer, sinon une courbe de
     // capital se calcule sur la fin de la période sans qu'on le sache.
     const rTout = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' },
-      { profils, pas: 2, maxBougies: 160, limiteTrades: 100000 });
+      { profils, pas: 2, maxBougies: 160, demande: 800, limiteTrades: 100000 });
     ok('la limite de trades est réglable', (rTout.trades || []).length === rTout.clos,
       `${(rTout.trades || []).length} rendus pour ${rTout.clos} clos`);
+
+    // Un backtest sur une poignée de bougies n'est pas un résultat. Le drapeau
+    // doit être calculé par le moteur, sinon l'écran peut l'oublier — c'est
+    // exactement ce qui s'est produit avec un « −0,13 R » sur 93 bougies d'or.
+    ok('un historique court est marqué non fiable', rTout.fiable === false,
+      `${rTout.bougies} bougies`);
+    const serieLongue = [];
+    for (let i = 0; i < 420; i++) {
+      const base = 40000 + Math.sin(i / 7) * 260 + i * 0.5;
+      serieLongue.push(cb(i, base, base + 140, base - 140, base + (i % 2 ? 80 : -70)));
+    }
+    const rLong = B.lancer(serieLongue, { symbol: 'R_75', timeframe: '5m' },
+      { profils, pas: 2, maxBougies: 400 });
+    ok('un historique suffisant est marqué fiable', rLong.fiable === true,
+      `${rLong.bougies} bougies`);
+    ok('le nombre de types de configuration est exposé',
+      Number.isFinite(rLong.types) && rLong.types > 0,
+      `${rLong.types} type(s) pour ${(rLong.trades || []).length} trade(s)`);
+    ok('la concentration des trois premiers types est mesurée',
+      Number.isFinite(rLong.concentrationTop3)
+      && rLong.concentrationTop3 >= 0 && rLong.concentrationTop3 <= 100,
+      `top 3 = ${rLong.concentrationTop3} %`);
+
+    // Le nom exporté est MAX_BOUGIES. Lire MAX_BOUGES (sans le I) donnait
+    // `undefined`, donc un nombre de bougies NaN, donc le minimum du courtier :
+    // 93 bougies pour tous les backtests de l'écran. Un test statique sur le
+    // serveur est le seul moyen d'attraper cette faute de frappe.
+    ok('le plafond de bougies est exporté', Number.isFinite(B.MAX_BOUGIES) && B.MAX_BOUGIES >= 80,
+      `MAX_BOUGIES = ${B.MAX_BOUGIES}`);
+    const sourceServeur = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('la route du backtest ne lit pas un plafond inexistant',
+      !/Backtest\.MAX_BOUGES\b/.test(sourceServeur),
+      /Backtest\.MAX_BOUGES\b/.test(sourceServeur) ? 'MAX_BOUGES encore présent' : 'aucune référence fautive');
+    ok('la route du backtest borne le nombre de bougies',
+      /Math\.min\(Math\.max\(demande, 80\), plafond\)/.test(sourceServeur));
 
     // Porte du rapport risque/rendement : mesurée par tranche de rr sur 110 000
     // trades, elle écarte les configurations dont l'objectif vaut moins que le

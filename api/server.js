@@ -3281,7 +3281,15 @@ async function executerBacktest(src = {}) {
   if (!symbol) { const e = new Error('Paramètre « symbol » requis'); e.code = 400; throw e; }
   if (!Market.TF_MS[tf]) { const e = new Error(`Timeframe inconnu : ${tf}`); e.code = 400; throw e; }
 
-  const bougies = Math.min(Math.max(Number(src.bougies) || 400, 80), Backtest.MAX_BOUGES);
+  // ⚠️ Le nom exporté est `MAX_BOUGIES` (avec un I). Lire `MAX_BOUGES` rendait
+  // `undefined`, donc `Math.min(800, undefined)` = NaN, donc le courtier recevait
+  // un nombre de bougies invalide et rendait son minimum — 93 bougies. TOUS les
+  // backtests de l'écran tournaient sur 23 heures d'historique sans que rien ne
+  // le signale. On valide le plafond au lieu de lui faire confiance.
+  const plafond = Number.isFinite(Number(Backtest.MAX_BOUGIES)) && Number(Backtest.MAX_BOUGIES) >= 80
+    ? Number(Backtest.MAX_BOUGIES) : 800;
+  const demande = Math.round(Number(src.bougies) || 400);
+  const bougies = Math.min(Math.max(demande, 80), plafond);
   const pas = Math.min(Math.max(Number(src.pas) || 2, 1), 10);
   const initialCapital = Number(src.initialCapital) || 0;
   const riskPct = Number(src.riskPct) || 0;
@@ -3291,7 +3299,8 @@ async function executerBacktest(src = {}) {
   const r = Backtest.lancer(candles, { symbol, timeframe: tf }, {
     profils: options.profils || [],
     pas,
-    maxBougies: bougies
+    maxBougies: bougies,
+    demandees: bougies
   });
 
   const resultat = {

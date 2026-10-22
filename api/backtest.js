@@ -165,6 +165,13 @@ function lancer(candles, meta = {}, options = {}) {
     at: n ? serie[n - 1].t : null,
     debut: n ? serie[0].t : null,
     bougies: n,
+    // Un backtest sur une poignée de bougies n'est pas un résultat : c'est une
+    // anecdote. Le drapeau est calculé ici pour que l'écran ne puisse pas
+    // l'oublier — 93 bougies, c'est 23 heures d'or en 15m.
+    fiable: n >= 300,
+    // Le nombre de marchés/temps réellement disponibles : le courtier rend
+    // parfois moins de bougies que demandé (Deriv : 573 pour 800 en 15m forex).
+    demandees: Math.round(Number(options.demandees) || 0) || null,
     pas,
     evaluations,
     ignoresDoublons,
@@ -264,6 +271,22 @@ function resumer(trades, meta = {}) {
     parStrategie: agreger(t => t.strategie || (t.source === 'motif' ? t.nom : 'structure du marché')),
     parMotif: agreger(t => (t.source === 'motif' ? t.nom : null)),
     courbeR: courbe,
+    // Combien de TYPES de configuration : 727 trades peuvent venir de 28
+    // concepts seulement, répétés à des prix différents. Et surtout, la part que
+    // représentent les trois types les plus fréquents — si trois motifs font 60 %
+    // des prises, l'espérance affichée parle de ces trois motifs, pas du marché.
+    ...(() => {
+      const parType = {};
+      for (const t of trades) if (t.identite) parType[t.identite] = (parType[t.identite] || 0) + 1;
+      const parts = Object.values(parType).sort((a, b) => b - a);
+      const total = trades.length || 1;
+      return {
+        types: parts.length,
+        concentrationTop3: parts.length
+          ? +((parts.slice(0, 3).reduce((a, b) => a + b, 0) / total) * 100).toFixed(1)
+          : null
+      };
+    })(),
     // La liste rendue est plafonnée : une réponse HTTP de 20 000 trades n'a pas
     // de sens pour l'écran. Mais l'analyse hors ligne, elle, a besoin de TOUT —
     // mesurer une courbe de capital sur les 200 trades les plus récents ne dit

@@ -3885,7 +3885,7 @@ function BacktestPanel() {
   const lancer = async () => {
     setBusy(true); setErr('');
     try {
-      const q = `symbol=${encodeURIComponent(cles.symbol)}&tf=${tf}&provider=${encodeURIComponent(cles.provider)}&pas=${pas}&bougies=300&mode=auto`;
+      const q = `symbol=${encodeURIComponent(cles.symbol)}&tf=${tf}&provider=${encodeURIComponent(cles.provider)}&pas=${pas}&bougies=800&mode=auto`;
       const d = await (await api('/backtest?' + q)).json();
       if (!d.success) throw new Error(d.error || 'backtest impossible');
       setRes(d);
@@ -3962,9 +3962,27 @@ function BacktestPanel() {
         {res && (
           <span style={{ fontSize:11.5, color:'var(--dim)' }}>
             {res.bougies} bougies · {res.evaluations} évaluations · {res.ignoresDoublons} doublon(s) évité(s)
+            {Number.isFinite(res.types) && ` · ${res.types} type(s) de configuration`}
+            {Number.isFinite(res.concentrationTop3) && ` · top 3 = ${res.concentrationTop3} % des prises`}
           </span>
         )}
       </div>
+
+      {/* Un backtest sur quelques dizaines de bougies n'est pas un résultat :
+          c'est une anecdote. Le dire AU-DESSUS des chiffres, pas en bas de page —
+          93 bougies en 15m, c'est 23 heures d'or, et « −0,13 R » n'y a aucun
+          poids statistique. */}
+      {res && res.fiable === false && (
+        <div style={{ marginTop:10, fontSize:12, color:'#fbbf24', padding:'8px 10px', borderRadius:8,
+          background:'rgba(245,158,11,.08)', border:'1px solid rgba(245,158,11,.25)' }}>
+          <i className="fas fa-triangle-exclamation" style={{ marginRight:7 }}></i>
+          <b>Échantillon trop court pour conclure.</b> {res.bougies} bougies
+          {res.demandees ? ` (${res.demandees} demandées, le courtier en a rendu ${res.bougies})` : ''}
+          {Number.isFinite(res.types) ? ` · ${res.types} type(s) de configuration` : ''} —
+          les chiffres ci-dessous décrivent ces bougies, pas le marché. Choisis une unité
+          de temps plus grande ou un historique plus long.
+        </div>
+      )}
 
       {err && <div style={{ marginTop:10, fontSize:12.5, color:'#fca5a5' }}>{err}</div>}
 
