@@ -1,0 +1,12 @@
+{
+  "name": "5trade",
+  "version": "1.0.0",
+  "private": true,
+  "description": "5trade — moteur de signaux, modele exporte et gestion du risque. Le code vit dans api/ ; cette racine expose les commandes canoniques pour qu'on n'ait pas a se souvenir du sous-dossier.",
+  "scripts": {
+    "test": "npm --prefix api run verify",
+    "verify": "npm --prefix api run verify",
+    "start": "npm --prefix api start",
+    "dev": "npm --prefix api run dev"
+  }
+}
