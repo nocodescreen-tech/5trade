@@ -66,8 +66,19 @@ function enregistrer(signaux, meta = {}, options = {}) {
   // 31 positions ouvertes pour un plafond de 5, 30 % de risque engagé pour un
   // plafond de 5 %, et un levier de 150×. Un journal qui accepte tout n'est pas
   // un registre de trades, c'est un fichier de logs.
-  let etatCourant = options.ignorerRisque ? null
-    : Risque.etat(data.signaux, { depuis: data.reinitialiseLe });
+  //
+  // Calcul PARESSEUX (mesuré : 87,3 ms sur les 100,5 ms d'un `enregistrer()`,
+  // et cette fonction tourne à chaque bougie clôturée sur le flux SSE). La
+  // plupart des appels n'ajoutent aucun signal — doublons, niveaux absents,
+  // refus évidents. On ne paie donc l'état que lorsqu'un signal est réellement
+  // sur le point d'être retenu.
+  let etatCourant = null;
+  const etatDuCompte = () => {
+    if (etatCourant === null && !options.ignorerRisque) {
+      etatCourant = Risque.etat(data.signaux, { depuis: data.reinitialiseLe });
+    }
+    return etatCourant;
+  };
 
   for (const s of signaux || []) {
     // ATTENTION : `Number(null)` vaut 0, pas NaN. Un signal sans niveaux (un
@@ -127,7 +138,9 @@ function enregistrer(signaux, meta = {}, options = {}) {
     // Un trade refusé n'entre pas dans le registre : il ne consomme pas de
     // place, ne sera pas évalué, et son refus est remonté à l'appelant avec le
     // chiffre qui l'explique.
-    if (etatCourant) {
+    // État calculé ici seulement, au premier signal réellement candidat.
+    const etatIci = options.ignorerRisque ? null : etatDuCompte();
+    if (etatIci) {
       const verdict = Risque.verifierPrise({ entree: e, stop: st, symbol: meta.symbol }, etatCourant);
       if (!verdict.ok) {
         refusesRisque.push({
