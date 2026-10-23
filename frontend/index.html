@@ -5652,7 +5652,11 @@ const OUTILS_GET = [
   { id:'patterns',         label:'Patterns',         icon:'fa-shapes',                url:'/patterns',         params:['symbol','tf'] },
   { id:'signal-scoring',   label:'Score ML',         icon:'fa-brain',                 url:'/signal-scoring' },
   { id:'order-flow',       label:'Order Flow',       icon:'fa-arrow-right-arrow-left',url:'/order-flow',       params:['symbol','tf'] },
-  { id:'anomalies',        label:'Anomalies',        icon:'fa-triangle-exclamation', url:'/anomalies',        params:['symbol','tf'] }
+  { id:'anomalies',        label:'Anomalies',        icon:'fa-triangle-exclamation', url:'/anomalies',        params:['symbol','tf'] },
+  // Analyse complète : rejoue le moteur sur tout l'historique et rend un tableau
+  // par famille de concepts ou par stratégie — avec DSR, PBO et hors échantillon.
+  { id:'analyse-concepts',   label:'Tous les concepts',    icon:'fa-layer-group', url:'/analyse', params:['symbol','tf'], group:'concept' },
+  { id:'analyse-strategies', label:'Toutes les stratégies', icon:'fa-sitemap',     url:'/analyse', params:['symbol','tf'], group:'strategie' }
 ];
 
 /* ══════════════ SYSTÈME : MODÈLE + RISQUE ══════════════
@@ -5905,6 +5909,8 @@ function Outils() {
     const q = new URLSearchParams();
     if ((o.params || []).includes('symbol')) q.set('symbol', symbol);
     if ((o.params || []).includes('tf')) q.set('tf', tf);
+    // L'analyse coûte cher (tout l'historique) : on borne et on le dit.
+    if (o.group) { q.set('group', o.group); q.set('bougies', '2500'); q.set('pas', '4'); }
     appeler(o.url + (q.toString() ? '?' + q.toString() : ''));
   };
 
@@ -5944,7 +5950,8 @@ function Outils() {
           </div>
           <div>
             <label className="lbl">Symbole</label>
-            <input className="fld" value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} style={{ width:130 }} />
+            <input className="fld" aria-label="Symbole analysé" value={symbol}
+              onChange={e=>setSymbol(e.target.value.toUpperCase())} style={{ width:130 }} />
           </div>
           <div>
             <label className="lbl">Unité</label>
@@ -5958,7 +5965,81 @@ function Outils() {
           <button className="btn ghost" onClick={lancerBacktest} disabled={chargement}>Backtest</button>
         </div>
         {erreur && <div style={{ color:'var(--bad)', marginTop:10, fontSize:13 }}>{erreur}</div>}
-        {data && <pre style={{ marginTop:12, maxHeight:420, overflow:'auto' }}>{JSON.stringify(data, null, 2)}</pre>}
+
+        {/* Analyse par familles : un tableau, pas un tas de JSON. */}
+        {data && Array.isArray(data.lignes) && (
+          <div style={{ marginTop:14 }}>
+            <div style={{ display:'flex', gap:14, flexWrap:'wrap', alignItems:'baseline', fontSize:12.5, color:'var(--muted)' }}>
+              <span><b style={{ color:'var(--txt)' }}>{data.symbol}</b> {data.tf}</span>
+              <span>{data.bougies} bougies · {data.trades} trades</span>
+              <span>{data.lignes.length} famille(s)</span>
+              <span>espérance <b style={{ color: data.esperance >= 0 ? 'var(--ok)' : 'var(--bad)' }}>
+                {data.esperance >= 0 ? '+' : ''}{data.esperance} R</b></span>
+              <span>total <b>{data.totalR} R</b></span>
+              <span>PBO <b style={{ color: data.pbo > 0.5 ? 'var(--bad)' : 'var(--ok)' }}>
+                {data.pbo === null ? 'n/a' : (data.pbo * 100).toFixed(1) + ' %'}</b></span>
+              <span>essais {data.essais}</span>
+              <span style={{ color:'var(--dim)' }}>{data.source}</span>
+            </div>
+
+            {data.synthetique && (
+              <div style={{ marginTop:8, fontSize:11.5, padding:'7px 10px', borderRadius:7,
+                background:'rgba(239,68,68,.08)', border:'1px solid rgba(239,68,68,.35)', color:'#fca5a5' }}>
+                <b>Instrument synthétique.</b> {data.avertissement}
+              </div>
+            )}
+
+            <div tabIndex={0} role="region" aria-label="Analyse par famille"
+              style={{ marginTop:10, maxHeight:420, overflow:'auto' }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                <thead>
+                  <tr style={{ color:'var(--muted)', textAlign:'right' }}>
+                    <th style={{ textAlign:'left', padding:'6px 8px' }}>Famille</th>
+                    <th>trades</th><th>total R</th><th>espérance</th>
+                    <th>1re moitié</th><th>2e moitié</th><th>Sharpe</th><th>PSR</th><th>survit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.lignes.map(l => (
+                    <tr key={l.nom} style={{ borderTop:'1px solid var(--border)' }}>
+                      <td style={{ textAlign:'left', padding:'6px 8px' }}>{l.nom}</td>
+                      <td style={{ textAlign:'right' }}>{l.n}</td>
+                      <td style={{ textAlign:'right' }}>{l.totalR}</td>
+                      <td style={{ textAlign:'right', color: l.esperance >= 0 ? 'var(--ok)' : 'var(--bad)' }}>
+                        {l.esperance >= 0 ? '+' : ''}{l.esperance}
+                      </td>
+                      <td style={{ textAlign:'right', color: (l.is ?? 0) >= 0 ? 'var(--muted)' : 'var(--bad)' }}>{l.is ?? '—'}</td>
+                      <td style={{ textAlign:'right', color: (l.oos ?? 0) >= 0 ? 'var(--muted)' : 'var(--bad)' }}>{l.oos ?? '—'}</td>
+                      <td style={{ textAlign:'right' }}>{l.sharpe}</td>
+                      <td style={{ textAlign:'right' }}>{l.psr ?? '—'}</td>
+                      <td style={{ textAlign:'center' }}>
+                        {l.survit
+                          ? <span className="badge" style={{ background:'rgba(16,185,129,.15)', color:'var(--ok)' }}>oui</span>
+                          : <span style={{ color:'var(--dim)' }}>non</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display:'flex', gap:8, marginTop:10, flexWrap:'wrap' }}>
+              <a className="btn ghost sm"
+                href={`/api/export/analyse.csv?symbol=${encodeURIComponent(data.symbol)}&tf=${data.tf}&group=${data.group}&bougies=2500&pas=4`}>
+                <i className="fas fa-file-csv"></i> CSV de cette analyse
+              </a>
+              <span style={{ fontSize:11.5, color:'var(--dim)', alignSelf:'center' }}>
+                « survit » = PSR au-dessus du seuil de sélection, donc l'avantage ne s'explique
+                pas par le nombre d'essais. « 1re / 2e moitié » = régularité dans le temps.
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Les autres modules rendent encore du JSON : c'est leur nature. */}
+        {data && !Array.isArray(data.lignes) && (
+          <pre style={{ marginTop:12, maxHeight:420, overflow:'auto' }}>{JSON.stringify(data, null, 2)}</pre>
+        )}
       </div>
 
       <div className="panel" style={{ padding:18 }}>
@@ -5987,9 +6068,22 @@ function Outils() {
       <div className="panel" style={{ padding:18 }}>
         <h3 style={{ margin:'0 0 10px' }}><i className="fas fa-download"></i> Exports</h3>
         <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-          <a className="btn ghost sm" href="/api/export/pdf">Rapport HTML</a>
-          <a className="btn ghost sm" href="/api/export/csv">Journal CSV</a>
+          <a className="btn ghost sm" href="/api/export/pdf">
+            <i className="fas fa-file-lines"></i> Rapport HTML
+          </a>
+          <a className="btn ghost sm" href="/api/export/csv">
+            <i className="fas fa-file-csv"></i> Journal CSV (mes trades)
+          </a>
+          {/* Le journal du MOTEUR : concept, conditions, R annoncé, R net, taille,
+              risque. C'est celui qui permet de vérifier le système dans un tableur. */}
+          <a className="btn ghost sm" href="/api/export/csv?source=signaux">
+            <i className="fas fa-microchip"></i> Signaux CSV (moteur)
+          </a>
         </div>
+        <p style={{ margin:'10px 0 0', fontSize:11.5, color:'var(--dim)' }}>
+          « Mes trades » = ce que vous avez saisi. « Signaux » = ce que le moteur a
+          détecté, avec une ligne par signal et une colonne par mesure (24 colonnes).
+        </p>
       </div>
     </div>
   );

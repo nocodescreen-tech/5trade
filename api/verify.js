@@ -2713,6 +2713,62 @@ function tinyPng(W = 64, H = 40) {
     Fr.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
   }
 
+  // ── Analyse par concept / stratégie, et exports CSV ──────────────────────
+  // Le panneau « Modules d'analyse » affichait du JSON brut ; il rend désormais
+  // un tableau. Ce qui se teste sans réseau : le regroupement des familles, la
+  // forme du CSV, et le journal du moteur à 24 colonnes.
+  {
+    const A = require('./analyse.js');
+    // « Support 4271.41 » et « Support 4102.9 » sont la même famille.
+    ok('le niveau est retiré du nom de famille',
+      A.famille({ concept: 'Support 4271.41' }, 'concept') === 'Support'
+      && A.famille({ concept: 'Support 4102.9' }, 'concept') === 'Support');
+    ok('le regroupement par stratégie utilise la stratégie',
+      A.famille({ strategie: 'structure du marché', concept: 'BOS' }, 'strategie') === 'structure du marché'
+      && A.famille({ strategie: 'structure du marché', concept: 'BOS' }, 'concept') === 'BOS');
+    ok('un nom vide ne casse pas le regroupement',
+      A.famille({}, 'concept') === '?');
+
+    const faux = {
+      symbol: 'BTC-USD', tf: '1h', group: 'concept', trades: 100, bougies: 2500,
+      pbo: 0.25, essais: 3, gestionPartielle: false,
+      lignes: [
+        { nom: 'Breaker', n: 40, totalR: 9.6, esperance: 0.24, sharpe: 0.15, psr: 0.99,
+          is: 0.18, oos: 0.31, tient: true, survit: true, longueurMinimale: 30 },
+        { nom: 'FVG; test', n: 20, totalR: -1.2, esperance: -0.06, sharpe: -0.04, psr: 0.12,
+          is: -0.02, oos: null, tient: false, survit: false, longueurMinimale: 400 }
+      ]
+    };
+    const csv = A.versCsv(faux);
+    const lignesCsv = csv.split('\n');
+    ok('le CSV d’analyse a l’en-tête attendu',
+      lignesCsv[0].startsWith('famille;trades;totalR;esperance_R'), lignesCsv[0].slice(0, 60));
+    ok('le CSV d’analyse a une ligne par famille', lignesCsv.length >= 4, `${lignesCsv.length} lignes`);
+    ok('un point-virgule dans un nom est échappé', csv.includes('"FVG; test"'));
+    ok('le CSV d’analyse note les paramètres de la mesure',
+      /PBO 25\.0 %/.test(csv) && /gestion partielle désactivée/.test(csv));
+
+    // Journal du moteur : 24 colonnes, une ligne par signal.
+    const { genererCSVSignaux } = require('./exportPDF.js');
+    const csvS = genererCSVSignaux([{
+      at: 1790296800000, clotureLe: 1790300400000, symbol: 'BTC-USD', tf: '1h',
+      nom: 'Breaker 41234.5', concept: 'Breaker 41234.5', strategie: 'structure du marché',
+      sens: 'long', status: 'confirme', force: 0.82, entree: 41234.5, stop: 41000,
+      objectifs: [41600, 42000], rr: 1.56, resultat: 'tp1', rBrut: 1.56, r: 1.42,
+      modeleR: 0.31, risque: { taille: 0.25, risque: 10 },
+      conditions: [{ ok: true }, { ok: false }], id: 'sig-1'
+    }]);
+    const [entete, ligne] = csvS.split('\n');
+    ok('le CSV des signaux a 24 colonnes', entete.split(';').length === 24,
+      String(entete.split(';').length));
+    ok('une ligne de signal a le même nombre de champs', ligne.split(';').length === 24,
+      String(ligne.split(';').length));
+    ok('le CSV des signaux porte le R annoncé et le R net',
+      ligne.includes('1.42') && ligne.includes('0.31'));
+    ok('le CSV des signaux compte les conditions',
+      ligne.includes(';1;2;'), ligne.slice(-60));
+  }
+
   // ── Validité statistique : DSR, PBO, longueur minimale ────────────────────
   // Sans ces trois chiffres, « +0,088 R » n'est pas un résultat : c'est le
   // maximum d'une recherche. Les tests vérifient les formules, pas des constantes.

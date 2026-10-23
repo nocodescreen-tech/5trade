@@ -183,4 +183,55 @@ function genererCSVEnrichi(trades) {
   return lines.join('\n') + '\n';
 }
 
-module.exports = { genererRapportPDF, genererCSVEnrichi };
+/**
+ * CSV du JOURNAL DU MOTEUR — celui qui manquait.
+ *
+ * L'export existant ne sortait que les trades saisis à la main. Le journal du
+ * moteur contient ce qui compte pour analyser : le concept, les conditions, le R
+ * annoncé par le modèle, le R net après frais, la taille et le risque. Sans lui,
+ * un tableur ne peut rien vérifier.
+ */
+function genererCSVSignaux(signaux) {
+  const colonnes = ['date_emission', 'date_cloture', 'symbole', 'timeframe', 'concept',
+    'famille', 'sens', 'statut', 'force', 'entree', 'stop', 'objectif_1', 'objectif_2',
+    'rr', 'resultat', 'r_brut', 'r_net', 'r_annonce_modele', 'taille', 'risque_unites',
+    'conditions_ok', 'conditions_total', 'strategie', 'id'];
+  const esc = v => {
+    if (v === null || v === undefined) return '';
+    const s = String(v);
+    return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const iso = ts => (ts ? new Date(ts).toISOString().slice(0, 16).replace('T', ' ') : '');
+
+  const lignes = [colonnes.join(';')];
+  for (const s of signaux) {
+    const obj = Array.isArray(s.objectifs) ? s.objectifs : [];
+    const cond = Array.isArray(s.conditions) ? s.conditions : [];
+    // Les signaux du journal n'utilisent pas tous les mêmes noms de champs :
+    // `timeframe` (pas `tf`), pas de `status` (il se déduit de `resultat`), et le
+    // R annoncé vit dans `modele.rAttendu`. Sans cette lecture, l'export sortait
+    // deux colonnes vides et un R annoncé nul.
+    const ok = s.conditionsOk !== undefined ? s.conditionsOk : cond.filter(c => c && c.ok).length;
+    lignes.push([
+      iso(s.at), iso(s.clotureLe || s.leveLe),
+      s.symbol, s.timeframe || s.tf, s.concept || s.nom,
+      String(s.concept || s.nom || '').replace(/\s+[\d.,]+.*$/, ''),
+      s.sens, s.status || s.statut || (s.resultat === 'ouvert' ? 'ouvert' : 'tranché'),
+      s.force === undefined || s.force === null ? '' : Number(s.force).toFixed(3),
+      s.entree, s.stop, obj[0] ?? '', obj[1] ?? '',
+      s.rr ?? '', s.resultat || '',
+      s.rBrut ?? '', s.r ?? '',
+      (s.modele && s.modele.rAttendu !== null && s.modele.rAttendu !== undefined)
+        ? Number(s.modele.rAttendu).toFixed(4)
+        : (s.modeleR ?? ''),
+      s.risque && s.risque.taille !== undefined ? Number(s.risque.taille).toFixed(6) : '',
+      s.risque && (s.risque.risqueMontant !== undefined || s.risque.risque !== undefined)
+        ? Number(s.risque.risqueMontant ?? s.risque.risque).toFixed(4) : '',
+      ok, cond.length || (s.conditionsTotal ?? ''),
+      s.strategie || '', s.id || ''
+    ].map(esc).join(';'));
+  }
+  return lignes.join('\n');
+}
+
+module.exports = { genererRapportPDF, genererCSVEnrichi, genererCSVSignaux };

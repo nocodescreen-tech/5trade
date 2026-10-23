@@ -331,7 +331,7 @@ async function sendPush(payload) {
 const { creerCompte, listerComptes, getCompte, mettreAJourCapital, supprimerCompte, pnlCompte } = require('./multiAccount');
 
 // ─── Export PDF — implémentation dans exportPDF.js ───
-const { genererRapportPDF, genererCSVEnrichi } = require('./exportPDF');
+const { genererRapportPDF, genererCSVEnrichi, genererCSVSignaux } = require('./exportPDF');
 
 // ─── Journal de trades — logique dans trades.js ───
 const Trades = require('./trades');
@@ -358,6 +358,8 @@ const Patterns = require('./patterns');
 // réelle (objectif 1/2, stop, retour à l'entrée). Sans ça, aucune stratégie ne
 // peut être jugée — on ne garde que des opinions.
 const JournalSignaux = require('./journal-signaux');
+// Analyse par concept / stratégie sur historique long (DSR, PBO, hors échantillon).
+const Analyse = require('./analyse');
 // Backtest : rejoue le moteur sur l'historique avec le MÊME code que le direct,
 // pour répondre à la seule question qui compte — est-ce que ça gagne ?
 const Backtest = require('./backtest');
@@ -2043,12 +2045,49 @@ app.get('/api/export/pdf', requireAuth, async (req, res) => {
 
 app.get('/api/export/csv', requireAuth, async (req, res) => {
   try {
+    // `?source=signaux` exporte le journal du MOTEUR (concept, conditions, R
+    // annoncé, R net, taille, risque) — celui qui permet de vérifier le système.
+    // Sans ce paramètre, on garde le journal des trades saisis à la main.
+    if (String(req.query.source || '').toLowerCase() === 'signaux') {
+      const signaux = JournalSignaux.lister({ limite: 100000 });
+      const csv = genererCSVSignaux(signaux);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="5trade-signaux.csv"');
+      return res.send(csv);
+    }
     const trades = await DB.listTrades();
     const csv = genererCSVEnrichi(trades);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="5trade-journal.csv"');
     res.send(csv);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Analyse par concept / par stratégie ───
+// Rejoue le moteur sur un historique long et rend un tableau utilisable :
+// espérance en R, régularité entre les deux moitiés, DSR, PBO. C'est ce que le
+// panneau « Modules d'analyse » affichait en JSON brut.
+app.get('/api/analyse', requireAuth, async (req, res) => {
+  try {
+    const r = await Analyse.analyser({
+      symbol: req.query.symbol, tf: req.query.tf, provider: req.query.provider,
+      group: req.query.group, pas: req.query.pas, bougies: req.query.bougies
+    });
+    res.json({ success: true, ...r });
+  } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+});
+
+app.get('/api/export/analyse.csv', requireAuth, async (req, res) => {
+  try {
+    const r = await Analyse.analyser({
+      symbol: req.query.symbol, tf: req.query.tf, provider: req.query.provider,
+      group: req.query.group, pas: req.query.pas, bougies: req.query.bougies
+    });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition',
+      `attachment; filename="5trade-analyse-${r.group}-${r.symbol}-${r.tf}.csv"`);
+    res.send(Analyse.versCsv(r));
+  } catch (e) { res.status(400).json({ success: false, error: e.message }); }
 });
 
 // ─── Alertes push ───
