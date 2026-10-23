@@ -193,6 +193,57 @@ préréglages :
 Le second gagne deux fois plus et perd deux fois plus en cours de route. Les deux
 sont honnêtes ; le premier est plus confortable.
 
+## Le portefeuille multi-marchés : le premier où les paris sont différents
+
+Le filtre de tendance a révélé quels marchés tendent **sans suivre les actions**.
+Mesuré sur 10 ans, frais + glissement, filtre activé :
+
+| marché | espérance | corr. actions |
+|---|---|---|
+| Or (GC=F) | **+23,53 %** | 0,11 |
+| Argent (SI=F) | **+18,79 %** | 0,23 |
+| Coton (CT=F) | **+18,25 %** | 0,22 |
+| Café (KC=F) | **+13,15 %** | 0,09 |
+| Cuivre (HG=F) | +6,62 % | 0,34 |
+| Pétrole (CL=F) | +2,46 % | 0,11 |
+| Sucre (SB=F) | +0,83 % | 0,09 |
+
+Et les marchés qui ne tendent pas, même filtrés : gaz naturel (−5,6 %), soja
+(−5,7 %), dollar, blé, maïs, yen.
+
+En les agrégeant aux 8 indices : **13 marchés, 12 positifs, +11,25 % du risque
+par trade** sur 14 572 trades.
+
+| risque/trade | positions | rendement/an | drawdown | ratio |
+|---|---|---|---|---|
+| 0,25 % | 15 | 24,6 % | 24,6 % | 1,00 |
+| 0,50 % | 10 | 44,1 % | 29,1 % | **1,52** |
+| 1,00 % | 5 | **62,7 %** | 38,2 % | **1,64** |
+
+### Le test qui rend ce résultat crédible
+
+Choix figés, coupure au 1er janvier 2022 :
+
+```
+2016-2021 (où les choix ont été faits) :   6 814 trades   +7,69 %   +524 R
+2022-2026 (jamais regardé)             :   7 758 trades  +14,38 %  +1 116 R
+```
+
+**Le hors-échantillon est meilleur que l'échantillon.** Et le filtre a réellement
+changé de camp au lieu de s'arrêter :
+
+| année | total R | part de longs |
+|---|---|---|
+| 2019 | −29 | 54 % |
+| 2021 | +135 | 88 % |
+| 2022 (krach) | +136 | **26 %** |
+| 2023 | −84 | 69 % |
+| 2024 | +575 | 88 % |
+| 2025 | +540 | 84 % |
+
+Trois années perdantes sur dix, toutes petites (−29, −84, −52 R) contre des gains
+de +575 et +540 R. C'est un profil de suiveur de tendance qui fonctionne.
+
 ## Pourquoi les indices et pas le forex
 
 EURUSD est à −0,23 R par trade : ce n'est pas un problème de méthode, c'est un

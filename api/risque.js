@@ -446,6 +446,20 @@ const PRESETS = {
     // 35,3 % (ratio 1,38 contre 1,48). Plus rentable, moins confortable.
     mesure: 'mêmes règles + filtre de tendance (SMA200 et pente) : '
       + '48,5 %/an, drawdown 35,3 % (ratio 1,38, 1 853 prises)'
+  },
+  'multi-marches': {
+    titre: 'Multi-marchés, tendance confirmée',
+    risquePct: 0.5, maxSimultanes: 10, maxRisqueMarchePct: 2, maxRisqueTotalPct: 5,
+    sources: ['motif', 'structure'],
+    regime: true,
+    // 8 indices + or, argent, cuivre, coton, café. Les 8 indices ne valaient que
+    // 2,7 paris indépendants ; ces matières premières sont corrélées 0,09 à 0,34
+    // aux actions. 12 marchés positifs sur 13, +11,25 % du risque par trade.
+    // Hors échantillon (2022-2026, jamais regardé) : +14,38 % contre +7,69 % sur
+    // la période où les choix ont été faits — le filtre a changé de camp en 2022
+    // (26 % de longs) puis en 2024 (88 %).
+    mesure: '13 marchés, 10 ans, filtre de tendance : 44,1 %/an, drawdown 29,1 % '
+      + '(ratio 1,52, 4 068 prises) · à 1 %/5 positions : 62,7 %/an pour 38,2 % (ratio 1,64)'
   }
 };
 

@@ -2875,7 +2875,13 @@ function tinyPng(W = 64, H = 40) {
     const rTendance = Rp.configurerPreset('indices-tendance');
     ok('le préréglage « indices-tendance » active le filtre de tendance',
       rTendance.regime === true && rTendance.risquePct === 1, `${rTendance.risquePct} % · regime ${rTendance.regime}`);
-    ok('chaque préréglage annonce sa mesure', !!(rTendance.mesure && rIndices.mesure));
+    // Le portefeuille multi-marchés : le seul où les paris ne sont pas tous les
+    // actions (or, argent, cuivre, coton, café — corrélés 0,09 à 0,34).
+    const rMulti = Rp.configurerPreset('multi-marches');
+    ok('le préréglage « multi-marches » existe et filtre la tendance',
+      rMulti.regime === true && rMulti.risquePct === 0.5,
+      `${rMulti.risquePct} % · regime ${rMulti.regime}`);
+    ok('chaque préréglage annonce sa mesure', !!(rTendance.mesure && rIndices.mesure && rMulti.mesure));
     ok('un préréglage inconnu est refusé', (() => {
       try { Rp.configurerPreset('inexistant'); return false; } catch { return true; }
     })());
