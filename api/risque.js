@@ -408,6 +408,40 @@ function simuler(signaux, options = {}) {
   };
 }
 
+/**
+ * PRÉRÉGLAGES MESURÉS — des réglages issus de simulations, pas d'intuitions.
+ *
+ * `indices` : balayage du 2026-10-23 sur 8 indices d'actions, 10 ans, bougies
+ * quotidiennes, glissement d'un spread entier. 12 combinaisons testées ; celle-ci
+ * maximise le rapport rendement / drawdown :
+ *
+ *   0,25 % · 3 pos.  →  1,2 %/an · 10,2 % DD  (ratio 0,12)
+ *   0,50 % · 10 pos. → 22,4 %/an · 15,7 % DD  (ratio 1,43)  ← retenu
+ *   1,00 % · 5 pos.  → 16,5 %/an · 34,8 % DD  (ratio 0,47)
+ *   2,00 % · 5 pos.  →  0,6 %/an ·  2,2 % DD  (les plafonds bloquent tout)
+ *
+ * Un risque par trade plus élevé ne rend pas plus riche : au-delà de 1 %, les
+ * plafonds de marché et de total refusent les trades et le rendement s'effondre
+ * pendant que le drawdown reste.
+ */
+const PRESETS = {
+  indices: {
+    titre: 'Portefeuille d’indices (quotidien)',
+    risquePct: 0.5, maxSimultanes: 10, maxRisqueMarchePct: 2, maxRisqueTotalPct: 5,
+    mesure: '8 indices, 10 ans, 1d, glissement 1 spread : 22,4 %/an, drawdown 15,7 %'
+  }
+};
+
+function configurerPreset(nom) {
+  const p = PRESETS[String(nom || '').toLowerCase()];
+  if (!p) throw new Error(`préréglage inconnu : ${nom} (disponibles : ${Object.keys(PRESETS).join(', ')})`);
+  return configurer({
+    risquePct: p.risquePct, maxSimultanes: p.maxSimultanes,
+    maxRisqueMarchePct: p.maxRisqueMarchePct, maxRisqueTotalPct: p.maxRisqueTotalPct
+  });
+}
+
 module.exports = {
-  FICHIER, DEFAUT, configuration, configurer, dimensionner, etat, verifierPrise, simuler, normaliser
+  FICHIER, DEFAUT, PRESETS, configuration, configurer, configurerPreset,
+  dimensionner, etat, verifierPrise, simuler, normaliser
 };

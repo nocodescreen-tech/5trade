@@ -2739,6 +2739,28 @@ function tinyPng(W = 64, H = 40) {
     Fr.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
   }
 
+  // ── Préréglages de risque mesurés ────────────────────────────────────────
+  // Un réglage doit venir d'une simulation, pas d'une intuition. Le préréglage
+  // « indices » est celui qui maximise rendement / drawdown sur 8 marchés.
+  {
+    const Rp = require('./risque.js');
+    Rp.configurer({ risquePct: 1, maxSimultanes: 5, maxRisqueMarchePct: 2, maxRisqueTotalPct: 5 });
+    const avant = Rp.configuration();
+    ok('le préréglage « indices » existe', !!Rp.PRESETS.indices);
+    Rp.configurerPreset('indices');
+    const apres = Rp.configuration();
+    ok('le préréglage applique 0,5 % de risque', apres.risquePct === 0.5, String(apres.risquePct));
+    ok('le préréglage applique 10 positions', apres.maxSimultanes === 10, String(apres.maxSimultanes));
+    ok('le préréglage change réellement la configuration',
+      avant.risquePct !== apres.risquePct || avant.maxSimultanes !== apres.maxSimultanes);
+    ok('un préréglage inconnu est refusé', (() => {
+      try { Rp.configurerPreset('inexistant'); return false; } catch { return true; }
+    })());
+    // Remise à l'état antérieur : les sections suivantes en dépendent.
+    Rp.configurer({ risquePct: avant.risquePct, maxSimultanes: avant.maxSimultanes,
+      maxRisqueMarchePct: avant.maxRisqueMarchePct, maxRisqueTotalPct: avant.maxRisqueTotalPct });
+  }
+
   // ── Analyse par concept / stratégie, et exports CSV ──────────────────────
   // Le panneau « Modules d'analyse » affichait du JSON brut ; il rend désormais
   // un tableau. Ce qui se teste sans réseau : le regroupement des familles, la
