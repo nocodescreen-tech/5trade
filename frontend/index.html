@@ -5877,6 +5877,8 @@ function Outils() {
   const [symbol, setSymbol] = useState('BTCUSDT');
   // Filtre de sources de l'analyse : « toutes », « motifs » ou « motifs-structure ».
   const [sourcesOutil, setSourcesOutil] = useState('toutes');
+  // Filtre de tendance : mesuré ×3,8 sur NQ (+6,49 % → +24,59 % du risque).
+  const [filtreTendance, setFiltreTendance] = useState('aucun');
   const [tf, setTf] = useState('1h');
   const [data, setData] = useState(null);
   const [chargement, setChargement] = useState(false);
@@ -5884,6 +5886,37 @@ function Outils() {
   const [comptes, setComptes] = useState([]);
   const [nomCompte, setNomCompte] = useState('');
   const [capitalCompte, setCapitalCompte] = useState('10000');
+  // Réglages mesurés : chaque préréglage annonce son rendement et son drawdown.
+  const [presets, setPresets] = useState([]);
+  const [presetChoisi, setPresetChoisi] = useState(null);
+  const [messagePreset, setMessagePreset] = useState('');
+
+  useEffect(() => {
+    let vivant = true;
+    (async () => {
+      try {
+        const r = await api('/risque/presets');
+        const d = await r.json().catch(() => ({}));
+        if (vivant && d && d.presets) setPresets(d.presets);
+      } catch {}
+    })();
+    return () => { vivant = false; };
+  }, []);
+
+  const appliquerPreset = async (nom) => {
+    try {
+      setMessagePreset('Application…');
+      const r = await api('/risque/preset', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nom })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.success) throw new Error(d.error || ('HTTP ' + r.status));
+      setPresetChoisi(d);
+      setMessagePreset(`Appliqué : ${d.titre} — ${d.configuration.risquePct} % par trade · `
+        + `${d.configuration.maxSimultanes} positions`);
+    } catch (e) { setMessagePreset('Échec : ' + e.message); }
+  };
 
   const chargerComptes = async () => {
     try {
@@ -5917,6 +5950,7 @@ function Outils() {
       if (sourcesOutil !== 'toutes') {
         q.set('sources', sourcesOutil === 'motifs' ? 'motif,structure' : 'motif');
       }
+      if (filtreTendance === 'tendance') q.set('regime', '1');
     }
     appeler(o.url + (q.toString() ? '?' + q.toString() : ''));
   };
@@ -5976,6 +6010,15 @@ function Outils() {
               <option value="toutes">Toutes</option>
               <option value="motifs">Sans les stratégies</option>
               <option value="motifs-structure">Motifs + structure</option>
+            </select>
+          </div>
+          {/* Le filtre de tendance : ×3,8 sur NQ, et il sauve l'or (+0,4 % → +23,5 %). */}
+          <div>
+            <label className="lbl">Tendance</label>
+            <select className="fld" aria-label="Filtre de tendance" value={filtreTendance}
+              onChange={e=>setFiltreTendance(e.target.value)}>
+              <option value="aucun">Aucun filtre</option>
+              <option value="tendance">Suivre la tendance</option>
             </select>
           </div>
           <button className="btn" onClick={charger} disabled={chargement}>
@@ -6073,6 +6116,45 @@ function Outils() {
         {/* Les autres modules rendent encore du JSON : c'est leur nature. */}
         {data && !Array.isArray(data.lignes) && (
           <pre style={{ marginTop:12, maxHeight:420, overflow:'auto' }}>{JSON.stringify(data, null, 2)}</pre>
+        )}
+      </div>
+
+      {/* Réglages MESURÉS : chaque préréglage porte son rendement, son drawdown
+          et son ratio. Ce ne sont pas des opinions, ce sont des simulations
+          reproductibles (voir tools/reglage-risque.js). */}
+      <div className="panel" style={{ padding:18 }}>
+        <h3 style={{ margin:'0 0 4px' }}><i className="fas fa-sliders"></i> Réglages mesurés</h3>
+        <div style={{ color:'var(--dim)', fontSize:12, marginBottom:12 }}>
+          8 indices + or, argent, cuivre, coton, café · quotidien · frais et glissement inclus
+        </div>
+        {presets.length === 0 && <div style={{ color:'var(--muted)', fontSize:13 }}>Chargement…</div>}
+        <div style={{ display:'grid', gap:10, gridTemplateColumns:'repeat(auto-fit, minmax(250px, 1fr))' }}>
+          {presets.map(p => (
+            <div key={p.nom} style={{ border:'1px solid var(--line)', borderRadius:10, padding:12 }}>
+              <div style={{ fontWeight:600, fontSize:13, marginBottom:4 }}>{p.titre}</div>
+              <div style={{ color:'var(--dim)', fontSize:12, marginBottom:8 }}>{p.mesure}</div>
+              <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center', marginBottom:8 }}>
+                <span className="tag">{p.risquePct} % / trade</span>
+                <span className="tag">{p.maxSimultanes} positions</span>
+                {p.regime && <span className="tag">filtre de tendance</span>}
+                {p.sources && <span className="tag">{p.sources.join(' + ')}</span>}
+              </div>
+              <button className="btn" onClick={()=>appliquerPreset(p.nom)}>
+                Appliquer
+              </button>
+            </div>
+          ))}
+        </div>
+        {messagePreset && (
+          <div style={{ marginTop:10, fontSize:12, color: messagePreset.startsWith('Échec') ? 'var(--bad)' : 'var(--ok)' }}>
+            {messagePreset}
+          </div>
+        )}
+        {presetChoisi && (
+          <div style={{ marginTop:6, fontSize:12, color:'var(--dim)' }}>
+            Sources à passer au backtest : <b>{presetChoisi.sources ? presetChoisi.sources.join(', ') : 'toutes'}</b>
+            {' · '}filtre de tendance : <b>{presetChoisi.regime ? 'actif' : 'inactif'}</b>
+          </div>
         )}
       </div>
 

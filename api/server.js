@@ -2074,7 +2074,10 @@ app.get('/api/analyse', requireAuth, async (req, res) => {
       group: req.query.group, pas: req.query.pas, bougies: req.query.bougies,
       prudent: req.query.prudent,
       // ?sources=motif,structure — les signaux de stratégie valent −0,19 R.
-      sources: req.query.sources ? String(req.query.sources).split(',').filter(Boolean) : undefined
+      sources: req.query.sources ? String(req.query.sources).split(',').filter(Boolean) : undefined,
+      // ?regime=1 — ne garde que les trades dans le sens de la tendance.
+      regime: req.query.regime,
+      regimeSma: req.query.regimeSma
     });
     res.json({ success: true, ...r });
   } catch (e) { res.status(400).json({ success: false, error: e.message }); }
@@ -3412,6 +3415,37 @@ app.post('/api/risque', requireAuth, (req, res) => {
     const cfg = Risque.configurer(req.body || {});
     res.json({ success: true, configuration: cfg });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+/**
+ * GET /api/risque/presets — les réglages MESURÉS, avec leur mesure.
+ *
+ * Un préréglage n'est pas une opinion : chacun annonce son rendement annuel, son
+ * drawdown, son ratio, et les sources/filtre à passer au backtest.
+ */
+app.get('/api/risque/presets', requireAuth, (req, res) => {
+  const Risque = require('./risque.js');
+  res.json({
+    success: true,
+    presets: Object.entries(Risque.PRESETS).map(([nom, p]) => ({
+      nom, titre: p.titre, mesure: p.mesure,
+      risquePct: p.risquePct, maxSimultanes: p.maxSimultanes,
+      sources: p.sources || null, regime: p.regime === true
+    })),
+    actuel: { risquePct: Risque.configuration().risquePct,
+      maxSimultanes: Risque.configuration().maxSimultanes }
+  });
+});
+
+/** POST /api/risque/preset — applique un préréglage mesuré. */
+app.post('/api/risque/preset', requireAuth, (req, res) => {
+  try {
+    const Risque = require('./risque.js');
+    const nom = (req.body && req.body.nom) || '';
+    const cfg = Risque.configurerPreset(nom);
+    res.json({ success: true, configuration: cfg, sources: cfg.sources, regime: cfg.regime,
+      mesure: cfg.mesure, titre: cfg.titre });
+  } catch (e) { res.status(400).json({ success: false, error: e.message }); }
 });
 
 // ─────────────────────────────────────────────────────────────
