@@ -5979,6 +5979,14 @@ function Outils() {
               <span>PBO <b style={{ color: data.pbo > 0.5 ? 'var(--bad)' : 'var(--ok)' }}>
                 {data.pbo === null ? 'n/a' : (data.pbo * 100).toFixed(1) + ' %'}</b></span>
               <span>essais {data.essais}</span>
+              {/* L'analyse tourne désormais avec spread + glissement d'un spread.
+                  Sans cette ligne, l'espérance affichée serait celle d'un monde
+                  où l'on est toujours rempli au prix exact. */}
+              {data.frais && data.frais.prudent && (
+                <span style={{ color:'#fbbf24' }}>
+                  frais inclus : spread {data.frais.spread} + glissement {data.frais.glissement}
+                </span>
+              )}
               <span style={{ color:'var(--dim)' }}>{data.source}</span>
             </div>
 

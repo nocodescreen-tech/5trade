@@ -22,6 +22,21 @@ const PROFIL_TOUT = [{
   seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: [], parametres: {}
 }];
 
+/**
+ * Frais par défaut : spread estimé, et **glissement égal au spread**.
+ *
+ * Sans ces valeurs, l'analyse de l'app tourne sans aucun coût et affiche une
+ * espérance qui n'existe pas. On a mesuré que le glissement fait passer BTC de
+ * +0,0370 R à +0,0006 R : l'ignorer n'est pas neutre, c'est optimiste.
+ * `prudent: false` rend l'ancien comportement, pour comparer.
+ */
+const SPREADS = {
+  'NQ=F': 1.00, 'YM=F': 1.00, 'ES=F': 0.25, 'RTY=F': 0.10,
+  '^GDAXI': 2.0, '^FTSE': 1.0, '^N225': 5.0, '^HSI': 5.0,
+  'GC=F': 0.30, 'CL=F': 0.02, 'BTC-USD': 12, 'EURUSD=X': 0.00012,
+  R_75: 0, frxXAUUSD: 0.30
+};
+
 /** Famille stable : on retire le niveau collé au nom. */
 const famille = (t, group) => {
   const brut = group === 'strategie'
@@ -55,9 +70,20 @@ async function analyser(opts = {}) {
   if (!toutes || toutes.length < 200) throw new Error(`historique insuffisant pour ${symbol} ${tf}`);
   const serieCourte = toutes.slice(-bougies);
 
+  // Coûts : prudent par défaut (spread + glissement d'un spread).
+  const spread = SPREADS[symbol];
+  const prudent = opts.prudent !== false && opts.prudent !== 'false' && opts.prudent !== '0'
+    && Number.isFinite(spread) && spread > 0;
+  if (prudent) {
+    F.configurer({ defaut: 0, commissionDefaut: 0, glissement: 0,
+      partMax: 0.15, parSymbole: { [symbol]: { spread, glissement: spread } } });
+  }
+
   const r = B.lancer(serieCourte, { symbol, timeframe: tf },
     { profils: PROFIL_TOUT, pas, maxBougies: serieCourte.length,
       plafond: 20000, limiteTrades: 1e6, modele: false });
+
+  if (prudent) F.configurer({ defaut: 0, commissionDefaut: 0, glissement: 0, partMax: 0.15, parSymbole: {} });
 
   const trades = (r.trades || []).filter(t => Number.isFinite(t.r)).sort((a, b) => a.at - b.at);
   const coupe = trades[Math.floor(trades.length * 0.6)]?.at ?? Infinity;
@@ -111,6 +137,7 @@ async function analyser(opts = {}) {
     esperance: +(trades.reduce((a, t) => a + t.r, 0) / trades.length).toFixed(4),
     totalR: +trades.reduce((a, t) => a + t.r, 0).toFixed(2),
     gestionPartielle: require('./journal-signaux').gestionPartielleActive(),
+    frais: prudent ? { prudent: true, spread, glissement: spread } : { prudent: false },
     synthetique: I.synthetique(symbol),
     avertissement: I.avertissement(symbol),
     essais: configs.length,
