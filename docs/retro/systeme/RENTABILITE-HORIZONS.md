@@ -92,14 +92,53 @@ l'exposition corrélée. Le préréglage les exclut donc — mais elles restent 
 moteur, corrigées, visibles et sélectionnables à l'écran.
 
 **Ce qui est établi** : la même mécanique, appliquée sans ajustement à huit
-marchés indépendants sur trois continents, est positive sur sept d'entre eux
-après un spread entier de glissement. La probabilité que ce soit du hasard est de
-**3,5 %**. Ce n'est plus un réglage chanceux sur un instrument.
+marchés, est positive sur sept d'entre eux après un spread entier de glissement,
+et **le gain tient sur une période jamais regardée** (+5,24 % du risque par trade
+sur 2016-2021, +4,46 % sur 2022-2026, krach de 2022 inclus).
 
-**Ce qui n'est pas établi** : le Deflated Sharpe du portefeuille vaut 0,845, sous
-la barre de 0,95. Déflaté pour 50 essais (tous les réglages essayés depuis le
-début du projet), il tombe à 0,154. L'avantage est donc **probable et répliqué,
-pas démontré**.
+## Correction d'une annonce trop forte : « 3,5 % par hasard »
+
+J'avais annoncé que sept marchés positifs sur huit avaient 3,5 % de chance d'être
+du hasard. **C'était faux**, et la mesure qui le corrige est simple : les huit
+indices ne sont pas indépendants.
+
+Corrélations des rendements quotidiens (2 055 jours communs) : ES/YM 0,94,
+ES/NQ 0,93, RTY/ES 0,87, DAX/FTSE 0,81 — moyenne des paires **0,531**.
+
+```
+marchés annoncés              : 8
+marchés réellement indépendants : 2,7
+P(7/8 positifs | 8 indépendants) : 3,5 %
+P(7/8 positifs | 2,7 effectifs)  : 50,0 %
+```
+
+Avec 2,7 paris indépendants, « 7 sur 8 » est exactement ce que produit le hasard.
+L'argument de réplication entre marchés ne vaut donc presque rien : ce sont
+quatre façons de dire « actions américaines » et quatre reflets.
+
+Ce qui reste, et qui est plus solide : **le DSR selon le nombre d'essais
+réellement indépendants** (22 757 trades, +4,86 % par trade, glissement inclus) :
+
+| essais retenus | DSR |
+|---|---|
+| 3 (marchés effectifs × sources) | **0,997** |
+| 8 (marchés annoncés) | 0,889 |
+| 20 | 0,543 |
+| 50 (tout ce qui a été essayé) | 0,201 |
+
+Le chiffre honnête est donc « entre 0,55 et 0,99 selon ce qu'on compte comme une
+décision indépendante » — et non « 0,95, c'est prouvé ». Les décisions vraiment
+indépendantes du projet (horizon, famille de marchés, sources, plafond de rr)
+sont au nombre de **quatre ou cinq**, ce qui place la confiance autour de 0,95 :
+à la frontière, pas au-delà.
+
+**Ce qui n'est pas établi** : l'avantage n'est **pas démontré** au sens statistique
+strict. Le DSR vaut 0,889 si l'on déflate pour les huit marchés annoncés, 0,543
+pour vingt essais, 0,201 pour cinquante. Et la réplication entre marchés ne pèse
+presque rien (2,7 marchés effectifs). Ce qui tient debout : 22 757 trades,
++4,86 % du risque par trade glissement inclus, positif dans les deux moitiés de la
+période, et **positif sur quatre ans jamais regardés** (+4,46 %). C'est un
+avantage probable et robuste au coût, pas un avantage prouvé.
 
 ## Pourquoi les indices et pas le forex
 
