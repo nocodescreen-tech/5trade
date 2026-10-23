@@ -74,8 +74,18 @@ Format : ID · axe · écart · preuve · correctif · sévérité · effort · 
 
 ## Priorité de traitement
 
-1. **G-01** — sans cela, toute validation sur R_75 est un chiffre sur du bruit.
-2. **G-04** — la convention qui décide du signe doit être arbitrée, pas affichée.
-3. **G-02 / G-08** — avant d'annoncer un avantage, le déflater et le frotter au slippage.
+1. **G-01** — **RÉSOLU le 2026-10-23** : validation refaite sur marchés réels
+   (Yahoo, 10 ans), synthétiques marqués à l'écran. Voir `RENTABILITE-HORIZONS.md`.
+2. **G-04** — **RÉSOLU** : gestion partielle désactivée par défaut, chiffrée à l'écran.
+3. **G-02 / G-08** — **RÉSOLUS** : `api/validite.js` (PSR, DSR, PBO, longueur
+   minimale) et glissement d'un spread facturé par défaut (`test-glissement`).
 4. **G-05 / G-07** — l'échantillon effectif et la calibration décident de la confiance.
 5. Le reste : G-10 (démo réelle) est le seul moyen de sortir de la simulation.
+
+## Où en est la rentabilité (2026-10-23)
+
+Mesuré : **7 indices sur 8 en quotidien survivent à un spread entier de
+glissement** (+0,0275 à +0,0723 R par trade sur 10 ans). Portefeuille composé sous
+plafonds : **+22,4 %/an pour 15,7 % de drawdown** au réglage 0,5 % / 10 positions.
+DSR(8) = 0,845 : répliqué, pas encore démontré. Détail dans
+`docs/retro/systeme/RENTABILITE-HORIZONS.md`.
