@@ -791,6 +791,70 @@ function signauxStructure(carte, candles) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// PORTES DU RAPPORT RISQUE/RENDEMENT
+// ─────────────────────────────────────────────────────────────
+/**
+ * Refuse les signaux dont l'objectif ne peut pas être atteint.
+ *
+ * Trois motifs de refus, tous mesurés :
+ *   • objectif inutilisable (rr nul, ≤ 0, inconnu) — 9 % des trades de R_75 1h ;
+ *   • rr sous le minimum demandé (`rrMin`), quand l'appelant l'active ;
+ *   • objectif IRRÉALISTE sur un signal de STRATÉGIE (`rrMaxStrategie`, défaut 2).
+ *
+ * Le troisième est né d'une mesure : sur NQ=F quotidien, 10 ans, frais et
+ * glissement inclus, les signaux de stratégie sortent avec un rr moyen de 4,64
+ * (motifs : 1,41) et 62 % d'entre eux dépassent 2. Cette tranche vaut
+ * **−0,467 R sur 221 trades**, quand rr 0,5–1,5 vaut +0,28. Après plafond à 2,
+ * la source passe de −0,2033 à +0,1130 R.
+ *
+ * On ne l'applique PAS aux motifs : chez eux la tranche rr ≥ 2 est POSITIVE
+ * (+0,117 R sur 535 trades). Le défaut n'est pas « viser loin », c'est de viser
+ * loin avec un stop trop serré — propre aux niveaux des stratégies.
+ *
+ * Mute les signaux refusés (niveaux retirés, statut dégradé) et rend la liste
+ * des refus avec le chiffre qui les explique.
+ */
+function portesRR(signaux, options = {}) {
+  const rrMin = Number.isFinite(Number(options.rrMin)) ? Number(options.rrMin) : 0;
+  const rrMaxStrategie = Number.isFinite(Number(options.rrMaxStrategie))
+    ? Number(options.rrMaxStrategie) : 2;
+  const ecartesRR = [];
+
+  for (const s of signaux) {
+    if (s.entree === null || s.stop === null) continue;
+    // ⚠️ `Number(null)` vaut 0 : sans ce test, un signal sans objectif passait
+    // pour un rr de zéro. Règle de cohérence, PAS un réglage : un trade dont
+    // l'objectif est au niveau de l'entrée ne peut rien gagner.
+    const brut = s.rr;
+    const rr = (brut === null || brut === undefined) ? null : Number(brut);
+    const tropFaible = rr !== null && Number.isFinite(rr) && rr > 0 && rrMin > 0 && rr < rrMin;
+    const invalide = rr === null || !Number.isFinite(rr) || rr <= 0;
+    const tropLoin = s.source === 'strategie' && rrMaxStrategie > 0
+      && rr !== null && Number.isFinite(rr) && rr > rrMaxStrategie;
+    if (!invalide && !tropFaible && !tropLoin) continue;
+
+    const motif = invalide
+      ? `objectif inutilisable : rapport risque/rendement ${rr === null || !Number.isFinite(rr) ? 'inconnu' : rr.toFixed(2)} (aucun gain possible)`
+      : tropFaible
+        ? `rapport risque/rendement ${rr.toFixed(2)} < ${rrMin} exigé`
+        : `objectif irréaliste : ${rr.toFixed(2)} fois le risque, plafond ${rrMaxStrategie} `
+          + 'pour une stratégie (mesuré : cette tranche vaut −0,47 R par trade)';
+
+    const refus = { id: s.id, nom: s.nom, source: s.source, sens: s.sens,
+      rr: (rr !== null && Number.isFinite(rr)) ? rr : null, rrMin, invalide, raison: motif };
+    ecartesRR.push(refus);
+    s.ecarteRR = refus;
+    s.entree = null;
+    s.stop = null;
+    s.objectifs = [];
+    s.rr = null;
+    s.raison = [s.raison, motif].filter(Boolean).join(' — ');
+    if (s.status === 'confirme') s.status = 'surveiller';
+  }
+  return ecartesRR;
+}
+
+// ─────────────────────────────────────────────────────────────
 // POINT D'ENTRÉE
 // ─────────────────────────────────────────────────────────────
 /**
@@ -895,7 +959,7 @@ function detecterTout(candles, meta = {}, options = {}) {
     if (s.status === 'confirme') s.status = 'surveiller';
   }
 
-  // 5 bis. RAPPORT RISQUE/RENDEMENT MINIMUM — mesuré, pas supposé.
+  // 5 bis. RAPPORT RISQUE/RENDEMENT — mesuré, pas supposé.
   //    Analyse des 110 000 trades du jeu de données, par tranche de rr :
   //      rr 0,25-0,5 : XAU 15m **−0,027 R** (479 trades), R_75 15m **−0,073 R**
   //                    (359), XAU 5m +0,018, R_75 5m +0,004 — nul ou négatif.
@@ -903,34 +967,9 @@ function detecterTout(candles, meta = {}, options = {}) {
   //      rr 1,5-2    : +0,16 à +0,30 R  ← la tranche qui paie
   //    Le marché ne rémunère pas les objectifs trop proches : gagner souvent ne
   //    compense pas la perte rare quand l'objectif vaut moins que le risque.
-  //    Un seul point d'application, comme les frais et le modèle.
-  const rrMin = Number.isFinite(Number(options.rrMin)) ? Number(options.rrMin) : 0;
-  const ecartesRR = [];
-  for (const s of signaux) {
-    if (s.entree === null || s.stop === null) continue;
-    // ⚠️ `Number(null)` vaut 0 : sans ce test, un signal sans objectif passait
-    // pour un rr de zéro. Règle de cohérence, PAS un réglage : un trade dont
-    // l'objectif est au niveau de l'entrée ne peut rien gagner. Mesuré : 9 % des
-    // trades de R_75 1h étaient dans ce cas et faussaient l'espérance.
-    const brut = s.rr;
-    const rr = (brut === null || brut === undefined) ? null : Number(brut);
-    const tropFaible = rr !== null && Number.isFinite(rr) && rr > 0 && rrMin > 0 && rr < rrMin;
-    const invalide = rr === null || !Number.isFinite(rr) || rr <= 0;
-    if (!invalide && !tropFaible) continue;
-    const motif = invalide
-      ? `objectif inutilisable : rapport risque/rendement ${rr === null || !Number.isFinite(rr) ? 'inconnu' : rr.toFixed(2)} (aucun gain possible)`
-      : `rapport risque/rendement ${rr.toFixed(2)} < ${rrMin} exigé`;
-    ecartesRR.push({ id: s.id, nom: s.nom, source: s.source, sens: s.sens,
-      rr: (rr !== null && Number.isFinite(rr)) ? rr : null, rrMin,
-      invalide, raison: motif });
-    s.ecarteRR = { rr: (rr !== null && Number.isFinite(rr)) ? rr : null, rrMin, invalide, raison: motif };
-    s.entree = null;
-    s.stop = null;
-    s.objectifs = [];
-    s.rr = null;
-    s.raison = [s.raison, motif].filter(Boolean).join(' — ');
-    if (s.status === 'confirme') s.status = 'surveiller';
-  }
+  //    Un seul point d'application, comme les frais et le modèle : la fonction
+  //    `portesRR`, exportée pour être testée seule.
+  const ecartesRR = portesRR(signaux, options);
 
   // 6. LE MODÈLE PONDÈRE — R attendu.
   //    Les règles disent POURQUOI un signal existe ; le modèle dit COMBIEN il
@@ -1015,7 +1054,9 @@ function detecterTout(candles, meta = {}, options = {}) {
     // Combien de configurations refusées parce que l'objectif ne valait pas le
     // risque : c'est un refus de construction, pas de marché.
     ecartesRR: ecartesRR.length,
-    rrMin,
+    rrMin: Number.isFinite(Number(options.rrMin)) ? Number(options.rrMin) : 0,
+    rrMaxStrategie: Number.isFinite(Number(options.rrMaxStrategie))
+      ? Number(options.rrMaxStrategie) : 2,
     modele: modeleDispo
       ? { disponible: true, version: (Modele.modele() || {}).version || 1, marches: Modele.marches() }
       : { disponible: false, version: null, marches: [] },
@@ -1058,5 +1099,5 @@ module.exports = {
   carteMarche, contextePour, signauxStructure,
   // Garde des niveaux, exportée pour être testée seule : c'est le point unique
   // où l'on garantit « pas de risque nul, pas de stop à contre-sens ».
-  assainirNiveaux, arrondiPrix
+  assainirNiveaux, arrondiPrix, portesRR
 };

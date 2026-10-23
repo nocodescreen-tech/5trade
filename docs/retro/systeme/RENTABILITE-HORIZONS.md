@@ -53,19 +53,43 @@ hasard (binomial)  : 3,5 % de voir 7/8 positifs par chance
 
 Ventilation mesurée par source, NQ=F quotidien, 10 ans, frais + glissement :
 
-| source | trades | R par trade |
-|---|---|---|
-| structure | 1 099 | **+0,1105** |
-| motif | 1 561 | **+0,0797** |
-| **strategie** | **365** | **−0,1923** |
+| source | trades | R par trade | après correction |
+|---|---|---|---|
+| structure | 1 099 | **+0,1105** | +0,0850 |
+| motif | 1 561 | **+0,0797** | +0,0507 |
+| strategie | 365 | **−0,1923** | **+0,1130** |
 
-Les 33 stratégies construites dans l'application sont **la partie qui perd**.
-Sur le portefeuille complet, les inclure fait tomber l'espérance de 4,86 % à
-3,95 % et le DSR de 0,889 à 0,526.
+### La cause, mesurée
 
-Elles sont conservées (l'utilisateur doit pouvoir tester ses idées), mais le
-backtest expose désormais `parSource` et un filtre `sources` — et l'écran les
-affiche côte à côte.
+Les signaux de stratégie sortaient avec un **rr moyen de 4,64** (motifs : 1,41)
+et **62 % au-dessus de 2**. Cette tranche valait **−0,467 R sur 221 trades**,
+quand rr 0,5–1,5 valait +0,28. Un objectif à 4,6 fois le risque visé en une
+dizaine de bougies n'est pas un objectif : le stop le paie avant.
+
+La même tranche rr ≥ 2 est **positive** chez les motifs (+0,117 R sur 535). Le
+défaut n'est donc pas « viser loin », c'est de viser loin **avec un stop trop
+serré** — propre aux niveaux produits par `Signals.levelsFor`.
+
+### Le correctif
+
+`portesRR` refuse désormais les objectifs de stratégie au-delà de 2 fois le
+risque (`rrMaxStrategie`, réglable) et garde les motifs intacts. Effet mesuré sur
+NQ : **−0,2033 → +0,1130 R**, 179 trades retenus au lieu de 359, 904 objectifs
+irréalistes refusés avec leur chiffre.
+
+### Pourquoi elles restent hors du préréglage
+
+Elles sont redevenues profitables, mais **elles diluent le portefeuille sous les
+plafonds de positions** :
+
+| sources | prises | rendement/an | drawdown | ratio |
+|---|---|---|---|---|
+| motifs + structure | 4 721 | **23,2 %** | **15,7 %** | **1,48** |
+| toutes, stratégies corrigées | 4 070 | 16,9 % | 22,8 % | 0,74 |
+
+Elles consomment des places qui serviraient à de meilleurs trades et ajoutent de
+l'exposition corrélée. Le préréglage les exclut donc — mais elles restent dans le
+moteur, corrigées, visibles et sélectionnables à l'écran.
 
 **Ce qui est établi** : la même mécanique, appliquée sans ajustement à huit
 marchés indépendants sur trois continents, est positive sur sept d'entre eux

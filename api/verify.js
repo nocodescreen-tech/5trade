@@ -2742,7 +2742,37 @@ function tinyPng(W = 64, H = 40) {
     Fr.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
   }
 
-  // ── BUG-11 : une stratégie ne produisait AUCUN trade ─────────────────────
+    // BUG-12 — un objectif de stratégie à 4,6 fois le risque n'est pas un
+    // objectif. Mesuré sur NQ 1d : la tranche rr ≥ 2 valait −0,467 R sur 221
+    // trades. Après plafond à 2 : la source passe de −0,2033 à +0,1130 R.
+    {
+      const Sx = require('./signaux.js');
+      const loin = (source) => ({ id: `${source}:t`, source, nom: 'T', sens: 'long',
+        status: 'surveiller', entree: 100, stop: 99, objectifs: [110, 120], rr: 10 });
+      const signaux = [loin('strategie'), loin('motif'), loin('structure')];
+      const refus = Sx.portesRR(signaux, {});
+      ok('BUG-12 : un objectif de stratégie au-delà du plafond est refusé',
+        refus.some(e => e.source === 'strategie' && /irréaliste/.test(e.raison)),
+        `${refus.length} refus dont ${refus.filter(e => e.source === 'strategie').length} stratégie(s)`);
+      ok('BUG-12 : un motif très lointain n’est PAS refusé par ce plafond',
+        !refus.some(e => e.source === 'motif'), 'aucun motif refusé');
+      ok('BUG-12 : un signal refusé perd ses niveaux et son statut',
+        (() => {
+          const s = loin('strategie');
+          Sx.portesRR([s], {});
+          return s.entree === null && s.stop === null && s.rr === null && s.status === 'surveiller';
+        })());
+      ok('BUG-12 : le plafond est réglable — rr 3 refusé par défaut, accepté à 5',
+        (() => {
+          const s3 = () => ({ id: 'strat:t', source: 'strategie', nom: 'T', sens: 'long',
+            status: 'surveiller', entree: 100, stop: 99, objectifs: [103, 110], rr: 3 });
+          const parDefaut = Sx.portesRR([s3()], {}).length;
+          const aCinq = Sx.portesRR([s3()], { rrMaxStrategie: 5 }).length;
+          return parDefaut === 1 && aCinq === 0;
+        })());
+    }
+
+    // BUG-11 — un signal de stratégie porte un rapport calculé, jamais null.
   // `rr` était codé en dur à null sur les signaux de stratégie. Le filtre de
   // rapport risque/rendement le lisait comme « objectif inutilisable » et leur
   // retirait leurs niveaux. Mesuré en A/B sur 800 bougies d'or 15m :
