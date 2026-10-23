@@ -32,7 +32,7 @@ for (const [sym, spread] of Object.entries(INDICES)) {
     partMax: 0.15, parSymbole: { [sym]: { spread, glissement: spread } } });
   const r = B.lancer(bougies, { symbol: sym, timeframe: '1d' },
     { profils: profil, pas: 1, maxBougies: bougies.length, plafond: 20000,
-      limiteTrades: 1e6, modele: false, sources });
+      limiteTrades: 1e6, modele: false, sources, regime: process.env.REGIME === '1' });
   for (const t of (r.trades || [])) {
     if (Number.isFinite(t.r) && Number.isFinite(t.at)) {
       tous.push({ at: t.at, symbol: sym, entree: t.entree, stop: t.stop,

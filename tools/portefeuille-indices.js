@@ -34,7 +34,7 @@ for (const [sym, spread] of Object.entries(INDICES)) {
     partMax: 0.15, parSymbole: { [sym]: { spread, glissement: spread } } });
   const r = B.lancer(bougies, { symbol: sym, timeframe: '1d' },
     { profils: profil, pas: 1, maxBougies: bougies.length, plafond: 20000,
-      limiteTrades: 1e6, modele: false, sources });
+      limiteTrades: 1e6, modele: false, sources, regime: process.env.REGIME === '1' });
   const tr = (r.trades || []).filter(t => Number.isFinite(t.r));
   if (tr.length < 200) continue;
   const rs = tr.map(t => t.r);

@@ -2742,6 +2742,53 @@ function tinyPng(W = 64, H = 40) {
     Fr.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
   }
 
+    // BUG-13 — le filtre de tendance ne garde que les trades alignés.
+    // Mesuré sur NQ 1d : +6,49 % → +24,59 % du risque par trade.
+    {
+      const B = require('./backtest.js');
+      const c2 = (i, b) => ({ t: 1600000000000 + i * 86400000, o: b, h: b + 1.2, l: b - 1.2,
+        c: b, v: 1, closed: true });
+      const serieT = [];
+      for (let i = 0; i < 300; i++) {
+        // Tendance franche PUIS retournement, avec des vagues : sans oscillation,
+        // le moteur ne détecte rien et le test ne prouverait rien.
+        const tendance = i < 200 ? 100 + i * 0.35 : 170 - (i - 200) * 0.5;
+        const base = tendance + Math.sin(i / 5) * 5 + Math.sin(i / 2.3) * 1.5;
+        serieT.push(c2(i, base));
+      }
+      const profilsT = [{ id: 'p', titre: 'T', regles: ['R1', 'R2', 'R3', 'R4'],
+        seuilRegles: 1, seuilForce: 0, filtres: [], timeframes: ['1d'], parametres: {} }];
+      const sans = B.lancer(serieT, { symbol: 'TEST', timeframe: '1d' },
+        { profils: profilsT, pas: 1, maxBougies: 300, limiteTrades: 1000 });
+      const avec = B.lancer(serieT, { symbol: 'TEST', timeframe: '1d' },
+        { profils: profilsT, pas: 1, maxBougies: 300, limiteTrades: 1000, regime: true });
+
+      ok('BUG-13 : le filtre de tendance est exposé', avec.regime === true);
+      ok('BUG-13 : le filtre écarte réellement des signaux',
+        avec.ecartesRegime > 0, `${avec.ecartesRegime} écarté(s)`);
+      ok('BUG-13 : le filtre ne garde jamais plus de trades',
+        (avec.trades || []).length <= (sans.trades || []).length,
+        `${(avec.trades || []).length} ≤ ${(sans.trades || []).length}`);
+      // L'invariant : chaque trade gardé va dans le sens de la moyenne 200.
+      const parT = new Map();
+      for (let i = 0; i < serieT.length; i++) parT.set(serieT[i].t, i);
+      const sma = new Array(serieT.length).fill(null);
+      let som = 0;
+      for (let i = 0; i < serieT.length; i++) {
+        som += serieT[i].c;
+        if (i >= 200) som -= serieT[i - 200].c;
+        if (i >= 199) sma[i] = som / 200;
+      }
+      const malAlignes = (avec.trades || []).filter(t => {
+        const i = parT.get(t.at);
+        if (i === undefined || sma[i] === null) return false;
+        const haussier = serieT[i].c > sma[i];
+        return haussier ? t.sens !== 'long' : t.sens !== 'short';
+      });
+      ok('BUG-13 : aucun trade gardé ne va contre la tendance',
+        malAlignes.length === 0, `${malAlignes.length} mal aligné(s) sur ${(avec.trades || []).length}`);
+    }
+
     // BUG-12 — un objectif de stratégie à 4,6 fois le risque n'est pas un
     // objectif. Mesuré sur NQ 1d : la tranche rr ≥ 2 valait −0,467 R sur 221
     // trades. Après plafond à 2 : la source passe de −0,2033 à +0,1130 R.
@@ -2817,6 +2864,18 @@ function tinyPng(W = 64, H = 40) {
     ok('le préréglage applique 10 positions', apres.maxSimultanes === 10, String(apres.maxSimultanes));
     ok('le préréglage change réellement la configuration',
       avant.risquePct !== apres.risquePct || avant.maxSimultanes !== apres.maxSimultanes);
+    // Le préréglage doit aussi dire QUELLES sources et QUEL filtre passer au
+    // backtest : sans ça, l'appelant rejoue tout et les chiffres ne veulent rien
+    // dire (mesuré : 4 721 prises à ratio 1,48 contre 4 070 à ratio 0,74).
+    const rIndices = Rp.configurerPreset('indices');
+    ok('le préréglage nomme ses sources', Array.isArray(rIndices.sources)
+      && rIndices.sources.join(',') === 'motif,structure', String(rIndices.sources));
+    ok('le préréglage « indices » n’active PAS le filtre de tendance',
+      rIndices.regime === false, String(rIndices.regime));
+    const rTendance = Rp.configurerPreset('indices-tendance');
+    ok('le préréglage « indices-tendance » active le filtre de tendance',
+      rTendance.regime === true && rTendance.risquePct === 1, `${rTendance.risquePct} % · regime ${rTendance.regime}`);
+    ok('chaque préréglage annonce sa mesure', !!(rTendance.mesure && rIndices.mesure));
     ok('un préréglage inconnu est refusé', (() => {
       try { Rp.configurerPreset('inexistant'); return false; } catch { return true; }
     })());

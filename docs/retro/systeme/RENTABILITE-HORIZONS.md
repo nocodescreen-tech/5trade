@@ -140,6 +140,59 @@ presque rien (2,7 marchés effectifs). Ce qui tient debout : 22 757 trades,
 période, et **positif sur quatre ans jamais regardés** (+4,46 %). C'est un
 avantage probable et robuste au coût, pas un avantage prouvé.
 
+## Le test qui a failli tout annuler : les actifs décorrélés
+
+Puisque les huit indices ne valent que 2,7 paris indépendants, l'avantage pouvait
+n'être qu'un reflet de la hausse des actions. Les mêmes choix figés, appliqués à
+sept actifs décorrélés sur 10 ans :
+
+| actif | trades | espérance | corr. actions |
+|---|---|---|---|
+| Cuivre (HG=F) | 3 237 | **+8,76 %** | 0,34 |
+| Obligations 20+ (TLT) | 2 969 | **+1,22 %** | −0,15 |
+| Note 10 ans (ZN=F) | 1 964 | −7,86 % | −0,13 |
+| Dollar index (DX-Y) | 1 702 | −9,26 % | −0,16 |
+| Blé (ZW=F) | 2 879 | −4,91 % | 0,01 |
+| Maïs (ZC=F) | 1 969 | −3,77 % | 0,04 |
+| Yen (6J=F) | 1 461 | −8,13 % | −0,14 |
+
+**Portefeuille décorrélé : −2,02 % du risque par trade, 2 marchés positifs sur 7.**
+
+La méthode ne gagne donc pas partout. Elle gagne sur les marchés qui **tendent**
+(actions, cuivre), perd sur ceux qui **reviennent à la moyenne** (dollar, blé,
+maïs, yen). Ce n'est pas un avantage universel : c'est un suiveur de tendance.
+
+## Le filtre de tendance — le levier le plus puissant trouvé
+
+Si la méthode suit la tendance, les trades qui vont **contre** la tendance doivent
+être écartés. Mesuré sur NQ 1d, régime lu à l'entrée (moyenne 200 + pente sur 20) :
+
+| régime à l'entrée | trades | espérance |
+|---|---|---|
+| dans le sens de la tendance | 1 038 | **+25,73 %** du risque |
+| contre la tendance | 1 085 | **−10,31 %** |
+| sans tendance | 294 | +13,56 % |
+
+Le système prenait **autant de trades contre la tendance que dans son sens**, et
+ces trades perdent. Le filtre `regime: true` ne garde que les alignés :
+
+```
+NQ 1d, mêmes règles, frais + glissement
+  sans filtre : 2 606 trades ·  +6,49 % du risque par trade
+  avec filtre : 1 059 trades · +24,59 % du risque par trade   (×3,8)
+```
+
+Sur le portefeuille d'indices, cela donne deux profils mesurés, exposés comme
+préréglages :
+
+| préréglage | risque | positions | rendement/an | drawdown | ratio |
+|---|---|---|---|---|---|
+| `indices` | 0,5 % | 10 | 23,2 % | 15,7 % | **1,48** |
+| `indices-tendance` | 1 % | 5 | **48,5 %** | 35,3 % | 1,38 |
+
+Le second gagne deux fois plus et perd deux fois plus en cours de route. Les deux
+sont honnêtes ; le premier est plus confortable.
+
 ## Pourquoi les indices et pas le forex
 
 EURUSD est à −0,23 R par trade : ce n'est pas un problème de méthode, c'est un

@@ -428,22 +428,39 @@ const PRESETS = {
   indices: {
     titre: 'Portefeuille d’indices (quotidien)',
     risquePct: 0.5, maxSimultanes: 10, maxRisqueMarchePct: 2, maxRisqueTotalPct: 5,
-    // Les signaux de STRATÉGIE coûtent : −0,19 R par trade sur NQ en quotidien.
-    // Les écarter fait passer le portefeuille de 17,3 %/an (ratio 0,68) à
-    // 23,2 %/an pour 15,7 % de drawdown (ratio 1,48).
+    // Les signaux de STRATÉGIE coûtent : −0,19 R par trade sur NQ en quotidien
+    // (avant plafond de rr). Les écarter fait passer le portefeuille de 17,3 %/an
+    // (ratio 0,68) à 23,2 %/an pour 15,7 % de drawdown (ratio 1,48).
     sources: ['motif', 'structure'],
     mesure: '8 indices, 10 ans, 1d, glissement 1 spread, motifs + structure : '
       + '23,2 %/an, drawdown 15,7 % (ratio 1,48, 4 721 prises)'
+  },
+  'indices-tendance': {
+    titre: 'Indices, tendance confirmée (agressif)',
+    risquePct: 1, maxSimultanes: 5, maxRisqueMarchePct: 2, maxRisqueTotalPct: 5,
+    sources: ['motif', 'structure'],
+    regime: true,
+    // Le filtre de tendance écarte les trades qui vont contre la moyenne 200.
+    // Mesuré sur NQ : +6,49 % → +24,59 % du risque par trade. Sur le
+    // portefeuille : 23,2 % → 48,5 %/an, mais le drawdown passe de 15,7 % à
+    // 35,3 % (ratio 1,38 contre 1,48). Plus rentable, moins confortable.
+    mesure: 'mêmes règles + filtre de tendance (SMA200 et pente) : '
+      + '48,5 %/an, drawdown 35,3 % (ratio 1,38, 1 853 prises)'
   }
 };
 
 function configurerPreset(nom) {
   const p = PRESETS[String(nom || '').toLowerCase()];
   if (!p) throw new Error(`préréglage inconnu : ${nom} (disponibles : ${Object.keys(PRESETS).join(', ')})`);
-  return configurer({
+  configurer({
     risquePct: p.risquePct, maxSimultanes: p.maxSimultanes,
     maxRisqueMarchePct: p.maxRisqueMarchePct, maxRisqueTotalPct: p.maxRisqueTotalPct
   });
+  // Les sources et le filtre de tendance ne sont pas des réglages de risque : on
+  // les rend à l'appelant pour qu'il les passe au backtest, sans les écrire dans
+  // le fichier de configuration du risque.
+  return { ...configuration(), preset: nom, titre: p.titre,
+    sources: p.sources || null, regime: p.regime === true, mesure: p.mesure };
 }
 
 module.exports = {
