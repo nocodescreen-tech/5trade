@@ -95,7 +95,11 @@ function tinyPng(W = 64, H = 40) {
 (async () => {
   // ── 1. Syntaxe ──
   section('[1] Syntaxe');
-  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'market.js', 'structure.js', 'signals.js', 'reset-password.js', 'bootstrap-db.js', 'alerts.js', 'lexique.js', 'expliquer.js', 'concepts.js', 'playbooks.js', 'couts.js', 'pushAlerts.js']) {
+  // Les modules de mesure (frais, historique, dataset, modèle, risque, validité,
+  // analyse, instruments) sont vérifiés ici aussi : une faute de syntaxe doit
+  // apparaître en premier, pas au détour d'une section métier.
+  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'market.js', 'structure.js', 'signals.js', 'reset-password.js', 'bootstrap-db.js', 'alerts.js', 'lexique.js', 'expliquer.js', 'concepts.js', 'playbooks.js', 'couts.js', 'pushAlerts.js',
+    'frais.js', 'historique.js', 'dataset.js', 'modele.js', 'risque.js', 'validite.js', 'analyse.js', 'instruments.js']) {
     try {
       require('child_process').execFileSync(process.execPath, ['--check', path.join(__dirname, f)]);
       ok(f, true);
