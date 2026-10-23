@@ -2697,6 +2697,48 @@ function tinyPng(W = 64, H = 40) {
     Fr.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
   }
 
+  // ── Validité statistique : DSR, PBO, longueur minimale ────────────────────
+  // Sans ces trois chiffres, « +0,088 R » n'est pas un résultat : c'est le
+  // maximum d'une recherche. Les tests vérifient les formules, pas des constantes.
+  {
+    const V = require('./validite.js');
+    ok('invPhi(0,975) vaut 1,96', Math.abs(V.invPhi(0.975) - 1.959964) < 1e-3,
+      String(V.invPhi(0.975).toFixed(6)));
+    ok('phi(0) vaut 0,5', Math.abs(V.phi(0) - 0.5) < 1e-9);
+
+    // Série à avantage net déterministe : le PSR doit être très élevé.
+    const gagnante = Array.from({ length: 400 }, (_, i) => (i % 10 < 6 ? 1 : -1));
+    ok('une série gagnante a un PSR élevé', V.psr(gagnante) > 0.99,
+      String(V.psr(gagnante).toFixed(4)));
+
+    // Le seuil de sélection monte avec le nombre d'essais : c'est tout l'objet
+    // du Deflated Sharpe.
+    const s1 = V.seuilDeSelection(1), s10 = V.seuilDeSelection(10), s100 = V.seuilDeSelection(100);
+    ok('le seuil de sélection croît avec le nombre d’essais', s1 < s10 && s10 < s100,
+      `${s1.toFixed(2)} < ${s10.toFixed(2)} < ${s100.toFixed(2)}`);
+    ok('le DSR est plus sévère que le PSR pour la même série',
+      V.dsr(gagnante, 100, 0.01).psr < V.psr(gagnante),
+      `DSR ${V.dsr(gagnante, 100, 0.01).psr.toFixed(3)} < PSR ${V.psr(gagnante).toFixed(3)}`);
+    ok('la longueur minimale croît avec le nombre d’essais',
+      V.longueurMinimale(0.05, 10) < V.longueurMinimale(0.05, 100),
+      `${Math.round(V.longueurMinimale(0.05, 10))} < ${Math.round(V.longueurMinimale(0.05, 100))}`);
+
+    // PBO : bruit pur → la meilleure configuration en apprentissage retombe
+    // souvent sous la médiane hors échantillon ; une configuration dominante,
+    // non.
+    const graine = (() => { let g = 7; return () => (g = (g * 1103515245 + 12345) % 2147483648) / 2147483648; })();
+    const bruit = Array.from({ length: 300 }, () => Array.from({ length: 6 }, () => graine() - 0.5));
+    const forte = Array.from({ length: 300 }, (_, i) => [0.6 + (i % 3) * 0.01,
+      graine() - 0.5, graine() - 0.5, graine() - 0.5, graine() - 0.5, graine() - 0.5]);
+    const pBruit = V.pbo(bruit, { blocs: 10 });
+    const pForte = V.pbo(forte, { blocs: 10 });
+    ok('PBO : sur du bruit, la sélection ne tient pas', pBruit.pbo > 0.2,
+      `${(pBruit.pbo * 100).toFixed(0)} %`);
+    ok('PBO : une configuration dominante tient', pForte.pbo < pBruit.pbo,
+      `${(pForte.pbo * 100).toFixed(0)} % < ${(pBruit.pbo * 100).toFixed(0)} %`);
+    ok('PBO : refusé si la matrice est trop petite', V.pbo([[1, 2], [3, 4]]) === null);
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // RÉGRESSIONS NOMMÉES — un test par bug RÉELLEMENT trouvé.
   //

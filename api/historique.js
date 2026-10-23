@@ -143,10 +143,47 @@ async function telechargerDeriv(symbol, tf, nombre) {
   return [...parTemps.values()].sort((a, b) => a.t - b.t);
 }
 
+/**
+ * YAHOO — la seule source qui donne des marchés RÉELS sur plusieurs années sans
+ * clé d'API. Deriv ne remonte pas assez loin et surtout : ses indices synthétiques
+ * sortent d'un RNG cryptographique, donc un backtest dessus ne prouve rien.
+ * Ici on a de l'or (GC=F), du forex et du BTC réels sur 2 ans.
+ */
+const YAHOO = 'https://query1.finance.yahoo.com/v8/finance/chart';
+const RANGE_YAHOO = { '1m': '7d', '5m': '60d', '15m': '60d', '30m': '60d', '1h': '2y', '1d': '10y' };
+
+async function telechargerYahoo(symbol, tf, nombre) {
+  const interval = tf === '1h' ? '1h' : tf;
+  const range = RANGE_YAHOO[interval] || '2y';
+  const url = `${YAHOO}/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`;
+  const rep = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!rep.ok) throw new Error(`Yahoo ${rep.status} pour ${symbol} ${tf}`);
+  const j = await rep.json();
+  const r = j?.chart?.result?.[0];
+  if (!r || !r.timestamp) throw new Error(`Yahoo : aucune donnée pour ${symbol} ${tf}`);
+
+  const q = r.indicators.quote[0];
+  const bougies = [];
+  for (let i = 0; i < r.timestamp.length; i++) {
+    // Une bougie incomplète (close null) est écartée : la garder produirait un
+    // trou que le moteur lirait comme un prix.
+    if (q.open[i] == null || q.close[i] == null || q.high[i] == null || q.low[i] == null) continue;
+    bougies.push({
+      t: r.timestamp[i] * 1000,
+      o: +q.open[i], h: +q.high[i], l: +q.low[i], c: +q.close[i],
+      v: +(q.volume[i] || 0), closed: true
+    });
+  }
+  const triees = bougies.sort((a, b) => a.t - b.t);
+  return nombre ? triees.slice(-Math.round(Number(nombre))) : triees;
+}
+
 /** Choisit la source : Binance pour les paires *USDT, Deriv pour le reste. */
 function sourcePour(symbol, provider) {
   if (provider) return provider;
-  return /USDT$/i.test(symbol) ? 'binance' : 'deriv';
+  if (/USDT$/i.test(symbol)) return 'binance';
+  if (/^(GC=F|EURUSD=X|BTC-USD|ES=F|CL=F|^[A-Z]{1,5}=X)$/i.test(symbol)) return 'yahoo';
+  return 'deriv';
 }
 
 /**
@@ -156,8 +193,8 @@ function sourcePour(symbol, provider) {
 async function telecharger({ symbol, tf = '5m', nombre = 5000, provider = null }) {
   if (!symbol) throw new Error('symbol est requis');
   const src = sourcePour(symbol, provider);
-  const bougies = src === 'binance'
-    ? await telechargerBinance(symbol, tf, nombre)
+  const bougies = src === 'binance' ? await telechargerBinance(symbol, tf, nombre)
+    : src === 'yahoo' ? await telechargerYahoo(symbol, tf, nombre)
     : await telechargerDeriv(symbol, tf, nombre);
   if (!bougies.length) throw new Error(`Aucune bougie reçue pour ${symbol} ${tf} (${src})`);
 
