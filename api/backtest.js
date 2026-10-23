@@ -74,18 +74,23 @@ function lancer(candles, meta = {}, options = {}) {
   let ecartesModele = 0;
   let ecartesRR = 0;
 
-  // Régime de tendance, précalculé SANS le futur : moyenne mobile 200 et sa
-  // pente sur 20 bougies. Sert au filtre `regime` (voir plus bas).
+  // Régime de tendance, précalculé SANS le futur : moyenne mobile et sa pente.
+  // Les périodes sont paramétrables pour pouvoir vérifier que l'avantage ne
+  // dépend pas d'un réglage chanceux (200 est la valeur de départ, pas une vérité).
   const filtreRegime = options.regime === true;
+  const periodeSma = Math.max(20, Math.round(Number(options.regimeSma) || 200));
+  const periodePente = Math.max(2, Math.round(Number(options.regimePente) || 20));
   const sma200 = new Array(n).fill(null), penteSma = new Array(n).fill(null);
   if (filtreRegime) {
     let somme = 0;
     for (let i = 0; i < n; i++) {
       somme += serie[i].c;
-      if (i >= 200) somme -= serie[i - 200].c;
-      if (i >= 199) {
-        sma200[i] = somme / 200;
-        if (i >= 219 && sma200[i - 20]) penteSma[i] = (sma200[i] - sma200[i - 20]) / sma200[i - 20];
+      if (i >= periodeSma) somme -= serie[i - periodeSma].c;
+      if (i >= periodeSma - 1) {
+        sma200[i] = somme / periodeSma;
+        if (i >= periodeSma - 1 + periodePente && sma200[i - periodePente]) {
+          penteSma[i] = (sma200[i] - sma200[i - periodePente]) / sma200[i - periodePente];
+        }
       }
     }
   }

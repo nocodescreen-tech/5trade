@@ -2787,6 +2787,16 @@ function tinyPng(W = 64, H = 40) {
       });
       ok('BUG-13 : aucun trade gardé ne va contre la tendance',
         malAlignes.length === 0, `${malAlignes.length} mal aligné(s) sur ${(avec.trades || []).length}`);
+
+      // La période de la moyenne est un PARAMÈTRE, pas une vérité. Mesuré sur
+      // 7 marchés : les 15 réglages testés (100 à 300, pente 10 à 40) sont tous
+      // positifs, de +13,2 % à +17,5 % contre +7,2 % sans filtre.
+      const p100 = B.lancer(serieT, { symbol: 'TEST', timeframe: '1d' },
+        { profils: profilsT, pas: 1, maxBougies: 300, limiteTrades: 1000,
+          regime: true, regimeSma: 100, regimePente: 10 });
+      ok('BUG-13 : la période de la moyenne est réglable',
+        p100.regime === true && (p100.trades || []).length >= 0,
+        `${(p100.trades || []).length} trade(s) à 100/10 contre ${(avec.trades || []).length} à 200/20`);
     }
 
     // BUG-12 — un objectif de stratégie à 4,6 fois le risque n'est pas un

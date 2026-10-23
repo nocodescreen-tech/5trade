@@ -244,6 +244,62 @@ changé de camp au lieu de s'arrêter :
 Trois années perdantes sur dix, toutes petites (−29, −84, −52 R) contre des gains
 de +575 et +540 R. C'est un profil de suiveur de tendance qui fonctionne.
 
+## Les deux vérifications qui restaient
+
+### Le filtre ne dépend pas du réglage
+
+Quinze couples (moyenne 100 à 300, pente 10 à 40) sur 7 marchés, à code figé :
+
+```
+sans filtre : +7,22 % du risque par trade
+filtré      : +13,21 % à +17,55 % — LES QUINZE sont positifs
+```
+
+Un avantage qui n'existerait qu'à 200 serait un réglage chanceux. Ici la valeur
+exacte n'a pas d'importance : le filtre capture une propriété, pas un paramètre.
+
+### La sélection des marchés n'est pas un mirage
+
+Les 5 matières premières du portefeuille avaient été gardées **parce qu'elles
+gagnaient** — biais de sélection. Test : classer les 10 matières premières sur
+2016-2021 seulement, garder les 5 meilleures, puis mesurer sur 2022-2026.
+
+| | 2016-2021 (choix) | 2022-2026 (jamais vu) |
+|---|---|---|
+| Top 5 choisi à l'aveugle | +12,3 % (moyenne) | **+12,34 %** |
+| Les 10 marchés | — | **+13,14 %** |
+
+La sélection sur le passé reproduit un résultat positif en 2022-2026. Et surtout :
+**prendre tous les marchés aurait été légèrement meilleur que prendre les
+gagnants.** Il n'y a donc aucune raison de sélectionner — on trade l'univers.
+
+## Le portefeuille sans aucune action
+
+Question restée ouverte : peut-on se passer des indices ? Cinq matières premières,
+filtre actif, 10 ans :
+
+| marché | trades | espérance |
+|---|---|---|
+| Or | 1 073 | **+23,53 %** |
+| Argent | 1 189 | **+18,79 %** |
+| Coton | 1 197 | **+18,25 %** |
+| Café | 1 119 | **+13,15 %** |
+| Cuivre | 1 163 | +6,62 % |
+
+**5 marchés positifs sur 5 · +16,00 % du risque par trade · 5 741 trades ·
+1 seule année perdante sur 10 (2023, −75 R).**
+
+| risque/trade | positions | rendement/an | drawdown | ratio |
+|---|---|---|---|---|
+| 0,5 % | 10 | 48,7 % | 28,8 % | 1,69 |
+| **1,0 %** | **5** | **77,7 %** | **25,1 %** | **3,10** |
+
+Un ratio de 3,10 veut dire 3 points de gain annuel par point de drawdown. C'est
+très au-dessus de ce qu'on voit d'habitude (1 à 2) : **traiter ce chiffre comme
+optimiste**. Il ne repose que sur cinq marchés, sans actions pour amortir, et une
+année perdante suffit à changer l'allure de la courbe. Le portefeuille à 13
+marchés (44,1 %/an, ratio 1,52) est le profil auquel je crois le plus.
+
 ## Pourquoi les indices et pas le forex
 
 EURUSD est à −0,23 R par trade : ce n'est pas un problème de méthode, c'est un
