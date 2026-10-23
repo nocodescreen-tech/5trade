@@ -120,6 +120,11 @@ function configurer(patch = {}) {
   const suivant = normaliser({
     defaut: 'defaut' in patch ? patch.defaut : actuel.defaut,
     commissionDefaut: 'commissionDefaut' in patch ? patch.commissionDefaut : actuel.commissionDefaut,
+    // `glissement` doit être reporté ici aussi : sans cette ligne, il était
+    // silencieusement remis à zéro à l'enregistrement — le coût le plus discret
+    // du système ne s'appliquait jamais.
+    glissement: 'glissement' in patch ? patch.glissement : actuel.glissement,
+    partMax: 'partMax' in patch ? patch.partMax : actuel.partMax,
     parSymbole: patch.parSymbole && typeof patch.parSymbole === 'object'
       ? patch.parSymbole
       : actuel.parSymbole

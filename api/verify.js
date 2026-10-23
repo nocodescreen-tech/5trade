@@ -2242,6 +2242,13 @@ function tinyPng(W = 64, H = 40) {
       ok('le total additionne spread et glissement', Math.abs(c.total - 24) < 1e-6, String(c.total));
       F.configurer({ defaut: 0, commissionDefaut: 0, glissement: 0.5, parSymbole: {} });
       ok('un glissement seul rend les frais actifs', F.actifs() === true);
+      // `configurer` doit reporter glissement ET partMax : les deux étaient
+      // perdus à l'enregistrement, donc jamais appliqués.
+      F.configurer({ defaut: 0, commissionDefaut: 0, glissement: 0.5, partMax: 0.05, parSymbole: {} });
+      ok('configurer conserve le glissement', F.configuration().glissement === 0.5,
+        String(F.configuration().glissement));
+      ok('configurer conserve la part maximale', F.configuration().partMax === 0.05,
+        String(F.configuration().partMax));
       F.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
       ok('sans glissement ni spread, les frais restent inactifs', F.actifs() === false);
     }
