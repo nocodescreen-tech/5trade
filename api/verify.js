@@ -2721,7 +2721,6 @@ function tinyPng(W = 64, H = 40) {
   {
     const Bk = require('./backtest.js');
     const Rk = require('./risque.js');
-    const Mk = require('./modele.js');
     const T0r = 1700000000000, MINr = 60000;
     const serieR = [];
     for (let i = 0; i < 500; i++) {
