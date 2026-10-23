@@ -2638,6 +2638,22 @@ function tinyPng(W = 64, H = 40) {
     ok('le drapeau « le signe dépend du BE » est calculé',
       typeof rLong.signeDependDuBE === 'boolean', String(rLong.signeDependDuBE));
 
+    // La convention BE est une OPTION, plus une valeur par défaut : mesurée sur
+    // 2 ans de données réelles, elle fabrique 71 % du résultat BTC et 139 % de
+    // celui de l'or (−0,034 R/trade sans elle).
+    {
+      const J = require('./journal-signaux.js');
+      const be = () => ({ entree: 100, stop: 90, sens: 'long', objectifs: [120, 140],
+        resultat: 'be', symbol: 'frxXAUUSD' });
+      ok('la gestion partielle est désactivée par défaut', J.gestionPartielleActive() === false);
+      ok('un BE vaut 0 R par défaut', J.multipleR(be()) === 0, String(J.multipleR(be())));
+      J.activerGestionPartielle(true);
+      ok('l’activer crédite la moitié du premier objectif', J.multipleR(be()) === 1,
+        String(J.multipleR(be())));
+      J.activerGestionPartielle(false);
+      ok('la désactiver remet un BE à 0 R', J.multipleR(be()) === 0);
+    }
+
     // Le nom exporté est MAX_BOUGIES. Lire MAX_BOUGES (sans le I) donnait
     // `undefined`, donc un nombre de bougies NaN, donc le minimum du courtier :
     // 93 bougies pour tous les backtests de l'écran. Un test statique sur le

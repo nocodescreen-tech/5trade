@@ -4044,24 +4044,30 @@ function BacktestPanel() {
             </div>
           )}
 
-          {/* La convention qui décide du signe, dite à voix haute.
-              Un « retour à l'entrée » (BE) est crédité de la moitié du premier
-              objectif : c'est une gestion partielle supposée, pas un fait. Sur
-              l'or 15m, cette seule hypothèse fait passer le total de +27 R à
-              −70 R. La cacher reviendrait à vendre un résultat qui n'existe pas
-              sans elle. */}
-          {Number.isFinite(res.rTotalSansGestion) && (
+          {/* La convention de gestion partielle, dite à voix haute.
+              Elle est DÉSACTIVÉE par défaut : mesuré sur 2 ans de données
+              réelles, elle fabrique 71 % du résultat BTC et 139 % de celui de
+              l'or — sans elle, l'or devient perdant. L'écart est chiffré ici
+              pour que l'hypothèse reste visible, jamais implicite. */}
+          {Number.isFinite(res.beTheorique) && res.beTheorique !== 0 && (
             <div style={{ marginTop:8, fontSize:11.5, padding:'7px 10px', borderRadius:7,
-              background: res.signeDependDuBE ? 'rgba(245,158,11,.08)' : 'rgba(148,163,184,.05)',
-              border: `1px solid ${res.signeDependDuBE ? 'rgba(245,158,11,.3)' : 'rgba(148,163,184,.15)'}`,
-              color: res.signeDependDuBE ? '#fbbf24' : 'var(--dim)' }}>
-              <i className={`fas ${res.signeDependDuBE ? 'fa-triangle-exclamation' : 'fa-circle-info'}`}
-                style={{ marginRight:7 }}></i>
-              Un BE (objectif 1 pris puis retour à l'entrée) est crédité de
-              <b> la moitié du premier objectif</b> — clôture partielle supposée, stop à l'entrée.
-              Sans cette gestion : <b>{res.rTotalSansGestion >= 0 ? '+' : ''}{r2(res.rTotalSansGestion)} R</b>
-              {' '}({r2(res.esperanceSansGestion)} R/trade, contre {r2(res.esperance)} R/trade).
-              {res.signeDependDuBE && ' Le signe du résultat dépend de cette seule hypothèse.'}
+              background:'rgba(148,163,184,.06)', border:'1px solid rgba(148,163,184,.2)',
+              color:'var(--dim)' }}>
+              <i className="fas fa-scale-unbalanced" style={{ marginRight:7 }}></i>
+              {res.gestionPartielle ? (
+                <>
+                  <b>Gestion partielle activée.</b> Un BE (objectif 1 touché puis retour à l'entrée)
+                  est crédité de la moitié du premier objectif : <b>+{r2(res.beSomme)} R</b> sur
+                  {' '}{res.be || 0} trade(s). Sans cette hypothèse : <b>{r2(res.rTotalSansGestion)} R</b>.
+                </>
+              ) : (
+                <>
+                  <b>Gestion partielle désactivée</b> — un BE vaut 0 R. Si on créditait la moitié du
+                  premier objectif, le total passerait à <b>{r2(res.rTotal + res.beTheorique)} R</b>
+                  {' '}(soit +{r2(res.beTheorique)} R d'hypothèse). Ce n'est pas une mesure : aucune
+                  sortie partielle n'est simulée dans les frais.
+                </>
+              )}
             </div>
           )}
 

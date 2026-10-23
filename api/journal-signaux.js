@@ -332,6 +332,24 @@ function evaluer(sig, bougies) {
   return sig;
 }
 
+/**
+ * La gestion partielle est-elle créditée ?
+ *
+ * Mesuré sur 2 ans de données réelles : cette convention fabrique 71 % du
+ * résultat BTC et 139 % de celui de l'or (sans elle, l'or passe de +0,088 R à
+ * −0,034 R par trade). La littérature est du même avis — un stop à l'entrée
+ * abaisse l'espérance dans le cas général.
+ *
+ * Elle reste disponible, mais **désactivée par défaut** : un système ne peut pas
+ * présenter comme acquis ce qu'une hypothèse de gestion fabrique.
+ */
+let gestionPartielle = false;
+
+function activerGestionPartielle(valeur = true) {
+  gestionPartielle = !!valeur;
+  return gestionPartielle;
+}
+
 /** Gain/perte en « R » (risque initial = 1). */
 function multipleR(sig) {
   const risque = Math.abs(sig.entree - sig.stop);
@@ -345,9 +363,12 @@ function multipleR(sig) {
       const o = sig.objectifs[0];
       return Number.isFinite(o) ? +(((sig.sens === 'long' ? o - sig.entree : sig.entree - o) / risque).toFixed(2)) : null;
     }
-    // BE : objectif 1 pris, puis retour à l'entrée. On compte la moitié du
-    // premier objectif — c'est ce qu'un gestionnaire sérieux sécurise.
+    // BE : objectif 1 touché, puis retour à l'entrée. Par défaut : 0 R — le
+    // trade n'a rien rapporté, la sortie partielle n'est pas simulée dans les
+    // coûts. Créditer la moitié du premier objectif est une hypothèse, pas une
+    // mesure : elle s'active explicitement (`activerGestionPartielle`).
     case 'be': {
+      if (!gestionPartielle) return 0;
       const o = sig.objectifs[0];
       return Number.isFinite(o) ? +((((sig.sens === 'long' ? o - sig.entree : sig.entree - o) / risque) / 2).toFixed(2)) : 0;
     }
@@ -616,5 +637,8 @@ function stats() {
 
 module.exports = {
   FICHIER, enregistrer, evaluer, mettreAJour, perimer, lister, stats, charger, sauver,
-  MAX_BOUGIES_SUIVI
+  MAX_BOUGIES_SUIVI,
+  // La convention BE est une option, plus une valeur par défaut.
+  activerGestionPartielle, gestionPartielleActive: () => gestionPartielle,
+  multipleR
 };

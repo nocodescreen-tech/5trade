@@ -285,16 +285,27 @@ function resumer(trades, meta = {}) {
     // la convention, −70,0 R si un BE vaut zéro. Le signe du résultat tient donc
     // à cette seule hypothèse — elle doit être affichée, pas enfouie.
     ...(() => {
-      const sommeBE = clos.filter(t => t.resultat === 'be')
-        .reduce((a, t) => a + (Number.isFinite(t.r) ? t.r : 0), 0);
+      const beTr = closes => closes.filter(t => t.resultat === 'be');
+      const sommeBE = beTr(clos).reduce((a, t) => a + (Number.isFinite(t.r) ? t.r : 0), 0);
+      // Ce que la convention AURAIT crédité : la moitié du premier objectif.
+      // On le calcule même quand elle est désactivée, pour que l'écart soit
+      // visible au lieu d'être une opinion.
+      const theorique = beTr(clos).reduce((a, t) => {
+        const risque = Math.abs(t.entree - t.stop);
+        const o = (t.objectifs || [])[0];
+        if (!risque || !Number.isFinite(o)) return a;
+        const r1 = (t.sens === 'long' ? o - t.entree : t.entree - o) / risque;
+        return a + (Number.isFinite(r1) ? r1 / 2 : 0);
+      }, 0);
       const sansGestion = rTotal - sommeBE;
       return {
+        gestionPartielle: Journal.gestionPartielleActive(),
+        be: beTr(clos).length,
         beSomme: +sommeBE.toFixed(2),
+        beTheorique: +theorique.toFixed(2),
         rTotalSansGestion: +sansGestion.toFixed(2),
         esperanceSansGestion: clos.length ? +(sansGestion / clos.length).toFixed(4) : null,
-        // Part du résultat qui vient de la convention (en % de |total|).
         poidsBePct: Math.abs(rTotal) > 0 ? +((sommeBE / Math.abs(rTotal)) * 100).toFixed(0) : null,
-        // Le drapeau qui compte : la convention change-t-elle le SIGNE ?
         signeDependDuBE: (rTotal > 0) !== (sansGestion > 0)
       };
     })(),
