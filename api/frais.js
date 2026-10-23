@@ -30,7 +30,7 @@ const path = require('path');
 
 const FICHIER = process.env.FRAIS_FICHIER || path.join(__dirname, '..', 'data', 'frais.json');
 
-const DEFAUT = { defaut: 0, commissionDefaut: 0, parSymbole: {}, partMax: 0.15 };
+const DEFAUT = { defaut: 0, commissionDefaut: 0, glissement: 0, parSymbole: {}, partMax: 0.15 };
 
 /**
  * Part maximale du RISQUE qu'un coût peut représenter. Au-delà, le trade est
@@ -83,7 +83,8 @@ function normaliser(brut) {
   for (const [sym, val] of Object.entries(source)) {
     if (!sym || val === null || val === undefined) continue;
     const o = typeof val === 'object' ? val : { spread: val };
-    const e = { spread: nombre(o.spread, 0), commissionPct: nombre(o.commissionPct, 0) };
+    const e = { spread: nombre(o.spread, 0), commissionPct: nombre(o.commissionPct, 0),
+      glissement: nombre(o.glissement, 0) };
     // Une entrée à zéro est conservée : elle dit explicitement « ce symbole est
     // gratuit », ce qui n'est pas la même chose que « on ne sait pas ».
     parSymbole[String(sym)] = e;
@@ -93,7 +94,8 @@ function normaliser(brut) {
   const partMaxBrut = Number(j.partMax);
   const partMax = Number.isFinite(partMaxBrut) && partMaxBrut > 0 && partMaxBrut < 1
     ? partMaxBrut : PART_MAX_COUT;
-  return { defaut: nombre(j.defaut, 0), commissionDefaut: nombre(j.commissionDefaut, 0), parSymbole, partMax };
+  return { defaut: nombre(j.defaut, 0), commissionDefaut: nombre(j.commissionDefaut, 0),
+    glissement: nombre(j.glissement, 0), parSymbole, partMax };
 }
 
 /** Configuration courante. Relue si le fichier a changé (édition à la main prise en compte). */
@@ -145,10 +147,18 @@ function fraisPour(symbol, entree) {
   const commission = Number.isFinite(Number(entree)) && commissionPct
     ? commissionPct * Number(entree) * 2     // aller ET retour
     : 0;
+  // GLISSEMENT D'EXÉCUTION : on n'est jamais rempli au niveau exact. Le prix
+  // glisse contre nous à l'entrée, et de nouveau à la sortie — d'où ×2. C'est
+  // une hypothèse, mais une hypothèse honnête : sans elle, tous les résultats
+  // supposent un remplissage parfait, ce qui n'existe pas.
+  const glissement = (perso && Number.isFinite(Number(perso.glissement)))
+    ? Number(perso.glissement)
+    : (Number(cfg.glissement) || 0);
   return {
     spread: +spread.toFixed(6),
     commission: +commission.toFixed(6),
-    total: +(spread + commission).toFixed(6)
+    glissement: +(glissement * 2).toFixed(6),
+    total: +(spread + commission + glissement * 2).toFixed(6)
   };
 }
 
@@ -162,8 +172,9 @@ function coutEnR(symbol, entree, risque) {
 /** Les frais sont-ils réellement configurés ? (sinon net = brut) */
 function actifs() {
   const cfg = configuration();
-  if (cfg.defaut > 0 || cfg.commissionDefaut > 0) return true;
-  return Object.values(cfg.parSymbole).some(v => v.spread > 0 || v.commissionPct > 0);
+  if (cfg.defaut > 0 || cfg.commissionDefaut > 0 || cfg.glissement > 0) return true;
+  return Object.values(cfg.parSymbole)
+    .some(v => v.spread > 0 || v.commissionPct > 0 || v.glissement > 0);
 }
 
 /**

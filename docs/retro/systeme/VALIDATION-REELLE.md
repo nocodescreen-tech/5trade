@@ -75,6 +75,27 @@ Décomposition par concept, BTC, sans la convention :
 | Structure | +0,078 R | −0,008 R |
 | Liquidité | +0,067 R | −0,031 R |
 
+## Le glissement d'exécution — le test qui tranche
+
+Tous les chiffres ci-dessus supposent un remplissage **au niveau exact**. On
+facture maintenant un glissement à l'entrée **et** à la sortie, en unités de prix
+(`tools/test-glissement.js`). BTC-USD 1h, 17 332 bougies :
+
+| glissement | trades | total R | espérance | Breaker | FVG |
+|---|---|---|---|---|---|
+| 0 (parfait) | 8 329 | +307,9 | **+0,0370** | +0,108 | +0,101 |
+| 6 $ (½ spread) | 7 841 | +80,0 | +0,0102 | +0,069 | +0,099 |
+| 12 $ (1 spread) | 6 667 | +4,1 | **+0,0006** | +0,033 | +0,084 |
+| 24 $ (2 spreads) | 4 429 | −83,0 | −0,0187 | −0,003 | −0,018 |
+
+**L'avantage de BTC meurt dès un glissement égal à un spread.** Il ne survit que
+dans l'hypothèse d'un demi-spread, soit une exécution meilleure que celle d'un
+particulier sur un broker retail.
+
+Note de cohérence : un BE (retour à l'entrée) paie le spread sans rien gagner —
+1 877 trades × ≈ −0,028 R = **−52,70 R**. C'est pour cela que le total passe de
+360,64 R (BE exclus du calcul) à 307,94 R (BE payés et crédités de 0 R).
+
 ## Verdict
 
 1. **Sur instrument synthétique (R_75), tout résultat est sans valeur.** La
@@ -82,10 +103,13 @@ Décomposition par concept, BTC, sans la convention :
 2. **L'or et l'EURUSD n'ont pas d'avantage défendable.** L'or est positif
    uniquement grâce à la convention BE (−0,034 R sans elle) ; l'EURUSD meurt dès
    que les coûts doublent (−80 %). Ni l'un ni l'autre ne doit être annoncé.
-3. **BTC présente un avantage réel mais non encore établi** : Breaker **+0,115 R**
-   et FVG **+0,108 R** par trade sur 8 329 trades et 2 ans, frais inclus, positifs
-   dans les deux moitiés de la période, robustes à des coûts doublés. Le PSR de
-   0,77 reste **sous la barre de 0,95** : l'avantage est probable, pas démontré.
+3. **BTC présente un avantage réel mais qui ne survit pas à l'exécution** :
+   Breaker **+0,108 R** et FVG **+0,101 R** par trade sur 8 329 trades et 2 ans,
+   frais inclus. Mais avec un glissement d'un demi-spread l'espérance tombe à
+   +0,010 R, et à **+0,0006 R** pour un spread entier. Le PSR de 0,77 était déjà
+   sous la barre de 0,95 ; l'exécution réaliste achève le dossier : **ce n'est pas
+   tradeable en l'état**, pas parce que le raisonnement est faux, parce que
+   l'avantage est plus petit que la friction.
 4. **La convention BE doit cesser d'être la présentation par défaut.** Elle
    fabrique 71 % du résultat BTC et 139 % de celui de l'or. Tant qu'elle est la
    ligne du haut, le système affiche une performance de gestion, pas de méthode.

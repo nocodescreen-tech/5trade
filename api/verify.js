@@ -2233,6 +2233,18 @@ function tinyPng(W = 64, H = 40) {
     // L'or reste acceptable : 0,30 de spread sur 2,915 de risque = 10,3 %.
     const or = F.plafondCout(4100, 4097.085, 'frxXAUUSD');
     ok('un coût sous le plafond laisse passer', !!or && or.ok === true, or ? `${or.part} %` : '—');
+    // Glissement d'exécution : on n'est jamais rempli au niveau exact. Facturé à
+    // l'entrée ET à la sortie, donc ×2 sur le total.
+    {
+      F.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: { 'BTC-USD': { spread: 12, glissement: 6 } } });
+      const c = F.fraisPour('BTC-USD', 60000);
+      ok('le glissement compte à l’entrée et à la sortie', c.glissement === 12, String(c.glissement));
+      ok('le total additionne spread et glissement', Math.abs(c.total - 24) < 1e-6, String(c.total));
+      F.configurer({ defaut: 0, commissionDefaut: 0, glissement: 0.5, parSymbole: {} });
+      ok('un glissement seul rend les frais actifs', F.actifs() === true);
+      F.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
+      ok('sans glissement ni spread, les frais restent inactifs', F.actifs() === false);
+    }
     // Une part absurde (50 au lieu de 0,5) ne doit pas désactiver le plafond.
     ok('une part maximale invalide retombe sur la valeur sûre',
       F.normaliser({ partMax: 50 }).partMax === F.PART_MAX_COUT,
