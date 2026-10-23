@@ -25,6 +25,8 @@
 const Multi = require('./signaux');
 const Journal = require('./journal-signaux');
 const Frais = require('./frais');
+// Nature de l'instrument : un backtest sur un RNG ne prouve rien.
+const Instruments = require('./instruments');
 
 const DEPART_MIN = 30;        // bougies nécessaires avant de juger
 const MAX_BOUGIES = 800;
@@ -165,6 +167,11 @@ function lancer(candles, meta = {}, options = {}) {
     at: n ? serie[n - 1].t : null,
     debut: n ? serie[0].t : null,
     bougies: n,
+    // Ce que vaut le résultat : sur un instrument synthétique, rien.
+    instrument: {
+      synthetique: Instruments.synthetique(meta.symbol),
+      avertissement: Instruments.avertissement(meta.symbol)
+    },
     // Un backtest sur une poignée de bougies n'est pas un résultat : c'est une
     // anecdote. Le drapeau est calculé ici pour que l'écran ne puisse pas
     // l'oublier — 93 bougies, c'est 23 heures d'or en 15m.

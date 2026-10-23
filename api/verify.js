@@ -2768,6 +2768,18 @@ function tinyPng(W = 64, H = 40) {
         const v = Rk.dimensionner(4100, 4099, 1000, 1);   // stop 1 point → 10 unités
         return v.taille !== null && v.exposition > 1000;
       })());
+    // BUG-10 — nature de l'instrument : un backtest sur un RNG ne prouve rien.
+    const Ins = require('./instruments.js');
+    ok('BUG-10 : un indice synthétique est identifié comme tel',
+      Ins.synthetique('R_75') && Ins.synthetique('BOOM500') && Ins.synthetique('1HZ100V'));
+    ok('BUG-10 : un vrai marché n’est pas marqué synthétique',
+      !Ins.synthetique('frxXAUUSD') && !Ins.synthetique('cryBTCUSD') && !Ins.synthetique('OTC_SPC'));
+    ok('BUG-10 : le backtest expose la nature de son instrument',
+      rR.instrument && typeof rR.instrument.synthetique === 'boolean',
+      `frxXAUUSD → ${rR.instrument && rR.instrument.synthetique}`);
+    ok('BUG-10 : l’avertissement nomme l’instrument concerné',
+      String(Ins.avertissement('R_75') || '').includes('R_75')
+      && Ins.avertissement('frxXAUUSD') === null);
     // La parité Node ↔ sklearn a déjà son test dédié plus haut (section modèle) :
     // on ne la rejoue pas ici, un doublon n'est pas une couverture.
   }

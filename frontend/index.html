@@ -4032,6 +4032,18 @@ function BacktestPanel() {
             <span style={{ color:'var(--dim)' }}>{res.enCours} encore en cours (exclues)</span>
           </div>
 
+          {/* Sur un indice synthétique, un résultat positif ne prouve rien.
+              Deriv le dit lui-même : ces séries sortent d'un générateur
+              aléatoire cryptographique. Afficher « +67 R » sans ce cadre
+              reviendrait à vendre du bruit comme une compétence. */}
+          {res.instrument && res.instrument.synthetique && (
+            <div style={{ marginTop:8, fontSize:11.5, padding:'8px 10px', borderRadius:7,
+              background:'rgba(239,68,68,.08)', border:'1px solid rgba(239,68,68,.35)', color:'#fca5a5' }}>
+              <i className="fas fa-dice" style={{ marginRight:7 }}></i>
+              <b>Instrument synthétique.</b> {res.instrument.avertissement}
+            </div>
+          )}
+
           {/* La convention qui décide du signe, dite à voix haute.
               Un « retour à l'entrée » (BE) est crédité de la moitié du premier
               objectif : c'est une gestion partielle supposée, pas un fait. Sur
