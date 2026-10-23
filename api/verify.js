@@ -2249,7 +2249,10 @@ function tinyPng(W = 64, H = 40) {
         String(F.configuration().glissement));
       ok('configurer conserve la part maximale', F.configuration().partMax === 0.05,
         String(F.configuration().partMax));
-      F.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
+      // Remise à zéro EXPLICITE : depuis que `configurer` conserve un champ
+      // absent, omettre `glissement` le laisserait actif pour les sections
+      // suivantes — et le plafond de coût refuserait alors tous les trades.
+      F.configurer({ defaut: 0, commissionDefaut: 0, glissement: 0, partMax: 0.15, parSymbole: {} });
       ok('sans glissement ni spread, les frais restent inactifs', F.actifs() === false);
     }
     // Une part absurde (50 au lieu de 0,5) ne doit pas désactiver le plafond.
