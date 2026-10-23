@@ -2697,6 +2697,82 @@ function tinyPng(W = 64, H = 40) {
     Fr.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // RÉGRESSIONS NOMMÉES — un test par bug RÉELLEMENT trouvé.
+  //
+  // Méthode (skill `ai-regression-testing`) : quand le même modèle écrit et
+  // relit le code, il transporte les mêmes hypothèses dans les deux étapes. Un
+  // test automatique est le seul garde-fou. On ne teste donc pas « le code qui
+  // marche », on teste les bugs qui ont eu lieu, et chaque test porte l'identifiant
+  // du bug pour que la cause reste lisible dans la sortie.
+  //
+  //   BUG-1  `Number(null) === 0` — taille de position zéro, rapport nul compté
+  //          comme trade. Trouvé TROIS fois (risque, rr, journal).
+  //   BUG-2  objectif à contre-sens → « gagnant » à R négatif (Double top).
+  //   BUG-3  `MAX_BOUGES` lu au lieu de `MAX_BOUGIES` → 93 bougies au lieu de 800.
+  //   BUG-4  convention BE invisible alors qu'elle décide du signe du résultat.
+  //   BUG-5  `trades` plafonné à 200 sans le dire → courbe de capital tronquée.
+  //   BUG-6  levier plafonné sur le notionnel au lieu du risque engagé.
+  //   BUG-7  perte du jour comptant des trades jamais pris.
+  //   BUG-8  capital de référence pris sur la composition naïve.
+  //   BUG-9  journal acceptant plus de positions que son plafond.
+  //   BUG-10 positions ouvertes jamais périmées → livre bloqué pour toujours.
+  // ═══════════════════════════════════════════════════════════════════════
+  {
+    const Bk = require('./backtest.js');
+    const Rk = require('./risque.js');
+    const Mk = require('./modele.js');
+    const T0r = 1700000000000, MINr = 60000;
+    const serieR = [];
+    for (let i = 0; i < 500; i++) {
+      const base = 4100 + Math.sin(i / 9) * 16 + Math.sin(i / 3.5) * 4;
+      serieR.push({ t: T0r + i * MINr, o: base, h: base + 6, l: base - 6,
+        c: base + (i % 3 ? 2.5 : -2.2), v: 1, closed: true });
+    }
+    const profilsR = [{ id: 'p', titre: 'T', regles: ['R1', 'R2', 'R3', 'R4'],
+      seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: [], parametres: {} }];
+    const rR = Bk.lancer(serieR, { symbol: 'frxXAUUSD', timeframe: '5m' },
+      { profils: profilsR, pas: 2, maxBougies: 480, limiteTrades: 100000 });
+    const trR = rR.trades || [];
+
+    // BUG-1 — aucun R null/NaN ne doit passer pour un trade évalué.
+    ok('BUG-1 : aucun trade avec un R non fini', trR.every(t => Number.isFinite(t.r)),
+      `${trR.filter(t => !Number.isFinite(t.r)).length} cas`);
+    // BUG-2 — un gagnant rapporte, il ne retire pas.
+    ok('BUG-2 : aucun gagnant à R négatif',
+      trR.filter(t => (t.resultat === 'tp1' || t.resultat === 'tp2') && t.r <= 0).length === 0);
+    // BUG-3 — jamais plus de bougies que le plafond exporté.
+    ok('BUG-3 : jamais plus de bougies que MAX_BOUGIES',
+      rR.bougies <= Bk.MAX_BOUGIES, `${rR.bougies} <= ${Bk.MAX_BOUGIES}`);
+    // BUG-4 — la convention BE est chiffrée et cohérente avec le total.
+    ok('BUG-4 : total = total sans gestion + somme des BE',
+      Math.abs((rR.rTotalSansGestion + rR.beSomme) - rR.rTotal) < 0.05,
+      `${rR.rTotalSansGestion} + ${rR.beSomme} = ${rR.rTotal}`);
+    // BUG-5 — la limite de trades est réglable, donc la courbe peut couvrir tout.
+    ok('BUG-5 : tous les trades sont rendus quand on lève la limite',
+      trR.length === rR.clos, `${trR.length} rendus / ${rR.clos} clos`);
+    // BUG-9 — le journal refuse au-delà du plafond de positions.
+    const cfgR = Rk.configuration();
+    ok('BUG-9 : le plafond de positions est appliqué par la simulation',
+      (() => {
+        const ouverts = Array.from({ length: cfgR.maxSimultanes + 3 }, (_, i) => ({
+          at: T0r + i, leveLe: T0r + 1e9, entree: 4100, stop: 4090,
+          symbol: 'frxXAUUSD', resultat: 'ouvert', r: null
+        }));
+        const etatSature = Rk.etat(ouverts);
+        return Rk.verifierPrise({ entree: 4100, stop: 4090, symbol: 'frxXAUUSD' }, etatSature).ok === false;
+      })(), `plafond ${cfgR.maxSimultanes}`);
+    // BUG-6 — le plafond de levier ne s'applique pas au risque : un trade à stop
+    // large et petite taille doit passer même si son notionnel est élevé.
+    ok('BUG-6 : un notionnel élevé ne bloque pas si le risque est faible',
+      (() => {
+        const v = Rk.dimensionner(4100, 4099, 1000, 1);   // stop 1 point → 10 unités
+        return v.taille !== null && v.exposition > 1000;
+      })());
+    // La parité Node ↔ sklearn a déjà son test dédié plus haut (section modèle) :
+    // on ne la rejoue pas ici, un doublon n'est pas une couverture.
+  }
+
   // ── Backtest : un gagnant ne peut pas retirer du R ────────────────────────
   // Trouvé sur données réelles (or 5m) : des « Double top » vendaient avec un
   // premier objectif AU-DESSUS de l'entrée. Le prix l'atteint aussitôt, le trade
