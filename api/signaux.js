@@ -92,17 +92,36 @@ function assainirNiveaux(niv, sens, atr, risqueMini = 0.5) {
   // Stop du mauvais côté : la configuration est incohérente, on ne la publie pas.
   if (long ? niv.stop >= niv.entree : niv.stop <= niv.entree) return null;
 
-  if (!(atr > 0)) return niv;
+  // ── Objectifs du mauvais côté ────────────────────────────────────────────
+  // Trouvé sur données réelles : des « Double top » vendaient à 4109,97 avec un
+  // premier objectif à 4114,32 — AU-DESSUS de l'entrée. Le prix l'atteint donc
+  // immédiatement (il est déjà passé), le trade est compté « objectif atteint »
+  // et le R calculé sort NÉGATIF. Résultat à l'écran : « 40 gagnés, 2 perdus,
+  // 95 % de réussite, −4,47 R ». Un gagnant ne peut pas retirer du R.
+  //
+  // Un objectif situé du mauvais côté n'est pas un objectif : c'est un niveau
+  // déjà franchi. On refuse la configuration si la cible PROCHE est invalide, et
+  // on tronque les suivantes — jamais l'inverse, sinon `objectifs[0]` et
+  // `objectifs[1]` se décalent et le suivi TP1/TP2 devient faux.
+  const cote = o => Number.isFinite(o) && (long ? o > niv.entree : o < niv.entree);
+  const brut = Array.isArray(niv.objectifs) ? niv.objectifs : [];
+  if (!brut.length || !cote(brut[0])) return null;
+  const valides = brut.filter(cote);
+  const ecartes = brut.length - valides.length;
+
+  if (!(atr > 0)) return ecartes ? { ...niv, objectifs: valides } : niv;
   const ecart = Math.abs(niv.entree - niv.stop);
   const mini = atr * risqueMini;
-  if (ecart >= mini) return niv;
+  if (ecart >= mini) return ecartes ? { ...niv, objectifs: valides } : niv;
 
   const stop = long ? niv.entree - mini : niv.entree + mini;
   return {
     ...niv,
+    objectifs: valides,
     stop: arrondiPrix(stop),
     stopElargi: true,
-    base: [niv.base, `stop élargi à ${risqueMini}× ATR (le niveau était à ${arrondiPrix(ecart)} du prix)`]
+    base: [niv.base, `stop élargi à ${risqueMini}× ATR (le niveau était à ${arrondiPrix(ecart)} du prix)`,
+      ecartes ? `${ecartes} objectif(s) écarté(s) : du mauvais côté de l'entrée` : null]
       .filter(Boolean).join(' · ')
   };
 }

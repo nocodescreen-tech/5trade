@@ -2697,6 +2697,50 @@ function tinyPng(W = 64, H = 40) {
     Fr.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
   }
 
+  // ── Backtest : un gagnant ne peut pas retirer du R ────────────────────────
+  // Trouvé sur données réelles (or 5m) : des « Double top » vendaient avec un
+  // premier objectif AU-DESSUS de l'entrée. Le prix l'atteint aussitôt, le trade
+  // était compté gagnant, et le R sortait négatif — d'où « 95 % de réussite et
+  // −4,47 R » à l'écran. La cause est corrigée dans `assainirNiveaux`.
+  {
+    const Multi = require('./signaux.js');
+    // Cible derrière l'entrée pour un short → configuration refusée.
+    const shortFaux = Multi.assainirNiveaux(
+      { entree: 4109.97, stop: 4124.06, objectifs: [4114.32, 4109.79] }, 'short', 8);
+    ok('un objectif du mauvais côté est refusé', shortFaux === null,
+      shortFaux ? `objectifs ${JSON.stringify(shortFaux.objectifs)}` : 'refusé');
+    // Cible correcte pour un short → conservée telle quelle.
+    const shortBon = Multi.assainirNiveaux(
+      { entree: 4109.97, stop: 4124.06, objectifs: [4100, 4090] }, 'short', 8);
+    ok('un objectif du bon côté est conservé',
+      !!shortBon && shortBon.objectifs[0] === 4100, JSON.stringify(shortBon && shortBon.objectifs));
+    // Deuxième cible derrière l'entrée → tronquée, la première reste en place.
+    const tronque = Multi.assainirNiveaux(
+      { entree: 4109.97, stop: 4124.06, objectifs: [4100, 4130] }, 'short', 8);
+    ok('une cible lointaine invalide est tronquée sans décaler les rangs',
+      !!tronque && tronque.objectifs.length === 1 && tronque.objectifs[0] === 4100,
+      JSON.stringify(tronque && tronque.objectifs));
+    // Aucun objectif → pas de trade.
+    ok('un signal sans objectif est refusé', Multi.assainirNiveaux(
+      { entree: 100, stop: 98, objectifs: [] }, 'long', 1) === null);
+    // Et sur un backtest réel, plus aucun gagnant à R négatif.
+    const Bk = require('./backtest.js');
+    const T0b = 1700000000000, MINb = 60000;
+    const serieOr = [];
+    for (let i = 0; i < 400; i++) {
+      const base = 4100 + Math.sin(i / 9) * 14 + Math.sin(i / 3) * 3;
+      serieOr.push({ t: T0b + i * MINb, o: base, h: base + 5, l: base - 5, c: base + (i % 3 ? 2 : -2), v: 1, closed: true });
+    }
+    const profilsOr = [{ id: 'p', titre: 'T', regles: ['R1', 'R2', 'R3', 'R4'],
+      seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: [], parametres: {} }];
+    const rOr = Bk.lancer(serieOr, { symbol: 'frxXAUUSD', timeframe: '5m' },
+      { profils: profilsOr, pas: 2, maxBougies: 380 });
+    const gagnantsNeg = (rOr.trades || []).filter(t =>
+      (t.resultat === 'tp1' || t.resultat === 'tp2') && Number.isFinite(t.r) && t.r <= 0);
+    ok('aucun gagnant avec un R négatif', gagnantsNeg.length === 0,
+      `${gagnantsNeg.length} cas sur ${(rOr.trades || []).length} trades`);
+  }
+
   // ── Backtest : le moteur rejoué, et une définition UNIQUE du succès ──
   {
     const B = require('./backtest.js');
