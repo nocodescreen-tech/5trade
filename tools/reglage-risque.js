@@ -21,6 +21,10 @@ const profil = [{ id: 'p', titre: 'T', regles: ['R1', 'R2', 'R3', 'R4'],
   seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: [], parametres: {} }];
 
 const tous = [];
+// Sources à retenir : `node tools/reglage-risque.js motif,structure`
+// Défaut : toutes (aucun filtre). Mesuré sur 8 indices en quotidien, les signaux
+// de stratégie valent −0,19 R par trade sur NQ et font tomber le DSR de 0,84 à 0,53.
+const sources = process.argv[2] ? process.argv[2].split(',').map(s => s.trim()).filter(Boolean) : null;
 for (const [sym, spread] of Object.entries(INDICES)) {
   const bougies = H.charger('yahoo', sym, '1d');
   if (!bougies || bougies.length < 300) continue;
@@ -28,7 +32,7 @@ for (const [sym, spread] of Object.entries(INDICES)) {
     partMax: 0.15, parSymbole: { [sym]: { spread, glissement: spread } } });
   const r = B.lancer(bougies, { symbol: sym, timeframe: '1d' },
     { profils: profil, pas: 1, maxBougies: bougies.length, plafond: 20000,
-      limiteTrades: 1e6, modele: false });
+      limiteTrades: 1e6, modele: false, sources });
   for (const t of (r.trades || [])) {
     if (Number.isFinite(t.r) && Number.isFinite(t.at)) {
       tous.push({ at: t.at, symbol: sym, entree: t.entree, stop: t.stop,

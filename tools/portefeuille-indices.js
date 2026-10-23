@@ -23,6 +23,7 @@ const INDICES = {
 const profil = [{ id: 'p', titre: 'T', regles: ['R1', 'R2', 'R3', 'R4'],
   seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: [], parametres: {} }];
 
+const sources = process.argv[2] ? process.argv[2].split(',').map(x => x.trim()).filter(Boolean) : null;
 const parMarche = [];
 const tous = [];
 
@@ -33,7 +34,7 @@ for (const [sym, spread] of Object.entries(INDICES)) {
     partMax: 0.15, parSymbole: { [sym]: { spread, glissement: spread } } });
   const r = B.lancer(bougies, { symbol: sym, timeframe: '1d' },
     { profils: profil, pas: 1, maxBougies: bougies.length, plafond: 20000,
-      limiteTrades: 1e6, modele: false });
+      limiteTrades: 1e6, modele: false, sources });
   const tr = (r.trades || []).filter(t => Number.isFinite(t.r));
   if (tr.length < 200) continue;
   const rs = tr.map(t => t.r);

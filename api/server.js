@@ -2072,7 +2072,9 @@ app.get('/api/analyse', requireAuth, async (req, res) => {
     const r = await Analyse.analyser({
       symbol: req.query.symbol, tf: req.query.tf, provider: req.query.provider,
       group: req.query.group, pas: req.query.pas, bougies: req.query.bougies,
-      prudent: req.query.prudent
+      prudent: req.query.prudent,
+      // ?sources=motif,structure — les signaux de stratégie valent −0,19 R.
+      sources: req.query.sources ? String(req.query.sources).split(',').filter(Boolean) : undefined
     });
     res.json({ success: true, ...r });
   } catch (e) { res.status(400).json({ success: false, error: e.message }); }

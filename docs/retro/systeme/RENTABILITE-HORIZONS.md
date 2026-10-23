@@ -35,19 +35,37 @@ Conséquence mesurée en quotidien sur 10 ans, glissement = 1 spread :
 ## Le résultat central : 7 indices sur 8
 
 En agrégeant les huit indices d'actions (mêmes règles, mêmes paramètres, aucun
-réglage par marché) :
+réglage par marché), **motifs et structure seulement** :
 
 ```
-trades             : 23 346
-espérance          : +4,56 % du risque par trade
-total              : +1 064 R sur 10 ans
+trades             : 22 757
+espérance          : +4,86 % du risque par trade
+total              : +1 105 R sur 10 ans
 marchés positifs   : 7 / 8
-Sharpe par trade   : 0,0299
-DSR (déflaté 8)    : 0,845
-DSR (déflaté 50)   : 0,154
-drawdown max       : −125 R
+Sharpe par trade   : 0,0318
+DSR (déflaté 8)    : 0,889
+DSR (déflaté 50)   : 0,201
+drawdown max       : −128 R
 hasard (binomial)  : 3,5 % de voir 7/8 positifs par chance
 ```
+
+## Ce que coûtent les stratégies de l'utilisateur
+
+Ventilation mesurée par source, NQ=F quotidien, 10 ans, frais + glissement :
+
+| source | trades | R par trade |
+|---|---|---|
+| structure | 1 099 | **+0,1105** |
+| motif | 1 561 | **+0,0797** |
+| **strategie** | **365** | **−0,1923** |
+
+Les 33 stratégies construites dans l'application sont **la partie qui perd**.
+Sur le portefeuille complet, les inclure fait tomber l'espérance de 4,86 % à
+3,95 % et le DSR de 0,889 à 0,526.
+
+Elles sont conservées (l'utilisateur doit pouvoir tester ses idées), mais le
+backtest expose désormais `parSource` et un filtre `sources` — et l'écran les
+affiche côte à côte.
 
 **Ce qui est établi** : la même mécanique, appliquée sans ajustement à huit
 marchés indépendants sur trois continents, est positive sur sept d'entre eux
@@ -96,8 +114,10 @@ Balayage du risque par trade × nombre de positions (`tools/reglage-risque.js`) 
 | 1,00 % | 5 | 2 281 | 16,5 % | 34,8 % | 0,47 |
 | 2,00 % | 5 | 4 | 0,6 % | 2,2 % | 0,29 |
 
-**Le réglage retenu : 0,5 % de risque par trade, 10 positions simultanées.**
-22,4 % par an pour 15,7 % de drawdown, ratio 1,43, sur 4 814 prises en 10 ans.
+**Le réglage retenu : 0,5 % de risque par trade, 10 positions simultanées,
+motifs + structure.** 23,2 % par an pour 15,7 % de drawdown, ratio 1,48, sur
+4 721 prises en 10 ans. Avec les stratégies incluses, le même réglage tombe à
+17,3 %/an pour 25,5 % de drawdown (ratio 0,68).
 
 Deux enseignements contre-intuitifs :
 - **Augmenter le risque par trade ne rend pas plus riche.** À 2 %, les plafonds de

@@ -81,7 +81,10 @@ async function analyser(opts = {}) {
 
   const r = B.lancer(serieCourte, { symbol, timeframe: tf },
     { profils: PROFIL_TOUT, pas, maxBougies: serieCourte.length,
-      plafond: 20000, limiteTrades: 1e6, modele: false });
+      plafond: 20000, limiteTrades: 1e6, modele: false,
+      // `sources` : filtrer motif / structure / strategie. Mesuré sur 8 indices
+      // en quotidien, les stratégies coûtent −0,19 R par trade.
+      sources: opts.sources });
 
   if (prudent) F.configurer({ defaut: 0, commissionDefaut: 0, glissement: 0, partMax: 0.15, parSymbole: {} });
 
@@ -138,6 +141,11 @@ async function analyser(opts = {}) {
     totalR: +trades.reduce((a, t) => a + t.r, 0).toFixed(2),
     gestionPartielle: require('./journal-signaux').gestionPartielleActive(),
     frais: prudent ? { prudent: true, spread, glissement: spread } : { prudent: false },
+    // Ventilation par source : sur NQ 10 ans, motif +0,0797 R, structure
+    // +0,1105 R, strategie −0,1923 R. Un utilisateur doit voir que ses propres
+    // stratégies sont la partie qui perd.
+    parSource: r.parSource || null,
+    sources: opts.sources || null,
     synthetique: I.synthetique(symbol),
     avertissement: I.avertissement(symbol),
     essais: configs.length,

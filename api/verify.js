@@ -2717,14 +2717,17 @@ function tinyPng(W = 64, H = 40) {
       (rPorte.trades || []).every(t => !Number.isFinite(t.rr) || t.rr >= 1.5),
       (rPorte.trades || []).map(t => t.rr).slice(0, 6).join(', '));
 
-    // Un signal dont l'objectif s'arrondit sur l'entrée n'est PAS un trade : il
-    // ne peut rien gagner. Sur un prix de 1,12 avec un ATR de 0,0015, tous les
-    // signaux de cette série sont dans ce cas — le backtest doit le compter.
+    // Un signal dont l'objectif est inutilisable n'est PAS un trade : il ne peut
+    // rien gagner. Depuis que les signaux de stratégie portent un vrai rapport
+    // (BUG-11), cette série produit des trades VALIDES — ce qui doit être vrai
+    // n'est donc plus « zéro trade », mais « aucun trade sans gain possible ».
     const rFine = B.lancer(serieFine, { symbol: 'EURUSD', timeframe: '5m' },
       { profils, pas: 2, maxBougies: 120 });
-    ok('un objectif inutilisable ne devient pas un trade',
-      (rFine.trades || []).length === 0 && rFine.ecartesRR > 0,
-      `${(rFine.trades || []).length} trade(s), ${rFine.ecartesRR} écartée(s)`);
+    ok('un objectif inutilisable ne devient jamais un trade',
+      (rFine.trades || []).every(t => Number.isFinite(t.rr) && t.rr > 0),
+      `${(rFine.trades || []).length} trade(s), ${rFine.ecartesRR} écartée(s)`
+        + ((rFine.trades || []).length
+          ? `, rr min ${Math.min(...rFine.trades.map(t => t.rr)).toFixed(2)}` : ''));
 
     // Coût disproportionné : le backtest ne doit produire AUCUN trade, et le
     // refus doit être COMPTÉ — un trade qui disparaît en silence laisse croire
@@ -2737,6 +2740,37 @@ function tinyPng(W = 64, H = 40) {
     ok('les configurations écartées par les frais sont comptées',
       rCout.ecartesFrais > 0, String(rCout.ecartesFrais));
     Fr.configurer({ defaut: 0, commissionDefaut: 0, parSymbole: {} });
+  }
+
+  // ── BUG-11 : une stratégie ne produisait AUCUN trade ─────────────────────
+  // `rr` était codé en dur à null sur les signaux de stratégie. Le filtre de
+  // rapport risque/rendement le lisait comme « objectif inutilisable » et leur
+  // retirait leurs niveaux. Mesuré en A/B sur 800 bougies d'or 15m :
+  //   avant → 619 trades, 0 strategie · après → 714 trades, 97 strategie.
+  {
+    const Sx = require('./signaux.js');
+    const bougies = Array.from({ length: 60 }, (_, i) => ({
+      t: i * 900000, o: 100 + Math.sin(i / 3) * 2, h: 101 + Math.sin(i / 3) * 2,
+      l: 99 + Math.sin(i / 3) * 2, c: 100 + Math.sin(i / 3.1) * 2, v: 100
+    }));
+    const profil = { id: 't', titre: 'Test', regles: ['R1', 'R2', 'R3', 'R4'],
+      seuilRegles: 1, seuilForce: 0, filtres: [], parametres: {} };
+    const sig = Sx.signalStrategie(bougies, { symbol: 'frxXAUUSD', timeframe: '15m' }, profil);
+    ok('BUG-11 : un signal de stratégie porte un rapport calculé, jamais null',
+      sig.rr === null ? sig.entree === null : Number.isFinite(sig.rr),
+      String(sig.rr));
+    ok('BUG-11 : le rapport d’un signal de stratégie correspond à ses niveaux',
+      (() => {
+        if (sig.entree === null || sig.stop === null) return true;
+        const attendu = Sx.rrDe({ entree: sig.entree, stop: sig.stop, objectifs: sig.objectifs });
+        return Math.abs(sig.rr - attendu) < 0.011;
+      })(), String(sig.rr));
+    // Et le filtre ne doit plus lui retirer ses niveaux.
+    const out = Sx.detecterTout(bougies, { symbol: 'frxXAUUSD', timeframe: '15m' }, { profils: [profil] });
+    const st = out.signaux.find(s => s.source === 'strategie');
+    ok('BUG-11 : le filtre RR ne déshabille pas un signal de stratégie valide',
+      !st || st.rr !== null || st.entree === null,
+      st ? `rr ${st.rr} · entree ${st.entree}` : 'aucun');
   }
 
   // ── Préréglages de risque mesurés ────────────────────────────────────────
@@ -3009,6 +3043,22 @@ function tinyPng(W = 64, H = 40) {
     const profils = [{ id: 'p', titre: 'Test', regles: ['R1', 'R2'], seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: ['5m'], parametres: {} }];
     const r = B.lancer(serie, { symbol: 'TEST', timeframe: '5m' }, { profils, pas: 3, maxBougies: 120 });
     ok('le backtest produit des prises', !r.indisponible && r.total > 0, `${r.total} prise(s)`);
+
+    // Le filtre par SOURCE, et la ventilation qui l'accompagne.
+    // Mesuré sur NQ 1d, 10 ans, frais + glissement : motif +0,0797 R,
+    // structure +0,1105 R, strategie −0,1923 R sur 365 trades.
+    ok('la ventilation par source couvre toutes les prises',
+      (() => {
+        const somme = Object.values(r.parSource || {}).reduce((a, v) => a + v.total, 0);
+        return somme === r.total;
+      })(), `${Object.keys(r.parSource || {}).length} source(s) pour ${r.total} prise(s)`);
+    const filtre = B.lancer(serie, { symbol: 'TEST', timeframe: '5m' },
+      { profils, pas: 3, maxBougies: 120, sources: ['motif'] });
+    ok('le filtre par source ne garde que la source demandée',
+      !filtre.parSource || Object.keys(filtre.parSource).every(k => k === 'motif'),
+      Object.keys(filtre.parSource || {}).join(',') || 'aucune prise');
+    ok('le filtre ne garde jamais plus de prises que sans filtre',
+      (filtre.total || 0) <= r.total, `${filtre.total} ≤ ${r.total}`);
     ok('les prises résolues ne dépassent pas le total', r.clos <= r.total, `${r.clos}/${r.total}`);
     ok('le taux de réussite reste entre 0 et 100',
       r.tauxReussite === null || (r.tauxReussite >= 0 && r.tauxReussite <= 100), String(r.tauxReussite));

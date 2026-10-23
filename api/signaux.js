@@ -413,7 +413,11 @@ function signalStrategie(candles, meta, profil) {
     entree: niveaux ? niveaux.entree : null,
     stop: niveaux ? niveaux.stop : null,
     objectifs: niveaux ? niveaux.objectifs : [],
-    rr: null,
+    // `rr` doit être CALCULÉ, pas nul. Codé en dur à null, il faisait échouer
+    // tous les signaux de stratégie au filtre de rapport risque/rendement, qui
+    // leur retirait leurs niveaux : aucune stratégie ne produisait de trade.
+    // Mesuré : 0 trade `strategie` sur 957 en backtest, avant ce correctif.
+    rr: rrDe(niveaux),
     raison: v.summary || null,
     // Ce que la stratégie DEMANDAIT sans l'obtenir (R5 jetée, filtre inconnu) :
     // un filtrage silencieux est un bug, on le remonte.

@@ -428,7 +428,12 @@ const PRESETS = {
   indices: {
     titre: 'Portefeuille d’indices (quotidien)',
     risquePct: 0.5, maxSimultanes: 10, maxRisqueMarchePct: 2, maxRisqueTotalPct: 5,
-    mesure: '8 indices, 10 ans, 1d, glissement 1 spread : 22,4 %/an, drawdown 15,7 %'
+    // Les signaux de STRATÉGIE coûtent : −0,19 R par trade sur NQ en quotidien.
+    // Les écarter fait passer le portefeuille de 17,3 %/an (ratio 0,68) à
+    // 23,2 %/an pour 15,7 % de drawdown (ratio 1,48).
+    sources: ['motif', 'structure'],
+    mesure: '8 indices, 10 ans, 1d, glissement 1 spread, motifs + structure : '
+      + '23,2 %/an, drawdown 15,7 % (ratio 1,48, 4 721 prises)'
   }
 };
 

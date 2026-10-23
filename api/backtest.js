@@ -98,6 +98,16 @@ function lancer(candles, meta = {}, options = {}) {
     ecartesModele += (r.ecartesModele || []).length;
     ecartesRR += (r.ecartesRR || []).length;
 
+    // Filtre par SOURCE (motif, structure, strategie).
+    // Mesuré sur 8 indices en quotidien : les signaux de stratégie valent
+    // −0,04 R par trade et font tomber le DSR du portefeuille de 0,843 à 0,449.
+    // Le filtre existe donc pour pouvoir les écarter — et le chiffre reste
+    // visible dans `parSource`, pas caché.
+    if (Array.isArray(options.sources) && options.sources.length) {
+      const gardes = new Set(options.sources);
+      r.signaux = (r.signaux || []).filter(s => gardes.has(s.source));
+    }
+
     const futurs = serie.slice(i + 1);
     // Plusieurs détecteurs peuvent décrire le MÊME trade sur cette bougie
     // (même entrée, même stop) : une seule prise, les concepts se cumulent.
@@ -106,6 +116,11 @@ function lancer(candles, meta = {}, options = {}) {
       if (s.status !== 'confirme' && s.status !== 'surveiller') continue;
       if (!s.entree || !s.stop || !Array.isArray(s.objectifs) || !s.objectifs.length) continue;
       if (!s.sens || s.sens === 'neutre') continue;
+      // Aucune bougie FUTURE, ou pas assez pour aller au bout du suivi : le
+      // trade ne peut pas être jugé. On ne l'ajoute pas. Sinon il sortait
+      // « ouvert » avec un R nul — et le nombre de trades rendus ne
+      // correspondait plus au nombre de trades clos.
+      if (futurs.length < Journal.MAX_BOUGIES_SUIVI) continue;
 
       const identite = `${s.id}|${s.sens}`;
       const dejaResolueA = resolues.get(identite);

@@ -5875,6 +5875,8 @@ function Systeme() {
 function Outils() {
   const [outil, setOutil] = useState(OUTILS_GET[0].id);
   const [symbol, setSymbol] = useState('BTCUSDT');
+  // Filtre de sources de l'analyse : « toutes », « motifs » ou « motifs-structure ».
+  const [sourcesOutil, setSourcesOutil] = useState('toutes');
   const [tf, setTf] = useState('1h');
   const [data, setData] = useState(null);
   const [chargement, setChargement] = useState(false);
@@ -5910,7 +5912,12 @@ function Outils() {
     if ((o.params || []).includes('symbol')) q.set('symbol', symbol);
     if ((o.params || []).includes('tf')) q.set('tf', tf);
     // L'analyse coûte cher (tout l'historique) : on borne et on le dit.
-    if (o.group) { q.set('group', o.group); q.set('bougies', '2500'); q.set('pas', '4'); }
+    if (o.group) {
+      q.set('group', o.group); q.set('bougies', '2500'); q.set('pas', '4');
+      if (sourcesOutil !== 'toutes') {
+        q.set('sources', sourcesOutil === 'motifs' ? 'motif,structure' : 'motif');
+      }
+    }
     appeler(o.url + (q.toString() ? '?' + q.toString() : ''));
   };
 
@@ -5959,6 +5966,18 @@ function Outils() {
               {['1m','5m','15m','1h','4h','1d'].map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
+          {/* Les signaux de stratégie perdent de l'argent en quotidien
+              (−0,19 R par trade mesuré sur NQ). Le filtre doit être à un clic,
+              pas caché dans une requête. */}
+          <div>
+            <label className="lbl">Sources</label>
+            <select className="fld" aria-label="Sources de signaux analysées" value={sourcesOutil}
+              onChange={e=>setSourcesOutil(e.target.value)}>
+              <option value="toutes">Toutes</option>
+              <option value="motifs">Sans les stratégies</option>
+              <option value="motifs-structure">Motifs + structure</option>
+            </select>
+          </div>
           <button className="btn" onClick={charger} disabled={chargement}>
             {chargement ? 'Chargement…' : 'Charger'}
           </button>
@@ -5987,6 +6006,13 @@ function Outils() {
                   frais inclus : spread {data.frais.spread} + glissement {data.frais.glissement}
                 </span>
               )}
+              {/* La ventilation par source, en clair : sur NQ 10 ans, motif
+                  +0,08 R, structure +0,11 R, strategie −0,19 R. */}
+              {data.parSource && Object.entries(data.parSource).map(([src, v]) => (
+                <span key={src} style={{ color: (v.r / v.total) >= 0 ? 'var(--ok)' : 'var(--bad)' }}>
+                  {src} {(v.r / v.total).toFixed(3)} R sur {v.total}
+                </span>
+              ))}
               <span style={{ color:'var(--dim)' }}>{data.source}</span>
             </div>
 
