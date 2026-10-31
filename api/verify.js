@@ -3276,6 +3276,17 @@ function tinyPng(W = 64, H = 40) {
     ok('le shebang des scripts conteneur est en LF',
       !/\r/.test(entry.split('\n')[0]) && !/\r/.test(dockerfile.split('\n')[0]),
       JSON.stringify(entry.slice(0, 12)));
+
+    // Script de déploiement : quatre allers-retours API perdus pour des règles
+    // que la plateforme impose (nom alphabétique, région obligatoire, ASCII).
+    const deploiement = path.join(ROOT, 'tools', 'northflank-deploy.js');
+    const dSrc = fs.readFileSync(deploiement, 'utf8');
+    require('child_process').execFileSync(process.execPath, ['--check', deploiement], { stdio: 'pipe' });
+    ok('le script de déploiement Northflank est syntaxiquement valide', true);
+    ok('le nom du service commence par une lettre', /NF_SERVICE \|\| '[A-Za-z]/.test(dSrc));
+    ok('la région est envoyée à la création du projet', /region: REGION/.test(dSrc));
+    ok('une base externe évite l\'addon (NF_DB_URL)', /NF_DB_URL/.test(dSrc));
+    ok('les identifiants sont masqués avant d\'être journalisés', /':\*\*\*@'/.test(dSrc));
   }
 
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──
