@@ -1,0 +1,8 @@
+{
+  "id": "strategy_003",
+  "title": "Reversal Pattern Strategy",
+  "content": "Détecter les patterns de retournement comme les double top/bottom, head and shoulders, ou engulfing patterns. Attendre la confirmation avant d'entrer. Stop loss au-delà du pattern. Cible basée sur la hauteur du pattern. Risque élevé, nécessite confirmation multiple.",
+  "type": "strategy",
+  "createdAt": "2026-10-10T00:00:00.000Z",
+  "tags": ["reversal", "pattern", "high risk", "double top", "head and shoulders"]
+}

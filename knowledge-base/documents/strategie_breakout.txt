@@ -1,0 +1,37 @@
+# Stratégie de Trading - Breakout Pattern
+
+## Description
+Stratégie basée sur les breakouts de niveaux clés avec confirmation de volume.
+
+## Règles d'entrée
+- Attendre que le prix casse un niveau de support ou résistance significatif
+- Confirmer avec un volume supérieur à la moyenne
+- Le breakout doit être clair (pas de faux breakout)
+
+## Règles de sortie
+- Take profit: 2x la distance du breakout
+- Stop loss: juste en dessous/au-dessus du niveau cassé
+- Trailing stop: 50% du profit réalisé
+
+## Timeframes recommandés
+- M15, M30, H1, H4
+
+## Paires recommandées
+- EURUSD, GBPUSD, USDJPY, XAUUSD
+
+## Gestion du risque
+- Risque maximum par trade: 1-2% du capital
+- Ratio risque/récompense minimum: 1:2
+
+## Indicateurs nécessaires
+- Volume
+- Support/Résistance
+- Moyennes mobiles (pour tendance)
+
+## Exemple visuel
+[Image du pattern breakout]
+
+---
+Créé le: 2026-10-10
+Type: breakout-strategy
+Tags: breakout, support, resistance, volume

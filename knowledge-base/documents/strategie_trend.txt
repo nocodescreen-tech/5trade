@@ -1,0 +1,35 @@
+# Stratégie de Trading - Suivi de Tendance
+
+## Description
+Stratégie simple basée sur le suivi de la tendance principale.
+
+## Règles d'entrée
+- Prix au-dessus des moyennes mobiles (MA 50, 200)
+- Confirmation avec RSI > 50 (pour tendance haussière)
+- Volume croissant
+
+## Règles de sortie
+- Sortie lorsque le prix passe en dessous de la MA 50
+- RSI < 30 (survente)
+- Changement de tendance sur timeframe supérieur
+
+## Timeframes recommandés
+- H1, H4, D1
+
+## Paires recommandées
+- Toutes les paires majeures
+
+## Gestion du risque
+- Risque maximum par trade: 1% du capital
+- Stop loss: en dessous du plus bas récent
+- Take profit: 3x le risque
+
+## Indicateurs nécessaires
+- Moyennes mobiles (50, 200)
+- RSI
+- MACD
+
+---
+Créé le: 2026-10-10
+Type: trend-strategy
+Tags: trend, moving-average, rsi, macd

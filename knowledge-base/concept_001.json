@@ -1,0 +1,8 @@
+{
+  "id": "concept_001",
+  "title": "Risk Management",
+  "content": "Gestion du risque: ne jamais risquer plus de 1-2% du capital par trade. Utiliser des stop losses systématiques. Calculer le ratio risque/rendement avant chaque entrée. Diversifier les trades. Ne pas trader avec des émotions.",
+  "type": "concept",
+  "createdAt": "2026-10-10T00:00:00.000Z",
+  "tags": ["risk management", "capital", "stop loss", "diversification"]
+}

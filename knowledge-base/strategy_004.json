@@ -1,0 +1,8 @@
+{
+  "id": "strategy_004",
+  "title": "Momentum Strategy",
+  "content": "Utiliser l'indice de force relative (RSI) et le MACD pour identifier la momentum. Acheter lorsque RSI sort de la zone de survente (<30) et MACD croît à la hausse. Vendre lorsque RSI sort de la zone de surachat (>70) et MACD décroît. Stop loss basé sur les plus bas récents.",
+  "type": "strategy",
+  "createdAt": "2026-10-10T00:00:00.000Z",
+  "tags": ["momentum", "rsi", "macd", "bullish", "bearish"]
+}

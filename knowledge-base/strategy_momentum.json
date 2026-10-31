@@ -1,0 +1,9 @@
+{
+  "id": "strategy_momentum",
+  "title": "Stratégie de Trading - Momentum",
+  "content": "Stratégie basée sur le momentum du marché.\n\n## Règles d'entrée\n- RSI > 70 (pour momentum haussier) ou < 30 (pour baissier)\n- MACD histogramme positif/négatif\n- Volume élevé\n- Prix au-dessus/au-dessous des moyennes mobiles\n\n## Règles de sortie\n- Sortie lorsque RSI revient vers 50\n- Changement de couleur du MACD\n- Volume décroissant\n- Sortie partielle à 50% du profit\n\n## Timeframes recommandés\n- M15, M30, H1\n\n## Paires recommandées\n- Toutes les paires avec bon volume\n\n## Gestion du risque\n- Risque maximum par trade: 1% du capital\n- Stop loss: en dessous du plus bas récent\n- Take profit: 2x le risque\n\n## Indicateurs nécessaires\n- RSI\n- MACD\n- Volume\n- Moyennes mobiles\n\n---\nCréé le: 2026-10-10\nType: momentum-strategy\nTags: momentum, rsi, macd, volume",
+  "type": "strategy",
+  "createdAt": "2026-10-10T00:00:00.000Z",
+  "tags": ["momentum", "rsi", "macd", "volume"],
+  "source": "manual"
+}

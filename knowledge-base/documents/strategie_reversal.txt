@@ -1,0 +1,35 @@
+# Stratégie de Trading - Retournement
+
+## Description
+Stratégie basée sur la détection des patterns de retournement.
+
+## Règles d'entrée
+- Double top/bottom confirmé
+- Divergence RSI
+- Volume faible lors du deuxième test
+- Confirmation avec engulfing pattern
+
+## Règles de sortie
+- Take profit: distance du pattern + extension
+- Stop loss: au-delà du plus haut/bas du pattern
+- Sortie partielle à 50% du profit
+
+## Timeframes recommandés
+- H1, H4, D1
+
+## Paires recommandées
+- EURUSD, GBPUSD, USDJPY
+
+## Gestion du risque
+- Risque maximum par trade: 0.5% du capital
+- Ratio risque/récompense: 1:3 minimum
+
+## Indicateurs nécessaires
+- RSI
+- Volume
+- Pattern recognition
+
+---
+Créé le: 2026-10-10
+Type: reversal-strategy
+Tags: reversal, double-top, double-bottom, divergence, rsi

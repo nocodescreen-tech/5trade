@@ -1,0 +1,78 @@
+{
+  "id": "srch_mv5601w5r9vn6y",
+  "title": "ICT A+ Setup Checklist Strategy",
+  "content": "L'approche ICT A+ consiste à ne trader que des configurations où toutes les confluences majeures sont réunies : biais directionnel confirmé, tirage sur la liquidité (DOL), timing en kill zone, balayage de liquidité, changement de structure de marché (MSS), zone PD Array, ratio risque/rendement minimum de 1:2, absence de blocage HTF et de news imminentes. L'objectif est de privilégier la qualité à la quantité en exécutant uniquement des setups notés 11/11 selon une checklist stricte.\n\nThe most discussed question from ICT traders is “Which setup should I focus on?” It is a reasonable question — the ICT framework is vast, spanning dozens of concepts, entry models, timing rules, and market structure principles that can feel overwhelming when encountered all at once. However, the question itself contains a hidden problem: most traders who ask it are looking for a shortcut. In ICT trading setups and methods, no such shortcut exists. What does exist is a structured, checklist-driven approach to identifying only the highest-quality setups and refusing to trade anything else. In the ICT community, these are called A+ setups: trades where every major confluence condition is satisfied simultaneously, where the risk-to-reward ratio is clearly defined and achievable, and where the institutional narrative of the day supports the direction of the trade. Table of Contents Core Principle: In ICT trading, the goal is not to trade more — it is to trade better. One A+ setup per day, executed with discipline and proper risk management, produces more consistent results than 10 mediocre setups taken without full confluence. Quality always outperforms quantity in the ICT framework. Elements of ICT Trading Setups: It is important to understand market as a whole and elements of a trade setup in smart money trading. In traditional approach to technical analysis, we are dependent on technical indicators and support & resistance. Traditional technical analysis and price action is limited and cannot provide the logic you want. This left traders unaware about market context. ICT focuses on understanding market structure as whole. ICT trading concepts combine time and price action in trading for better and logical trade entries. ICT trading setups requires an in-depth understanding of ICT trading concepts. As an ICT trader, there two essential elements and concerns: Context or Framework surrounding the idea. Reference points in institutional order flow. Context or Framework surrounding the idea. Trading the market extends beyond simplistic reliance on support and resistance or Candlestick pattern signals; ICT trade setups demands a profound understanding of the broader context. The context refers to the prevailing market conditions, sentiment, and underlying trends that dictate price movements. A trading signal, no matter how technically sound, holds little value if it contradicts the market’s contextual narrative. To achieve consistent success, traders must align their strategies with the overarching market environment, ensuring that their signals are not isolated but rather a coherent part of the larger market dynamics. Context, therefore, serves as the critical foundation upon which effective trading decisions are built. In context, ICT focuses on the following market conditions: Expansion Retracement Reversal Consolidation One these four market conditions provide strong framework and context of the market. Market in consolidation phase is preparing for Expansion. From Expansion, there came retracement, and from extremes of expansion market starts to prepare for its reversal. Our ultimate concern is looking for consolidation phase of the market. It can be accumulation or distribution. From there it decides its expansion phase, but we don’t know whether the market is accumulated or distributed. That is the reason that an ICT trader wait for the first expansion move. The first expansion move decides which side has the control of the market. It is normal that a trader does not catch all moves. We wait for the opportunities. Expansion Expansion is when price moves quickly from a level of Equilibrium (consolidation). It’s a direction covered by price and denotes institutional interest. When price leaves a level quickly, leaving an imbalance, it indicates trend strength and willingness on the part of institutions. ICT trader look for the order block which is placed at or near the Consolidation phase. ICT traders recommend that do not chase the price and wait for the price to reach the order block level. Retracement Retracement is normally referred to as pull back inside the recently created price range. It can offer potential entry points. It is important in the case when there are fair value gaps or liquidity voids. Reversal Reversal is the moving of price in opposite direction. Reversal are top and bottom reversals. It changes the current direction of trend into opposite direction. In ICT, reversal indicates that institutions have ran a level of stops and a new move in opposite direction has taken place. Our important areas to look for is the liquidity pools just above an old price high and just below an old price low. Consolidation It is also known as lateralization period of market. During the period, market moves inside a clear trading range and shows no willingness to move significantly higher or lower. Accumulation or distribution by institutions leads to new expansion. The important for us is to wait for impulse move or swing in price away from the equilibrium price level. Reference points in Institutional Order Flow In institutional order flow, reference points are pivotal in constructing a robust ICT trading setups in trading. These points are identified through four key criteria: expansion, retracement, consolidation, and reversal. Expansion marks the directional thrust where institutional activity drives price, indicating trend strength. Retracement follows as price pulls back, often towards significant levels, offering potential entry points. Consolidation represents periods of market equilibrium, where price ranges within defined bounds, signaling preparation for a breakout. Reversal occurs when the trend shifts, highlighting a change in institutional sentiment. By analyzing these elements within the broader market context, traders can pinpoint precise reference points, enhancing trade accuracy and alignment with institutional flows. These reference points can help traders constructing I",
+  "type": "web-strategy",
+  "source": "search",
+  "sourceUrl": "https://www.writofinance.com/ict-trading-setups/",
+  "structured": {
+    "title": "ICT A+ Setup Checklist Strategy",
+    "summary": "L'approche ICT A+ consiste à ne trader que des configurations où toutes les confluences majeures sont réunies : biais directionnel confirmé, tirage sur la liquidité (DOL), timing en kill zone, balayage de liquidité, changement de structure de marché (MSS), zone PD Array, ratio risque/rendement minimum de 1:2, absence de blocage HTF et de news imminentes. L'objectif est de privilégier la qualité à la quantité en exécutant uniquement des setups notés 11/11 selon une checklist stricte.",
+    "rules": {
+      "entry": "Après un balayage de liquidité (au-dessus d'un sommet pour un setup baissier, en dessous d'un creux pour un setup haussier) et un MSS sur timeframe inférieur (5M ou 15M), entrer sur une zone PD Array (Order Block, Fair Value Gap, Breaker Block ou zone OTE 0.62-0.79) dans le sens du biais quotidien, pendant une kill zone.",
+      "exit": "Sortir au premier objectif (TP1) à au moins 2 fois la taille du stop-loss, puis au deuxième objectif (TP2) selon le draw on liquidity identifié.",
+      "stopLoss": "Placer le stop-loss au-delà du point de balayage de liquidité ou de l'extrême de la structure invalidante, de manière à ce que le risque soit clairement défini et inférieur ou égal à 1% du capital.",
+      "takeProfit": "TP1 à minimum 2R (2 fois le risque), TP2 au prochain pool de liquidité opposé (swing high/low significatif) servant de draw on liquidity.",
+      "timeframes": [
+        "Daily",
+        "H4",
+        "M15",
+        "M5"
+      ],
+      "pairs": [
+        "XAUUSD",
+        "EURUSD",
+        "GBPUSD",
+        "USDJPY"
+      ],
+      "sessions": [
+        "London",
+        "New York"
+      ]
+    },
+    "concepts": [
+      "A+ setup",
+      "Biais directionnel quotidien",
+      "Draw on Liquidity (DOL)",
+      "Kill Zones",
+      "Balayage de liquidité (Liquidity Sweep)",
+      "Market Structure Shift (MSS)",
+      "PD Array (Order Block, Fair Value Gap, Breaker Block, OTE)",
+      "Ratio risque/rendement 1:2",
+      "Confluence",
+      "Expansion, Retracement, Reversal, Consolidation",
+      "Liquidity Pools",
+      "Stop Runs",
+      "Équilibre (Equilibrium)",
+      "Checklist A+ 11 points"
+    ],
+    "tags": [
+      "ICT",
+      "Smart Money Concepts",
+      "A+ Setup",
+      "Checklist",
+      "Kill Zones",
+      "Liquidity Sweep",
+      "MSS",
+      "PD Array",
+      "Risk Management",
+      "Prop Firm"
+    ],
+    "conditions": "Ne pas trader si : le biais quotidien n'est pas clairement défini (haussier ou baissier) ; le draw on liquidity est à moins de 2R ; le setup se forme en dehors des kill zones ; aucun balayage de liquidité n'a eu lieu ; aucun MSS n'est présent ; aucune zone PD Array n'est disponible à l'entrée ; le ratio risque/rendement est inférieur à 1:2 ; il existe un support/résistance HTF majeur sur le chemin ; une news à fort impact (NFP, FOMC, CPI, taux d'intérêt) est prévue dans les 30 minutes ; la taille de position n'est pas calculée avec un risque max de 1% ; le trade n'est pas journalisé avant l'entrée. Si un seul de ces critères manque, le trade est déclassé en B, C ou F et ne doit pas être exécuté.",
+    "confidence": "high",
+    "sourceUrl": "https://www.writofinance.com/ict-trading-setups/"
+  },
+  "tags": [
+    "ICT",
+    "Smart Money Concepts",
+    "A+ Setup",
+    "Checklist",
+    "Kill Zones",
+    "Liquidity Sweep",
+    "MSS",
+    "PD Array",
+    "Risk Management",
+    "Prop Firm"
+  ],
+  "createdAt": "2026-10-12T11:24:33.557Z"
+}

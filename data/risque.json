@@ -1,0 +1,10 @@
+{
+  "capital": 1000,
+  "risquePct": 0.5,
+  "maxPerteJourPct": 3,
+  "maxSimultanes": 10,
+  "maxRisqueMarchePct": 2,
+  "maxRisqueTotalPct": 5,
+  "maxLevier": 30,
+  "maxRisqueTradePct": 2
+}

@@ -1,0 +1,19 @@
+{
+  "id": "man_mv263uvrx69grz",
+  "title": "Liquidity Sweep + OB",
+  "content": "Balayage de liquidite au-dessus du high asiatique, puis retour dans un order block bullish M15. Entree au CHoCH confirme, SL sous l OB, TP au high precedent. Sessions London et New York. Paires XAUUSD, EURUSD.",
+  "type": "strategy",
+  "source": "manual",
+  "tags": [
+    "bullish",
+    "order block",
+    "session",
+    "london",
+    "new york",
+    "asia",
+    "choch",
+    "xauusd",
+    "eurusd"
+  ],
+  "createdAt": "2026-10-10T09:04:12.567Z"
+}

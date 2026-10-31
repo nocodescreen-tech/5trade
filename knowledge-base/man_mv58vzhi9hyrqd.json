@@ -1,0 +1,47 @@
+{
+  "id": "man_mv58vzhi9hyrqd",
+  "title": "Scalping sweep + FVG/OB sur indices synthétiques",
+  "content": "Le trader attend un balayage d'un plus bas évident suivi d'un retour rapide au-dessus. Il identifie alors un déséquilibre (FVG) ou un order block laissé par la bougie de retour, puis achète sur le test et rejet de cette zone. Stop sous le plus bas du balayage, objectif sur l'équilibre du range ou la liquidité opposée.\nEntrée : Après un balayage d'un plus bas évident et un retour rapide au-dessus, attendre que le prix revienne tester la zone FVG ou order block laissée par la bougie de retour, puis acheter sur rejet de cette zone.\nInvalidation : Si le prix casse le plus bas du balayage ou si la zone FVG/OB est invalidée sans rejet.\nObjectif : Équilibre du range ou liquidité en face.\nÀ éviter : Ne pas trader pendant la session asiatique (trop plat).\n--- description d'origine ---\nJe scalpe les indices synthetiques en 1 minute. J attends que le prix balaie un plus bas evident puis revienne vite au dessus : la je regarde si la bougie de retour laisse un desequilibre (FVG) ou un order block. Quand le prix revient tester cette zone et rejette, j achete. Je mets mon stop sous le plus bas du balayage et je vise l equilibre du range ou la liquidite en face. Je ne prends rien pendant la session asiatique, c est trop plat.",
+  "type": "strategy",
+  "source": "decrite",
+  "tags": [
+    "scalping",
+    "indices synthétiques",
+    "sweep",
+    "FVG",
+    "order block",
+    "1 minute"
+  ],
+  "structured": {
+    "summary": "Le trader attend un balayage d'un plus bas évident suivi d'un retour rapide au-dessus. Il identifie alors un déséquilibre (FVG) ou un order block laissé par la bougie de retour, puis achète sur le test et rejet de cette zone. Stop sous le plus bas du balayage, objectif sur l'équilibre du range ou la liquidité opposée.",
+    "concepts": [
+      "OB",
+      "FVG",
+      "Sweep"
+    ],
+    "conditions": "Ne pas trader pendant la session asiatique (trop plat).",
+    "rules": {
+      "entree": "Après un balayage d'un plus bas évident et un retour rapide au-dessus, attendre que le prix revienne tester la zone FVG ou order block laissée par la bougie de retour, puis acheter sur rejet de cette zone.",
+      "invalidation": "Si le prix casse le plus bas du balayage ou si la zone FVG/OB est invalidée sans rejet.",
+      "objectif": "Équilibre du range ou liquidité en face."
+    }
+  },
+  "moteur": {
+    "regles": [
+      "R1",
+      "R3"
+    ],
+    "seuilForce": 0.5,
+    "seuilRegles": 2,
+    "style": "scalping",
+    "timeframes": [
+      "1m"
+    ],
+    "seuilAlignes": 1,
+    "swingsWindow": 2,
+    "toleranceLiquidite": 0.0008,
+    "impulsion": 3,
+    "atrStop": 1
+  },
+  "createdAt": "2026-10-12T12:45:22.662Z"
+}

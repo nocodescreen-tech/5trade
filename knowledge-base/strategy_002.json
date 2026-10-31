@@ -1,0 +1,8 @@
+{
+  "id": "strategy_002",
+  "title": "Trend Following Strategy",
+  "content": "Suivre la tendance principale en utilisant les moyennes mobiles. Entrer lorsque le prix est au-dessus de la moyenne mobile 50 et que la moyenne mobile 50 est au-dessus de la moyenne mobile 200. Sortir lorsque le prix passe en dessous de la moyenne mobile 50. Stop loss basé sur les plus bas récents.",
+  "type": "strategy",
+  "createdAt": "2026-10-10T00:00:00.000Z",
+  "tags": ["trend", "moving average", "bullish", "bearish"]
+}

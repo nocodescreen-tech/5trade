@@ -1,0 +1,9 @@
+{
+  "id": "strategy_reversal",
+  "title": "Stratégie de Trading - Retournement",
+  "content": "Stratégie basée sur la détection des patterns de retournement.\n\n## Règles d'entrée\n- Double top/bottom confirmé\n- Divergence RSI\n- Volume faible lors du deuxième test\n- Confirmation avec engulfing pattern\n\n## Règles de sortie\n- Take profit: distance du pattern + extension\n- Stop loss: au-delà du plus haut/bas du pattern\n- Sortie partielle à 50% du profit\n\n## Timeframes recommandés\n- H1, H4, D1\n\n## Paires recommandées\n- EURUSD, GBPUSD, USDJPY\n\n## Gestion du risque\n- Risque maximum par trade: 0.5% du capital\n- Ratio risque/récompense: 1:3 minimum\n\n## Indicateurs nécessaires\n- RSI\n- Volume\n- Pattern recognition\n\n---\nCréé le: 2026-10-10\nType: reversal-strategy\nTags: reversal, double-top, double-bottom, divergence, rsi",
+  "type": "strategy",
+  "createdAt": "2026-10-10T00:00:00.000Z",
+  "tags": ["reversal", "double-top", "double-bottom", "divergence", "rsi"],
+  "source": "manual"
+}

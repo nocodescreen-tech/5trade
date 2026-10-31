@@ -1,0 +1,98 @@
+{
+  "id": "srch_mv5609k10pw4il",
+  "title": "ICT Inner Circle Trader Strategy",
+  "content": "L'ICT (Inner Circle Trader) est une méthodologie de trading Smart Money créée par Michael J. Huddleston qui combine l'analyse du flux d'ordres institutionnel avec des modèles temporels. Elle identifie les zones de liquidité, les order blocks, les Fair Value Gaps et les kill zones pour se positionner du même côté que les institutions. La stratégie ajoute une dimension temporelle cruciale : les kill zones (Londres 2h-5h, New York AM 7h-10h, heure de New York) et le Power of Three (accumulation, manipulation, distribution).\n\nHomeFeaturesPerformanceTrack RecordGuidesAcademyFree IndicatorsSignalsQuantumBotPricingAboutContactENDEESFRPTZHARLog InSign Up Home›Guides›Smart Money Concepts Smart Money ConceptsICT Trading Strategy: The Complete Inner Circle Trader Guide Written by ILY · Reviewed by Quant · Live track record · Published April 8, 2026◆ THE SHORT ANSWERICT (Inner Circle Trader) trading strategy is Michael J. Huddleston's Smart Money methodology adding time to institutional order flow: market structure, order blocks, Fair Value Gaps, liquidity, optimal trade entry at the 0.618–0.786 Fibonacci zone, kill zones (London 2:00–5:00 AM, New York AM 7:00–10:00 AM, New York time) and the power of three: accumulation, manipulation, distribution. It suits forex and index traders. Before the model, what the order flow ICT describes looks like on a chart — Quantum Algo Zeno on gold, Bitcoin and NAS100, exported straight from TradingView.◆ Real chart · XAUUSD · 15M · Quantum Algo Zeno Gold · signals + SL/TP zones + dashboardICT reads order flow by hand; this is what it looks like when an engine does it: Zeno marks the entry, the stop and TP1/TP2 on gold, 15-minute, on a confirmed close.◆ Real chart · BTCUSDT perpetual · 2H · Quantum Algo Zeno + Tidal Force · six monthsOn Bitcoin 2H the regime labels are the higher-timeframe draw on liquidity — the bias every killzone entry on this page should agree with.◆ Real chart · NAS100 · 4H · Quantum Algo Zeno + Tidal ForceAnd on NAS100 4H, the index most ICT traders scalp inside the New York AM killzone: the cloud is the daily bias, the 5-minute model is the entry. Premium Indicators Indicators that prove themselves in public. One engine, four precision tools — the Gold (XAU) Scalper, the institutional Gravity Zone, the Zeno momentum Oscillator, and Zeno Stocks for equities. Tap a side card, drag, or use the dots to switch What Is ICT Trading? ICT (Inner Circle Trader) trading strategy is a comprehensive Smart Money methodology that combines institutional order flow analysis with time-based market models.This complete guide covers all core ICT concepts: market structure (BOS/CHoCH), order blocks, Fair Value Gaps, liquidity concepts, optimal trade entries (OTE at the 0.618–0.786 Fibonacci zone), kill zones (London 2:00–5:00 AM, New York AM 7:00–10:00 AM, New York time), power of three (accumulation, manipulation, distribution), and the ICT market maker model. ICT is best suited for forex and indices traders who can trade during specific session times. Last verified: April 15, 2026 ICT stands for Inner Circle Trader, the alias of Michael J. Huddleston — a trader and educator who has been teaching institutional trading concepts since the 2010s through YouTube lectures and mentorship programs. His methodology forms the foundation of what the broader trading community now calls Smart Money Concepts (SMC). At its core, ICT trading is built on a single premise: retail traders lose money because they don't understand how institutional traders operate. Banks and hedge funds can't simply click \"buy\" on a million-lot order. They need to engineer liquidity — create conditions where enough retail traders are willing to take the other side of their trade.ICT teaches you to recognize those engineered conditions and position yourself on the same side as the institutions. What makes ICT different from generic price action trading is its emphasis on time. While most methodologies focus only on price levels, ICT adds a critical dimension: when institutions are active. This is expressed through concepts like kill zones, the power of three, and session-specific trading windows that most retail traders completely ignore. ICT's approach gained massive popularity because Huddleston published hundreds of hours of free educational content. His concepts — order blocks, fair value gaps, liquidity sweeps, optimal trade entry — have been adopted and renamed by the broader SMC community. But the original ICT methodology retains unique time-based elements that set it apart. ◆ Key TakeawayICT isn't just \"SMC with a different name.\" Its unique contribution is the time dimension — kill zones, session-specific behaviors, and the power of three model. If you already know SMC concepts, ICT adds the when to your existing where. When do institutions trade in the ICT kill zones? A kill zone is a specific time window when institutional traders are most active and the highest-probability setups form. ICT identifies four primary kill zones that align with major market session opens — the moments when fresh institutional capital enters the market.◆ Illustration · the three killzones on one day · GBPUSD 5M · London · NY AM · NY PMThe killzones drawn on a full session: London 02:00–05:00 New York time, NY AM 08:30–11:00 (the window used for index futures; for forex the NY AM killzone starts at 07:00), NY PM 13:30–16:00. ICT entries live inside the bands; the two entries outside them are what a structure-only trader would take — the difference this guide keeps coming back to. The ICT kill zones across a trading day 00:0003:0008:0013:0016:0020:00 ASIA RANGE LONDON KZ 02:00-05:00 NY NEW YORK KZ 07:00-10:00 NY LDN CLOSE judas ↓ expansion ↑ Institutional volume clusters in specific windows. The London and New York kill zones produce the day’s manipulation and expansion legs; Asia usually builds the range they feed on. Trading outside kill zones is one of the most common mistakes ICT beginners make. The market between sessions often produces choppy, directionless price action because institutions aren't actively positioning. Kill zones concentrate your trading into the windows where real money is moving. ASIAN 8PM–12AM Defines the range LONDON 2AM–5AM Judas Swing zone NEW YORK AM 7AM–10AM Highest volume NEW YORK PM 1:30–4PM Reversal window ICT KILL ZONES (New York Time) Fig 1. The four ICT kill zones. London and NY AM are the highest-probability windows for setups. What role does the Asian session (8PM–12AM New York time) play? ",
+  "type": "web-strategy",
+  "source": "search",
+  "sourceUrl": "https://www.quantum-algo.com/blog/guides/ict-trading-strategy-complete-guide/",
+  "structured": {
+    "title": "ICT Inner Circle Trader Strategy",
+    "summary": "L'ICT (Inner Circle Trader) est une méthodologie de trading Smart Money créée par Michael J. Huddleston qui combine l'analyse du flux d'ordres institutionnel avec des modèles temporels. Elle identifie les zones de liquidité, les order blocks, les Fair Value Gaps et les kill zones pour se positionner du même côté que les institutions. La stratégie ajoute une dimension temporelle cruciale : les kill zones (Londres 2h-5h, New York AM 7h-10h, heure de New York) et le Power of Three (accumulation, manipulation, distribution).",
+    "rules": {
+      "entry": "Après un Break of Structure (BOS) pendant une kill zone, attendre une retracement dans la zone OTE (62%-79% de Fibonacci) et entrer sur un order block ou un FVG situé dans cette zone. Pour un long : BOS haussier, retracement dans l'OTE, entrée sur OB/FVG. Pour un short : BOS baissier, retracement dans l'OTE, entrée sur OB/FVG.",
+      "exit": "Sortir sur le prochain pool de liquidité (plus haut/plus bas opposé de session) ou sur un FVG non comblé sur une unité de temps supérieure. Prendre des profits partiels si le premier objectif est atteint pendant la kill zone de New York AM. En New York PM, gérer les sorties et resserrer les stops.",
+      "stopLoss": "Placer le stop loss sous l'order block pour un long (ou au-dessus pour un short).",
+      "takeProfit": "Cibler le prochain pool de liquidité, typiquement le plus haut/plus bas opposé de session ou un FVG non comblé sur une unité de temps supérieure.",
+      "timeframes": [
+        "H4",
+        "H1",
+        "M15",
+        "M5"
+      ],
+      "pairs": [
+        "XAUUSD",
+        "BTCUSDT",
+        "NAS100",
+        "GBPUSD",
+        "Forex",
+        "Indices"
+      ],
+      "sessions": [
+        "London",
+        "New York AM",
+        "New York PM"
+      ]
+    },
+    "concepts": [
+      "Kill zones (Londres 2h-5h, New York AM 7h-10h, New York PM 13h30-16h, heure de New York)",
+      "Power of Three (AMD) : Accumulation, Manipulation, Distribution",
+      "Judas Swing (faux mouvement à l'ouverture de Londres)",
+      "Order Blocks (dernière bougie baissière avant un mouvement haussier, ou inverse)",
+      "Fair Value Gaps (FVG) / Imbalances / Inefficiencies",
+      "Liquidity Pools (clusters de stop-loss)",
+      "Optimal Trade Entry (OTE) : zone de retracement 62%-79% de Fibonacci",
+      "Displacement (bougie agressive institutionnelle)",
+      "Market Structure Shift (MSS) / Change of Character (CHoCH)",
+      "Break of Structure (BOS)",
+      "Asian Range (range de référence)",
+      "Sessions de trading (Asie, Londres, New York)",
+      "Time-based analysis (le temps comme filtre principal)"
+    ],
+    "tags": [
+      "ICT",
+      "Inner Circle Trader",
+      "Smart Money Concepts",
+      "SMC",
+      "Order Blocks",
+      "Fair Value Gaps",
+      "Liquidity",
+      "Kill Zones",
+      "Power of Three",
+      "Judas Swing",
+      "Optimal Trade Entry",
+      "OTE",
+      "Fibonacci",
+      "Market Structure",
+      "BOS",
+      "CHoCH",
+      "Forex",
+      "Indices",
+      "Crypto"
+    ],
+    "conditions": "Ne pas trader en dehors des kill zones (marché souvent choppy et sans direction). Ne pas trader pendant la session asiatique (8PM-12AM) sauf pour marquer le range. Ne pas initier de nouvelles positions pendant la session New York PM (13h30-16h) sauf setup très clair. Éviter de trader si aucun setup ne se présente pendant Londres ou New York AM : ne pas sur-trader, la méthodologie est conçue pour 1-2 trades de haute qualité par jour. Ne pas trader sans confirmation de structure (BOS) et sans confluence (OTE + OB/FVG + kill zone).",
+    "confidence": "high",
+    "sourceUrl": "https://www.quantum-algo.com/blog/guides/ict-trading-strategy-complete-guide/"
+  },
+  "tags": [
+    "ICT",
+    "Inner Circle Trader",
+    "Smart Money Concepts",
+    "SMC",
+    "Order Blocks",
+    "Fair Value Gaps",
+    "Liquidity",
+    "Kill Zones",
+    "Power of Three",
+    "Judas Swing",
+    "Optimal Trade Entry",
+    "OTE",
+    "Fibonacci",
+    "Market Structure",
+    "BOS",
+    "CHoCH",
+    "Forex",
+    "Indices",
+    "Crypto"
+  ],
+  "createdAt": "2026-10-12T11:24:43.489Z"
+}

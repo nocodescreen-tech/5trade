@@ -1,0 +1,9 @@
+{
+  "id": "strategy_breakout",
+  "title": "Stratégie de Trading - Breakout Pattern",
+  "content": "Stratégie basée sur les breakouts de niveaux clés avec confirmation de volume.\n\n## Règles d'entrée\n- Attendre que le prix casse un niveau de support ou résistance significatif\n- Confirmer avec un volume supérieur à la moyenne\n- Le breakout doit être clair (pas de faux breakout)\n\n## Règles de sortie\n- Take profit: 2x la distance du breakout\n- Stop loss: juste en dessous/au-dessus du niveau cassé\n- Trailing stop: 50% du profit réalisé\n\n## Timeframes recommandés\n- M15, M30, H1, H4\n\n## Paires recommandées\n- EURUSD, GBPUSD, USDJPY, XAUUSD\n\n## Gestion du risque\n- Risque maximum par trade: 1-2% du capital\n- Ratio risque/récompense minimum: 1:2\n\n## Indicateurs nécessaires\n- Volume\n- Support/Résistance\n- Moyennes mobiles (pour tendance)\n\n## Exemple visuel\n[Image du pattern breakout]\n\n---\nCréé le: 2026-10-10\nType: breakout-strategy\nTags: breakout, support, resistance, volume",
+  "type": "strategy",
+  "createdAt": "2026-10-10T00:00:00.000Z",
+  "tags": ["breakout", "support", "resistance", "volume"],
+  "source": "manual"
+}

@@ -1,0 +1,75 @@
+{
+  "id": "web_mv27riwzacty4r",
+  "title": "Liquidity Sweep Trading: 5 Entry Models",
+  "content": "Un cadre de trading basé sur la lecture de la liquidité : le prix balaie une poche de liquidité (sweep), rejette et se déplace, laissant une zone d'intérêt (order block, FVG ou breaker) où l'on entre sur le retour. Cinq modèles d'entrée, trois approches de session et une grille de confluences sont décrits, avec invalidation et limites pour chacun.\n\nKnowing what liquidity is, where it sits and how it gets taken is the groundwork. This guide covers what comes next: the entry models that turn that reading into a repeatable process. Five setups, three session approaches, and the confluences that separate a complete configuration from a hopeful one. Each is described with its conditions, its invalidation and its limits — because a setup without an invalidation is not a setup. Before anything else. Nothing here guarantees a result. These are structured ways of reading price around known liquidity levels, and every one of them fails a meaningful share of the time. A retail chart shows price, not orders: every mention below of liquidity taken or absorbed is a reading, not an observation. The value lies in having a defined process, not in any individual entry. Strategy 1 — Sweep + Order Block The foundational model, and the one to master first. The logic Price sweeps a liquidity pocket, rejects, and displaces. The area it displaced from is an order block. That much is on the chart. The usual explanation — that resting counterparty was absorbed there — is an inference about order flow. The conditions, in order An identified pocket — equal highs/lows, previous day high/low, a major swing. The sweep — price clears the level then closes back inside. A close beyond invalidates the setup: that is a breakout. Displacement — two to five consecutive candles in the opposite direction whose bodies each exceed twice the average body of the prior ten candles. A break of structure is not required here; Strategy 3 does require one. The order block — the last opposing candle before that displacement. The return — price comes back into the order block. Entry, stop and target Entry: on the return into the order block, ideally with a lower-timeframe rejection candle. Stop: beyond the order block or the wick of the sweep, whichever is further from entry, plus a fixed buffer set in advance — say the average range of the last ten candles. Not one tick under the block: this framework assumes that level is the one being used as inducement. Target: the opposite liquidity. After a bullish sweep of sell-side liquidity, the natural target is the buy-side pocket above. LIQUIDITY SWEEP TRADINGsell-side liquidityorder blockTarget: opposite liquidityEntry on the returnStop beyond the blockSweepThe entry waits for the return into the origin of the displacement.Sweep + order block. Enter on the return into the origin of the displacement; the stop goes beyond the order block or the wick of the sweep, whichever is further from entry, plus a fixed buffer. Schematic, not a sampled outcome. Invalidation A close beyond the order block, on the timeframe the sweep closed on — that timeframe defines the block. Not a wick — a close. It is a discretionary early exit, at a different price from the stop; the stop is the hard exit, and the distance you size against. Limits Price does not always return to the order block. A displacement that runs away leaves you behind, and chasing it is precisely how you end up entering in premium during an uptrend. The chase costs more than the miss. Strategy 2 — Sweep + Fair Value Gap The variant for when displacement is violent enough to leave an imbalance. The logic A strong displacement leaves a fair value gap: three consecutive candles where the first and third wicks do not overlap. That gap is a zone crossed without balanced trade. The FVG model treats that zone as an inefficiency and expects price to revisit it. How often that happens is not measured here. What distinguishes it from strategy 1 The order block is the origin of the move. The FVG is the path of the move. The FVG sits between the order block and the current price, which means: an entry reached earlier in the retracement, so less waiting; a wider stop, since the reference is still the block or the sweep wick, whichever is further from entry; a lower reward-to-risk ratio than an order-block entry. That trade-off is the whole point, and how much more often the FVG entry is reached is not quantified here. Neither is better: they suit different temperaments and different session conditions. Practical execution Entry: at the FVG boundary, or at its midpoint for a more conservative fill. Stop: the same reference as Strategy 1 — block or sweep wick, whichever is further from entry, plus the buffer. Invalidation: as in Strategy 1 — a close beyond the order block, on the timeframe the sweep closed on. Target: the opposite liquidity, as before. Limits An FVG marks a zone, not a floor: price can cross it and keep going, which is why the stop sits at the block and not at the far edge of the gap. A gap that did not follow a liquidity take is no part of this model. LIQUIDITY SWEEP TRADINGsell-side liquidityFVGTarget: opposite liquidityEntry on the returnStop beyond the sweep wickSweepWider stop, lower reward-to-risk: the entry comes earlier in the retracement.Sweep + FVG. Trades the path instead of the origin: an entry reached earlier in the retracement, wider stop, lower reward-to-risk. Schematic, not a sampled outcome. A frequent mistake. Treating any FVG as a signal. An FVG that did not follow a liquidity take is just a fast move. The sequence matters more than the pattern: sweep first, imbalance second. Strategy 3 — Sweep + Breaker The model for when the first attempt failed — and that failure becomes the information. The logic An order block forms and price moves away from it. Price then comes back and breaks it: the setup failed. The standard explanation is that positions taken at the block are now offside and their exits reinforce the retest when price returns to that area from the other side — a model of who is doing what. An old demand zone becomes a supply zone. That is a breaker block. The conditions An order block that produced a move. A break of structure through that block — this is what separates a breaker from a simple mitigation. A liquidity sweep in the new direction. A return to ",
+  "type": "web-strategy",
+  "source": "scrape",
+  "sourceUrl": "https://liquiditysweeptrading.com/learn/liquidity-trading-strategies/",
+  "structured": {
+    "title": "Liquidity Sweep Trading: 5 Entry Models",
+    "summary": "Un cadre de trading basé sur la lecture de la liquidité : le prix balaie une poche de liquidité (sweep), rejette et se déplace, laissant une zone d'intérêt (order block, FVG ou breaker) où l'on entre sur le retour. Cinq modèles d'entrée, trois approches de session et une grille de confluences sont décrits, avec invalidation et limites pour chacun.",
+    "rules": {
+      "entry": "Attendre un balayage de liquidité (mèche au-delà d'un niveau puis clôture de retour à l'intérieur), un déplacement de 2 à 5 bougies dont les corps dépassent chacun deux fois le corps moyen des 10 bougies précédentes, puis entrer sur le retour dans la zone d'origine du déplacement (order block, FVG ou breaker), idéalement avec une bougie de rejet sur un timeframe inférieur.",
+      "exit": "Sortie discrétionnaire anticipée possible sur clôture au-delà de la zone d'invalidation ; sinon sortie dure au stop loss. Objectif atteint à la liquidité opposée.",
+      "stopLoss": "Placé au-delà de l'order block ou de la mèche du sweep, selon lequel est le plus éloigné de l'entrée, plus un buffer fixe prédéfini (ex. la plage moyenne des 10 dernières bougies). Ne pas placer le stop juste sous le niveau balayé.",
+      "takeProfit": "Liquidité opposée non encore prise (ex. après un sweep baissier, la poche acheteuse au-dessus). Le ratio risque/rendement doit dépasser un seuil minimum défini à l'avance (ex. 2:1).",
+      "timeframes": [
+        "D1",
+        "H4",
+        "H1",
+        "M15",
+        "M5"
+      ],
+      "pairs": [
+        "majeures Forex",
+        "indices",
+        "matières premières"
+      ],
+      "sessions": [
+        "Asian",
+        "London",
+        "New York"
+      ]
+    },
+    "concepts": [
+      "Liquidity sweep",
+      "Order block",
+      "Fair Value Gap (FVG)",
+      "Breaker block",
+      "Break of structure",
+      "Displacement",
+      "Equal highs/lows",
+      "Premium/discount",
+      "Judas Swing",
+      "Asian range",
+      "Confluence gates",
+      "Risk management (0.5% risk, 2:1 RR)"
+    ],
+    "tags": [
+      "liquidité",
+      "sweep",
+      "order block",
+      "FVG",
+      "breaker",
+      "sessions",
+      "confluence",
+      "gestion du risque",
+      "price action"
+    ],
+    "conditions": "Ne pas trader si : la direction higher timeframe est absente ou contraire ; le prix est en premium pour un achat ou en discount pour une vente ; aucun balayage de liquidité avec clôture de retour à l'intérieur n'a eu lieu ; le setup est basé sur des equal highs/lows visibles uniquement en M1-M5, déjà touchés depuis leur formation, ou contre la direction daily ; le ratio risque/rendement est sous le seuil défini ; le stop ne peut pas être défini précisément ; lors d'ouvertures de session, autour de news ou en heures asiatiques peu liquides (spreads élargis).",
+    "confidence": "medium",
+    "sourceUrl": "https://liquiditysweeptrading.com/learn/liquidity-trading-strategies/"
+  },
+  "tags": [
+    "liquidité",
+    "sweep",
+    "order block",
+    "FVG",
+    "breaker",
+    "sessions",
+    "confluence",
+    "gestion du risque",
+    "price action"
+  ],
+  "createdAt": "2026-10-10T09:50:36.419Z"
+}

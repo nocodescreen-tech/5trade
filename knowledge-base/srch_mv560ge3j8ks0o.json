@@ -1,0 +1,83 @@
+{
+  "id": "srch_mv560ge3j8ks0o",
+  "title": "ICT One Trade Setup for Life",
+  "content": "Modèle de trading complet basé sur cinq raids de liquidité sessionnels (PM, London, Opening Range Gap, NY Lunch, AM session comme cible) ancré sur le biais journalier. Il se répète chaque jour et couvre scalping et day trading. L'entrée se fait après un raid de liquidité contre le biais, suivi d'un Market Structure Shift (MSS) sur petit timeframe et d'une entrée sur le retest.\n\nFacebook X WhatsApp Telegram Practical ICT Strategies – 7th Edition Released Over 150 pages of knowledge coming from 8+ years of experience from Professional ICT Trader. 👉 Buy Now! ➝ SponsoredICT One Trade Setup for Life is a complete trading model that repeats every day across five session-based liquidity raids — PM session range, London session range, opening range gaps, New York lunch raid and the previous AM session as the target. If you master this single setup, you do not need any other model — it covers scalping and day trading in the same framework.In this guide I walk you through the One Trade Setup for Life — the components, the five session raids, the daily-bias context, the step-by-step trade flow, the best timeframes, common mistakes and the FAQ.You can jump to the section you are most interested in from below or continue reading the full article for a complete view.Table of Contents ToggleWhat is ICT One Trade Setup for Life?ICT One Trade Setup for Life is a complete trading model based on the following concepts.(I) ICT Daily Bias(II) Draw on Liquidity(III) PM Session Liquidity Raid(IV) London Session Liquidity Raid(V) Opening Range Gaps(VI) New York Lunch Raid(VII) AM Session Liquidity RaidThis setup repeats over and over again and can be used for scalping as well as day trading.If you master the ICT One Trade Setup for Life, you do not need any other thing to trade — it is a complete model.Before going forward, you need to understand what draw on liquidity means. ✨ Update: I've launched my ICT Trading Strategies PDF eBook! Check it out at ictpdf.com .What is Draw on Liquidity?Liquidity means willing buyers and sellers at the current market price.In trading terms, liquidity means the liquidation price of active traders — either sellers or buyers.ICT Trading Courseicttradingcourse.comThe only complete ICT trading course6.5 hours · 6 modules · lifetime access — one‑time $149.Draw on liquidity means hunting the liquidity of active traders — hitting their stop losses or activating their pending orders such as sell stops or buy stops.Draw on liquidity is the sole purpose of price delivery.How to Trade Using ICT One Trade Setup for LifeTo trade using the ICT One Trade Setup for Life, follow the steps below as told by ICT himself, and set your TradingView time window to New York local time.(I) PM Session RangePM session range is the previous day’s price delivery. For the PM session range, look at the 01:30 PM to 04:00 PM (New York local time) range.Mark the highest high and lowest low of the PM session range. Above the highest high rests the buy-side liquidity; below the lowest low rests the sell-side liquidity.If your Daily Bias is bullish, anticipate price to run below the PM session range low to raid the sell-side liquidity and create an ICT Judas Swing.If you are bearish, look for price to run above the PM session high for the liquidity raid and the ICT Judas Swing.After the liquidity raid, wait for an ICT Market Structure Shift in the direction of your daily bias. Then execute a trade at the retest in the direction of your daily bias.(II) London Session RaidIf the PM session is not a factor or price is far away from the PM session range, look for the London session liquidity raid for trade execution.Mark the London session range 02:00 AM to 05:00 AM — highest high and lowest low.On the New York opening, if you are bullish, anticipate a run below the low of the London session range for the sell-side liquidity raid.If your daily bias is bearish, anticipate a run above the high of the London session range for the buy-side liquidity hunt.The process after the liquidity hunt is the same for every session — look for a market structure shift in the direction of your daily bias and then execute a trade on the retracement.(III) Opening Range GapsThe opening gap is the event that takes place when trading stops and the market reopens at 08:30 AM for forex and 09:30 AM (New York local time) for indices like Nasdaq and S&P500.If your daily bias is bearish and price opens with a gap, wait until New York lunch hour — the algorithm engineers liquidity in the morning and during lunch hour at 01:30 PM NY local time.After lunch hour, anticipate price to approach the opening gap and then sell off to take the liquidity engineered during the AM session and lunch hour.ICT Trading Courseicttradingcourse.comThe only complete ICT trading course6.5 hours · 6 modules · lifetime access — one‑time $149.(IV) New York Lunch RaidIf price has not done anything yet — no PM session raid, no London session raid, no opening gap range — look for the New York lunch raid.Mark the New York lunch range (highest high and lowest low) from 12:00 PM to 01:30 PM (New York local time).If you are bearish, look for the New York lunch range high to be raided for buy-side liquidity, and then a market structure shift to the downside to execute a sell trade.If your daily bias is bullish, look for the New York lunch range low to be raided for sell-side liquidity, and then a market structure shift to the upside to execute a buy trade.(V) AM Session Liquidity Raid (Target)The previous day’s AM session (09:30 AM to Noon) liquidity is the target.If you are bullish and have the trade setup, your final target is the previous day’s AM session high.If you are bearish and have the trade opportunity, your final profit target is the previous day’s AM session low.Step-by-Step One Trade Setup FlowThis is the exact sequence I run every morning to find the One Trade Setup.Set your chart to New York local time. Every session range in the model is defined in NY time.Set the daily bias. 1-day and 4-hour structure plus the higher-timeframe PD array — bullish, bearish or neutral.Mark the previous day’s AM session high and low. 09:30 AM to Noon — this is the final target zone.Mark the PM session range. 01:30 PM to 04:00 PM of the previous day.Mark the London session range. 02:00 AM to 05:00 AM NY time of the current day.Mark the NY lunch range. 12:0",
+  "type": "web-strategy",
+  "source": "search",
+  "sourceUrl": "https://innercircletrader.net/tutorials/ict-one-trade-setup-for-life/",
+  "structured": {
+    "title": "ICT One Trade Setup for Life",
+    "summary": "Modèle de trading complet basé sur cinq raids de liquidité sessionnels (PM, London, Opening Range Gap, NY Lunch, AM session comme cible) ancré sur le biais journalier. Il se répète chaque jour et couvre scalping et day trading. L'entrée se fait après un raid de liquidité contre le biais, suivi d'un Market Structure Shift (MSS) sur petit timeframe et d'une entrée sur le retest.",
+    "rules": {
+      "entry": "Après le raid de liquidité d'une session (PM, London, Opening Range Gap ou NY Lunch) dans le sens opposé au biais journalier, attendre un MSS (Market Structure Shift) sur 5min ou 1min dans la direction du biais, puis entrer sur le retest du PD Array post-MSS.",
+      "exit": "Prendre profit à la cible de la session AM de la veille : high (si biais haussier) ou low (si biais baissier). Utiliser des prises partielles aux niveaux relatifs égaux sur le chemin.",
+      "stopLoss": "Placer le stop loss au-delà de l'extrême de la session balayée, avec un petit buffer.",
+      "takeProfit": "Objectif final : high de la session AM précédente (09:30-12:00 NY) pour un biais haussier, ou low pour un biais baissier.",
+      "timeframes": [
+        "M1",
+        "M5",
+        "M15",
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "pairs": [
+        "GBPUSD",
+        "EURUSD",
+        "USDCAD",
+        "NQ",
+        "ES",
+        "XAUUSD"
+      ],
+      "sessions": [
+        "PM",
+        "London",
+        "New York",
+        "NY Lunch",
+        "AM"
+      ]
+    },
+    "concepts": [
+      "ICT Daily Bias",
+      "Draw on Liquidity",
+      "PM Session Liquidity Raid",
+      "London Session Liquidity Raid",
+      "Opening Range Gaps",
+      "New York Lunch Raid",
+      "AM Session Liquidity Raid (Target)",
+      "ICT Judas Swing",
+      "Market Structure Shift (MSS)",
+      "PD Array",
+      "Liquidity Raid",
+      "Buy-side / Sell-side Liquidity"
+    ],
+    "tags": [
+      "ICT",
+      "Smart Money Concepts",
+      "Liquidity Raid",
+      "Session Trading",
+      "Day Trading",
+      "Scalping",
+      "New York Session",
+      "London Session",
+      "Market Structure Shift",
+      "Daily Bias"
+    ],
+    "conditions": "Ne pas trader si le raid de liquidité ne correspond pas au biais journalier (ex: raid buy-side alors que biais haussier). Ne pas entrer sur le simple toucher du niveau de session sans MSS. Ne pas marquer la range NY Lunch avant 13:30 NY. Ne pas cibler la session AM du jour même. Ne pas trader chaque session : le modèle est 'première opportunité gagnante' ; une fois qu'une session a donné un trade propre, le reste de la journée est de la surveillance. Ne pas utiliser un autre fuseau horaire que New York.",
+    "confidence": "high",
+    "sourceUrl": "https://innercircletrader.net/tutorials/ict-one-trade-setup-for-life/"
+  },
+  "tags": [
+    "ICT",
+    "Smart Money Concepts",
+    "Liquidity Raid",
+    "Session Trading",
+    "Day Trading",
+    "Scalping",
+    "New York Session",
+    "London Session",
+    "Market Structure Shift",
+    "Daily Bias"
+  ],
+  "createdAt": "2026-10-12T11:24:52.347Z"
+}

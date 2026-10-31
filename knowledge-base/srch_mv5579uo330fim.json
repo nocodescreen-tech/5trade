@@ -1,0 +1,64 @@
+{
+  "id": "srch_mv5579uo330fim",
+  "title": "Fibonacci Retracement Trading Strategy",
+  "content": "La stratégie de retracement de Fibonacci consiste à identifier les niveaux de retracement clés (23.6%, 38.2%, 50%, 61.8%, 78.6%) après un mouvement impulsif pour anticiper les points d'entrée dans le sens de la tendance. Elle est utilisée pour repérer des zones de support/résistance potentielles où le prix pourrait rebondir ou se retourner.\n\nFibonacci Retracement: How to Use Fibonacci Levels in TradingWritten by Julian ParkerJul 15, 202615 min readSHARETable of Contents1. Key Takeaways2. What Is Fibonacci Retracement?3. How Do Fibonacci Retracement Levels Work?4. How to Calculate Fibonacci Retracement Levels5. How to Draw Fibonacci Retracement on a Chart6. How to Read Fibonacci Retracement in Uptrends and Downtrends7. Fibonacci Retracement Trading Strategies8. Practical EUR/USD Fibonacci Retracement Example9. Fibonacci Retracement and Risk Management10. Advantages and Limitations of Fibonacci Retracement11. Common Fibonacci Retracement Mistakes to Avoid12. How to Start Trading CFD on Markets.com: A Step-by-Step Guide13. Conclusion14. FAQsRisk Warning: This article is provided for informational purposes only and does not constitute investment advice, investment research, or a recommendation to trade. The views expressed are those of the author and do not necessarily reflect the position of Markets.com. When considering shares, indices, forex (foreign exchange), and commodities for trading and price predictions, remember that trading CFDs involves a significant degree of risk and may not be suitable for all investors. Leveraged products can result in capital loss. Past performance is not indicative of future results. Before trading, ensure you fully understand the risks involved and consider your investment objectives and level of experience. Cryptocurrency CFD trading restrictions may apply depending on jurisdiction.MarketsPopularSharesFXCommoditiesIndicesCryptoETFsBondsPalladium - Cash--0.12%EUR/USD---0.24%Cotton---0.29%AUD/USD---0.21%Santander--0.75%easyJet--0.06%VIXX---0.24%Silver---0.49%USA 30 - Futures---0.09%Tags DirectoryView allcfd tradingtrading strategiesMost Popular ArticlesView allJun 7, 2026How Does SpaceX Make Money? SpaceX Revenue, Starlink and IPO ExplainedTable of Contents1. Key Takeaways2. What Is Fibonacci Retracement?3. How Do Fibonacci Retracement Levels Work?4. How to Calculate Fibonacci Retracement Levels5. How to Draw Fibonacci Retracement on a Chart6. How to Read Fibonacci Retracement in Uptrends and Downtrends7. Fibonacci Retracement Trading Strategies8. Practical EUR/USD Fibonacci Retracement Example9. Fibonacci Retracement and Risk Management10. Advantages and Limitations of Fibonacci Retracement11. Common Fibonacci Retracement Mistakes to Avoid12. How to Start Trading CFD on Markets.com: A Step-by-Step Guide13. Conclusion14. FAQsRecommended Topicscfds meaning tradingcfd trading tipswhat is cfd tradinghow to invest in andurilwhat is forex trading and how does it workhow to do options tradinggold price predictionwhy gold price is risinggold etfgold markethow to trade crude oiloil tradingcrude oil price todaycfds on goldsilver comex chartforex trading companies in dubaicfd meaningcfd trading in dubai uaeniblgold rate forecast uaedxy chartrivian stock price prediction 2030weekend us tech 100tradingview commetatrader5Related ArticlesGold to Silver Ratio: What It Means and How to Use It in TradingLearn how the gold to silver ratio works, calculate it with examples, interpret historical trends, and understand trading strategies, CFD costs, and key risks.--Best Bank Stocks to Buy in 2026: 8 Banks to WatchExplore eight of the best bank stocks to buy in 2026, including large banks, regional banks and dividend stocks, plus the key metrics and risks to watch.--How to Invest in Precious Metals: A Beginner’s GuideLearn how to invest in precious metals, compare gold, silver, ETFs and mining stocks, and understand costs, market drivers and the risks of CFD trading.--",
+  "type": "web-strategy",
+  "source": "search",
+  "sourceUrl": "https://www.markets.com/education-centre/fibonacci-retracement-trading",
+  "structured": {
+    "title": "Fibonacci Retracement Trading Strategy",
+    "summary": "La stratégie de retracement de Fibonacci consiste à identifier les niveaux de retracement clés (23.6%, 38.2%, 50%, 61.8%, 78.6%) après un mouvement impulsif pour anticiper les points d'entrée dans le sens de la tendance. Elle est utilisée pour repérer des zones de support/résistance potentielles où le prix pourrait rebondir ou se retourner.",
+    "rules": {
+      "entry": "Dans une tendance haussière, acheter lorsque le prix atteint un niveau de retracement de Fibonacci (38.2%, 50% ou 61.8%) et montre des signes de rebond (bougie de rejet, confirmation). Dans une tendance baissière, vendre à ces mêmes niveaux après un rebond baissier.",
+      "exit": "Sortir lorsque le prix atteint le niveau d'extension de Fibonacci (161.8%, 261.8%) ou lorsqu'un signal de retournement apparaît.",
+      "stopLoss": "Placer le stop loss juste en dessous du niveau de retracement suivant (par exemple, sous le 61.8% pour un achat) ou sous le plus bas récent.",
+      "takeProfit": "Objectif au niveau d'extension de Fibonacci (161.8% ou 261.8%) ou à un niveau de résistance/support majeur.",
+      "timeframes": [
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "pairs": [
+        "EURUSD",
+        "XAUUSD",
+        "GBPUSD"
+      ],
+      "sessions": [
+        "London",
+        "New York"
+      ]
+    },
+    "concepts": [
+      "Retracement de Fibonacci",
+      "Niveaux de Fibonacci (23.6%, 38.2%, 50%, 61.8%, 78.6%)",
+      "Extensions de Fibonacci",
+      "Tendance haussière et baissière",
+      "Zones de support et résistance",
+      "Rebond technique",
+      "Gestion du risque",
+      "Analyse technique"
+    ],
+    "tags": [
+      "Fibonacci",
+      "retracement",
+      "trading",
+      "analyse technique",
+      "stratégie",
+      "CFD",
+      "forex"
+    ],
+    "conditions": "Ne pas trader cette stratégie dans un marché sans tendance claire (range) ou lorsque le prix casse de manière significative les niveaux de Fibonacci sans rebond. Éviter également les périodes de forte volatilité ou avant des annonces économiques majeures.",
+    "confidence": "medium",
+    "sourceUrl": "https://www.markets.com/education-centre/fibonacci-retracement-trading"
+  },
+  "tags": [
+    "Fibonacci",
+    "retracement",
+    "trading",
+    "analyse technique",
+    "stratégie",
+    "CFD",
+    "forex"
+  ],
+  "createdAt": "2026-10-12T11:02:10.848Z"
+}

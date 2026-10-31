@@ -1,0 +1,9 @@
+{
+  "id": "strategy_price_action",
+  "title": "Stratégie de Trading - Price Action",
+  "content": "Stratégie pure basée sur l'analyse des bougies japonaises.\n\n## Patterns à rechercher\n- Engulfing: Bougie englobante la précédente\n- Harami: Bougie petite à l'intérieur de la précédente\n- Marubozu: Bougie avec corps long et petites ombres\n- Doji: Bougie avec corps très petit\n\n## Règles d'entrée\n- Confirmation avec volume\n- Alignement avec la tendance principale\n- Support/résistance respecté\n- Pas de contre-tendance forte\n\n## Règles de sortie\n- Sortie au prochain niveau clé\n- Sortie après un nombre défini de bougies\n- Trailing stop\n\n## Timeframes recommandés\n- M15, M30, H1\n\n## Paires recommandées\n- EURUSD, GBPUSD, USDJPY\n\n## Gestion du risque\n- Risque maximum par trade: 0.8% du capital\n- Stop loss: en dehors du pattern\n- Take profit: 1.5x à 2x le risque\n\n---\nCréé le: 2026-10-10\nType: price-action-strategy\nTags: price-action, candlestick, patterns, volume",
+  "type": "strategy",
+  "createdAt": "2026-10-10T00:00:00.000Z",
+  "tags": ["price-action", "candlestick", "patterns", "volume"],
+  "source": "manual"
+}

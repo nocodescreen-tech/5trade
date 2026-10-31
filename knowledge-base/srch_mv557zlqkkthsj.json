@@ -1,0 +1,71 @@
+{
+  "id": "srch_mv557zlqkkthsj",
+  "title": "ICT Fibonacci OTE Strategy",
+  "content": "Utilise les niveaux de retracement Fibonacci personnalisés d'ICT (0.5, 0.62, 0.705, 0.79) pour identifier la zone d'entrée optimale (OTE) après un retracement dans un marché en tendance. L'entrée se fait au niveau 70.5% avec confluence (FVG, order block, MSS) et les objectifs sont basés sur les extensions standard-deviation (-0.27, -0.62, -1.0, -2.0, -2.5, -4.0).\n\nFacebook X WhatsApp Telegram Practical ICT Strategies – 7th Edition Released Over 150 pages of knowledge coming from 8+ years of experience from Professional ICT Trader. 👉 Buy Now! ➝ SponsoredIn this guide I will walk you through the exact ICT Fibonacci settings I use on TradingView — the retracement levels, the OTE entry zone, the standard-deviation profit projections and how to apply the tool in both bullish and bearish setups.Fibonacci is a tool used to measure retracements in price. It helps traders trade the continuation of a trend after a retracement and it sits at the heart of the ICT Optimal Trade Entry (OTE) pattern.You can jump to the section you need or read the whole guide for a complete view of the tool.Table of Contents ToggleWhat are ICT Fibonacci Levels?ICT Fib Levels are the customised Fibonacci retracement and extension settings used personally by Michael Huddleston AKA Inner Circle Trader (ICT).Fibonacci levels are a crucial part of the ICT Trading Strategy including the ICT Optimal Trade Entry (OTE) Pattern and they pair directly with the ICT Premium & Discount framework.So you need to set up your Fibonacci tool according to the ICT specification before you can trade his strategy.The standard ICT Fibonacci retracement set replaces the default tool levels with the values below.1Start0.5Equillibrium0.6262% Retracement0.705OTE 70.50.7979% Retracement0Profit Scale-0.27Target 1-0.62Target 2-1Symmetrical PriceICT Fib Settings on TradingView (Step-by-Step)This is exactly how I configure the Fibonacci retracement tool on TradingView so the OTE zone, equilibrium and the standard-deviation extensions render correctly.Open the Fibonacci retracement tool on the left toolbar (or press Alt+F).Right-click the tool and choose Settings.Under the Coefficients tab, remove every default level except 0 and 1.Add the ICT retracement levels: 0.5, 0.62, 0.705 and 0.79. The 0.705 level is the centre of the OTE zone.Add the ICT standard-deviation extensions for profit targets: -0.27, -0.62, -1.0, -2.0, -2.5 and -4.0.Tick Show prices and Levels line so the price labels print on every level.Save the configuration as a template named “ICT Fib” so you can reapply it on every chart.How to Use ICT Fibonacci Levels in a Bullish MarketIn a bullish market price makes higher highs and higher lows. Before making a new high price retraces down and then continues its bullish trend.When price retraces back you use the ICT fib levels to identify Premium and Discount, and the entry comes from the discount area using the ICT Optimal Trade Entry (OTE) Pattern.(I) Identify a Swing High and the most recent Swing Low.(II) Draw the Fibonacci tool from swing low to swing high as shown in the picture below.(III) Wait for price to retrace back to the 70.5% OTE level.ICT Trading Courseicttradingcourse.comThe only complete ICT trading course6.5 hours · 6 modules · lifetime access — one‑time $149. ✨ Update: I've launched my ICT Trading Strategies PDF eBook! Check it out at ictpdf.com .(IV) Look for bullish evidence such as an ICT Market Structure Shift on lower timeframes at the OTE level.(V) After confirmation you can execute a buy trade at the OTE level with stop loss below the swing low. For profit targets you use the ICT fib extensions on the negative side of the tool (standard deviation projections).How to Use ICT Fibonacci Levels in a Bearish MarketIn a bearish market price makes lower highs and lower lows. Before making a new low price retraces up and then continues its bearish trend.When price retraces back you use the ICT fib levels to identify the Premium zone and you enter from the premium using the ICT Optimal Trade Entry (OTE) Pattern.(I) Identify a Swing High and the most recent Swing Low.(II) Draw the Fibonacci tool from swing high to swing low as shown in the picture below.(III) Wait for price to retrace back to the 70.5% OTE level.(IV) Look for bearish evidence such as an ICT Market Structure Shift on lower timeframes at the OTE level.(V) After confirmation you can execute a sell trade at the OTE level with stop loss above the swing high. For profit targets you use the ICT fib extensions on the negative side of the tool.Ideal Fibonacci Retracement Levels for Trade EntryAccording to Michael Huddleston the ideal fibonacci entry zone in a bullish trend sits below the 50% retracement — specifically at the 62%, 70.5% and 79% levels.In a bearish trend the ideal fibonacci entry levels sit above the 50% line, which is called the ICT Premium Zone.So price is expected to bounce back from these fib levels and traders anticipate the entry here with confluence from a fair value gap, an order block or a liquidity sweep.The 70.5% level is the central OTE level and is the most commonly cited entry on the ICT model.ICT Standard Deviation Fib Settings (Profit Targets)The negative side of the Fibonacci tool — the standard deviation projection — is how I set my profit targets. ICT teaches a specific extension set that aligns with how the algorithm delivers price after a clean displacement.The canonical ICT standard-deviation projections are:ICT Trading Courseicttradingcourse.comThe only complete ICT trading course6.5 hours · 6 modules · lifetime access — one‑time $149.-0.27 — short-term internal target, often the first liquidity pool above/below the swing.-0.62 — measured-move continuation; useful trail point.-1.0 — symmetrical projection, typical “1× the leg” target.-2.0 — full standard deviation expansion; often coincides with prior session highs/lows.-2.5 — extended target on strong trend days.-4.0 — maximum projection used in weekly bias trades and during high-impact news drives.These are the targets I work down through, taking partials at -1.0 and trailing the rest toward -2.0 and beyond when the higher-timeframe draw on liquidity supports it.Where to Set Stop Loss while Using ICT Fib Levels for Trade EntryWhile using ICT fib levels to execute a trade, your stop loss should sit 10 to 20 pips below the 1.0 (100%) fibon",
+  "type": "web-strategy",
+  "source": "search",
+  "sourceUrl": "https://innercircletrader.net/tutorials/ict-fibonacci-levels/",
+  "structured": {
+    "title": "ICT Fibonacci OTE Strategy",
+    "summary": "Utilise les niveaux de retracement Fibonacci personnalisés d'ICT (0.5, 0.62, 0.705, 0.79) pour identifier la zone d'entrée optimale (OTE) après un retracement dans un marché en tendance. L'entrée se fait au niveau 70.5% avec confluence (FVG, order block, MSS) et les objectifs sont basés sur les extensions standard-deviation (-0.27, -0.62, -1.0, -2.0, -2.5, -4.0).",
+    "rules": {
+      "entry": "Dans un marché haussier : tracer le Fibonacci du swing low au swing high, attendre le retracement au niveau 70.5% (OTE) et chercher une confirmation de retournement haussier (Market Structure Shift) sur timeframe inférieur. Dans un marché baissier : tracer du swing high au swing low, attendre le retracement au 70.5% et chercher une confirmation baissière (MSS).",
+      "exit": "Prendre des partiels aux niveaux d'extension -1.0 et -2.0, puis trailing stop vers -2.5 et -4.0 si le biais HTF soutient.",
+      "stopLoss": "Pour un achat : 10 à 20 pips sous le niveau 1.0 (100%) du Fibonacci. Pour une vente : 10 à 20 pips au-dessus du niveau 1.0. Sur indices (NQ, ES) : 5 à 10 ticks au-delà du 1.0. Sur l'or (XAU/USD) : 50 à 100 cents au-delà du 1.0.",
+      "takeProfit": "Utiliser les extensions standard-deviation : -0.27 (cible interne court terme), -0.62 (continuation mesurée), -1.0 (projection symétrique), -2.0 (expansion complète), -2.5 (cible étendue), -4.0 (projection maximale).",
+      "timeframes": [
+        "M15",
+        "M5",
+        "M3",
+        "M1"
+      ],
+      "pairs": [
+        "GBPUSD",
+        "EURUSD",
+        "NQ",
+        "ES",
+        "XAUUSD"
+      ],
+      "sessions": [
+        "New York"
+      ]
+    },
+    "concepts": [
+      "ICT Optimal Trade Entry (OTE)",
+      "Fibonacci retracement personnalisé",
+      "Premium & Discount",
+      "Market Structure Shift (MSS)",
+      "Fair Value Gap (FVG)",
+      "Order Block",
+      "Liquidity Sweep",
+      "Standard-deviation projections",
+      "Confluence"
+    ],
+    "tags": [
+      "ICT",
+      "Fibonacci",
+      "OTE",
+      "retracement",
+      "trading",
+      "forex",
+      "indices",
+      "or",
+      "stratégie"
+    ],
+    "conditions": "Ne pas trader si le retracement n'atteint pas la zone OTE (62%-79%) ; si le prix stagne avant 62%, le mouvement est faible et le setup est invalide. Ne pas trader sans confluence (FVG, order block, liquidité). Ne pas dessiner le Fibonacci sur un swing non valide (doit provenir d'un balayage de liquidité ou d'un MSS). Ne pas inverser la direction du Fibonacci (bullish : low vers high ; bearish : high vers low).",
+    "confidence": "high",
+    "sourceUrl": "https://innercircletrader.net/tutorials/ict-fibonacci-levels/"
+  },
+  "tags": [
+    "ICT",
+    "Fibonacci",
+    "OTE",
+    "retracement",
+    "trading",
+    "forex",
+    "indices",
+    "or",
+    "stratégie"
+  ],
+  "createdAt": "2026-10-12T11:02:44.222Z"
+}

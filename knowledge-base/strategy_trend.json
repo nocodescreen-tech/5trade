@@ -1,0 +1,9 @@
+{
+  "id": "strategy_trend",
+  "title": "Stratégie de Trading - Suivi de Tendance",
+  "content": "Stratégie simple basée sur le suivi de la tendance principale.\n\n## Règles d'entrée\n- Prix au-dessus des moyennes mobiles (MA 50, 200)\n- Confirmation avec RSI > 50 (pour tendance haussière)\n- Volume croissant\n\n## Règles de sortie\n- Sortie lorsque le prix passe en dessous de la MA 50\n- RSI < 30 (survente)\n- Changement de tendance sur timeframe supérieur\n\n## Timeframes recommandés\n- H1, H4, D1\n\n## Paires recommandées\n- Toutes les paires majeures\n\n## Gestion du risque\n- Risque maximum par trade: 1% du capital\n- Stop loss: en dessous du plus bas récent\n- Take profit: 3x le risque\n\n## Indicateurs nécessaires\n- Moyennes mobiles (50, 200)\n- RSI\n- MACD\n\n---\nCréé le: 2026-10-10\nType: trend-strategy\nTags: trend, moving-average, rsi, macd",
+  "type": "strategy",
+  "createdAt": "2026-10-10T00:00:00.000Z",
+  "tags": ["trend", "moving-average", "rsi", "macd"],
+  "source": "manual"
+}

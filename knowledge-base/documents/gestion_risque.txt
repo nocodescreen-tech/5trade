@@ -1,0 +1,34 @@
+# Gestion du Risque en Trading
+
+## Principes fondamentaux
+- Ne jamais risquer plus de 1-2% du capital par trade
+- Utiliser des stop losses systématiques
+- Calculer le ratio risque/récompense avant chaque trade
+- Diversifier le portefeuille
+
+## Sizing des positions
+- Position size = (Capital total × % risque par trade) / Distance stop
+- Exemple: 0,000 capital, 1% risque, /usr/bin/bash.10 distance stop = 1000 actions
+
+## Types de risque
+- Market risk: Risque de marché général
+- Specific risk: Risque lié à un actif spécifique
+- Liquidity risk: Risque de liquidité
+- Operational risk: Risque opérationnel
+
+## Outils de gestion
+- Stop loss
+- Take profit
+- Trailing stop
+- Hedging
+
+## Règles de base
+1. Toujours utiliser un stop loss
+2. Ne jamais trader sans plan
+3. Respecter les règles de gestion
+4. Ne pas émouvoir
+
+---
+Créé le: 2026-10-10
+Type: concept
+Tags: risk, management, capital, position-sizing

@@ -1,0 +1,72 @@
+{
+  "id": "srch_mv557sp7dc96kl",
+  "title": "Fibonacci Retracement & Extension Trading",
+  "content": "Utiliser les niveaux de retracement et d'extension de Fibonacci pour identifier les zones potentielles de support et de résistance. Ces niveaux aident à déterminer les points d'entrée et de sortie optimaux dans une tendance.\n\nCompétition de trading SyntX Dotation totale de $100,000 Quitter le site pour l’Afrique du Sud ? Vous êtes actuellement sur notre site pour l’Afrique du Sud, exploité par Weltrade SA (Pty) Ltd et réglementé par la FSCA. Passer à une autre juridiction signifie une entité et une licence différentes, avec une protection réglementaire réduite ou nulle. Pour continuer, vous devrez accepter le Contrat client et les Politiques du nouveau site. Changer de site Rester Passer au site pour l’Afrique du Sud? Vous êtes sur le point d’accéder à notre site pour l’Afrique du Sud, exploité par Weltrade SA (Pty) Ltd et réglementé par la FSCA. Pour continuer, vous devrez accepter le Contrat client et les Politiques applicables à ce site. Changer de site Rester Fibonacci Levels Calculator Identify key market levels with our Fibonacci Levels Calculator. By entering the high and low price points of a price movement, you can calculate crucial Fibonacci retracement, Fibonacci numbers and Fibonacci extension levels. This tool aids in identifying potential support and resistance levels, enhancing your technical analysis and trading strategy. Calculate How you can work with the Fibonacci Tool To work with the Fibonacci Tool, input the high and low prices of the price action you wish to analyze. The calculator will solve for the Fibonacci retracement levels, Fibonacci numbers and extension levels, helping you make informed decisions on entry and exit points. This calculation is based on an infinite mathematical sequence where each term is the sum of the two previous terms, starting with F0 and F1. Leverage our Fibonacci Levels Calculator To determine significant retracement levels based on the Fibonacci sequence. By analyzing an asset's price action, you can optimize your trading strategy and pinpoint potential support and resistance on the price chart. Use this tool to calculate Fibonacci retracements and extensions that can be vital for day trading and long-term investment strategies. Perfect Your Trading with Weltrade Elevate your trading with Weltrade’s advanced tools and secure trading environment. Open an account today to access our comprehensive Fibonacci retracement tool, Fibonacci calculators, and other financial instruments. Join a global community of successful traders and benefit from our industry-leading trading systems, risk management resources, and technical analysis tools. Try the Fibonacci sequence and Fibonacci retracement levels to guide your trading strategy, making use of other indicators and tools to optimize your trade entries and exits. Open an Account Find a variety of our calculators, solely by your needs Lot Size Calculator Determine the optimal lot size based on your risk tolerance. Use this tool to calculate the appropriate position size for any trade, balancing risk and reward. Risk of Ruin Calculator Assess the likelihood of depleting your trading capital over time. By calculating the probability of ruin, you can make more informed decisions and manage your trading risk more effectively. Pip Calculator Calculate the value of pips in your trades for improved risk management. Understanding the impact of price changes on your positions is essential for managing risk effectively. Leverage Calculator Understand the impact of leverage on your trading positions. Calculate how different levels of leverage affect your trading capital, risk, and potential profit. Forex Profit Calculator Estimate potential profits or losses for any trading scenario. This tool helps you calculate expected returns based on various factors, including the Fibonacci sequence and other indicators. Fibonacci Calculator Identify key Fibonacci retracement, Fibonacci numbers and Fibonacci extension levels to refine your technical analysis. Use this tool to calculate the Fibonacci sequence and determine critical levels in the market. About Weltrade With 20 years of expertise, Weltrade is your trusted partner in secure and transparent Forex trading. Join a global community of over 60,000 traders in 20+ countries who rely on our exceptional customer service, direct communication, and powerful trading tools. We’re here to empower your trading journey with advanced resources designed for success in the global market FAQs How many times can I use the Fibonacci Tool? You can use the Fibonacci Tool as often as needed to analyze an asset's price action and identify key Fibonacci retracements. It's available for continuous use to help traders compute retracement and extension values based on the Fibonacci sequence and Fibonacci number. Is there a fee to access the Fibonacci Tool? No, the Fibonacci Tool is entirely free to use. You can calculate Fibonacci retracement, price patterns, profit levels, and extension levels using the Fibonacci number, without incurring any costs, making it an essential resource for day trading and long-term investment strategies. What does the Fibonacci Calculator do? The Fibonacci Calculator computes Fibonacci retracement levels, Fibonacci numbers and Fibonacci extension levels, which are crucial for identifying potential retracement points on a price chart. By inputting the high and low prices of an asset's price movement, the calculator provides Fibonacci ratios that many traders use to determine support and resistance levels in financial markets. How do I work with the Fibonacci Tool? To work with the Fibonacci Tool, input the high and low prices of the price action you wish to analyze. The calculator will solve for the Fibonacci retracement levels, Fibonacci numbers and extension levels, helping you make informed decisions on entry and exit points. This calculation is based on an infinite mathematical sequence where each term is the sum of the two previous terms, starting with F0 and F1. Why are Fibonacci levels significant? Fibonacci retracement levels, based on the Fibonacci sequence, Fibonacci numbers and golden ratio, help traders identify potential price reversal points, making them essential ",
+  "type": "web-strategy",
+  "source": "search",
+  "sourceUrl": "https://www.weltrade.com/tools/calculator/fibonacci/",
+  "structured": {
+    "title": "Fibonacci Retracement & Extension Trading",
+    "summary": "Utiliser les niveaux de retracement et d'extension de Fibonacci pour identifier les zones potentielles de support et de résistance. Ces niveaux aident à déterminer les points d'entrée et de sortie optimaux dans une tendance.",
+    "rules": {
+      "entry": "Entrer en position longue lorsque le prix rebondit sur un niveau de retracement de Fibonacci (par exemple 38.2%, 50%, 61.8%) dans une tendance haussière, ou en position courte lorsque le prix rejette un niveau de retracement dans une tendance baissière.",
+      "exit": "Sortir lorsque le prix atteint un niveau d'extension de Fibonacci (par exemple 127.2%, 161.8%, 261.8%) ou lorsqu'un signal de retournement apparaît.",
+      "stopLoss": "Placer le stop loss juste en dessous du niveau de retracement suivant (pour un long) ou juste au-dessus (pour un short), ou sous le plus bas/haut récent.",
+      "takeProfit": "Prendre profit aux niveaux d'extension de Fibonacci, généralement 127.2% ou 161.8% du mouvement initial.",
+      "timeframes": [
+        "H1",
+        "H4",
+        "D1"
+      ],
+      "pairs": [
+        "XAUUSD",
+        "EURUSD",
+        "GBPUSD",
+        "USDJPY"
+      ],
+      "sessions": [
+        "London",
+        "New York"
+      ]
+    },
+    "concepts": [
+      "Retracement de Fibonacci",
+      "Extension de Fibonacci",
+      "Nombres de Fibonacci",
+      "Suite de Fibonacci",
+      "Ratio d'or",
+      "Support et résistance",
+      "Analyse technique",
+      "Points d'entrée et de sortie",
+      "Gestion du risque"
+    ],
+    "tags": [
+      "Fibonacci",
+      "Retracement",
+      "Extension",
+      "Analyse technique",
+      "Support",
+      "Résistance",
+      "Trading",
+      "Forex",
+      "Indices",
+      "Matières premières"
+    ],
+    "conditions": "Ne pas trader cette stratégie dans des marchés sans tendance claire ou en range étroit, car les niveaux de Fibonacci sont moins fiables. Éviter également les périodes de forte volatilité imprévisible ou avant des annonces économiques majeures.",
+    "confidence": "medium",
+    "sourceUrl": "https://www.weltrade.com/tools/calculator/fibonacci/"
+  },
+  "tags": [
+    "Fibonacci",
+    "Retracement",
+    "Extension",
+    "Analyse technique",
+    "Support",
+    "Résistance",
+    "Trading",
+    "Forex",
+    "Indices",
+    "Matières premières"
+  ],
+  "createdAt": "2026-10-12T11:02:35.276Z"
+}

@@ -1,0 +1,89 @@
+{
+  "id": "srch_mv560rxni8twk1",
+  "title": "ICT Trading Strategy",
+  "content": "L'ICT (Inner Circle Trader) est une méthodologie de trading qui se concentre sur le suivi des traces laissées par les institutions sur les graphiques de prix. Elle repose sur l'idée que le prix est délivré vers la liquidité et que les mouvements de prix sont algorithmiques, avec des phases d'accumulation, de manipulation et de distribution. Les traders ICT utilisent des concepts comme la structure de marché, la liquidité, les order blocks, les fair value gaps, l'Optimal Trade Entry (OTE) et les kill zones pour anticiper les mouvements de prix et se positionner du même côté que les smart money.\n\nWhat Is ICT Trading? (Inner Circle Trader Explained) ICT trading is a methodology developed by Michael J. Huddleston, a trader and educator who goes by the name Inner Circle Trader (ICT) online. Over the past decade, ICT has become one of the most widely studied and debated approaches to trading, particularly among forex and futures traders. The methodology has expanded into equities, crypto, and indices as its concepts apply to any liquid market where institutional participants drive price. At its core, the ICT trading strategy is built on a single premise: retail traders lose money because they do not understand how institutional traders and market makers operate. Banks, hedge funds, and algorithmic trading firms do not trade the way retail traders are taught to trade. They need liquidity to fill large orders, and they engineer price movements to access that liquidity. ICT teaches traders to read the footprints that institutions leave on price charts and to position themselves on the same side as smart money. Unlike traditional technical analysis that relies on lagging indicators like moving averages and RSI, the ICT method focuses on price action, time, and the structural mechanics of how markets move. ICT traders study where liquidity pools form, how price delivers to those pools, and what happens after liquidity is taken. This creates a framework for anticipating price movement rather than reacting to it after the fact. The ICT methodology includes dozens of specific concepts, but the most important ones fall into a few core categories: market structure, liquidity, order blocks, fair value gaps, optimal trade entry, and kill zones. This guide breaks down each one in detail and shows you how to apply them in a real trading workflow. One important distinction: ICT is not an indicator or a signal service. It is a way of reading price. Learning ICT requires studying how candles form, how structure shifts, and how time aligns with institutional activity. The payoff is a deeper understanding of why price moves — not just where it moved in the past. If you want to follow along on a live chart, every concept in this guide can be plotted automatically on a free ChartingLens account — no credit card required. The Core Principles of ICT Trading Before diving into specific ICT concepts, it helps to understand the foundational principles that underpin the entire methodology. Every ICT setup, entry model, and trade plan is built on top of these ideas. Price Is Delivered to Liquidity The single most important principle in ICT trading is that price moves toward liquidity. Liquidity, in this context, means clusters of stop-loss orders sitting above swing highs (buy-side liquidity) or below swing lows (sell-side liquidity). Institutional traders need to fill large orders, and they cannot do so without triggering these stop clusters. The ICT method teaches you to identify where liquidity pools exist and anticipate that price will be delivered to those levels before reversing. The Market Is Not Random ICT rejects the idea that short-term price movement is random noise. Instead, the methodology argues that price follows an algorithm — a repeating pattern of accumulation, manipulation, and distribution. Smart money accumulates positions quietly, then engineers a false move (manipulation) to trigger retail stops and create liquidity, then distributes into the move that follows. This three-phase cycle appears on every timeframe. Time and Price Are Connected Unlike most trading methodologies that focus only on price levels, ICT places heavy emphasis on when price reaches key levels. Specific times of day — known as kill zones — are when institutions are most active and when the highest-probability setups form. A perfect price level at the wrong time of day is not a valid ICT trade. This time-based filtering is one of the most distinctive aspects of the methodology. Higher Timeframes Control Lower Timeframes ICT uses a top-down analysis framework. The daily and 4-hour charts establish the overall direction — the institutional order flow bias. The 1-hour chart provides structure context. The 15-minute and 5-minute charts are used for precision entries. An ICT trader never takes a 5-minute entry that contradicts the daily bias. This multi-timeframe alignment is what separates ICT from lower-probability scalping approaches. Key Takeaway ICT trading is not about finding patterns on a chart — it is about understanding the algorithm of price delivery. Smart money needs liquidity to operate, and price is engineered to reach that liquidity at specific times. Every ICT concept builds on this foundation. Market Structure in ICT: Higher Highs, Lower Lows, BOS and CHoCH Market structure is the backbone of the ICT trading strategy. Before analyzing liquidity, order blocks, or fair value gaps, you need to understand what the market is doing at a structural level. Is it trending up? Trending down? Ranging? And most critically — is the structure shifting? Bullish and Bearish Market Structure In ICT terms, bullish market structure consists of a series of higher highs (HH) and higher lows (HL). Each new swing high exceeds the previous one, and each pullback holds above the previous swing low. As long as this pattern continues, the bias is bullish. Bearish market structure is the mirror: lower lows (LL) and lower highs (LH). Each new swing low breaks below the previous one, and each rally fails to exceed the previous swing high. The bias remains bearish until structure shifts. Break of Structure (BOS) A break of structure (BOS) occurs when price continues in the direction of the existing trend by breaking a key swing point. In a bullish trend, a BOS happens when price creates a new higher high by breaking above the previous swing high. In a bearish trend, BOS occurs when price makes a new lower low by breaking below the previous swing low. A BOS confirms that the current trend is intact and continuing. Change of Character (CHo",
+  "type": "web-strategy",
+  "source": "search",
+  "sourceUrl": "https://chartinglens.com/blog/ict-trading-strategy-guide",
+  "structured": {
+    "title": "ICT Trading Strategy",
+    "summary": "L'ICT (Inner Circle Trader) est une méthodologie de trading qui se concentre sur le suivi des traces laissées par les institutions sur les graphiques de prix. Elle repose sur l'idée que le prix est délivré vers la liquidité et que les mouvements de prix sont algorithmiques, avec des phases d'accumulation, de manipulation et de distribution. Les traders ICT utilisent des concepts comme la structure de marché, la liquidité, les order blocks, les fair value gaps, l'Optimal Trade Entry (OTE) et les kill zones pour anticiper les mouvements de prix et se positionner du même côté que les smart money.",
+    "rules": {
+      "entry": "1. Déterminer le biais directionnel sur les unités de temps supérieures (daily, H4) en identifiant la structure de marché (haussier/baissier) et les éventuels CHoCH. 2. Identifier les niveaux de liquidité clés (swing highs/lows, equal highs/lows) sur H4 et H1. 3. Repérer les order blocks valides (dernière bougie opposée avant un mouvement impulsif ayant causé un BOS ou CHoCH) et les fair value gaps (FVG) sur H1 et M15. 4. Attendre que le prix revienne dans une zone de confluence (order block + FVG + OTE entre 62% et 79% de retracement de Fibonacci) dans le sens du biais. 5. Entrer lorsque le prix montre un rejet dans cette zone, idéalement pendant une kill zone (London ou New York).",
+      "exit": "Sortir lorsque le prix atteint la prochaine zone de liquidité opposée (buy-side liquidity pour un short, sell-side liquidity pour un long) ou lorsqu'un changement de structure (CHoCH) se produit contre la position.",
+      "stopLoss": "Placer le stop loss juste en dessous de l'order block pour un long (ou au-dessus pour un short), ou sous le swing low/high le plus récent dans la zone d'entrée.",
+      "takeProfit": "Objectif : la prochaine poche de liquidité non prise (swing high/low, equal highs/lows) ou un niveau de structure opposé. Utiliser un ratio risque/récompense minimum de 1:2.",
+      "timeframes": [
+        "Daily",
+        "H4",
+        "H1",
+        "M15",
+        "M5"
+      ],
+      "pairs": [
+        "Forex",
+        "Futures",
+        "Indices",
+        "Crypto",
+        "Actions"
+      ],
+      "sessions": [
+        "London",
+        "New York"
+      ]
+    },
+    "concepts": [
+      "Market Structure (HH, HL, LL, LH)",
+      "Break of Structure (BOS)",
+      "Change of Character (CHoCH)",
+      "Liquidity (Buy-side, Sell-side)",
+      "Liquidity Sweeps",
+      "Liquidity Grabs",
+      "Order Blocks",
+      "Fair Value Gaps (FVG)",
+      "Optimal Trade Entry (OTE)",
+      "Fibonacci Retracement (62%-79%)",
+      "Premium and Discount Zones",
+      "Kill Zones (Asian, London, New York, London Close)",
+      "Time and Price Theory",
+      "Top-Down Analysis",
+      "Smart Money Concepts"
+    ],
+    "tags": [
+      "ICT",
+      "Inner Circle Trader",
+      "Smart Money",
+      "Liquidity",
+      "Order Block",
+      "Fair Value Gap",
+      "OTE",
+      "Kill Zones",
+      "Market Structure",
+      "BOS",
+      "CHoCH",
+      "Forex",
+      "Futures",
+      "Price Action"
+    ],
+    "conditions": "Ne pas trader en dehors des kill zones (heures de forte activité institutionnelle). Ne pas prendre de trade contre le biais directionnel des unités de temps supérieures. Ne pas entrer si le prix n'a pas balayé la liquidité opposée avant l'entrée. Ne pas trader si la structure de marché est ambiguë ou en range sans direction claire. Éviter les périodes de faible volume et les annonces économiques majeures sans confirmation.",
+    "confidence": "high",
+    "sourceUrl": "https://chartinglens.com/blog/ict-trading-strategy-guide"
+  },
+  "tags": [
+    "ICT",
+    "Inner Circle Trader",
+    "Smart Money",
+    "Liquidity",
+    "Order Block",
+    "Fair Value Gap",
+    "OTE",
+    "Kill Zones",
+    "Market Structure",
+    "BOS",
+    "CHoCH",
+    "Forex",
+    "Futures",
+    "Price Action"
+  ],
+  "createdAt": "2026-10-12T11:25:07.307Z"
+}

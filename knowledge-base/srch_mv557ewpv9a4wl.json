@@ -1,0 +1,81 @@
+{
+  "id": "srch_mv557ewpv9a4wl",
+  "title": "Fibonacci Retracement & Extension Trading",
+  "content": "Utiliser les niveaux de retracement de Fibonacci (23.6%, 38.2%, 50%, 61.8%, 78.6%) pour identifier des points d'entrée potentiels lors d'un repli de prix dans une tendance existante, et les niveaux d'extension (127.2%, 161.8%, 261.8%) pour fixer des objectifs de profit. Les niveaux sont calculés à partir d'un swing high et swing low significatifs, et sont utilisés sur tous les marchés et timeframes.\n\n← Back to All CalculatorsFIBONACCI CALCULATORFind Your Fibonacci Levels InstantlyCalculate retracement and extension levels for any price swing. Know exactly where price is likely to pause, reverse, or continue.A Fibonacci calculator applies key ratios 23.6%, 38.2%, 50%, 61.8%, and 78.6% to any price swing to identify where markets commonly retrace before continuing their trend or reverse entirely. These levels are used by traders across Forex, stocks, crypto, and indices to plan entries, exits, and stop-losses with precision. Fibonacci Retracement & Extension Calculator | TradeZella Your Price Range Forex Stocks Crypto Indices Swing High ? Swing Low ? Precision ? 2 — Stocks & Indices 4 — Forex Majors 5 — Forex (5-digit) 8 — Crypto Trend ? ▲ Uptrend ▼ Downtrend Fibonacci Levels Retracement Extension Both Level Price Distance Type Track Your Fibonacci Trades in TradeZella How to Use the Fibonacci Calculator This free Fibonacci calculator works for any market including forex, stocks, crypto, and indices. Follow these steps to get your retracement and extension levels in seconds. 1 Select your market. Choose Forex, Stocks, Crypto, or Indices. This sets the correct decimal precision automatically so your levels are accurate. 2 Enter your swing high and swing low. Look at your chart and identify the most recent significant peak and trough. Enter both prices into the calculator. 3 Choose the trend direction. Select Uptrend if price has been moving up, or Downtrend if price has been moving down. This tells the calculator whether your levels act as support or resistance. 4 Read your Fibonacci levels. The table shows every key level with the exact price, the distance from your swing point, and whether it acts as support, resistance, or a profit target. Fibonacci Retracement vs Extension Levels Fibonacci retracement and extension levels are both calculated from the same swing high and low, but they serve different purposes in a trade plan. Retracement Levels Retracement levels measure how far price has pulled back from a swing high or low. The key retracement levels are 23.6%, 38.2%, 50%, 61.8%, and 78.6%. Traders use these levels to find potential entry points when price pulls back before continuing its trend. Extension Levels Extension levels project where price could move beyond the original swing high or low. The most commonly used extension levels are 127.2%, 161.8%, and 261.8%. Traders use these as profit targets after price breaks past the original swing point. Which Fibonacci Levels Matter Most? Not all Fibonacci levels carry equal weight. Here are the key retracement levels from 0% to 100% and what each one means for your trades: 0% (Starting Point). This is your swing high in an uptrend or swing low in a downtrend. It marks where the move began and serves as your reference point for all other levels. 23.6% (Shallow Pullback). A minor retracement that usually happens in strong, fast-moving trends. If price only pulls back to this level and bounces, it signals strong momentum in the original direction. 38.2% (Moderate Pullback). One of the most watched retracement levels. In healthy trends, price often pulls back to 38.2% before continuing. This is a common entry level for traders looking to join an existing trend. 50% (Halfway Point). While 50% is not a true Fibonacci number, it is one of the most widely used levels in trading. Price pulling back to the midpoint of a move is a natural area for support or resistance. Many institutional traders watch this level closely. 61.8% (The Golden Ratio). The single most important Fibonacci level. Derived from the golden ratio (1.618), this level is where the strongest price reactions typically happen. If price holds at 61.8%, the trend is likely to continue. If it breaks through, the trend may be weakening. 78.6% (Deep Retracement). A deep pullback that signals the trend is under pressure. Price reaching this level means the move has given back most of its gains. This is often the last line of defense before a full reversal to 100%. 100% (Full Retracement). Price has returned all the way to where the original move started. At this point, the entire swing has been erased. This can signal a trend reversal or a move into a new range. Most traders focus on the 38.2%, 50%, and 61.8% levels for trade entries. The 61.8% golden ratio level tends to produce the strongest reactions across forex, stocks, crypto, and indices. Related Trading Calculators Position Size Calculator Calculate your ideal lot size based on risk Drawdown Recovery Calculator Estimate realistic recovery timelines Prop Firm ROI Calculator See if the evaluation cost is worth it Futures Calculator Calculate profit and loss for futures trades Frequently Asked QuestionsWhat is a Fibonacci retracement?A Fibonacci retracement is a technical analysis tool that uses horizontal lines to indicate potential support or resistance levels based on key Fibonacci ratios — 23.6%, 38.2%, 50%, 61.8%, and 78.6%. These levels are drawn between a significant high and low to predict where price might pull back before continuing its trend.What Fibonacci levels matter most in trading?The most widely watched levels are 38.2%, 50%, and 61.8%. The 61.8% level known as the \"golden ratio\" is considered the most significant and often acts as the strongest area of support or resistance. The 50% level, while not a true Fibonacci number, is also heavily traded.How do I use Fibonacci retracements to find trade entries?Identify a clear swing high and swing low. Then look for price to pull back into a key Fibonacci level (typically 38.2%–61.8%) before resuming the trend. Combine Fibonacci levels with other signals, like candlestick patterns, volume, or trend indicators — for higher-probability setups.What's the difference between Fibonacci retracement and extension?Retracement levels help you find potential reversal zones within an existing move, ideal for planning entries. Extension levels project where price may go beyond ",
+  "type": "web-strategy",
+  "source": "search",
+  "sourceUrl": "https://www.tradezella.com/tools/fibonacci-calculator",
+  "structured": {
+    "title": "Fibonacci Retracement & Extension Trading",
+    "summary": "Utiliser les niveaux de retracement de Fibonacci (23.6%, 38.2%, 50%, 61.8%, 78.6%) pour identifier des points d'entrée potentiels lors d'un repli de prix dans une tendance existante, et les niveaux d'extension (127.2%, 161.8%, 261.8%) pour fixer des objectifs de profit. Les niveaux sont calculés à partir d'un swing high et swing low significatifs, et sont utilisés sur tous les marchés et timeframes.",
+    "rules": {
+      "entry": "Identifier un swing high et swing low clairs. En tendance haussière, attendre un repli du prix vers un niveau de retracement clé (idéalement entre 38.2% et 61.8%) et chercher une confirmation (pattern de chandelier, volume, indicateur de tendance) pour entrer en achat. En tendance baissière, attendre un rebond vers ces niveaux pour entrer en vente.",
+      "exit": "Sortir lorsque le prix atteint un niveau d'extension (127.2%, 161.8%, 261.8%) ou lorsqu'un signal de retournement apparaît. Utiliser les niveaux d'extension comme cibles de profit.",
+      "stopLoss": "Placer le stop loss sous le swing low (pour un achat) ou au-dessus du swing high (pour une vente), ou juste au-delà du niveau de Fibonacci suivant (par exemple, sous 78.6% pour un achat).",
+      "takeProfit": "Utiliser les niveaux d'extension de Fibonacci (127.2%, 161.8%, 261.8%) comme objectifs de profit.",
+      "timeframes": [
+        "1m",
+        "5m",
+        "15m",
+        "1H",
+        "4H",
+        "Daily",
+        "Weekly"
+      ],
+      "pairs": [
+        "Forex",
+        "Stocks",
+        "Crypto",
+        "Indices",
+        "Futures"
+      ],
+      "sessions": [
+        "London",
+        "New York",
+        "Asia"
+      ]
+    },
+    "concepts": [
+      "Retracement de Fibonacci",
+      "Extension de Fibonacci",
+      "Ratio doré (61.8%)",
+      "Niveaux de support/résistance",
+      "Swing high/swing low",
+      "Tendance haussière/baissière",
+      "Points d'entrée",
+      "Objectifs de profit",
+      "Stop loss",
+      "Analyse technique"
+    ],
+    "tags": [
+      "Fibonacci",
+      "Retracement",
+      "Extension",
+      "Trading",
+      "Analyse Technique",
+      "Support",
+      "Résistance",
+      "Entrée",
+      "Sortie",
+      "Stop Loss",
+      "Take Profit"
+    ],
+    "conditions": "Ne pas trader si le marché est en range sans tendance claire, si les niveaux de Fibonacci ne sont pas respectés (manque de réactions), ou si d'autres signaux techniques contredisent les niveaux. Éviter de trader uniquement sur les niveaux de Fibonacci sans confirmation supplémentaire.",
+    "confidence": "high",
+    "sourceUrl": "https://www.tradezella.com/tools/fibonacci-calculator"
+  },
+  "tags": [
+    "Fibonacci",
+    "Retracement",
+    "Extension",
+    "Trading",
+    "Analyse Technique",
+    "Support",
+    "Résistance",
+    "Entrée",
+    "Sortie",
+    "Stop Loss",
+    "Take Profit"
+  ],
+  "createdAt": "2026-10-12T11:02:17.401Z"
+}

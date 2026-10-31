@@ -1,0 +1,8 @@
+{
+  "id": "strategy_001",
+  "title": "Breakout Strategy",
+  "content": "Stratégie de breakout basée sur les niveaux de support et résistance. Lorsque le prix casse un niveau clé avec volume élevé, entrer dans la direction de la cassure. Stop loss au-dessous du niveau cassé pour les achats, au-dessus pour les ventes. Cible: prochain niveau clé ou ratio risque/rendement 1:2.",
+  "type": "strategy",
+  "createdAt": "2026-10-10T00:00:00.000Z",
+  "tags": ["breakout", "support", "resistance", "volume"]
+}

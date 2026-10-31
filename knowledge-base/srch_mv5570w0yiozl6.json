@@ -1,0 +1,56 @@
+{
+  "id": "srch_mv5570w0yiozl6",
+  "title": "Stratégie de croisement de moyennes mobiles 50/200 jours",
+  "content": "Cette stratégie utilise le croisement de la moyenne mobile à 50 jours et de la moyenne mobile à 200 jours pour identifier les tendances de fond et générer des signaux d'achat ou de vente. Elle est souvent utilisée comme filtre de tendance sur les marchés actions et indices.\n\nAverage Drawdown in Backtest Review GDP vs Stock Market: Correlation Guide 50-Day vs 200-Day MA for Trend Signals Average Drawdown in Backtest Review GDP vs Stock Market: Correlation Guide 50-Day vs 200-Day MA for Trend Signals Economic Data Release Signals: Guide for Traders",
+  "type": "web-strategy",
+  "source": "search",
+  "sourceUrl": "https://collinseow.com/fibonacci-levels/",
+  "structured": {
+    "title": "Stratégie de croisement de moyennes mobiles 50/200 jours",
+    "summary": "Cette stratégie utilise le croisement de la moyenne mobile à 50 jours et de la moyenne mobile à 200 jours pour identifier les tendances de fond et générer des signaux d'achat ou de vente. Elle est souvent utilisée comme filtre de tendance sur les marchés actions et indices.",
+    "rules": {
+      "entry": "Acheter lorsque la MA50 croise au-dessus de la MA200 (golden cross). Vendre à découvert lorsque la MA50 croise en dessous de la MA200 (death cross).",
+      "exit": "Clôturer la position lorsque le croisement opposé se produit ou selon d'autres critères de gestion.",
+      "stopLoss": "Placer un stop loss sous le dernier creux (pour un achat) ou au-dessus du dernier sommet (pour une vente) ou selon un pourcentage fixe du capital.",
+      "takeProfit": "Objectif basé sur un ratio risque/récompense ou sur la sortie au croisement opposé.",
+      "timeframes": [
+        "Daily"
+      ],
+      "pairs": [
+        "Indices",
+        "Actions"
+      ],
+      "sessions": []
+    },
+    "concepts": [
+      "Moyenne mobile 50 jours",
+      "Moyenne mobile 200 jours",
+      "Croisement de moyennes mobiles",
+      "Golden cross",
+      "Death cross",
+      "Suivi de tendance"
+    ],
+    "tags": [
+      "moyenne mobile",
+      "tendance",
+      "croisement",
+      "50/200",
+      "golden cross",
+      "death cross",
+      "analyse technique"
+    ],
+    "conditions": "Ne pas trader dans des marchés sans tendance claire ou en range étroit, car les croisements peuvent générer de faux signaux. Éviter également les périodes de forte volatilité sans confirmation.",
+    "confidence": "medium",
+    "sourceUrl": "https://collinseow.com/fibonacci-levels/"
+  },
+  "tags": [
+    "moyenne mobile",
+    "tendance",
+    "croisement",
+    "50/200",
+    "golden cross",
+    "death cross",
+    "analyse technique"
+  ],
+  "createdAt": "2026-10-12T11:01:59.232Z"
+}

@@ -1,0 +1,84 @@
+{
+  "id": "srch_mv560mak7spiv6",
+  "title": "SMC/ICT Liquidity Sweep + Order Block + FVG",
+  "content": "Stratégie de price action basée sur la structure de marché (BOS/CHOCH), les balayages de liquidité (liquidity sweeps), les order blocks et les fair value gaps. L'idée est d'attendre un balayage de liquidité au-dessus/dessous d'un extrême, puis un changement de structure (CHOCH/MSS) et une entrée dans un order block non mitigé ou un FVG, avec un biais directionnel aligné sur les hauts timeframes.\n\nShare: Copy link Text size A− 18px A+ Key Takeaways SMC/ICT is a framework built on market structure, liquidity, and institutional order-flow logic — not a secret indicator The core building blocks are BOS/CHOCH, order blocks, fair value gaps, and liquidity pools Liquidity sweeps above swing highs or below swing lows often precede strong reversals — but only with structural confirmation Premium/discount zones (above/below the 50% of the range) define where to sell and where to buy SMC does not replace risk management — position sizing, stop placement, and a trading plan still decide profitability Concepts transfer to gold and indices, but stop distance and session timing must be adapted per instrument Table of Contents TL;DR — SMC & ICT at a Glance Short Answer Detailed Explanation Example Common Mistake Professional Tip ICT order-block, MSS and FVG rules: entry, invalidation, exit Short Answer Detailed Explanation Example Common Mistake Professional Tip What Is Smart Money Concepts (SMC)? SMC vs. ICT — Are They the Same? The Five Core Building Blocks 1. Market Structure: BOS and CHOCH 2. Order Blocks (OB) 3. Fair Value Gap (FVG) / Imbalance 4. Liquidity: BSL and SSL 5. Premium vs. Discount Sessions and Killzones Applying SMC to Gold (XAU/USD) A Full SMC Setup — Step by Step SMC in Ranging vs. Trending Markets SMC vs. Classical Technical Analysis How to Apply SMC on MT4 / MT5 Common SMC Mistakes (and the Fix) Honest Limitations of SMC Who Is SMC Best For? Late July 2026 field note: SMC/ICT terms are heavily paraphrased across AI answers and social media. Treat this page as a definition + process guide. Zone drawing is subjective; journal live setups instead of trusting curated screenshots. TL;DR — SMC & ICT at a Glance# Short AnswerSMC is a price-action framework focused on market structure (BOS/CHOCH), order blocks, fair value gaps and liquidity sweeps. ICT is a related named methodology with extra tools such as killzones and Silver Bullet. Both help map where stops and imbalances sit — they do not guarantee profits. Use HTF bias, wait for a liquidity sweep plus confirmation, and keep risk ≤1% per trade.Detailed ExplanationSMC and ICT labels organise discretionary observations about structure, liquidity and imbalances; a chart cannot prove the identity or intent of a participant. Convert every term into an objective entry, invalidation and exit rule, then test it on the chosen instrument with costs.ExampleA trader may define a sweep as price trading above a prior high and closing back below it, then require a lower-timeframe structure break before entry. This is a testable rule; drawing an order block after a reversal is not.Common MistakeLabelling nearly every candle an order block or liquidity sweep after the outcome is visible.Professional TipTimestamp zones and signals before entry and include every qualifying failure in the journal to expose hindsight bias. Concept What it is Why it matters Market Structure (BOS / CHOCH) Higher highs/lows vs. lower highs/lows Defines trend direction and shift Order Block (OB) Last opposite-color candle before a strong move Potential institutional entry zone Fair Value Gap (FVG) 3-candle imbalance / inefficiency Price tends to return and rebalance Liquidity (BSL / SSL) Clusters of stops above highs / below lows Targets of stop hunts and sweeps Premium / Discount Above / below 50% of a leg Where to sell vs. where to buy Killzones London open, NY open sessions Highest-volatility windows ICT order-block, MSS and FVG rules: entry, invalidation, exit# Short AnswerICT and SMC setups share one sequence: liquidity sweep, then a structure shift (MSS/CHOCH/BOS), then entry in an unmitigated order block or FVG. Invalidation is a close beyond the opposite side of that zone. Exit at the next opposing liquidity, a partial at 1R, or the next unfilled imbalance. These are discretionary rules, not a guaranteed edge.Detailed ExplanationConvert every label into three prices before you click: entry zone, invalidation, first target. An order block without a sweep and a structure break is hindsight drawing. A fair value gap is an imbalance, not a must-fill. Size the lot from the invalidation, not from the story.ExampleEUR/USD sweeps the prior H1 high, closes back below it, then breaks the last opposing swing (MSS). The last opposite-color candle before the impulse is the order block. Enter on a return into that block with an FVG still open. Stop goes beyond the far side of the block. First take-profit is 1R or the next equal lows; a runner can aim at the next unfilled FVG.Common MistakeCalling every candle an order block after the reversal, then using a 5-pip stop that has no relation to the zone.Professional TipWrite the four columns — setup, entry, invalidation, exit — in the journal before the trade. If you cannot fill the row, skip the setup. Setup Entry Invalidation Exit Order block After a sweep and BOS/CHOCH, return into the unmitigated last opposite-color candle (confluence if an FVG sits in the impulse) Close beyond the opposite side of the order block Next opposing liquidity, partial at 1R, runner to the next unfilled FVG Market structure shift (MSS) After a sweep, wait for the opposing swing to break, then enter the pullback Reclaim of the swept high or low Next liquidity pool or a predefined 1R–2R Fair value gap (FVG) HTF bias, then a return into an unfilled 3-candle imbalance Full fill and close through the gap against the idea Partial at 50% of the gap; remainder at the next OB or liquidity Size the lot from the invalidation, not from the label. Placement rules: how to set stop-loss and take-profit. Smart Money Concepts (SMC) — popularised by the ICT (Inner Circle Trader) methodology — is a price-action framework that tries to read the chart the way large participants do: by tracking where liquidity is built and taken, and where institutional orders are likely to sit. Through 2025–2026 it remains one of the most discussed forex technical topics in retail ed",
+  "type": "web-strategy",
+  "source": "search",
+  "sourceUrl": "https://forextradelab.com/blog/smart-money-concepts-ict-trading-guide/",
+  "structured": {
+    "title": "SMC/ICT Liquidity Sweep + Order Block + FVG",
+    "summary": "Stratégie de price action basée sur la structure de marché (BOS/CHOCH), les balayages de liquidité (liquidity sweeps), les order blocks et les fair value gaps. L'idée est d'attendre un balayage de liquidité au-dessus/dessous d'un extrême, puis un changement de structure (CHOCH/MSS) et une entrée dans un order block non mitigé ou un FVG, avec un biais directionnel aligné sur les hauts timeframes.",
+    "rules": {
+      "entry": "1) Déterminer le biais HTF (D1/H4). 2) Attendre un balayage de liquidité (BSL au-dessus d'un plus haut, SSL en dessous d'un plus bas). 3) Attendre un changement de structure (CHOCH/MSS) sur un timeframe inférieur. 4) Entrer sur un retour dans l'order block non mitigé (dernière bougie opposée avant le mouvement impulsif) ou dans un FVG non comblé, idéalement en zone de discount (pour un achat) ou premium (pour une vente).",
+      "exit": "Sortie partielle à 1R ou au prochain pool de liquidité opposé. Le reste (runner) visera le prochain FVG non comblé ou la prochaine zone de liquidité majeure. Sortie également si le prix clôture au-delà de la zone d'invalidation.",
+      "stopLoss": "Placé juste au-delà du plus bas du balayage (pour un achat) ou du plus haut du balayage (pour une vente), jamais à l'intérieur de l'order block. La taille de position est calculée à partir de cette invalidation pour ne pas risquer plus de 1% du compte.",
+      "takeProfit": "Premier objectif : prochain pool de liquidité opposé (ex. equal lows/highs) ou 1R. Objectif final : prochain FVG non comblé ou zone de premium/discount du swing supérieur.",
+      "timeframes": [
+        "D1",
+        "H4",
+        "H1",
+        "M15",
+        "M5"
+      ],
+      "pairs": [
+        "XAUUSD",
+        "EURUSD",
+        "GBPUSD",
+        "US30",
+        "NAS100",
+        "BTCUSD",
+        "ETHUSD"
+      ],
+      "sessions": [
+        "London",
+        "New York"
+      ]
+    },
+    "concepts": [
+      "Market Structure (BOS/CHOCH)",
+      "Order Blocks (OB)",
+      "Fair Value Gap (FVG) / Imbalance",
+      "Liquidity (BSL/SSL)",
+      "Liquidity Sweep / Stop Hunt",
+      "Premium vs Discount",
+      "Optimal Trade Entry (OTE)",
+      "Killzones",
+      "MSS (Market Structure Shift)",
+      "Risk Management (≤1% par trade)"
+    ],
+    "tags": [
+      "SMC",
+      "ICT",
+      "price action",
+      "liquidity",
+      "order block",
+      "FVG",
+      "BOS",
+      "CHOCH",
+      "stop hunt",
+      "forex",
+      "gold",
+      "indices",
+      "crypto"
+    ],
+    "conditions": "Ne pas trader : 1) Contre le biais HTF (ne pas fade la tendance HTF pour un CHOCH). 2) Sans balayage de liquidité préalable. 3) Pendant les annonces économiques majeures (Fed, CPI, géopolitique) ou en dehors des killzones. 4) En consolidation pré-news ou en range sans direction claire. 5) Si les stops sont trop larges par rapport au risque de 1% (réduire la taille, ne pas forcer un stop serré). 6) Si l'on ne peut pas définir entry, invalidation et target avant l'entrée.",
+    "confidence": "medium",
+    "sourceUrl": "https://forextradelab.com/blog/smart-money-concepts-ict-trading-guide/"
+  },
+  "tags": [
+    "SMC",
+    "ICT",
+    "price action",
+    "liquidity",
+    "order block",
+    "FVG",
+    "BOS",
+    "CHOCH",
+    "stop hunt",
+    "forex",
+    "gold",
+    "indices",
+    "crypto"
+  ],
+  "createdAt": "2026-10-12T11:24:59.996Z"
+}

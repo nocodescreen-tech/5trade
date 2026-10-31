@@ -1,0 +1,9 @@
+{
+  "id": "concept_market_structure",
+  "title": "Structure du Marché",
+  "content": "Comprendre la structure du marché pour mieux trader.\n\n## Types de tendance\n- Tendance haussière: Plus hauts plus hauts, plus hauts bas\n- Tendance baissière: Plus bas plus bas, plus bas hauts\n- Range: Marché sans tendance claire\n- Choppy: Marché très volatile sans direction\n\n## Niveaux clés\n- Support: Niveau où l'acheteur domine\n- Résistance: Niveau où le vendeur domine\n- Pivot points: Points de retournement potentiels\n- Trend lines: Lignes de tendance\n\n## Phases du marché\n1. Accumulation: Les gros joueurs accumulent\n2. Tendance: Mouvement directionnel\n3. Distribution: Les gros joueurs vendent\n4. Retournement: Changement de tendance\n\n## Indicateurs de structure\n- Higher highs/lows pour tendance haussière\n- Lower highs/lows pour tendance baissière\n- Breakout pour changement de structure\n---\nCréé le: 2026-10-10\nType: concept\nTags: market-structure, trend, support, resistance",
+  "type": "concept",
+  "createdAt": "2026-10-10T00:00:00.000Z",
+  "tags": ["market-structure", "trend", "support", "resistance"],
+  "source": "manual"
+}

@@ -18,8 +18,22 @@ uploads/
 .env.production.local
 
 # Données sensibles
-data/
-knowledge-base/
+# ─── Données : on versionne ce qui n'est PAS personnel ───
+# Les stratégies, concepts et documents, plus le lexique (les « termes ») et les
+# réglages, doivent exister DANS l'image : sinon un déploiement depuis Git
+# (Hostless, Render, Koyeb) démarre sur une application vide — les fichiers
+# n'arrivent que si le build les voit. Les comptes, le journal de signaux et les
+# caches restent locaux : ils sont en base en production.
+data/*
+!data/lexique.json
+!data/alerts.json
+!data/frais.json
+!data/risque.json
+!data/news-calendrier.json
+knowledge-base/**
+!knowledge-base/**/
+!knowledge-base/*.json
+!knowledge-base/documents/*
 
 # Build
 dist/
@@ -71,3 +85,4 @@ data/dump-*.sql
 
 # Modeles de variables et blueprints : versionnes, sans secret
 !.env.deploy.example
+knowledge-base/documents/.hermes-tmp*
