@@ -121,6 +121,23 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Sonde de santé pour la plateforme (Northflank/Render/Koyeb) : elle touche
+// réellement la base. Un 200 sans requête SQL ne prouve rien.
+app.get('/healthz', async (req, res) => {
+  try {
+    const stockage = await DB.ping();
+    res.json({
+      ok: true,
+      stockage,
+      ia: { deepseek: !!process.env.DEEPSEEK_API_KEY, secoursNvidia: !!process.env.NVIDIA_API_KEY },
+      uptime: Math.round(process.uptime()),
+      at: new Date().toISOString()
+    });
+  } catch (e) {
+    res.status(503).json({ ok: false, stockage: 'injoignable', erreur: e.message });
+  }
+});
+
 // Sonde du secours IA — montée UNIQUEMENT si IA_SELFTEST=1.
 // Elle prouve, en un appel, que la chaîne DeepSeek → NVIDIA NIM répond, et dit
 // QUI a répondu (`source`). Sert à diagnostiquer un « solde épuisé » en prod
@@ -3845,7 +3862,11 @@ async function start() {
       .catch(() => { /* un marché en échec ne bloque pas les autres */ });
   }, JOURNAL_INTERVALLE_MS);
   if (typeof minuteurJournal.unref === 'function') minuteurJournal.unref();
-  app.listen(PORT, () => {
+  // 0.0.0.0 en production : derrière le proxy de la plateforme, un bind sur
+  // 127.0.0.1 rend le service injoignable (« listening » dans les logs, 502 au
+  // health check). En local on reste sur 127.0.0.1.
+  const HOST = process.env.HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
+  app.listen(PORT, HOST, () => {
     console.log('═══════════════════════════════════════');
     console.log('  5trade — plateforme de trading IA');
     console.log('═══════════════════════════════════════');

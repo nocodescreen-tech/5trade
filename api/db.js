@@ -228,8 +228,22 @@ async function removeTradeRecord(id) {
   return true;
 }
 
+/**
+ * Sonde de santé : prouve que la couche de stockage est réellement joignable.
+ * Un /health qui répond 200 sans toucher la base ment (service « en ligne » dont
+ * chaque requête échoue). En mode fichiers, on vérifie l'écriture du dossier.
+ */
+async function ping() {
+  if (usePg) {
+    await sql`select 1`;
+    return 'postgresql';
+  }
+  await fs.access(DATA_DIR, fs.constants.W_OK);
+  return 'fichiers-json';
+}
+
 module.exports = {
-  init, isPg,
+  init, isPg, ping,
   getAccount, saveAccount,
   loadSessions, saveSessions,
   loadOtp, saveOtp,
