@@ -3220,6 +3220,41 @@ function tinyPng(W = 64, H = 40) {
       !/mot de passe: \$\{password\}/.test(rSrc) && /voile/.test(rSrc));
   }
 
+  // ── Secours IA gratuit : quand DeepSeek tombe, l'analyse continue ──
+  // Constat réel : solde DeepSeek épuisé (402) = plus aucune analyse, alors
+  // qu'un modèle gratuit répondait correctement. Le secours NVIDIA NIM rejoue
+  // la MÊME requête et ne doit JAMAIS peser sur le budget.
+  {
+    const sSrc = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('un secours IA gratuit existe',
+      /integrate\.api\.nvidia\.com/.test(sSrc) && /NVIDIA_MODELS/.test(sSrc));
+    ok('le secours prend le relais quand DeepSeek échoue',
+      /appelDeepSeek\(messages/.test(sSrc) &&
+      /for \(const modele of NVIDIA_MODELS\)[\s\S]{0,200}?appelNvidia\(modele, messages/.test(sSrc));
+    ok('les appels de secours sont marqués gratuits', /gratuit: true/.test(sSrc));
+    ok('la sonde du secours est fermée par défaut', /IA_SELFTEST === '1'/.test(sSrc));
+
+    // Budget : journal temporaire, jamais le vrai fichier de l'utilisateur.
+    const tmpCouts = path.join(os.tmpdir(), `couts-${Date.now()}.json`);
+    process.env.COUTS_FICHIER = tmpCouts;
+    delete require.cache[require.resolve('./couts.js')];
+    const C = require('./couts.js');
+    C.enregistrer({ route: 'selftest', modele: 'nim:x', entree: 1000000, sortie: 1000000, gratuit: true });
+    ok('un million de tokens offerts restent à 0 $', C.bilan().depense === 0, `${C.bilan().depense} $`);
+    C.enregistrer({ route: 'selftest', modele: 'deepseek-chat', entree: 1000000, sortie: 1000000 });
+    ok('le même volume chez DeepSeek est bien facturé', C.bilan().depense > 0, `${C.bilan().depense} $`);
+    delete require.cache[require.resolve('./couts.js')];
+    delete process.env.COUTS_FICHIER;
+    try { fs.unlinkSync(tmpCouts); } catch { /* deja absent */ }
+
+    // Nettoyage JSON : les modèles de secours encadrent volontiers leur réponse.
+    const { extraireJSON } = require('./json-ia.js');
+    ok('un JSON déjà propre est rendu tel quel', extraireJSON('{"a":1}') === '{"a":1}');
+    ok('un bloc de code ```json est déballé', extraireJSON('Voici:\n```json\n{"a":1}\n```\nVoila.') === '{"a":1}');
+    ok('une phrase autour du JSON ne casse pas le parse', extraireJSON('Analyse: {"a":1} (fin)') === '{"a":1}');
+    ok('un tableau JSON est reconnu', extraireJSON('[1,2]') === '[1,2]');
+  }
+
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──
   // Mesure réelle : 8,7 s pour joindre Telegram depuis cette connexion. Sans
   // reprise, l'alerte échouait sur un appel pourtant valide.

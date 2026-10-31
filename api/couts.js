@@ -59,8 +59,10 @@ function ecrire(liste) {
   } catch { /* le comptage ne doit jamais casser une analyse */ }
 }
 
-function enregistrer({ route = 'ia', modele = '?', entree = 0, sortie = 0 } = {}) {
-  const cout = (Number(entree) / 1e6) * TARIF_ENTREE_PM
+function enregistrer({ route = 'ia', modele = '?', entree = 0, sortie = 0, gratuit = false } = {}) {
+  // Un modèle gratuit (secours NVIDIA NIM) garde ses tokens visibles dans le
+  // journal mais ne doit JAMAIS peser sur le budget : cout = 0.
+  const cout = gratuit ? 0 : (Number(entree) / 1e6) * TARIF_ENTREE_PM
     + (Number(sortie) / 1e6) * TARIF_SORTIE_PM;
   const lignes = lire();
   const e = {

@@ -33,6 +33,20 @@ const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
 // (ex. Ollama : http://localhost:11434/v1/chat/completions) pour du 0 $.
 const DEEPSEEK_URL = process.env.DEEPSEEK_URL || 'https://api.deepseek.com/v1/chat/completions';
 
+// ─── Secours gratuit NVIDIA NIM ───
+// Quand DeepSeek refuse l'appel (solde épuisé, quota, 401/402/429/5xx, panne
+// réseau, ou plafond mensuel local atteint), on rejoue la MÊME requête sur un
+// modèle gratuit de build.nvidia.com. Aucun frais : le journal les marque
+// `gratuit` et le budget reste intact.
+//   NVIDIA_MODELS = liste ordonnée, séparée par des virgules. Le premier qui
+//   répond correctement gagne ; les suivants servent de secours en cascade.
+const NVIDIA_URL = process.env.NVIDIA_URL || 'https://integrate.api.nvidia.com/v1/chat/completions';
+const NVIDIA_MODELS = String(
+  process.env.NVIDIA_MODELS ||
+  'mistralai/mistral-large-4-1t-a52b,nvidia/nemotron-3.5-lightning-30b-a3b'
+).split(',').map(m => m.trim()).filter(Boolean);
+const NVIDIA_TIMEOUT_MS = Number(process.env.NVIDIA_TIMEOUT_MS || 45000);
+
 // ─── Budget IA : moins de tokens, et pas deux fois le même appel ───
 // Le plan d'analyse était demandé à 2200 tokens alors que la réponse JSON
 // tient largement en dessous : chaque appel payait de la marge inutilisée.
@@ -106,6 +120,34 @@ app.get('/health', (req, res) => {
     at: new Date().toISOString()
   });
 });
+
+// Sonde du secours IA — montée UNIQUEMENT si IA_SELFTEST=1.
+// Elle prouve, en un appel, que la chaîne DeepSeek → NVIDIA NIM répond, et dit
+// QUI a répondu (`source`). Sert à diagnostiquer un « solde épuisé » en prod
+// sans lancer une analyse complète. Fermée par défaut : sans le drapeau,
+// la route n'existe pas (404).
+if (process.env.IA_SELFTEST === '1') {
+  app.get('/api/ia-selftest', async (req, res) => {
+    const messages = [{
+      role: 'user',
+      content: 'Reponds uniquement un JSON: {"ok":true,"modele":"ton nom de modele"}'
+    }];
+    try {
+      const avant = Couts.bilan();
+      const contenu = await deepseek(messages, { maxTokens: 300, json: true, route: 'selftest' });
+      const apres = Couts.bilan();
+      res.json({
+        ok: true,
+        fournisseur: dernierFournisseur,     // « deepseek » ou « nim:<modele> »
+        contenu,
+        budget: { avant: avant.depense, apres: apres.depense, plafond: apres.plafond },
+        modeles: { deepseek: DEEPSEEK_MODEL, nvidia: NVIDIA_MODELS }
+      });
+    } catch (e) {
+      res.status(e.status || 500).json({ ok: false, erreur: e.message });
+    }
+  });
+}
 
 app.use('/uploads', express.static(UPLOADS_DIR));
 // Frontend servi sur la même origine (évite les soucis de CORS)
@@ -258,6 +300,7 @@ const S3 = require('./s3');
 // ─── Vision (Gemini) — implémentation dans vision.js ───
 const vision = require('./vision');
 const Couts = require('./couts');
+const { extraireJSON } = require('./json-ia');
 
 // ─── Calendrier économique — implémentation dans fundamentals.js ───
 const { filtreCalendrier } = require('./fundamentals');
@@ -474,12 +517,15 @@ function appendHistory(entry) {
 // ─────────────────────────────────────────────────────────────
 // DeepSeek
 // ─────────────────────────────────────────────────────────────
-async function deepseek(messages, { maxTokens = 2000, json = false, route = 'ia' } = {}) {
+async function appelDeepSeek(messages, { maxTokens = 2000, json = false } = {}) {
   const key = process.env.DEEPSEEK_API_KEY;
   if (!key || key.includes('your_deepseek')) {
-    throw new Error('DEEPSEEK_API_KEY non configurée dans .env');
+    const e = new Error('DEEPSEEK_API_KEY non configurée dans .env');
+    e.code = 'NO_KEY';
+    throw e;
   }
   // Garde-fou : on refuse AVANT de dépenser si le plafond mensuel est atteint.
+  // L'erreur remonte au répartiteur, qui bascule alors sur le secours gratuit.
   Couts.verifierBudget();
   const body = {
     model: DEEPSEEK_MODEL,
@@ -514,17 +560,157 @@ async function deepseek(messages, { maxTokens = 2000, json = false, route = 'ia'
     throw new Error(msg);
   }
   const contenu = data.choices[0].message.content;
-  // Journalisation du coût réel (jamais bloquante).
-  try {
-    const usage = data.usage || {};
-    Couts.enregistrer({
-      route,
-      modele: body.model,
-      entree: Number(usage.prompt_tokens) || Couts.estimerEntree(messages),
-      sortie: Number(usage.completion_tokens) || Couts.estimerTokens(contenu)
+  return { contenu, modele: body.model, usage: data.usage || {} };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Secours gratuit — NVIDIA NIM (build.nvidia.com)
+// ─────────────────────────────────────────────────────────────
+// DeepSeek est le seul appel PAYANT. NVIDIA NIM est gratuit : quand DeepSeek
+// tombe (solde, quota, 429, panne, plafond local), on rejoue la même requête
+// ici sans que ça coûte un centime. Le nettoyage JSON vit dans json-ia.js.
+
+async function appelNvidia(modele, messages, { maxTokens = 2000, json = false } = {}) {
+  const key = process.env.NVIDIA_API_KEY;
+  if (!key) {
+    const e = new Error('NVIDIA_API_KEY non configurée dans .env');
+    e.code = 'NO_KEY';
+    throw e;
+  }
+  // Les modèles texte de NIM ne lisent pas les images : on retire les blocs
+  // image et on le DIT au modèle, plutôt que de lui envoyer du contenu qu'il
+  // refuserait (400).
+  let images = 0;
+  const msgs = messages.map(m => {
+    if (!Array.isArray(m.content)) return m;
+    const texte = m.content
+      .filter(p => p && p.type === 'text')
+      .map(p => p.text).join('\n');
+    images += m.content.filter(p => p && p.type === 'image_url').length;
+    return { role: m.role, content: texte };
+  });
+  if (images > 0) {
+    msgs.unshift({
+      role: 'system',
+      content: `Contexte : ${images} capture(s) de graphique n'ont pas pu être transmises ` +
+        `(modèle texte de secours). Appuie-toi uniquement sur les données chiffrées fournies.`
     });
-  } catch { /* le comptage ne doit jamais casser une analyse */ }
-  return contenu;
+  }
+  if (json) {
+    msgs.unshift({
+      role: 'system',
+      content: 'Réponds EXCLUSIVEMENT par un objet JSON valide, sans balise, sans texte avant ou après.'
+    });
+  }
+
+  const res = await fetch(NVIDIA_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${key}`,
+      'Content-Type': 'application/json'
+    },
+    // Les modèles NIM sont majoritairement des modèles « reasoning » : ils
+    // consomment d'abord des tokens à réfléchir, puis écrivent la réponse.
+    // Avec le budget exact, on recevait un contenu vide (finish=length).
+    // Comme c'est gratuit, on ajoute une marge de raisonnement généreuse.
+    body: JSON.stringify({
+      model: modele,
+      messages: msgs,
+      max_tokens: maxTokens + Number(process.env.NVIDIA_MARGE_TOKENS || 1500),
+      temperature: 0.3
+    }),
+    signal: AbortSignal.timeout(NVIDIA_TIMEOUT_MS)
+  });
+
+  const brut = await res.text();
+  let data = {};
+  try { data = JSON.parse(brut); } catch { /* réponse non JSON */ }
+  if (!res.ok) {
+    const msg = data.detail || data.error?.message || brut.slice(0, 200) || `HTTP ${res.status}`;
+    throw new Error(`NVIDIA ${modele} HTTP ${res.status} — ${msg}`);
+  }
+  const choix = (data.choices || [])[0] || {};
+  const msg = choix.message || {};
+  // Certains modèles « reasoning » renvoient le contenu final vide quand le
+  // budget de tokens a été mangé par le raisonnement : on le signale.
+  let contenu = msg.content;
+  if (!contenu || !String(contenu).trim()) {
+    throw new Error(`NVIDIA ${modele} : réponse vide (finish=${choix.finish_reason || '?'})`);
+  }
+  contenu = String(contenu);
+  return {
+    contenu: json ? extraireJSON(contenu) : contenu,
+    modele: `nim:${modele}`,
+    usage: data.usage || {}
+  };
+}
+
+/**
+ * Point d'entrée IA unique de l'app.
+ *   1. DeepSeek (payant) si la clé existe et que le budget mensuel n'est pas atteint.
+ *   2. Sinon — ou si DeepSeek échoue — bascule AUTOMATIQUE sur NVIDIA NIM (gratuit),
+ *      modèle après modèle, jusqu'à une réponse exploitable.
+ * Le coût DeepSeek est journalisé comme avant ; les appels NVIDIA le sont à 0 $.
+ */
+// Qui a répondu au dernier appel IA (« deepseek » ou « nim:<modele> »).
+// Exposé par la sonde /api/ia-selftest : en prod, c'est la seule façon de
+// savoir si le secours gratuit a réellement pris le relais.
+let dernierFournisseur = 'aucun';
+async function deepseek(messages, { maxTokens = 2000, json = false, route = 'ia' } = {}) {
+  const raisons = [];
+  // 1) Voie payante.
+  try {
+    const r = await appelDeepSeek(messages, { maxTokens, json });
+    try {
+      const usage = r.usage || {};
+      Couts.enregistrer({
+        route,
+        modele: r.modele,
+        entree: Number(usage.prompt_tokens) || Couts.estimerEntree(messages),
+        sortie: Number(usage.completion_tokens) || Couts.estimerTokens(r.contenu)
+      });
+    } catch { /* le comptage ne doit jamais casser une analyse */ }
+    dernierFournisseur = 'deepseek';
+    return r.contenu;
+  } catch (e) {
+    // Une requête malformée échouera aussi ailleurs : on ne la rejoue pas.
+    if (e.status === 400) throw e;
+    raisons.push(`DeepSeek: ${e.message}`);
+    console.warn(`[IA] DeepSeek indisponible → secours gratuit NVIDIA (${e.message.slice(0, 140)})`);
+  }
+
+  // 2) Secours gratuit, en cascade.
+  if (!process.env.NVIDIA_API_KEY) {
+    const e = new Error(
+      `${raisons.join(' | ')} — et NVIDIA_API_KEY n'est pas configurée : aucun secours gratuit disponible.`
+    );
+    e.status = 503;
+    throw e;
+  }
+  for (const modele of NVIDIA_MODELS) {
+    try {
+      const r = await appelNvidia(modele, messages, { maxTokens, json });
+      try {
+        Couts.enregistrer({
+          route,
+          modele: r.modele,
+          entree: Number(r.usage.prompt_tokens) || Couts.estimerEntree(messages),
+          sortie: Number(r.usage.completion_tokens) || Couts.estimerTokens(r.contenu),
+          gratuit: true
+        });
+      } catch { /* idem : jamais bloquant */ }
+      console.log(`[IA] Secours gratuit : ${modele} a répondu (${route}).`);
+      dernierFournisseur = `nim:${modele}`;
+      return r.contenu;
+    } catch (e) {
+      raisons.push(`${modele}: ${e.message}`);
+      console.warn(`[IA] Secours ${modele} échoué — ${e.message.slice(0, 140)}`);
+    }
+  }
+
+  const e = new Error(`Aucune IA disponible. ${raisons.join(' | ')}`);
+  e.status = 503;
+  throw e;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -3669,6 +3855,7 @@ async function start() {
     const v = vision.visionInfo();
     console.log(`  Vision     : ${v.provider} / ${v.model}${vision.visionReady() ? '' : '  (clé manquante)'}`);
     console.log(`  Clé DeepSeek: ${process.env.DEEPSEEK_API_KEY && !process.env.DEEPSEEK_API_KEY.includes('your_deepseek') ? '✅ configurée' : '❌ manquante (.env)'}`);
+    console.log(`  Secours      : ${process.env.NVIDIA_API_KEY ? `NVIDIA NIM gratuit (${NVIDIA_MODELS.length} modèle(s) : ${NVIDIA_MODELS.join(', ')})` : '❌ NVIDIA_API_KEY absente'}`);
     console.log('═══════════════════════════════════════');
   });
 }
