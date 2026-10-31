@@ -8,6 +8,7 @@ api/node_modules
 .env.*
 !.env.example
 !.env.northflank
+!.env.deploy.example
 *.log
 logs
 api/srv.log

@@ -10,7 +10,9 @@
 const path = require('path');
 const fs = require('fs').promises;
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+// Surchargeable : la même variable que server.js, pour que le repli « fichiers
+// JSON » écrive au même endroit que le reste quand la plateforme monte un volume.
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 
 let sql = null;
 let usePg = false;

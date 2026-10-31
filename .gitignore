@@ -68,3 +68,6 @@ ml/__pycache__/
 
 # Dumps et exports locaux (données personnelles)
 data/dump-*.sql
+
+# Modeles de variables et blueprints : versionnes, sans secret
+!.env.deploy.example

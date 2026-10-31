@@ -10,7 +10,10 @@ FROM node:22-slim
 
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
-    PORT=3001
+    PORT=3001 \
+    DATA_DIR=/app/state/data \
+    KNOWLEDGE_BASE_DIR=/app/state/knowledge-base \
+    UPLOADS_DIR=/app/state/uploads
 
 WORKDIR /app
 
@@ -27,9 +30,6 @@ RUN cp -a /app/knowledge-base /app/seed-knowledge-base \
  && cp -a /app/data /app/seed-data \
  && rm -rf /app/knowledge-base /app/data /app/api/uploads \
  && mkdir -p /app/state/data /app/state/knowledge-base /app/state/uploads \
- && ln -s /app/state/knowledge-base /app/knowledge-base \
- && ln -s /app/state/data /app/data \
- && ln -s /app/state/uploads /app/api/uploads \
  && chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 3001

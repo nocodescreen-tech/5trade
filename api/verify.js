@@ -226,7 +226,10 @@ function tinyPng(W = 64, H = 40) {
       ok('DELETE signé', rd.ok, String(rd.status));
       ok('objet bien supprimé', (await fetch(g.url, { method: 'GET', headers: g.headers })).status === 404);
     } catch (e) {
-      ok('aller-retour S3', false, e.message);
+      // La cause réelle d'un « fetch failed » est dans e.cause (ENOTFOUND,
+      // ECONNRESET, cert…) : sans elle, le message ne dit rien d'exploitable.
+      ok('aller-retour S3', false,
+        `${e.message}${e.cause ? ' (' + (e.cause.code || e.cause.message) + ')' : ''}`);
     }
   }
 
@@ -3287,6 +3290,43 @@ function tinyPng(W = 64, H = 40) {
     ok('la région est envoyée à la création du projet', /region: REGION/.test(dSrc));
     ok('une base externe évite l\'addon (NF_DB_URL)', /NF_DB_URL/.test(dSrc));
     ok('les identifiants sont masqués avant d\'être journalisés', /':\*\*\*@'/.test(dSrc));
+
+    // ── Portable : Render, Koyeb, Hostless, Northflank, Fly, VPS ──
+    const render = fs.readFileSync(path.join(ROOT, 'render.yaml'), 'utf8');
+    const modele = fs.readFileSync(path.join(ROOT, '.env.deploy.example'), 'utf8');
+    const sSrc = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('render.yaml décrit un service Docker et sa base',
+      /runtime: docker/.test(render) && /healthCheckPath: \/healthz/.test(render)
+      && /fromDatabase/.test(render) && /^databases:/m.test(render));
+    ok('les chemins de données sont surchargeables par l\'environnement',
+      /process\.env\.DATA_DIR/.test(sSrc) && /process\.env\.KNOWLEDGE_BASE_DIR/.test(sSrc)
+      && /process\.env\.UPLOADS_DIR/.test(sSrc));
+    ok('le modèle de variables couvre les clés critiques',
+      // DATA_DIR est facultatif : il figure commenté pour montrer la valeur par défaut.
+      ['DATABASE_URL', 'NVIDIA_API_KEY', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY', 'DATA_DIR']
+        .every(k => new RegExp(`^#?\\s*${k}=`, 'm').test(modele)),
+      'modele .env.deploy.example');
+    ok('un Procfile existe pour les plateformes sans Docker',
+      /^web: node api\/server\.js$/m.test(fs.readFileSync(path.join(ROOT, 'Procfile'), 'utf8')));
+    ok('la doc de déploiement nomme les quatre cibles',
+      ['Render', 'Koyeb', 'Hostless', 'Northflank']
+        .every(t => fs.readFileSync(path.join(ROOT, 'docs', 'DEPLOIEMENT.md'), 'utf8').includes(t)));
+
+    // Comportement réel du pré-vol : base locale = refus, base distante = feu vert.
+    const preflight = path.join(ROOT, 'tools', 'preflight-deploy.js');
+    const lancer = envPre => {
+      try {
+        require('child_process').execFileSync(process.execPath, [preflight, 'render'], {
+          stdio: 'pipe', env: { ...process.env, ...envPre }
+        });
+        return 0;
+      } catch (e) { return e.status; }
+    };
+    const baseCommune = { DEEPSEEK_API_KEY: 'x', NVIDIA_API_KEY: 'x', OTP_ON_LOGIN: 'false' };
+    ok('le pré-vol refuse une base localhost en production',
+      lancer({ ...baseCommune, DATABASE_URL: 'postgresql://u:p@localhost:5432/db' }) === 1);
+    ok('le pré-vol donne le feu vert avec une base distante',
+      lancer({ ...baseCommune, DATABASE_URL: 'postgresql://u:p@db.exemple.com:5432/db' }) === 0);
   }
 
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──

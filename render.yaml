@@ -1,0 +1,76 @@
+# Render Blueprint — 5trade (https://render.com/docs/blueprint-spec)
+# Déploiement en un clic : New > Blueprint > ce dépôt.
+#
+# L'image est la même partout (Dockerfile). Ce qui change ici : le nom, la
+# région, et le fait que Render injecte DATABASE_URL depuis la base ci-dessous.
+services:
+  - type: web
+    name: fivetrade
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    envVars:
+      # La base du Blueprint fournit la chaîne de connexion complète.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: fivetrade-db
+          property: connectionString
+      - key: NODE_ENV
+        value: production
+      # Secrets : à saisir dans le dashboard (sync: false ne les versionne pas).
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_MODEL
+        value: deepseek-chat
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: NVIDIA_MODELS
+        value: nvidia/nemotron-3-ultra-550b-a55b,openai/gpt-oss-20b,nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_VISION_MODEL
+        value: gemini-3-flash-preview
+      - key: VISION_PROVIDER
+        value: gemini
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: OTP_ON_LOGIN
+        value: "true"
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+databases:
+  - name: fivetrade-db
+    plan: free
+    region: frankfurt
+    postgresMajorVersion: "16"
+# ─────────────────────────────────────────────────────────────
+# Limites Render à connaître (plan gratuit) :
+#   • le service s'endort après ~15 min d'inactivité → premier appel ~50 s ;
+#   • PAS de disque persistant sur le plan gratuit : /app/state repart vide à
+#     chaque déploiement, et l'entrypoint y recopie les graines. Les données qui
+#     doivent survivre (comptes, trades, stratégies) sont en PostgreSQL ;
+#   • la base gratuite expire au bout de 30 jours (Render prévient par mail).
+# Pour un disque persistant, passer le service en plan payant et ajouter :
+#     disk:
+#       name: etat
+#       mountPath: /app/state
+#       sizeGB: 1
