@@ -1,0 +1,6 @@
+# Les scripts lus par un shell Linux (conteneur) doivent être en LF strict :
+# un shebang terminé par \r donne « ./docker-entrypoint.sh: not found ».
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+.dockerignore   text eol=lf
+docker-entrypoint.sh text eol=lf
