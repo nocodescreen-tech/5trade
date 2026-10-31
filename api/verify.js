@@ -3255,6 +3255,29 @@ function tinyPng(W = 64, H = 40) {
     ok('un tableau JSON est reconnu', extraireJSON('[1,2]') === '[1,2]');
   }
 
+  // ── Contrat de déploiement (Northflank / tout PaaS à conteneur) ──
+  // Les erreurs de ce bloc ne se voient qu'en production : un shebang en CRLF
+  // (« not found »), un volume vide (« mes stratégies ont disparu »), un
+  // DATABASE_URL manquant (comptes écrits dans des fichiers éphémères).
+  {
+    const dockerfile = fs.readFileSync(path.join(ROOT, 'Dockerfile'), 'utf8');
+    const entry = fs.readFileSync(path.join(ROOT, 'docker-entrypoint.sh'), 'utf8');
+    const ignore = fs.readFileSync(path.join(ROOT, '.dockerignore'), 'utf8');
+
+    ok('l\'image expose une sonde /healthz', /HEALTHCHECK[\s\S]*\/healthz/.test(dockerfile));
+    ok('l\'entrypoint refuse la prod sans DATABASE_URL',
+      /NODE_ENV" = "production"[\s\S]{0,200}DATABASE_URL" \]/.test(entry) && /exit 1/.test(entry));
+    ok('les stratégies et le lexique sont copiés dans le volume',
+      /seed-knowledge-base/.test(entry) && /seed-data/.test(entry) && /cp -a/.test(entry));
+    ok('le mot de passe de la base n\'est jamais journalisé',
+      /sed -E 's#:\/\/\[\^@\]\*@/.test(entry) && !/echo "\[5trade\] stockage : \$DATABASE_URL/.test(entry));
+    ok('les caches lourds restent hors de l\'image',
+      /data\/historique/.test(ignore) && /data\/dataset/.test(ignore));
+    ok('le shebang des scripts conteneur est en LF',
+      !/\r/.test(entry.split('\n')[0]) && !/\r/.test(dockerfile.split('\n')[0]),
+      JSON.stringify(entry.slice(0, 12)));
+  }
+
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──
   // Mesure réelle : 8,7 s pour joindre Telegram depuis cette connexion. Sans
   // reprise, l'alerte échouait sur un appel pourtant valide.
