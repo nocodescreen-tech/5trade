@@ -20,7 +20,13 @@ const path = require('path');
 
 const API = 'https://api.northflank.com/v1';
 const TOKEN = process.env.NF_TOKEN;
-const PROJET = process.env.NF_PROJECT || '5trade';
+// Northflank impose un nom commençant par une LETTRE : « 5trade » est refusé
+// (^[a-zA-Z]...). D'où « fivetrade », qui donne aussi un domaine lisible.
+// Le plan gratuit plafonne aussi le nombre de PROJETS : on réutilise donc le
+// projet existant (« Default ») et le nom sert au SERVICE.
+const PROJET = process.env.NF_PROJECT || 'default';
+const SERVICE = process.env.NF_SERVICE || 'fivetrade';
+const REGION = process.env.NF_REGION || 'europe-west';
 const PLAN = process.env.NF_PLAN || 'nf-compute-50';           // 0,5 vCPU / 1 Go — 12 $/mois
 const PLAN_BUILD = process.env.NF_BUILD_PLAN || 'nf-compute-400-16';
 const PLAN_ADDON = process.env.NF_PLAN_ADDON || 'nf-compute-10';
@@ -78,21 +84,30 @@ function lireEnv() {
 }
 
 async function main() {
-  journal(`Projet cible : ${PROJET}   plan ${PLAN}   branche ${BRANCHE}${SEC ? '   [DRY]' : ''}`);
+  journal(`Projet ${PROJET} / service ${SERVICE} / plan ${PLAN} / branche ${BRANCHE}${SEC ? '   [DRY]' : ''}`);
 
   // 1. Projet
   const projets = await api('GET', '/projects');
   let projet = (projets.projects || []).find(p => p.name === PROJET || p.id === PROJET);
   if (!projet) {
     if (SEC) throw new Error(`DRY: le projet ${PROJET} n'existe pas`);
-    journal(`→ création du projet ${PROJET}`);
-    projet = await api('POST', '/projects', { name: PROJET, description: 'Plateforme de trading IA 5trade' });
+    journal(`→ création du projet ${PROJET} (${REGION})`);
+    projet = await api('POST', '/projects', {
+      name: PROJET,
+      description: 'Plateforme de trading IA 5trade',
+      region: REGION
+    });
   } else {
     journal(`→ projet existant : ${projet.id}`);
   }
   const pid = projet.id || projet.name;
 
-  // 2. Addon PostgreSQL
+  // 2. Addon PostgreSQL — ignoré si une base externe est fournie (NF_DB_URL),
+  // ce qui permet d'utiliser un Postgres gratuit ailleurs (Neon, Supabase…).
+  let databaseUrl = process.env.NF_DB_URL || '';
+  if (databaseUrl) {
+    journal('→ base externe fournie (NF_DB_URL), pas d\'addon Northflank');
+  } else {
   const addons = await api('GET', `/projects/${pid}/addons`);
   let addon = (addons.addons || []).find(a => a.name === 'postgres');
   if (!addon) {
@@ -119,23 +134,24 @@ async function main() {
     }
   }
   if (!identifiants) throw new Error('addon PostgreSQL : identifiants indisponibles après 10 min');
-  const databaseUrl = identifiants.connectionString || identifiants.connectionStringUri
+  databaseUrl = identifiants.connectionString || identifiants.connectionStringUri
     || identifiants.POSTGRES_URI || identifiants.uri || identifiants.url;
   if (!databaseUrl) {
     console.error('Clés d\'identifiants reçues :', Object.keys(identifiants));
     throw new Error('chaîne de connexion PostgreSQL introuvable dans les identifiants');
   }
+  }
   journal(`→ DATABASE_URL obtenue (${databaseUrl.replace(/:[^:@]+@/, ':***@').slice(0, 60)}…)`);
 
   // 3. Service combiné (build + run)
   const services = await api('GET', `/projects/${pid}/services`);
-  let service = (services.services || []).find(s => s.name === PROJET);
+  let service = (services.services || []).find(s => s.name === SERVICE);
   if (!service) {
     if (SEC) throw new Error('DRY: service absent');
-    journal('→ création du service combiné');
+    journal(`→ création du service ${SERVICE}`);
     service = await api('POST', `/projects/${pid}/services/combined`, {
-      name: PROJET,
-      description: '5trade — API + frontend sur le même processus',
+      name: SERVICE,
+      description: '5trade - API et frontend dans le meme processus',
       billing: { deploymentPlan: PLAN, buildPlan: PLAN_BUILD },
       buildSource: 'git',
       vcsData: { projectUrl: REPO, projectType: 'github', projectBranch: BRANCHE },
@@ -197,7 +213,7 @@ async function main() {
   journal('\nTerminé. Suivre le build :');
   journal(`  curl -H "Authorization: Bearer $NF_TOKEN" ${API}/projects/${pid}/services/${sid}/build-logs`);
   journal(`  curl -H "Authorization: Bearer $NF_TOKEN" ${API}/projects/${pid}/services/${sid}/deployment`);
-  journal(`Santé publique une fois déployé : https://${PROJET.replace(/_/g, '-')}-${pid}.code.run/healthz`);
+  journal(`Santé publique une fois déployé : voir ports du service (domaine *.code.run)/healthz`);
 }
 
 main().catch(e => { console.error('ÉCHEC :', e.message); process.exit(1); });
