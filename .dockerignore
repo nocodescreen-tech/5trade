@@ -1,5 +1,6 @@
 .git
 .gitignore
+.gitattributes
 node_modules
 api/node_modules
 **/node_modules
@@ -9,17 +10,23 @@ api/node_modules
 !.env.northflank
 *.log
 logs
-data
-ml/.venv
-ml
-knowledge-base/.cache
-uploads
-api/uploads
 api/srv.log
 api/out.log
 api/err.log
 api/server.err.log
 api/server.log
-storage-options.md
+# Caches et jeux de données lourds : 218 Mo, régénérables, inutiles dans l'image.
+# Le reste de data/ (lexique, comptes, alertes, historique de signaux) est une
+# graine copiée dans le volume au premier démarrage.
+data/historique
+data/dataset
+ml
+ml/.venv
+knowledge-base/.cache
+uploads
+api/uploads
 *.png
 capture-graphique-zones.png
+entry-test.sh
+entry-run.log
+state

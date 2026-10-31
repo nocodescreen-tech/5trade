@@ -20,8 +20,11 @@ RUN cd api && (npm ci --omit=dev || npm install --omit=dev) && npm cache clean -
 
 COPY . .
 
-# Graine de la base de connaissances, copiée dans le volume au premier démarrage.
+# Graines copiées dans le volume au premier démarrage : stratégies importées,
+# concepts, lexique, comptes, alertes, historique de signaux. Un volume neuf ne
+# doit pas donner une application vide.
 RUN cp -a /app/knowledge-base /app/seed-knowledge-base \
+ && cp -a /app/data /app/seed-data \
  && rm -rf /app/knowledge-base /app/data /app/api/uploads \
  && mkdir -p /app/state/data /app/state/knowledge-base /app/state/uploads \
  && ln -s /app/state/knowledge-base /app/knowledge-base \

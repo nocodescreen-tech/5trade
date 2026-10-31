@@ -65,3 +65,6 @@ srv.err
 # Python (baseline ML) : environnement local, jamais versionne
 ml/.venv/
 ml/__pycache__/
+
+# Dumps et exports locaux (données personnelles)
+data/dump-*.sql
