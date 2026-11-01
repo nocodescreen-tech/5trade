@@ -37,7 +37,14 @@ function copierGraine(source, cible) {
 function inscriptible(dossier) {
   try {
     fs.mkdirSync(dossier, { recursive: true });
-    fs.accessSync(dossier, fs.constants.W_OK);
+    // accessSync(W_OK) ne suffit PAS : sur un montage en lecture seule (EROFS),
+    // il répond « accessible en écriture » d'après les bits de permission alors
+    // que toute écriture échoue. Multer, lui, ne pardonne pas : mkdir au
+    // chargement du module = serveur mort avant d'écouter. On écrit donc pour
+    // de vrai, puis on efface.
+    const sonde = path.join(dossier, `.ecriture-${process.pid}-${Date.now()}`);
+    fs.writeFileSync(sonde, 'ok');
+    fs.unlinkSync(sonde);
     return true;
   } catch {
     return false;

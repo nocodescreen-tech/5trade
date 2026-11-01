@@ -3318,6 +3318,23 @@ function tinyPng(W = 64, H = 40) {
         `${contenu.length} fichier(s) : ${contenu.slice(0, 4).join(', ')}`);
       fs.rmSync(cible, { recursive: true, force: true });
     }
+
+    // Comportement réel : un dossier impossible à écrire (ici un FICHIER occupe
+    // le nom) doit faire basculer sur le repli, sinon on meurt en EROFS au
+    // chargement de multer. C'est le cas vécu en production.
+    {
+      const blocage = path.join(os.tmpdir(), `5trade-bloc-${process.pid}`);
+      fs.rmSync(blocage, { recursive: true, force: true });
+      fs.writeFileSync(blocage, 'fichier, pas un dossier');
+      const voulu = path.join(blocage, 'data');
+      const choisi = require('child_process').execFileSync(process.execPath, ['-e',
+        `process.env.DATA_DIR=${JSON.stringify(voulu)};console.log(require('./api/dossiers').DATA_DIR)`
+      ], { cwd: ROOT, encoding: 'utf8' }).trim();
+      ok('un dossier non inscriptible bascule sur le repli',
+        path.resolve(choisi) !== path.resolve(voulu) && fs.existsSync(choisi),
+        `${choisi} (au lieu de ${voulu})`);
+      fs.rmSync(blocage, { force: true });
+    }
     ok('le modèle de variables couvre les clés critiques',
       // DATA_DIR est facultatif : il figure commenté pour montrer la valeur par défaut.
       ['DATABASE_URL', 'NVIDIA_API_KEY', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY', 'DATA_DIR']
