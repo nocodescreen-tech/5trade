@@ -3298,9 +3298,26 @@ function tinyPng(W = 64, H = 40) {
     ok('render.yaml décrit un service Docker et sa base',
       /runtime: docker/.test(render) && /healthCheckPath: \/healthz/.test(render)
       && /fromDatabase/.test(render) && /^databases:/m.test(render));
+    const dossiersSrc = fs.readFileSync(path.join(__dirname, 'dossiers.js'), 'utf8');
     ok('les chemins de données sont surchargeables par l\'environnement',
-      /process\.env\.DATA_DIR/.test(sSrc) && /process\.env\.KNOWLEDGE_BASE_DIR/.test(sSrc)
-      && /process\.env\.UPLOADS_DIR/.test(sSrc));
+      /process\.env\[variable\]/.test(dossiersSrc)
+      && /DATA_DIR/.test(dossiersSrc) && /KNOWLEDGE_BASE_DIR/.test(dossiersSrc)
+      && /UPLOADS_DIR/.test(dossiersSrc), 'api/dossiers.js');
+
+    // Comportement réel : un dossier cible vide reçoit la graine du dépôt
+    // (stratégies, lexique), sinon une build depuis Git démarre sans rien.
+    {
+      const cible = path.join(os.tmpdir(), `5trade-graine-${process.pid}`);
+      fs.rmSync(cible, { recursive: true, force: true });
+      const choisi = require('child_process').execFileSync(process.execPath, ['-e',
+        `process.env.DATA_DIR=${JSON.stringify(cible)};console.log(require('./api/dossiers').DATA_DIR)`
+      ], { cwd: ROOT, encoding: 'utf8' }).trim();
+      const contenu = fs.existsSync(cible) ? fs.readdirSync(cible) : [];
+      ok('un dossier de données vide reçoit la graine versionnée',
+        path.resolve(choisi) === path.resolve(cible) && contenu.includes('lexique.json'),
+        `${contenu.length} fichier(s) : ${contenu.slice(0, 4).join(', ')}`);
+      fs.rmSync(cible, { recursive: true, force: true });
+    }
     ok('le modèle de variables couvre les clés critiques',
       // DATA_DIR est facultatif : il figure commenté pour montrer la valeur par défaut.
       ['DATABASE_URL', 'NVIDIA_API_KEY', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY', 'DATA_DIR']

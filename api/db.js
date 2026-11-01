@@ -10,9 +10,9 @@
 const path = require('path');
 const fs = require('fs').promises;
 
-// Surchargeable : la même variable que server.js, pour que le repli « fichiers
-// JSON » écrive au même endroit que le reste quand la plateforme monte un volume.
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+// Dossier du repli « fichiers JSON » : résolu par dossiers.js, qui garantit qu'il
+// est inscriptible (le code peut être monté en lecture seule sur un PaaS).
+const { DATA_DIR } = require('./dossiers');
 
 let sql = null;
 let usePg = false;

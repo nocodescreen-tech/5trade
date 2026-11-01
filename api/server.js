@@ -60,14 +60,10 @@ const cachePlan = new Map(); // empreinte du prompt -> { at, plan }
 // Chemins
 // ─────────────────────────────────────────────────────────────
 const ROOT = path.join(__dirname, '..');
-// Chemins de données surchargeables : c'est ce qui rend l'image portable d'une
-// plateforme à l'autre. Chacune monte son volume ailleurs (Render : /app/state,
-// Koyeb : /data, Northflank : /app/state), et un conteneur n'a pas de symlinks
-// fiables pour ça — une variable d'environnement, si.
-const KNOWLEDGE_BASE_DIR = process.env.KNOWLEDGE_BASE_DIR || path.join(ROOT, 'knowledge-base');
-const DOCUMENTS_DIR = path.join(KNOWLEDGE_BASE_DIR, 'documents');
-const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
-const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
+// Chemins de données : résolus par api/dossiers.js, qui choisit un dossier
+// réellement inscriptible (le code peut être monté en lecture seule sur un PaaS)
+// et y recopie la graine versionnée (stratégies, lexique) si la cible est vide.
+const { DATA_DIR, KNOWLEDGE_BASE_DIR, DOCUMENTS_DIR, UPLOADS_DIR } = require('./dossiers');
 // Le compte et l'historique vivent désormais en base (api/db.js) :
 // plus de lecture/écriture directe de fichiers ici.
 
