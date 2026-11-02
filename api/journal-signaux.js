@@ -594,6 +594,47 @@ function stats() {
     };
   }
 
+  // ── Où ça gagne vraiment : stratégie × marché × unité de temps ──────────
+  // « support-résistance » n'a pas la même valeur sur R_75 en 15m et sur l'or en
+  // 1h. Le total par stratégie mélange les deux et donne une moyenne qui ne
+  // décrit aucun des deux cas. On expose donc la croisée, avec le nombre de
+  // trades devant chaque ligne : en dessous de 10, ce n'est pas un résultat,
+  // c'est une anecdote — et le drapeau le dit.
+  const etiquette = s => s.strategie
+    || (s.source === 'motif' ? `motif : ${s.nom}`
+      : s.source === 'structure' ? 'structure du marché'
+        : (s.nom || 'inconnu'));
+  const parCombinaison = {};
+  for (const s of clos) {
+    const strat = etiquette(s);
+    const k = `${strat}\u0000${s.symbol || '?'}\u0000${s.timeframe || '?'}`;
+    if (!parCombinaison[k]) {
+      parCombinaison[k] = {
+        strategie: strat, symbole: s.symbol || null, timeframe: s.timeframe || null,
+        total: 0, gagnes: 0, perdus: 0, be: 0, expires: 0, rTotal: 0
+      };
+    }
+    const c = parCombinaison[k];
+    c.total++;
+    c.rTotal += Number.isFinite(s.r) ? s.r : 0;
+    if (s.resultat === 'sl') c.perdus++;
+    else if (s.resultat === 'be') c.be++;
+    else if (s.resultat === 'expire') c.expires++;
+    else c.gagnes++;
+  }
+  const combinaisons = Object.values(parCombinaison).map(c => {
+    const decides = c.gagnes + c.perdus;
+    return {
+      ...c,
+      rTotal: +c.rTotal.toFixed(2),
+      rMoyen: c.total ? +(c.rTotal / c.total).toFixed(2) : null,
+      tauxReussite: decides ? +((c.gagnes / decides) * 100).toFixed(1) : null,
+      // 10 trades : seuil sous lequel une réussite à 70 % ne veut rien dire.
+      fiable: decides >= 10,
+      lecture: decides >= 10 ? 'exploitable' : 'échantillon trop faible'
+    };
+  }).sort((a, b) => b.rTotal - a.rTotal);
+
   // Par marché : le coût (en unités de prix) qui annulerait l'espérance — donc
   // le spread maximal acceptable, comparable à celui du courtier.
   const critiqueParMarche = {};
@@ -644,6 +685,7 @@ function stats() {
     parSource: compte(clos, s => s.source),
     parMarche: compte(clos, s => `${s.symbol} ${s.timeframe}`),
     parStrategie,
+    combinaisons,
     derniereMaj: data.majLe || null
   };
 }

@@ -3375,6 +3375,28 @@ function tinyPng(W = 64, H = 40) {
       lancer({ ...baseCommune, DATABASE_URL: 'postgresql://u:p@db.exemple.com:5432/db' }) === 0);
   }
 
+  // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
+  {
+    const J = require('./journal-signaux');
+    const s = J.stats();
+    const comb = s.combinaisons || [];
+    ok('la croisée stratégie × marché × unité de temps est calculée',
+      Array.isArray(comb) && comb.length > 0, `${comb.length} combinaison(s)`);
+    ok('les combinaisons sont triées par R total décroissant',
+      comb.every((c, i) => i === 0 || comb[i - 1].rTotal >= c.rTotal));
+    ok('une combinaison porte son échantillon et son taux',
+      comb.every(c => Number.isInteger(c.total) && (c.tauxReussite === null
+        || (c.tauxReussite >= 0 && c.tauxReussite <= 100))));
+    ok('en dessous de 10 trades tranchés, la ligne est marquée non fiable',
+      comb.every(c => c.fiable === ((c.gagnes + c.perdus) >= 10)),
+      `${comb.filter(c => c.fiable).length} exploitable(s) sur ${comb.length}`);
+    ok('la somme des combinaisons ne dépasse jamais le total des lignes closes',
+      comb.reduce((a, c) => a + c.total, 0) <= s.total,
+      `${comb.reduce((a, c) => a + c.total, 0)} ≤ ${s.total}`);
+    ok('l\'écran de journal affiche la croisée',
+      /Où ça gagne vraiment/.test(fs.readFileSync(path.join(ROOT, 'frontend', 'index.html'), 'utf8')));
+  }
+
   // ── Sauvegarde de la base : export, compression, RESTAURATION réelle ──
   // Une sauvegarde jamais restaurée n'est pas une sauvegarde. On restaure donc
   // pour de vrai, dans une base jetable, et on compare les comptes.

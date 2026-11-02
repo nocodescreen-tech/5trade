@@ -3840,6 +3840,47 @@ function JournalSignauxPanel() {
         ))}
       </div>
 
+      {st && (st.combinaisons || []).length > 0 && (
+        <div style={{ marginTop:14 }}>
+          <div style={{ fontSize:12, color:'var(--muted)', marginBottom:6 }}>
+            <i className="fas fa-crosshairs" style={{ marginRight:6 }}></i>
+            Où ça gagne vraiment — stratégie × marché × unité de temps
+          </div>
+          <div style={{ display:'grid', gap:4 }}>
+            {(st.combinaisons || [])
+              .filter(c => c.fiable)
+              .slice(0, 10)
+              .map((c, i) => (
+                <div key={'c' + i} style={{ display:'flex', alignItems:'center', gap:8, fontSize:11.5 }}>
+                  <span style={{ flex:'1 1 260px', color:'#e2e8f0' }}>
+                    {(c.strategie || '').slice(0, 34)}
+                    <span style={{ color:'var(--dim)' }}> · {c.symbole} {c.timeframe}</span>
+                  </span>
+                  <span style={{ color:'var(--dim)', minWidth:44, textAlign:'right' }}>{c.total} tr.</span>
+                  <span style={{ color:(c.tauxReussite ?? 0) >= 50 ? '#34d399' : '#fbbf24', minWidth:44, textAlign:'right' }}>
+                    {c.tauxReussite === null ? '—' : c.tauxReussite + ' %'}
+                  </span>
+                  <span style={{ color:'var(--dim)', minWidth:56, textAlign:'right' }}>
+                    {c.rMoyen > 0 ? '+' : ''}{c.rMoyen} R/tr.
+                  </span>
+                  <span style={{ color:(c.rTotal ?? 0) >= 0 ? '#34d399' : '#f87171', minWidth:64, textAlign:'right' }}>
+                    {(c.rTotal ?? 0) >= 0 ? '+' : ''}{c.rTotal} R
+                  </span>
+                </div>
+              ))}
+          </div>
+          {(() => {
+            const faibles = (st.combinaisons || []).filter(c => !c.fiable).length;
+            return faibles > 0 ? (
+              <div style={{ fontSize:10.5, color:'var(--dim)', marginTop:6 }}>
+                {faibles} autre(s) combinaison(s) masquée(s) : moins de 10 trades tranchés,
+                trop peu pour conclure quoi que ce soit.
+              </div>
+            ) : null;
+          })()}
+        </div>
+      )}
+
       {st && Object.keys(st.parStrategie || {}).length > 0 && (
         <div style={{ marginTop:12 }}>
           <div style={{ fontSize:12, color:'var(--muted)', marginBottom:6 }}>
