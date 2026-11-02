@@ -3499,6 +3499,13 @@ function tinyPng(W = 64, H = 40) {
     ok('le jeton Telegram vient de l\'environnement, pas du fichier',
       lu.t === jeton && lu.ch === '42', `${String(lu.t).slice(0, 12)}…`);
     fs.rmSync(tmpAlertes, { force: true });
+
+    // Diagnostic : les manques sont déjà couverts plus haut ; ce qui ne l'était
+    // pas, c'est l'absence de fuite du jeton dans la réponse.
+    const A = require('./alerts.js');
+    A.load();
+    ok('le diagnostic ne divulgue jamais le jeton',
+      !JSON.stringify(A.diagnostic()).includes('telegramToken'));
   }
 
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──

@@ -65,6 +65,16 @@ let config = { ...DEFAUT };
 let deps = null;
 let timer = null;
 
+// Secrets : sur un PaaS le disque est éphémère (et le dépôt peut être public),
+// donc le jeton du bot ne doit pas dépendre d'un fichier. L'environnement gagne
+// toujours — y compris après relecture en base, sinon un jeton posé en variable
+// serait écrasé par une vieille config.
+function appliquerEnvironnement() {
+  if (process.env.TELEGRAM_TOKEN) config.telegramToken = process.env.TELEGRAM_TOKEN.trim();
+  if (process.env.TELEGRAM_CHAT) config.telegramChat = process.env.TELEGRAM_CHAT.trim();
+  return config;
+}
+
 function load() {
   try {
     if (fs.existsSync(FICHIER)) {
@@ -74,13 +84,7 @@ function load() {
   } catch (e) {
     console.error('   Alertes    : configuration illisible —', e.message);
   }
-  // Secrets : sur un PaaS le disque est éphémère (et le dépôt peut être public),
-  // donc le jeton du bot ne doit pas dépendre d'un fichier. L'environnement
-  // gagne s'il est renseigné — sinon les alertes restaient muettes après un
-  // redéploiement, sans aucune erreur visible.
-  if (process.env.TELEGRAM_TOKEN) config.telegramToken = process.env.TELEGRAM_TOKEN.trim();
-  if (process.env.TELEGRAM_CHAT) config.telegramChat = process.env.TELEGRAM_CHAT.trim();
-  return config;
+  return appliquerEnvironnement();
 }
 
 function save() {
@@ -112,6 +116,8 @@ async function hydrater() {
     const depuisBase = await DB.kvLire('alertes', null);
     if (!depuisBase || typeof depuisBase !== 'object') return false;
     config = { ...DEFAUT, ...depuisBase };
+    // L'environnement reste prioritaire sur une config relue en base.
+    appliquerEnvironnement();
     try {
       if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
       fs.writeFileSync(FICHIER, JSON.stringify(config, null, 2));

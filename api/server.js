@@ -2470,6 +2470,15 @@ app.get('/api/alerts', requireAuth, (req, res) => {
   res.json({ success: true, config: c, historique: c.derniers || [] });
 });
 
+/**
+ * « Pourquoi je ne reçois rien ? » — la question qui coûte le plus de temps.
+ * On énumère ce qui manque au lieu de laisser deviner.
+ * Le jeton n'est jamais renvoyé, seulement sa présence.
+ */
+app.get('/api/alerts/diagnostic', requireAuth, (req, res) => {
+  res.json({ success: true, ...Alerts.diagnostic() });
+});
+
 app.put('/api/alerts', requireAuth, (req, res) => {
   try {
     const c = Alerts.update(req.body || {});
