@@ -3409,7 +3409,9 @@ function tinyPng(W = 64, H = 40) {
     // Le reste de verify.js tourne en mode fichiers (DATABASE_URL retiré pour les
     // tests de repli). On relit donc l'URL dans le .env et on exporte/restaure
     // dans un processus séparé : c'est la vraie chaîne sauvegarde → restauration.
-    const urlBase = (fs.readFileSync(ENV, 'utf8').match(/^DATABASE_URL=(.+)$/m)?.[1] || '').trim();
+    const urlBase = fs.existsSync(ENV)
+      ? (fs.readFileSync(ENV, 'utf8').match(/^DATABASE_URL=(.+)$/m)?.[1] || '').trim()
+      : '';
     if (urlBase) {
       const postgres = require('postgres');
       const nomTest = '5trade_bkp_test';
