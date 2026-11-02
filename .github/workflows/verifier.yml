@@ -1,0 +1,32 @@
+name: verifier
+
+# La porte de vérification tourne aussi ailleurs que sur la machine de René.
+# 738 tests écrits à la main ne protègent rien s'ils ne s'exécutent jamais.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Installer les dépendances de l'API
+        run: npm --prefix api ci --omit=dev
+
+      - name: Porte de vérification (racine du dépôt)
+        run: npm test
+
+      # Les tests qui dépendent du réseau (R2, Gemini, SMTP) se marquent
+      # « non testés » quand les clés sont absentes : c'est voulu, un CI sans
+      # secrets ne doit pas faire semblant de les avoir vérifiés.

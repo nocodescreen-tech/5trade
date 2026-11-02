@@ -83,6 +83,74 @@ async function init() {
 
 const isPg = () => usePg;
 
+/**
+ * Export complet, pour la sauvegarde. Aucune transformation : on veut pouvoir
+ * restaurer à l'identique (comptes, sessions, OTP, stratégies, trades).
+ */
+async function exporterTout() {
+  const at = new Date().toISOString();
+  if (!usePg) {
+    const fichiers = {};
+    for (const [nom, f] of Object.entries(FILES)) {
+      try { fichiers[nom] = JSON.parse(await fs.readFile(f, 'utf-8')); } catch { /* absent */ }
+    }
+    return { version: 1, at, mode: 'fichiers', fichiers };
+  }
+  const [kv, strategies, trades] = await Promise.all([
+    sql`select key, data from kv`,
+    sql`select id, data, created_at from strategies`,
+    sql`select id, data, created_at from trades`
+  ]);
+  return {
+    version: 1, at, mode: 'postgresql',
+    kv: kv.map(r => ({ key: r.key, data: r.data })),
+    strategies: strategies.map(r => ({ id: r.id, data: r.data, created_at: r.created_at })),
+    trades: trades.map(r => ({ id: r.id, data: r.data, created_at: r.created_at }))
+  };
+}
+
+/**
+ * Restaure une sauvegarde. Idempotent (upsert par clé) : on peut rejouer sans
+ * créer de doublon. `urlCible` permet de restaurer dans une base de test.
+ */
+async function restaurer(sauvegarde, urlCible = null) {
+  if (!sauvegarde || sauvegarde.version !== 1) throw new Error('sauvegarde illisible (version inconnue)');
+  if (sauvegarde.mode !== 'postgresql') {
+    throw new Error('cette sauvegarde est un export fichiers : à restaurer dans DATA_DIR, pas en base');
+  }
+  let client = sql;
+  let propre = false;
+  if (urlCible) {
+    const postgres = require('postgres');
+    client = postgres(urlCible, { onnotice: () => {}, max: 2 });
+    propre = true;
+    await client`create table if not exists kv (key text primary key, data jsonb not null)`;
+    await client`create table if not exists strategies (id text primary key, data jsonb not null, created_at timestamptz default now())`;
+    await client`create table if not exists trades (id text primary key, data jsonb not null, created_at timestamptz default now())`;
+  }
+  let n = 0;
+  try {
+    for (const r of sauvegarde.kv || []) {
+      await client`insert into kv (key, data) values (${r.key}, ${client.json(r.data)})
+        on conflict (key) do update set data = excluded.data`;
+      n++;
+    }
+    for (const r of sauvegarde.strategies || []) {
+      await client`insert into strategies (id, data, created_at) values (${r.id}, ${client.json(r.data)}, ${r.created_at || new Date()})
+        on conflict (id) do update set data = excluded.data`;
+      n++;
+    }
+    for (const r of sauvegarde.trades || []) {
+      await client`insert into trades (id, data, created_at) values (${r.id}, ${client.json(r.data)}, ${r.created_at || new Date()})
+        on conflict (id) do update set data = excluded.data`;
+      n++;
+    }
+  } finally {
+    if (propre) await client.end({ timeout: 5 });
+  }
+  return n;
+}
+
 /** Importe les données JSON existantes si la base est encore vide. */
 async function migrateFromFiles() {
   try {
@@ -245,7 +313,7 @@ async function ping() {
 }
 
 module.exports = {
-  init, isPg, ping,
+  init, isPg, ping, exporterTout, restaurer,
   getAccount, saveAccount,
   loadSessions, saveSessions,
   loadOtp, saveOtp,

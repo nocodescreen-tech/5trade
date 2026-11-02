@@ -318,6 +318,7 @@ const S3 = require('./s3');
 const vision = require('./vision');
 const Couts = require('./couts');
 const { extraireJSON } = require('./json-ia');
+const Backup = require('./backup');
 
 // ─── Calendrier économique — implémentation dans fundamentals.js ───
 const { filtreCalendrier } = require('./fundamentals');
@@ -1181,6 +1182,19 @@ app.post('/api/logout', (req, res) => {
   if (s) { delete sessions[s.token]; saveSessions(); }
   clearSessionCookie(res);
   res.json({ success: true });
+});
+
+// ─── Sauvegarde de la base (R2) ───
+// Planifiée dans le processus : elle hérite des variables d'environnement, donc
+// elle fonctionne sur n'importe quel hébergeur sans cron à configurer.
+app.get('/api/sauvegarde', requireAuth, (req, res) => res.json(Backup.etat()));
+
+app.post('/api/sauvegarde', requireAuth, async (req, res) => {
+  try {
+    res.json(await Backup.sauvegarder());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Restaure la session au rechargement (remplace localStorage)
@@ -3815,6 +3829,9 @@ async function start() {
 
   // Alertes : config chargée du disque, surveillance périodique démarrée.
   Alerts.load();
+  // Sauvegarde de la base vers R2 : planifiée ici, donc elle hérite de
+  // l'environnement (aucun cron à configurer sur l'hébergeur).
+  Backup.start();
   // Push navigateur : clés VAPID du .env (sans elles, les abonnements restent inertes).
   if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
     configurerVAPID(process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);

@@ -3363,6 +3363,94 @@ function tinyPng(W = 64, H = 40) {
       lancer({ ...baseCommune, DATABASE_URL: 'postgresql://u:p@db.exemple.com:5432/db' }) === 0);
   }
 
+  // ── Sauvegarde de la base : export, compression, RESTAURATION réelle ──
+  // Une sauvegarde jamais restaurée n'est pas une sauvegarde. On restaure donc
+  // pour de vrai, dans une base jetable, et on compare les comptes.
+  {
+    const zlib = require('zlib');
+    const DBx = require('./db');
+    const Backup = require('./backup');
+
+    const sauvegarde = await DBx.exporterTout();
+    ok('l\'export couvre les trois tables (ou les fichiers en mode local)',
+      sauvegarde.version === 1 && ['postgresql', 'fichiers'].includes(sauvegarde.mode)
+      && (sauvegarde.mode === 'fichiers' || (Array.isArray(sauvegarde.kv)
+        && Array.isArray(sauvegarde.strategies) && Array.isArray(sauvegarde.trades))),
+      `${sauvegarde.mode} : ${(sauvegarde.kv || []).length} kv, ${(sauvegarde.strategies || []).length} stratégies`);
+
+    const paquet = await Backup.construire();
+    const relu = JSON.parse(zlib.gunzipSync(paquet.corps).toString());
+    ok('la sauvegarde compressée se relit à l\'identique',
+      relu.version === 1 && paquet.octets < paquet.octetsBruts,
+      `${paquet.octetsBruts} → ${paquet.octets} octets`);
+    ok('le nom du fichier de sauvegarde est horodaté',
+      /\/db-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}\.json\.gz$/.test(Backup.nomFichier(new Date('2026-11-02T10:30:00Z'))),
+      Backup.nomFichier(new Date('2026-11-02T10:30:00Z')));
+
+    let erreurVersion = null;
+    try { await DBx.restaurer({ version: 99 }); } catch (e) { erreurVersion = e.message; }
+    ok('une sauvegarde d\'une version inconnue est refusée', /version inconnue/.test(erreurVersion || ''));
+
+    // Le reste de verify.js tourne en mode fichiers (DATABASE_URL retiré pour les
+    // tests de repli). On relit donc l'URL dans le .env et on exporte/restaure
+    // dans un processus séparé : c'est la vraie chaîne sauvegarde → restauration.
+    const urlBase = (fs.readFileSync(ENV, 'utf8').match(/^DATABASE_URL=(.+)$/m)?.[1] || '').trim();
+    if (urlBase) {
+      const postgres = require('postgres');
+      const nomTest = '5trade_bkp_test';
+      // Un nom qui commence par un chiffre doit être entre guillemets en SQL.
+      const nomSql = `"${nomTest}"`;
+      const urlAdmin = urlBase.replace(/\/[^/?]+(\?|$)/, '/postgres$1');
+      const urlTest = urlBase.replace(/\/[^/?]+(\?|$)/, `/${nomTest}$1`);
+      const admin = postgres(urlAdmin, { max: 1, onnotice() {} });
+      let resume = null, comptes = null, erreur = null;
+      try {
+        await admin.unsafe(`drop database if exists ${nomSql}`);
+        await admin.unsafe(`create database ${nomSql}`);
+        const code = `
+          const DB = require('./api/db');
+          (async () => {
+            await DB.init();
+            const s = await DB.exporterTout();
+            const n = await DB.restaurer(s, ${JSON.stringify(urlTest)});
+            console.log(JSON.stringify({ mode: s.mode, kv: (s.kv || []).length,
+              st: (s.strategies || []).length, tr: (s.trades || []).length, n }));
+            process.exit(0);
+          })();`;
+        const sortie = require('child_process').execFileSync(process.execPath, ['-e', code], {
+          cwd: ROOT, encoding: 'utf8',
+          env: { ...process.env, DATABASE_URL: urlBase, COUTS_FICHIER: path.join(os.tmpdir(), `couts-bkp-${process.pid}.json`) }
+        });
+        // db.js écrit son état de stockage sur stdout avant notre JSON.
+        const lignes = sortie.split('\n').map(l => l.trim()).filter(l => l.startsWith('{'));
+        resume = JSON.parse(lignes[lignes.length - 1] || '{}');
+        const c = postgres(urlTest, { max: 1, onnotice() {} });
+        const [kv] = await c`select count(*)::int as n from kv`;
+        const [st] = await c`select count(*)::int as n from strategies`;
+        const [tr] = await c`select count(*)::int as n from trades`;
+        comptes = `${kv.n}/${st.n}/${tr.n}`;
+        await c.end({ timeout: 5 });
+      } catch (e) {
+        erreur = e.message;
+      } finally {
+        try { await admin.unsafe(`drop database if exists ${nomSql}`); } catch { /* déjà partie */ }
+        await admin.end({ timeout: 5 });
+      }
+      const attendu = resume ? `${resume.kv}/${resume.st}/${resume.tr}` : '?';
+      ok('restauration réelle dans une base jetable : comptes identiques',
+        !erreur && resume && resume.mode === 'postgresql' && comptes === attendu && resume.n > 0,
+        erreur ? erreur.slice(0, 120) : `export ${attendu} → restauré ${comptes} (${resume && resume.n} lignes)`);
+    } else {
+      skipped('restauration réelle', 'DATABASE_URL absente du .env');
+    }
+
+    const srvB = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('la sauvegarde est planifiée et exposée',
+      /Backup\.start\(\)/.test(srvB) && /app\.post\('\/api\/sauvegarde', requireAuth/.test(srvB));
+    ok('la CI exécute la porte de vérification',
+      /run: npm test/.test(fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'verifier.yml'), 'utf8')));
+  }
+
   // ── Alertes Telegram : le jeton vient de l'environnement ──
   // Vécu : après publication du dépôt j'ai retiré le jeton de alerts.json, et
   // les alertes sont devenues muettes sans le moindre message d'erreur. Sur un
