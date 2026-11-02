@@ -318,6 +318,7 @@ const S3 = require('./s3');
 const vision = require('./vision');
 const Couts = require('./couts');
 const { extraireJSON } = require('./json-ia');
+const Kronos = require('./kronos');
 
 // ─── Calendrier économique — implémentation dans fundamentals.js ───
 const { filtreCalendrier } = require('./fundamentals');
@@ -1181,6 +1182,32 @@ app.post('/api/logout', (req, res) => {
   if (s) { delete sessions[s.token]; saveSessions(); }
   clearSessionCookie(res);
   res.json({ success: true });
+});
+
+// ─── Kronos : prévision de bougies (service Python séparé) ───
+// Le modèle ne tourne pas ici (PyTorch + allocation gratuite = impossible) : on
+// interroge un micro-service local. Absent ou en panne → 503 explicite, jamais
+// une analyse cassée.
+app.get('/api/kronos/sante', requireAuth, async (req, res) => {
+  res.json(await Kronos.sante());
+});
+
+app.post('/api/kronos/prevoir', requireAuth, async (req, res) => {
+  try {
+    const { symbole, timeframe, predLen } = req.body || {};
+    if (!symbole || !timeframe) return res.status(400).json({ error: 'symbole et timeframe requis' });
+    const bougies = await Market.getCandles(symbole, timeframe, 400).catch(() => null);
+    if (!Array.isArray(bougies) || bougies.length < 32) {
+      return res.status(400).json({ error: 'pas assez de bougies pour une prévision' });
+    }
+    const prevision = await Kronos.prevoir(bougies, { predLen: Number(predLen) || 12 });
+    if (!prevision) {
+      return res.status(503).json({ error: 'service Kronos indisponible', sante: await Kronos.sante() });
+    }
+    res.json({ symbole, timeframe, ...prevision });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Restaure la session au rechargement (remplace localStorage)

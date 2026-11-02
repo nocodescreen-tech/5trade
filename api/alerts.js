@@ -74,6 +74,12 @@ function load() {
   } catch (e) {
     console.error('   Alertes    : configuration illisible —', e.message);
   }
+  // Secrets : sur un PaaS le disque est éphémère (et le dépôt peut être public),
+  // donc le jeton du bot ne doit pas dépendre d'un fichier. L'environnement
+  // gagne s'il est renseigné — sinon les alertes restaient muettes après un
+  // redéploiement, sans aucune erreur visible.
+  if (process.env.TELEGRAM_TOKEN) config.telegramToken = process.env.TELEGRAM_TOKEN.trim();
+  if (process.env.TELEGRAM_CHAT) config.telegramChat = process.env.TELEGRAM_CHAT.trim();
   return config;
 }
 

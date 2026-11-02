@@ -3363,6 +3363,47 @@ function tinyPng(W = 64, H = 40) {
       lancer({ ...baseCommune, DATABASE_URL: 'postgresql://u:p@db.exemple.com:5432/db' }) === 0);
   }
 
+  // ── Kronos : prévision optionnelle, jamais bloquante ──
+  // Le modèle vit dans un service Python séparé. S'il est absent, l'analyse doit
+  // continuer : c'est une dépendance souple, pas un point de rupture.
+  {
+    const Kronos = require('./kronos.js');
+    ok('Kronos est inactif quand KRONOS_URL est vide', Kronos.configure() === false);
+    const prevision = await Kronos.prevoir([{ t: 1, o: 1, h: 1, l: 1, c: 1, v: 0 }], { predLen: 2 });
+    ok('sans service, la prévision renvoie null (aucune exception)', prevision === null);
+    const etat = await Kronos.sante();
+    ok('la sonde dit pourquoi il est inactif', etat.ok === false && /KRONOS_URL|désactivé/.test(etat.raison), etat.raison);
+    ok('une prévision vide n\'est pas résumable', Kronos.resume(null) === null);
+    const srvK = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('les routes Kronos existent et exigent une session',
+      /app\.get\('\/api\/kronos\/sante', requireAuth/.test(srvK)
+      && /app\.post\('\/api\/kronos\/prevoir', requireAuth/.test(srvK));
+    ok('l\'étude Kronos est documentée',
+      fs.existsSync(path.join(ROOT, 'docs', 'KRONOS.md'))
+      && /Kronos-base/.test(fs.readFileSync(path.join(ROOT, 'docs', 'KRONOS.md'), 'utf8')));
+  }
+
+  // ── Alertes Telegram : le jeton vient de l'environnement ──
+  // Vécu : après publication du dépôt j'ai retiré le jeton de alerts.json, et
+  // les alertes sont devenues muettes sans le moindre message d'erreur. Sur un
+  // PaaS le disque est éphémère : un secret doit venir de l'environnement.
+  {
+    const tmpAlertes = path.join(os.tmpdir(), `alertes-${process.pid}.json`);
+    fs.writeFileSync(tmpAlertes, JSON.stringify({ actif: true, telegramToken: null, telegramChat: null }));
+    const jeton = '123456789:AAHfakefakefakefakefakefakefakefake';
+    const sortie = require('child_process').execFileSync(process.execPath, ['-e',
+      `process.env.ALERTS_FICHIER=${JSON.stringify(tmpAlertes)};
+       process.env.TELEGRAM_TOKEN=${JSON.stringify(jeton)};
+       process.env.TELEGRAM_CHAT="42";
+       const c=require('./api/alerts.js').load();
+       console.log(JSON.stringify({t:c.telegramToken,ch:c.telegramChat}))`
+    ], { cwd: ROOT, encoding: 'utf8' }).trim();
+    const lu = JSON.parse(sortie);
+    ok('le jeton Telegram vient de l\'environnement, pas du fichier',
+      lu.t === jeton && lu.ch === '42', `${String(lu.t).slice(0, 12)}…`);
+    fs.rmSync(tmpAlertes, { force: true });
+  }
+
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──
   // Mesure réelle : 8,7 s pour joindre Telegram depuis cette connexion. Sans
   // reprise, l'alerte échouait sur un appel pourtant valide.
