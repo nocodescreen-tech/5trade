@@ -239,7 +239,10 @@ function tinyPng(W = 64, H = 40) {
   const vinfo = vision.visionInfo();
   console.log(`  • provider : VISION_PROVIDER=${vision.provider()} → ${vinfo.provider} / ${vinfo.model}`);
   if (!vision.visionReady()) {
-    ok('clé vision présente', false, `manquante pour ${vinfo.provider}`);
+    // Sans clé (CI, machine fraîche) il n'y a rien à tester, mais ce n'est pas
+    // un échec : les autres tests couvrent le reste. Un test rouge pour une clé
+    // absente rendait la CI inutilisable.
+    skipped('appel vision réel', `pas de clé pour ${vinfo.provider} — analyse d'image non testée`);
   } else {
     const png = tinyPng();
     console.log(`  • image de test — PNG ${png.length} octets généré à la volée`);
@@ -1776,8 +1779,17 @@ function tinyPng(W = 64, H = 40) {
     };
     ok('un chemin traversant est réduit à son dernier segment',
       nomSur('../../config.js') === 'config.js', nomSur('../../config.js'));
+    // Sur Windows, « ..\..\secret.env » est un chemin : il doit être réduit à
+    // son dernier segment. Sur Linux, l'antislash n'est PAS un séparateur :
+    // c'est un simple nom de fichier, et le nettoyage le neutralise (aucun
+    // séparateur, pas de « .. » en tête). Les deux résultats sont sûrs, mais
+    // ils diffèrent — le test doit dire ça au lieu d'imposer Windows.
+    const wNom = nomSur('..\\..\\secret.env');
     ok('un chemin Windows traversant aussi',
-      nomSur('..\\..\\secret.env') === 'secret.env', nomSur('..\\..\\secret.env'));
+      process.platform === 'win32'
+        ? wNom === 'secret.env'
+        : !/[\\/]/.test(wNom) && !wNom.startsWith('..'),
+      `${wNom} (${process.platform})`);
     ok('un nom sans danger est conservé tel quel',
       nomSur('cours-ICT.pdf') === 'cours-ICT.pdf', nomSur('cours-ICT.pdf'));
     ok('un nom vide rend un nom sûr, jamais un chemin vide',
@@ -3380,8 +3392,11 @@ function tinyPng(W = 64, H = 40) {
 
     const paquet = await Backup.construire();
     const relu = JSON.parse(zlib.gunzipSync(paquet.corps).toString());
+    // Sur une base vide (CI), gzip coûte plus que le contenu : comparer les
+    // tailles n'a de sens que sur une charge réelle.
+    const gainAttendu = paquet.octetsBruts > 2048 ? paquet.octets < paquet.octetsBruts : true;
     ok('la sauvegarde compressée se relit à l\'identique',
-      relu.version === 1 && paquet.octets < paquet.octetsBruts,
+      relu.version === 1 && relu.at === paquet.sauvegarde.at && gainAttendu,
       `${paquet.octetsBruts} → ${paquet.octets} octets`);
     ok('le nom du fichier de sauvegarde est horodaté',
       /\/db-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}\.json\.gz$/.test(Backup.nomFichier(new Date('2026-11-02T10:30:00Z'))),
