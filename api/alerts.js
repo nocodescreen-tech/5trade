@@ -19,7 +19,10 @@ const { fetchAvecReprise } = require('./reseau');
 // par deps.sendPush injecté, comme sendMail.
 const { payloadSignal } = require('./pushAlerts');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+// Dossier résolu par dossiers.js : sur un PaaS le code est monté en lecture
+// seule, et écrire dans /app/data échouait en EROFS à chaque sauvegarde de
+// configuration (« Alertes : enregistrement impossible »).
+const { DATA_DIR } = require('./dossiers');
 // Le fichier de configuration est surchargeable par l'environnement.
 // POURQUOI : la suite de tests faisait Al.update({ actif: false, email: null })
 // sur le VRAI fichier — lancer le canonique effaçait donc la configuration de
