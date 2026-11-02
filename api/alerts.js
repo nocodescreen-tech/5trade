@@ -90,6 +90,56 @@ function save() {
   } catch (e) {
     console.error('   Alertes    : enregistrement impossible —', e.message);
   }
+  // Persistance en base : sur un PaaS le disque est éphémère, donc une config
+  // saisie dans l'interface disparaissait au redéploiement (jeton Telegram,
+  // stratégies surveillées, marchés). On la recopie en base, sans bloquer.
+  try {
+    const DB = require('./db');
+    if (DB.isPg()) {
+      DB.kvEcrire('alertes', config).catch(() => { /* la config locale reste valable */ });
+    }
+  } catch { /* pas de base : le fichier suffit */ }
+}
+
+/**
+ * Reprend la configuration depuis la base si elle y est : c'est elle qui survit
+ * aux déploiements, le fichier n'est qu'un cache local.
+ */
+async function hydrater() {
+  try {
+    const DB = require('./db');
+    if (!DB.isPg()) return false;
+    const depuisBase = await DB.kvLire('alertes', null);
+    if (!depuisBase || typeof depuisBase !== 'object') return false;
+    config = { ...DEFAUT, ...depuisBase };
+    try {
+      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(FICHIER, JSON.stringify(config, null, 2));
+    } catch { /* le cache local est secondaire */ }
+    return true;
+  } catch (e) {
+    console.error('   Alertes    : relecture en base impossible —', e.message);
+    return false;
+  }
+}
+
+/** Diagnostic lisible : sert à répondre à « pourquoi je ne reçois rien ? ». */
+function diagnostic() {
+  const c = config;
+  const manques = [];
+  if (!c.actif) manques.push('alertes désactivées');
+  if (!c.telegramToken) manques.push('jeton Telegram absent');
+  if (!c.telegramChat) manques.push('chat id absent');
+  if (!Array.isArray(c.marches) || !c.marches.length) manques.push('aucun marché surveillé');
+  return {
+    actif: !!c.actif,
+    telegram: !!(c.telegramToken && c.telegramChat),
+    strategies: (c.strategies || []).length,
+    marches: (c.marches || []).length,
+    intervalleSec: c.intervalleSec,
+    pret: manques.length === 0,
+    manques
+  };
 }
 
 const get = () => config;
@@ -531,5 +581,6 @@ function retirerAbonnement(endpoint) {
 
 module.exports = {
   load, save, get, update, resetDedup, verifier, start, stop, compose, DEFAUT,
+  hydrater, diagnostic,
   listerAbonnements, ajouterAbonnement, retirerAbonnement
 };

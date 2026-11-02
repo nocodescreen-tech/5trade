@@ -130,6 +130,7 @@ app.get('/healthz', async (req, res) => {
       ok: true,
       stockage,
       ia: { deepseek: !!process.env.DEEPSEEK_API_KEY, secoursNvidia: !!process.env.NVIDIA_API_KEY },
+      alertes: Alerts.diagnostic(),
       uptime: Math.round(process.uptime()),
       at: new Date().toISOString()
     });
@@ -3827,7 +3828,9 @@ async function start() {
   await DB.init();
   await loadSessions();
 
-  // Alertes : config chargée du disque, surveillance périodique démarrée.
+  // Alertes : la base fait foi (le fichier local est un cache). Sans cette
+  // relecture, une config saisie dans l'interface était perdue au redéploiement.
+  await Alerts.hydrater();
   Alerts.load();
   // Sauvegarde de la base vers R2 : planifiée ici, donc elle hérite de
   // l'environnement (aucun cron à configurer sur l'hébergeur).
@@ -3894,6 +3897,13 @@ async function start() {
     console.log(`  Vision     : ${v.provider} / ${v.model}${vision.visionReady() ? '' : '  (clé manquante)'}`);
     console.log(`  Clé DeepSeek: ${process.env.DEEPSEEK_API_KEY && !process.env.DEEPSEEK_API_KEY.includes('your_deepseek') ? '✅ configurée' : '❌ manquante (.env)'}`);
     console.log(`  Secours      : ${process.env.NVIDIA_API_KEY ? `NVIDIA NIM gratuit (${NVIDIA_MODELS.length} modèle(s) : ${NVIDIA_MODELS.join(', ')})` : '❌ NVIDIA_API_KEY absente'}`);
+    {
+      // Une alerte muette ne doit jamais être silencieuse : on dit à l'écran
+      // pourquoi rien ne partirait (jeton Telegram, marchés, activation).
+      const d = Alerts.diagnostic();
+      console.log(`  Alertes      : ${d.pret ? '✅ prêtes' : '⚠️  ' + d.manques.join(' · ')}` +
+        ` (${d.strategies} stratégie(s), ${d.marches} marché(s), toutes les ${d.intervalleSec} s)`);
+    }
     console.log('═══════════════════════════════════════');
   });
 }

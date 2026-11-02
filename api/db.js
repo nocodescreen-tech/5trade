@@ -195,7 +195,8 @@ async function kvGet(key, fallback) {
     const rows = await sql`select data from kv where key = ${key}`;
     return rows[0] ? rows[0].data : fallback;
   }
-  return readJSON(FILES[key], fallback);
+  const f = FILES[key] || path.join(DATA_DIR, `${key}.json`);
+  return readJSON(f, fallback);
 }
 
 async function kvSet(key, value) {
@@ -205,7 +206,8 @@ async function kvSet(key, value) {
       on conflict (key) do update set data = ${sql.json(value)}`;
     return;
   }
-  await writeJSON(FILES[key], value);
+  const f = FILES[key] || path.join(DATA_DIR, `${key}.json`);
+  await writeJSON(f, value);
 }
 
 // ── Compte ──
@@ -314,6 +316,7 @@ async function ping() {
 
 module.exports = {
   init, isPg, ping, exporterTout, restaurer,
+  kvLire: kvGet, kvEcrire: kvSet,
   getAccount, saveAccount,
   loadSessions, saveSessions,
   loadOtp, saveOtp,

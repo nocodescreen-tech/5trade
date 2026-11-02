@@ -3468,6 +3468,18 @@ function tinyPng(W = 64, H = 40) {
       /run: npm test/.test(fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'verifier.yml'), 'utf8')));
   }
 
+  // ── Alertes muettes : diagnostic + config qui survit au redéploiement ──
+  {
+    const A = require('./alerts.js');
+    const d = A.diagnostic();
+    ok('le diagnostic nomme ce qui manque pour qu\'une alerte parte',
+      d.pret === false && d.manques.length > 0 && d.manques.some(m => /jeton|chat|marché/i.test(m)),
+      d.manques.join(' · '));
+    ok('le diagnostic expose le nombre de stratégies et de marchés',
+      Number.isInteger(d.strategies) && Number.isInteger(d.marches),
+      `${d.strategies} stratégie(s), ${d.marches} marché(s)`);
+  }
+
   // ── Alertes Telegram : le jeton vient de l'environnement ──
   // Vécu : après publication du dépôt j'ai retiré le jeton de alerts.json, et
   // les alertes sont devenues muettes sans le moindre message d'erreur. Sur un
