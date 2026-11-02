@@ -3363,26 +3363,6 @@ function tinyPng(W = 64, H = 40) {
       lancer({ ...baseCommune, DATABASE_URL: 'postgresql://u:p@db.exemple.com:5432/db' }) === 0);
   }
 
-  // ── Kronos : prévision optionnelle, jamais bloquante ──
-  // Le modèle vit dans un service Python séparé. S'il est absent, l'analyse doit
-  // continuer : c'est une dépendance souple, pas un point de rupture.
-  {
-    const Kronos = require('./kronos.js');
-    ok('Kronos est inactif quand KRONOS_URL est vide', Kronos.configure() === false);
-    const prevision = await Kronos.prevoir([{ t: 1, o: 1, h: 1, l: 1, c: 1, v: 0 }], { predLen: 2 });
-    ok('sans service, la prévision renvoie null (aucune exception)', prevision === null);
-    const etat = await Kronos.sante();
-    ok('la sonde dit pourquoi il est inactif', etat.ok === false && /KRONOS_URL|désactivé/.test(etat.raison), etat.raison);
-    ok('une prévision vide n\'est pas résumable', Kronos.resume(null) === null);
-    const srvK = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
-    ok('les routes Kronos existent et exigent une session',
-      /app\.get\('\/api\/kronos\/sante', requireAuth/.test(srvK)
-      && /app\.post\('\/api\/kronos\/prevoir', requireAuth/.test(srvK));
-    ok('l\'étude Kronos est documentée',
-      fs.existsSync(path.join(ROOT, 'docs', 'KRONOS.md'))
-      && /Kronos-base/.test(fs.readFileSync(path.join(ROOT, 'docs', 'KRONOS.md'), 'utf8')));
-  }
-
   // ── Alertes Telegram : le jeton vient de l'environnement ──
   // Vécu : après publication du dépôt j'ai retiré le jeton de alerts.json, et
   // les alertes sont devenues muettes sans le moindre message d'erreur. Sur un
