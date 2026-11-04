@@ -1305,7 +1305,11 @@ function tinyPng(W = 64, H = 40) {
   {
     // server.js est relu ici : les variables des autres blocs ne sont pas
     // visibles d'un bloc a l'autre, et srvTg n'existait donc pas dans ce scope.
-    const srvTg = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    // Les routes d'alertes sont désormais dans api/routes/alerts.js : on lit les
+    // deux fichiers, sinon ces contrôles porteraient sur un fichier qui ne les
+    // contient plus.
+    const srvTg = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8')
+      + fs.readFileSync(path.join(__dirname, 'routes', 'alerts.js'), 'utf8');
     const aSrc = fs.readFileSync(path.join(__dirname, 'delivery/alerts.js'), 'utf8');
     ok('les réglages portent le jeton du bot et la conversation',
       /telegramToken: null/.test(aSrc) && /telegramChat: null/.test(aSrc));
