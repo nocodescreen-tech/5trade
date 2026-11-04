@@ -13,10 +13,10 @@
  *   node tools/marches-tendance.js                 tous
  *   node tools/marches-tendance.js HG=F,CL=F,SI=F  une sélection
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
-const V = require('../api/validite');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
+const V = require('../api/core/validite');
 
 const ACTIFS = {
   'HG=F': { spread: 0.0005, nom: 'Cuivre' },

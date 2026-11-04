@@ -7,7 +7,7 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "verify": "node verify.js",
-    "expliquer": "node expliquer.js"
+    "expliquer": "node delivery/expliquer.js"
   },
   "dependencies": {
     "cheerio": "^1.0.0",

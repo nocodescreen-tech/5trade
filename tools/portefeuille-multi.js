@@ -11,11 +11,11 @@
  *
  * Usage : node tools/portefeuille-multi.js [risquePct] [positions]
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
-const R = require('../api/risque');
-const V = require('../api/validite');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
+const R = require('../api/risk/risque');
+const V = require('../api/core/validite');
 
 const MARCHES = {
   // Actions (2,7 paris effectifs)

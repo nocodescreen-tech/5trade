@@ -9,10 +9,10 @@
  *   7   = les familles de cette étude
  *   50  = hypothèse large, tous les réglages essayés depuis le début du projet
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
-const V = require('../api/validite');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
+const V = require('../api/core/validite');
 
 const SPREAD = { 'NQ=F': 1.00, 'ES=F': 0.25, 'BTC-USD': 12, 'GC=F': 0.30, 'CL=F': 0.02, 'EURUSD=X': 0.00012 };
 const profil = [{ id: 'p', titre: 'T', regles: ['R1', 'R2', 'R3', 'R4'],

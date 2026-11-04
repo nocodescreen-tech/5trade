@@ -20,7 +20,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 const compression = require('compression');
-const DB = require('./db');
+const DB = require('./core/db');
 // UN SEUL chargement. Le second appel (fallback « .env dans api/ ») etait inutile
 // et risque : dotenv cherche alors dans le dossier courant et peut ecraser des
 // valeurs deja chargees par un fichier non prevu.
@@ -63,7 +63,7 @@ const ROOT = path.join(__dirname, '..');
 // Chemins de données : résolus par api/dossiers.js, qui choisit un dossier
 // réellement inscriptible (le code peut être monté en lecture seule sur un PaaS)
 // et y recopie la graine versionnée (stratégies, lexique) si la cible est vide.
-const { DATA_DIR, KNOWLEDGE_BASE_DIR, DOCUMENTS_DIR, UPLOADS_DIR } = require('./dossiers');
+const { DATA_DIR, KNOWLEDGE_BASE_DIR, DOCUMENTS_DIR, UPLOADS_DIR } = require('./core/dossiers');
 // Le compte et l'historique vivent désormais en base (api/db.js) :
 // plus de lecture/écriture directe de fichiers ici.
 
@@ -313,67 +313,67 @@ async function uploadToImageKit(buffer, fileName, folder) {
 }
 
 // ─── S3 (Cloudflare R2) — implémentation dans s3.js ───
-const S3 = require('./s3');
+const S3 = require('./core/s3');
 
 // ─── Vision (Gemini) — implémentation dans vision.js ───
-const vision = require('./vision');
-const Couts = require('./couts');
-const { extraireJSON } = require('./json-ia');
-const Backup = require('./backup');
+const vision = require('./delivery/vision');
+const Couts = require('./core/couts');
+const { extraireJSON } = require('./core/json-ia');
+const Backup = require('./delivery/backup');
 
 // ─── Calendrier économique — implémentation dans fundamentals.js ───
-const { filtreCalendrier } = require('./fundamentals');
+const { filtreCalendrier } = require('./sources/fundamentals');
 
 // ─── Risque de portefeuille — implémentation dans portfolioRisk.js ───
-const { risqueTotal, peutOuvrirPosition } = require('./portfolioRisk');
+const { risqueTotal, peutOuvrirPosition } = require('./risk/portfolioRisk');
 
 // ─── Protection drawdown — implémentation dans drawdownProtection.js ───
-const { calculerDrawdown, ajusterRisque, courbeEquity } = require('./drawdownProtection');
+const { calculerDrawdown, ajusterRisque, courbeEquity } = require('./risk/drawdownProtection');
 
 // ─── Dashboard — implémentation dans dashboard.js ───
-const { buildDashboard } = require('./dashboard');
+const { buildDashboard } = require('./delivery/dashboard');
 
 // ─── Volume Profile — implémentation dans volumeProfile.js ───
-const { volumeProfile, niveauxVolume, gapsVolume } = require('./volumeProfile');
+const { volumeProfile, niveauxVolume, gapsVolume } = require('./engine/volumeProfile');
 
 // ─── Force des devises — implémentation dans currencyStrength.js ───
-const { forceDevises, classeDevises, paireLaPlusForte, matriceCorrelation } = require('./currencyStrength');
+const { forceDevises, classeDevises, paireLaPlusForte, matriceCorrelation } = require('./engine/currencyStrength');
 
 // ─── Corrélation dynamique — implémentation dans correlation.js ───
-const { correlationGlissante, ajusterTailleParCorrelation, ruptureCorrelation } = require('./correlation');
+const { correlationGlissante, ajusterTailleParCorrelation, ruptureCorrelation } = require('./engine/correlation');
 
 // ─── Backtesting visuel — implémentation dans backtestUI.js ───
-const { backtestVisuel } = require('./backtestUI');
+const { backtestVisuel } = require('./engine/backtestUI');
 
 // ─── London Breakout — implémentation dans londonBreakout.js ───
-const { rangeAsiatique, londonBreakout, evaluerQualite } = require('./londonBreakout');
+const { rangeAsiatique, londonBreakout, evaluerQualite } = require('./engine/londonBreakout');
 
 // ─── Divergences — implémentation dans divergences.js ───
-const { detecterDivergences, detecterDivergencesMACD } = require('./divergences');
+const { detecterDivergences, detecterDivergencesMACD } = require('./engine/divergences');
 
 // ─── Ajustement dynamique du risque — implémentation dans dynamicRisk.js ───
-const { ajusterRisqueATR, risqueAjuste, conditionsFavorables } = require('./dynamicRisk');
+const { ajusterRisqueATR, risqueAjuste, conditionsFavorables } = require('./risk/dynamicRisk');
 
 // ─── COT Report — implémentation dans cotReport.js ───
-const { getCOT, analyserCOT, tendanceCOT } = require('./cotReport');
+const { getCOT, analyserCOT, tendanceCOT } = require('./sources/cotReport');
 
 // ─── Taux d'intérêt — implémentation dans interestRates.js ───
-const { getTauxInteret, ecartTaux, analyseTaux, classeTaux } = require('./interestRates');
+const { getTauxInteret, ecartTaux, analyseTaux, classeTaux } = require('./sources/interestRates');
 
 // ─── Pattern Recognition — implémentation dans patternRecognition.js ───
-const { detecterPatterns } = require('./patternRecognition');
+const { detecterPatterns } = require('./engine/patternRecognition');
 
 // ─── Signal Scoring ML — implémentation dans signalScoring.js ───
-const { entrainerModele, predireSucces, ajusterSeuil, evaluerModele } = require('./signalScoring');
+const { entrainerModele, predireSucces, ajusterSeuil, evaluerModele } = require('./engine/signalScoring');
 
 // ─── Order Flow — implémentation dans orderFlow.js ───
-const { analyserOrderFlow } = require('./orderFlow');
+const { analyserOrderFlow } = require('./engine/orderFlow');
 
 // ─── Anomaly Detection — implémentation dans anomalyDetection.js ───
-const { analyserAnomalies } = require('./anomalyDetection');
+const { analyserAnomalies } = require('./engine/anomalyDetection');
 
 // ─── Alertes push — implémentation dans pushAlerts.js ───
-const { configurerVAPID, vapidPret, envoyerNotification } = require('./pushAlerts');
+const { configurerVAPID, vapidPret, envoyerNotification } = require('./delivery/pushAlerts');
 
 // Envoi push : diffuse aux abonnements du navigateur, purge les expirés.
 // Injecté à la surveillance comme sendMail (alerts.js ne connaît que deps).
@@ -390,50 +390,50 @@ async function sendPush(payload) {
 }
 
 // ─── Multi-comptes — implémentation dans multiAccount.js ───
-const { creerCompte, listerComptes, getCompte, mettreAJourCapital, supprimerCompte, pnlCompte } = require('./multiAccount');
+const { creerCompte, listerComptes, getCompte, mettreAJourCapital, supprimerCompte, pnlCompte } = require('./delivery/multiAccount');
 
 // ─── Export PDF — implémentation dans exportPDF.js ───
-const { genererRapportPDF, genererCSVEnrichi, genererCSVSignaux } = require('./exportPDF');
+const { genererRapportPDF, genererCSVEnrichi, genererCSVSignaux } = require('./delivery/exportPDF');
 
 // ─── Journal de trades — logique dans trades.js ───
-const Trades = require('./trades');
+const Trades = require('./delivery/trades');
 
 // ─── Recherche plein-texte dans la base de connaissance ───
-const Search = require('./search');
+const Search = require('./delivery/search');
 
 // ─── Export du journal (CSV / JSON) ───
-const Export = require('./export');
+const Export = require('./delivery/export');
 
 // ─── Marché temps réel (bourses / proxys) ───
-const Market = require('./market');
+const Market = require('./sources/market');
 
 // ─── Analyse de structure sur données exactes ───
-const Structure = require('./structure');
+const Structure = require('./engine/structure');
 
 // ─── Signaux (stratégie appliquée + confirmation achat/vente) ───
-const Signals = require('./signals');
+const Signals = require('./engine/signals');
 // Moteur multi-signaux : une liste de signaux (un par stratégie, un par motif)
 // au lieu d'un verdict unique. Voir signaux.js et patterns.js.
-const Multi = require('./signaux');
-const Patterns = require('./patterns');
+const Multi = require('./engine/signaux');
+const Patterns = require('./engine/patterns');
 // Journal des signaux : persiste chaque signal émis puis enregistre son ISSUE
 // réelle (objectif 1/2, stop, retour à l'entrée). Sans ça, aucune stratégie ne
 // peut être jugée — on ne garde que des opinions.
-const JournalSignaux = require('./journal-signaux');
+const JournalSignaux = require('./engine/journal-signaux');
 // Analyse par concept / stratégie sur historique long (DSR, PBO, hors échantillon).
-const Analyse = require('./analyse');
+const Analyse = require('./engine/analyse');
 // Backtest : rejoue le moteur sur l'historique avec le MÊME code que le direct,
 // pour répondre à la seule question qui compte — est-ce que ça gagne ?
-const Backtest = require('./backtest');
+const Backtest = require('./engine/backtest');
 // Actualités et calendrier économique : flux publics, sans clé ni compte.
-const News = require('./news');
-const Alerts = require('./alerts');
-const Lexique = require('./lexique');
+const News = require('./sources/news');
+const Alerts = require('./delivery/alerts');
+const Lexique = require('./delivery/lexique');
 // Base de concepts : les définitions des termes, injectées dans l'analyse IA.
-const Concepts = require('./concepts');
+const Concepts = require('./delivery/concepts');
 // Playbooks : les types de trade (scalping, chasse à la liquidité, intraday,
 // swing), chacun avec ses prérequis et ses étapes évalués sur le graphique.
-const Playbooks = require('./playbooks');
+const Playbooks = require('./delivery/playbooks');
 
 // Données de marché mises en cache sur disque : l'analyse doit rester
 // possible même sans réseau (et après un redémarrage).
@@ -3612,8 +3612,8 @@ app.post('/api/backtest', requireAuth, async (req, res) => {
  */
 app.get('/api/risque', requireAuth, (req, res) => {
   try {
-    const Risque = require('./risque.js');
-    const Journal = require('./journal-signaux.js');
+    const Risque = require('./risk/risque');
+    const Journal = require('./engine/journal-signaux');
       const journal = Journal.charger();
       res.json({
         success: true,
@@ -3638,7 +3638,7 @@ app.get('/api/risque', requireAuth, (req, res) => {
 /** POST /api/risque — règle les plafonds. Rendus relus depuis le disque. */
 app.post('/api/risque', requireAuth, (req, res) => {
   try {
-    const Risque = require('./risque.js');
+    const Risque = require('./risk/risque');
     const cfg = Risque.configurer(req.body || {});
     res.json({ success: true, configuration: cfg });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
@@ -3651,7 +3651,7 @@ app.post('/api/risque', requireAuth, (req, res) => {
  * drawdown, son ratio, et les sources/filtre à passer au backtest.
  */
 app.get('/api/risque/presets', requireAuth, (req, res) => {
-  const Risque = require('./risque.js');
+  const Risque = require('./risk/risque');
   res.json({
     success: true,
     presets: Object.entries(Risque.PRESETS).map(([nom, p]) => ({
@@ -3667,7 +3667,7 @@ app.get('/api/risque/presets', requireAuth, (req, res) => {
 /** POST /api/risque/preset — applique un préréglage mesuré. */
 app.post('/api/risque/preset', requireAuth, (req, res) => {
   try {
-    const Risque = require('./risque.js');
+    const Risque = require('./risk/risque');
     const nom = (req.body && req.body.nom) || '';
     const cfg = Risque.configurerPreset(nom);
     res.json({ success: true, configuration: cfg, sources: cfg.sources, regime: cfg.regime,
@@ -3687,8 +3687,8 @@ app.post('/api/risque/preset', requireAuth, (req, res) => {
  */
 app.get('/api/modele', requireAuth, (req, res) => {
   try {
-    const Modele = require('./modele.js');
-    const Journal = require('./journal-signaux.js');
+    const Modele = require('./engine/modele');
+    const Journal = require('./engine/journal-signaux');
     const st = Journal.stats();
     res.json({
       success: true,
@@ -3713,8 +3713,8 @@ app.get('/api/modele', requireAuth, (req, res) => {
  */
 app.get('/api/frais', requireAuth, (req, res) => {
   try {
-    const Frais = require('./frais.js');
-    const Journal = require('./journal-signaux.js');
+    const Frais = require('./core/frais');
+    const Journal = require('./engine/journal-signaux');
     const st = Journal.stats();
     res.json({
       success: true,
@@ -3743,7 +3743,7 @@ app.get('/api/frais', requireAuth, (req, res) => {
  */
 app.post('/api/frais', requireAuth, (req, res) => {
   try {
-    const Frais = require('./frais.js');
+    const Frais = require('./core/frais');
     const body = req.body || {};
     const actuel = Frais.configuration();
     const parSymbole = { ...actuel.parSymbole };

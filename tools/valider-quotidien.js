@@ -2,8 +2,8 @@
  * VALIDATION COMPLÈTE EN QUOTIDIEN — l'horizon où la friction devient supportable.
  * DSR, PBO, découpage 60/40, avec spread ET glissement réglés par instrument.
  */
-const A = require('../api/analyse');
-const F = require('../api/frais');
+const A = require('../api/engine/analyse');
+const F = require('../api/core/frais');
 
 const SPREAD = { 'NQ=F': 1.00, 'ES=F': 0.25, 'BTC-USD': 12 };
 

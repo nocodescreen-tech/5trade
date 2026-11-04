@@ -14,9 +14,9 @@
  *
  * Usage : node tools/selection-aveugle.js
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
 
 const MARCHES = {
   'GC=F': 0.30, 'SI=F': 0.005, 'PL=F': 0.10, 'HG=F': 0.0005, 'CL=F': 0.02,

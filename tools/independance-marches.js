@@ -11,7 +11,7 @@
  * d'échantillon effective). On recalcule ensuite la probabilité binomiale avec
  * N_eff au lieu de N.
  */
-const H = require('../api/historique');
+const H = require('../api/sources/historique');
 
 const INDICES = ['NQ=F', 'YM=F', 'ES=F', 'RTY=F', '^GDAXI', '^FTSE', '^N225', '^HSI'];
 

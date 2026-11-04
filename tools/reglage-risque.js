@@ -8,10 +8,10 @@
  * Les trades sont construits UNE fois, puis réutilisés : six simulations coûtent
  * six compositions, pas six backtests.
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
-const R = require('../api/risque');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
+const R = require('../api/risk/risque');
 
 const INDICES = {
   'NQ=F': 1.00, 'YM=F': 1.00, 'ES=F': 0.25, 'RTY=F': 0.10,

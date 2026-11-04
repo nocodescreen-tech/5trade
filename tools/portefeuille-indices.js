@@ -9,10 +9,10 @@
  * On agrège tous les trades en une seule série et on déflate pour 8 marchés
  * (et pour 50 essais, hypothèse large sur l'ensemble du projet).
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
-const V = require('../api/validite');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
+const V = require('../api/core/validite');
 
 // Indices d'actions uniquement : ce sont eux qui répliquent. Spread estimé par
 // instrument, glissement facturé à la même valeur (hypothèse sévère).

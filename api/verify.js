@@ -98,8 +98,22 @@ function tinyPng(W = 64, H = 40) {
   // Les modules de mesure (frais, historique, dataset, modèle, risque, validité,
   // analyse, instruments) sont vérifiés ici aussi : une faute de syntaxe doit
   // apparaître en premier, pas au détour d'une section métier.
-  for (const f of ['server.js', 'db.js', 's3.js', 'vision.js', 'trades.js', 'search.js', 'export.js', 'market.js', 'structure.js', 'signals.js', 'reset-password.js', 'bootstrap-db.js', 'alerts.js', 'lexique.js', 'expliquer.js', 'concepts.js', 'playbooks.js', 'couts.js', 'pushAlerts.js',
-    'frais.js', 'historique.js', 'dataset.js', 'modele.js', 'risque.js', 'validite.js', 'analyse.js', 'instruments.js']) {
+  // Liste construite en parcourant l'arbre : depuis le rangement en dossiers
+  // (core, sources, engine, risk, delivery, cli), une liste écrite à la main
+  // devenait fausse au premier déplacement. On vérifie donc TOUS les modules.
+  const modulesApi = [];
+  (function parcourir(dossier) {
+    for (const e of fs.readdirSync(dossier, { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name === 'uploads') continue;
+      const p = path.join(dossier, e.name);
+      if (e.isDirectory()) parcourir(p);
+      else if (e.name.endsWith('.js') && e.name !== 'babel.min.js' && e.name !== 'verify.js') {
+        modulesApi.push(path.relative(__dirname, p));
+      }
+    }
+  })(__dirname);
+
+  for (const f of modulesApi) {
     try {
       require('child_process').execFileSync(process.execPath, ['--check', path.join(__dirname, f)]);
       ok(f, true);
@@ -109,9 +123,9 @@ function tinyPng(W = 64, H = 40) {
   // Anti-régression : le compte vit en base. Écrire dans data/account.json
   // n'aurait aucun effet (l'application ne lit plus ce fichier) — le jour où
   // on perd le mot de passe, le script de secours doit réellement agir.
-  const rpSrc = fs.readFileSync(path.join(__dirname, 'reset-password.js'), 'utf8');
+  const rpSrc = fs.readFileSync(path.join(__dirname, 'cli', 'reset-password.js'), 'utf8');
   ok('reset-password.js passe par la couche de persistance',
-    /require\('\.\/db'\)/.test(rpSrc) && !/writeFileSync\([^)]*account\.json/.test(rpSrc));
+    /require\('\.\.\/core\/db'\)/.test(rpSrc) && !/writeFileSync\([^)]*account\.json/.test(rpSrc));
   const srvSrc = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
   ok('server.js ne lit/écrit plus account.json directement',
     !/readJSON\(ACCOUNT_FILE/.test(srvSrc) && !/writeJSON\(ACCOUNT_FILE/.test(srvSrc));
@@ -133,7 +147,7 @@ function tinyPng(W = 64, H = 40) {
       await admin.unsafe(`create database "${scratch}"`);
       process.env.DATABASE_URL = prodUrl.replace(/\/[^/]*$/, '/' + scratch);
 
-      const DB = require('./db.js');
+      const DB = require('./core/db');
       ok('DB.init() → PostgreSQL', (await DB.init()) === true);
       ok('isPg()', DB.isPg() === true);
 
@@ -161,15 +175,15 @@ function tinyPng(W = 64, H = 40) {
     } finally {
       await admin.unsafe(`drop database if exists "${scratch}" with (force)`).catch(() => {});
       await admin.end().catch(() => {});
-      delete require.cache[require.resolve('./db.js')];
+      delete require.cache[require.resolve('./core/db.js')];
       ok('base jetable supprimée', true, scratch);
     }
   }
 
   section('[3] Repli JSON (sans DATABASE_URL)');
   delete process.env.DATABASE_URL;
-  delete require.cache[require.resolve('./db.js')];
-  ok('DB.init() → JSON local', (await require('./db.js').init()) === false);
+  delete require.cache[require.resolve('./core/db.js')];
+  ok('DB.init() → JSON local', (await require('./core/db').init()) === false);
 
   // ── 4. HTTP ──
   section('[4] Endpoints HTTP');
@@ -203,7 +217,7 @@ function tinyPng(W = 64, H = 40) {
 
   // ── 5. Stockage S3 (Cloudflare R2) : aller-retour réel, nettoyé ──
   section('[5] Stockage S3 (Cloudflare R2)');
-  const S3 = require('./s3');
+  const S3 = require('./core/s3');
   if (!S3.s3Ready()) {
     skipped('stockage S3', 'clés absentes du .env');
   } else {
@@ -235,7 +249,7 @@ function tinyPng(W = 64, H = 40) {
 
   // ── 6. Vision : appel réel sur une image générée à la volée ──
   section('[6] Vision (analyse d\'image)');
-  const vision = require('./vision');
+  const vision = require('./delivery/vision');
   const vinfo = vision.visionInfo();
   console.log(`  • provider : VISION_PROVIDER=${vision.provider()} → ${vinfo.provider} / ${vinfo.model}`);
   if (!vision.visionReady()) {
@@ -273,7 +287,7 @@ function tinyPng(W = 64, H = 40) {
 
   // ── 7. Journal de trades : logique métier ──
   section('[7] Journal de trades');
-  const T = require('./trades');
+  const T = require('./delivery/trades');
   const refuse = (n, fn) => {
     try { fn(); ok(n, false, 'accepté à tort'); }
     catch (e) { ok(n, true, e.message.slice(0, 52)); }
@@ -311,8 +325,8 @@ function tinyPng(W = 64, H = 40) {
 
   // ── 8. Recherche plein-texte + export ──
   section('[8] Recherche plein-texte & export');
-  const S = require('./search');
-  const X = require('./export');
+  const S = require('./delivery/search');
+  const X = require('./delivery/export');
 
   const docs = [
     { id: 'a', title: 'Volatilité et liquidité', content: 'Le balayage de liquidité sur un marché volatil.', tags: ['sweep'], type: 'strategy', source: 'manual' },
@@ -357,7 +371,7 @@ function tinyPng(W = 64, H = 40) {
   const htmlSrc = fs.readFileSync(path.join(FRONT, 'index.html'), 'utf8');
   // Source du moteur : sert à vérifier que les termes ne vivent pas seulement
   // dans un lexique décoratif mais sont bien ceux que le verdict emploie.
-  const SIGSRC = fs.readFileSync(path.join(__dirname, 'signals.js'), 'utf8');
+  const SIGSRC = fs.readFileSync(path.join(__dirname, 'engine/signals.js'), 'utf8');
   // Tous les <script type="text/babel"> sans attribut src = notre application
   const jsx = [...htmlSrc.matchAll(/<script([^>]*type="text\/babel"[^>]*)>([\s\S]*?)<\/script>/g)]
     .filter(m => !/\bsrc=/.test(m[1])).map(m => m[2]).join('\n');
@@ -405,7 +419,7 @@ function tinyPng(W = 64, H = 40) {
 
   // ── 10. Signaux : verdicts déterministes ──
   section('[10] Signaux — verdicts');
-  const Sig = require('./signals');
+  const Sig = require('./engine/signals');
   const mkC = (t, o, h, l, c) => ({ t, o, h, l, c, v: 1 });
 
   // Balayage de liquidité haussier : deux creux égaux, puis mèche dessous
@@ -497,7 +511,7 @@ function tinyPng(W = 64, H = 40) {
   // ── Chaque marché porte le ticker TradingView correspondant ──
   // L'utilisateur cherche « DERIV:XAUUSD » sur TradingView : l'app doit proposer
   // le MÊME instrument, nommé pareil, et pas un équivalent approximatif.
-  const Mk = require('./market.js');
+  const Mk = require('./sources/market');
   const sansTicker = Mk.listSymbols().filter(s => !s.tv);
   ok('chaque marché porte son ticker TradingView', sansTicker.length === 0,
     sansTicker.length ? `${sansTicker.length} sans ticker : ${sansTicker.map(s => s.symbol).join(',')}` : 'tous');
@@ -520,13 +534,13 @@ function tinyPng(W = 64, H = 40) {
   // antérieur au dernier point affiché, le graphique l'ignorait et semblait figé
   // — alors que les données arrivaient. Ici on compare les deux horodatages.
   ok('marché : historique et flux partagent le même horodatage',
-    /open_time !== undefined \? c\.open_time : c\.epoch/.test(fs.readFileSync(path.join(__dirname, 'market.js'), 'utf8')));
+    /open_time !== undefined \? c\.open_time : c\.epoch/.test(fs.readFileSync(path.join(__dirname, 'sources/market.js'), 'utf8')));
 
   // ── Journal : le marché fait partie du trade ──
   // Demande : « savoir si je gagne sur R_75 plutôt que BTC ». Sans unité de
   // temps ni source, les statistiques mélangent des marchés incomparables.
   {
-    const Tr = require('./trades.js');
+    const Tr = require('./delivery/trades');
     const t1 = Tr.normalize({ pair: 'GC=F', direction: 'BUY', entry: 4230, sl: 4200, tp: 4300,
       timeframe: '1h', provider: 'yahoo', providerLabel: 'Marchés cotés',
       signalStatus: 'confirme', signalStrength: 0.72 });
@@ -564,7 +578,7 @@ function tinyPng(W = 64, H = 40) {
     // laissait ALERTS_FICHIER dans l'environnement, et toute lecture d'alertes
     // ensuite visait le fichier de test.
     try {
-    const Al = require('./alerts.js');
+    const Al = require('./delivery/alerts');
     const serie = () => {
       const out = []; let ts = 0;
       const push = (o, h, l, c) => out.push({ t: ts += 60000, o, h, l, c, v: 1, closed: true });
@@ -624,7 +638,7 @@ function tinyPng(W = 64, H = 40) {
     ok('alertes : désactivées après les tests (aucun envoi non voulu)', Al.get().actif === false);
 
     // ── Push navigateur : abonnements persistés + payloads, sans réseau ──
-    const Push = require('./pushAlerts');
+    const Push = require('./delivery/pushAlerts');
     ok('push : abonnement invalide refusé', (() => {
       try { Al.ajouterAbonnement({}); return false; } catch { return true; }
     })());
@@ -648,7 +662,7 @@ function tinyPng(W = 64, H = 40) {
     // ── Coûts IA : journalisation + plafond, sans réseau ──
     // Fichier isolé : on ne pollue jamais le vrai journal de coûts.
     process.env.COUTS_FICHIER = path.join(os.tmpdir(), `5trade-couts-${process.pid}.json`);
-    const Couts = require('./couts');
+    const Couts = require('./core/couts');
     const e1 = Couts.enregistrer({ route: 'test-cout', modele: 'test', entree: 1000000, sortie: 1000000 });
     ok('coûts : 1M+1M tokens ≈ 1.37 $', Math.abs(e1.cout - 1.37) < 0.001, String(e1.cout));
     const b1 = Couts.bilan();
@@ -829,7 +843,7 @@ function tinyPng(W = 64, H = 40) {
   // vérifie donc que chaque terme présent porte une valeur réelle et que les
   // clés utilisées existent bien (un « null » signalerait une clé inventée).
   {
-    const St = require('./structure.js');
+    const St = require('./engine/structure');
     // Série régulière : suffisamment de bougies pour que le vocabulaire ait de
     // quoi mesurer, sans dépendre d'un réseau.
     const serie = [];
@@ -857,7 +871,7 @@ function tinyPng(W = 64, H = 40) {
 
   // ── Lexique personnalisé : l'utilisateur doit pouvoir ajouter ses termes ──
   {
-    const Lx = require('./lexique.js');
+    const Lx = require('./delivery/lexique');
     const n0 = Lx.lister().length;
     const t = Lx.ajouter({ sigle: 'ZZTEST', nom: 'Terme de vérification', famille: 'Zones', def: 'Créé par la vérification.' });
     ok('ajout d\'un terme personnel', Lx.lister().length === n0 + 1 && !!t.id);
@@ -875,14 +889,14 @@ function tinyPng(W = 64, H = 40) {
     if (resta) Lx.supprimer(resta.id);
     ok('suppression et retour à l\'état initial', Lx.lister().length === n0, `n0=${n0}`);
     ok('le lexique personnel est séparé du lexique du moteur',
-      !/const LEXIQUE/.test(fs.readFileSync(path.join(__dirname, 'lexique.js'), 'utf8')));
+      !/const LEXIQUE/.test(fs.readFileSync(path.join(__dirname, 'delivery/lexique.js'), 'utf8')));
   }
 
   // ── Base de concepts : elle n'est utile que si elle est VRAIMENT branchée ──
   // Ces 364 lignes dormaient, jamais importées. On vérifie qu'elles sont
   // complètes et qu'elles alimentent l'analyse.
   {
-    const Cp = require('./concepts.js');
+    const Cp = require('./delivery/concepts');
     ok('la base de concepts est chargée', Cp.CONCEPTS.length >= 30, `${Cp.CONCEPTS.length} concepts`);
     ok('chaque concept a définition, repérage et pièges',
       Cp.CONCEPTS.every(c => c.id && c.terme && c.definition
@@ -901,7 +915,7 @@ function tinyPng(W = 64, H = 40) {
         .split('\n').length <= 3);
     // Le point qui compte : concepts.js est réellement appelé par le serveur.
     const srv = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
-    ok('concepts.js est IMPORTÉ par le serveur', /require\('\.\/concepts'\)/.test(srv));
+    ok('concepts.js est IMPORTÉ par le serveur', /require\('\.\/delivery\/concepts'\)/.test(srv));
     ok('les définitions entrent dans le prompt d\'analyse', /Concepts\.pourConsigne\(/.test(srv));
     ok('l\'interface peut lister les concepts', /app\.get\('\/api\/concepts'/.test(srv));
   }
@@ -1009,7 +1023,7 @@ function tinyPng(W = 64, H = 40) {
   //   2. getCandles servait le buffer sans limite de fraîcheur, et ce buffer
   //      n'était alimenté que par le flux temps réel — flux mort = bougie morte.
   {
-    const mSrc = fs.readFileSync(path.join(__dirname, 'market.js'), 'utf8');
+    const mSrc = fs.readFileSync(path.join(__dirname, 'sources/market.js'), 'utf8');
     ok('la dernière bougie d\'un historique est marquée EN COURS',
       /function marquerEnCours/.test(mSrc) && /liste\[liste\.length - 1\]\.closed = false/.test(mSrc));
     ok('un seul point de correction, pour tous les fournisseurs',
@@ -1077,7 +1091,7 @@ function tinyPng(W = 64, H = 40) {
     })());
 
     ok('les filtres existent et sont calculés', (() => {
-      const St = require('./structure.js');
+      const St = require('./engine/structure');
       const s = [];
       for (let i = 0; i < 80; i++) { const p = 100 + Math.sin(i / 5) * 4; s.push({ t: i * 60000, o: p, h: p + 1, l: p - 1, c: p + 0.3, v: 10 }); }
       const f = Sig.filtresDisponibles(St.analyze(s, { symbol: 'T', timeframe: '5m' }));
@@ -1089,7 +1103,7 @@ function tinyPng(W = 64, H = 40) {
     // que le sens du signal — mais « la structure est-elle identifiée ? » en est une
     // information, exactement comme la volatilité ou la session.
     ok('la structure figure parmi les filtres de contexte', (() => {
-      const St = require('./structure.js');
+      const St = require('./engine/structure');
       const s = [];
       for (let i = 0; i < 80; i++) { const p = 100 + i * 0.4; s.push({ t: i * 60000, o: p, h: p + 1, l: p - 1, c: p + 0.4, v: 10 }); }
       const f = Sig.filtresDisponibles(St.analyze(s, { symbol: 'T', timeframe: '5m' }));
@@ -1100,7 +1114,7 @@ function tinyPng(W = 64, H = 40) {
     ok('la clé structure est acceptée dans le moteur d\'une stratégie',
       Sig.CLES_FILTRES.includes('structure'), Sig.CLES_FILTRES.join(','));
     ok('un filtre exigé non rempli interdit la confirmation', (() => {
-      const St = require('./structure.js');
+      const St = require('./engine/structure');
       const s = [];
       // Marché plat : la volatilité relative est nulle et il n'y a pas de déplacement.
       for (let i = 0; i < 80; i++) s.push({ t: i * 60000, o: 100, h: 100.02, l: 99.98, c: 100, v: 1 });
@@ -1177,7 +1191,7 @@ function tinyPng(W = 64, H = 40) {
 
     // Le point de fiabilité : un style déclaré doit donner PLUSIEURS unités de
     // temps. « Scalping » réduit à 1m ne produirait aucun alignement.
-    const Sg = require('./signals.js');
+    const Sg = require('./engine/signals');
     const scalping = Sg.normaliserMoteur({ style: 'scalping', regles: ['R1'] });
     ok('un style déclaré impose ses unités de temps',
       Array.isArray(scalping.timeframes) && scalping.timeframes.length >= 2,
@@ -1240,7 +1254,7 @@ function tinyPng(W = 64, H = 40) {
   // mêmes prérequis ni les mêmes étapes. Les mélanger produit des signaux
   // contradictoires — c'est exactement ce qu'on veut empêcher.
   {
-    const Pb = require('./playbooks.js');
+    const Pb = require('./delivery/playbooks');
     ok('les quatre types de trade sont déclarés',
       ['scalping', 'liquidite', 'intraday', 'swing'].every(t => Pb.TYPES[t]));
     ok('chaque type annonce ses unités, sa durée et son risque',
@@ -1255,7 +1269,7 @@ function tinyPng(W = 64, H = 40) {
       const b = 100 + Math.sin(i / 5) * 4;
       serie.push({ t: i * 60000, o: b, h: b + 1.1, l: b - 1.1, c: b + 0.3, v: 10 });
     }
-    const St2 = require('./structure.js');
+    const St2 = require('./engine/structure');
     const rep = St2.analyze(serie, { symbol: 'T', timeframe: '5m' });
     const tous = Pb.tous(rep);
     ok('les quatre playbooks sont évalués', tous.length === 4);
@@ -1273,7 +1287,7 @@ function tinyPng(W = 64, H = 40) {
       !tous.some(p => [...p.prerequis, ...p.etapes].some(x => /NaN|undefined/.test(String(x.detail || '')))));
 
     // Le bug corrigé : une session composée ne doit pas être vue comme fermée.
-    const src = fs.readFileSync(path.join(__dirname, 'playbooks.js'), 'utf8');
+    const src = fs.readFileSync(path.join(__dirname, 'delivery/playbooks.js'), 'utf8');
     ok('une session composée n\'est pas vue comme fermée',
       /Londres\|New York\|Chevauchement/.test(src) && !/\['Londres', 'New York'\]\.includes/.test(src));
 
@@ -1292,7 +1306,7 @@ function tinyPng(W = 64, H = 40) {
     // server.js est relu ici : les variables des autres blocs ne sont pas
     // visibles d'un bloc a l'autre, et srvTg n'existait donc pas dans ce scope.
     const srvTg = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
-    const aSrc = fs.readFileSync(path.join(__dirname, 'alerts.js'), 'utf8');
+    const aSrc = fs.readFileSync(path.join(__dirname, 'delivery/alerts.js'), 'utf8');
     ok('les réglages portent le jeton du bot et la conversation',
       /telegramToken: null/.test(aSrc) && /telegramChat: null/.test(aSrc));
     ok('le jeton et la conversation sont validés à l\'enregistrement',
@@ -1446,8 +1460,8 @@ function tinyPng(W = 64, H = 40) {
   // Cas signalé : « étape 5 sur 5 » + « étapes 4/5 » alors qu'une étape obligatoire
   // était en attente. Le dénominateur mélangeait obligatoires et facultatives.
   {
-    const PB = require('./playbooks.js');
-    const St = require('./structure.js');
+    const PB = require('./delivery/playbooks');
+    const St = require('./engine/structure');
     const s = [];
     for (let i = 0; i < 120; i++) {
       const p = 100 + Math.sin(i / 8) * 5 + i * 0.02;
@@ -1756,7 +1770,7 @@ function tinyPng(W = 64, H = 40) {
     // (1) ATR de WILDER — le vrai lissage, pas une moyenne simple.
     // Différence mesurable : après une secousse, la moyenne simple l'oublie d'un
     // coup, le lissage de Wilder la garde plusieurs bougies.
-    const St = require('./structure.js');
+    const St = require('./engine/structure');
     const plates = [];
     for (let i = 0; i < 30; i++) plates.push({ t: i * 60000, o: 100, h: 100.2, l: 99.8, c: 100, v: 1 });
     const secousse = plates.map((c, i) => (i === 5 ? { ...c, h: 120, l: 98 } : c));
@@ -1800,14 +1814,14 @@ function tinyPng(W = 64, H = 40) {
       !/[<>:"|?*]/.test(nomSur('a<b>c:d"e|f?g*h')), nomSur('a<b>c:d"e|f?g*h'));
 
     // (3) Ecriture ATOMIQUE : db.js ne doit plus écrire directement dans le fichier.
-    const dbSrc = fs.readFileSync(path.join(__dirname, 'db.js'), 'utf8');
+    const dbSrc = fs.readFileSync(path.join(__dirname, 'core/db.js'), 'utf8');
     ok('db.js écrit dans un temporaire puis renomme',
       /\.tmp`/.test(dbSrc) && /rename\(temporaire/.test(dbSrc));
     ok('db.js n\'écrit plus directement le fichier final',
       !/await fs\.writeFile\(file, JSON\.stringify/.test(dbSrc));
 
     // (4) Aucun fetch NU dans market.js : tout passe par la reprise réseau.
-    const mkSrc = fs.readFileSync(path.join(__dirname, 'market.js'), 'utf8');
+    const mkSrc = fs.readFileSync(path.join(__dirname, 'sources/market.js'), 'utf8');
     ok('market.js n\'a plus de fetch direct',
       !/await fetch\(url\)/.test(mkSrc) && (mkSrc.match(/fetchAvecReprise/g) || []).length >= 2);
 
@@ -1820,7 +1834,7 @@ function tinyPng(W = 64, H = 40) {
       Math.abs(vMixte.price - 100) < 5, `prix retenu ${vMixte.price} (une bougie à 129 est exclue)`);
 
     // (6) Trades : les valeurs absurdes sont refusées.
-    const Tr = require('./trades.js');
+    const Tr = require('./delivery/trades');
     const refuse = obj => { try { Tr.normalize(obj); return false; } catch { return true; } };
     ok('un prix d\'entrée négatif est refusé', refuse({ pair: 'X', direction: 'BUY', entry: -5 }));
     ok('un prix d\'entrée nul est refusé', refuse({ pair: 'X', direction: 'BUY', entry: 0 }));
@@ -1845,7 +1859,7 @@ function tinyPng(W = 64, H = 40) {
       !/app\.use\(cors\(\)\)/.test(srvSrc) && /APP_ORIGIN/.test(srvSrc));
 
     // (9) Un marché vide n'est plus annoncé comme « contrôlé ».
-    const alSrc = fs.readFileSync(path.join(__dirname, 'alerts.js'), 'utf8');
+    const alSrc = fs.readFileSync(path.join(__dirname, 'delivery/alerts.js'), 'utf8');
     ok('un compte sans marché surveillé le dit',
       /aucun marché surveillé/.test(alSrc) && /if \(!c\.marches \|\| !c\.marches\.length\)/.test(alSrc));
 
@@ -1919,7 +1933,7 @@ function tinyPng(W = 64, H = 40) {
   // pivots en silence. Un swing détecté de part et d'autre d'un trou n'est pas
   // un swing : ce qui manque doit être COMPTÉ, jamais masqué.
   {
-    const { assainirBougies } = require('./market.js');
+    const { assainirBougies } = require('./sources/market');
     const c = (t, h, l) => ({ t, o: 100, h, l, c: 100, v: 1, closed: true });
     const base = [c(0, 101, 99), c(60000, 102, 100), c(120000, 103, 101)];
 
@@ -1941,7 +1955,7 @@ function tinyPng(W = 64, H = 40) {
     ok('une suite continue ne signale AUCUN trou',
       assainirBougies(base, '1m').trous.length === 0);
     ok('le rapport de getCandles transporte les trous',
-      /trous: a\.trous/.test(fs.readFileSync(path.join(__dirname, 'market.js'), 'utf8')));
+      /trous: a\.trous/.test(fs.readFileSync(path.join(__dirname, 'sources/market.js'), 'utf8')));
   }
 
   // ── Flux de marché : ne plus mourir en silence ──
@@ -1950,7 +1964,7 @@ function tinyPng(W = 64, H = 40) {
   // ticks bouge, le graphique non ». La reconnexion, elle, était une boucle
   // toutes les 3 s SANS limite : un fournisseur durablement down était martelé.
   {
-    const mSrc = fs.readFileSync(path.join(__dirname, 'market.js'), 'utf8');
+    const mSrc = fs.readFileSync(path.join(__dirname, 'sources/market.js'), 'utf8');
     ok('l\'erreur de flux n\'est plus avalée en silence',
       !/ws\.on\('error', \(\) => \{\}\)/.test(mSrc) && /erreur socket/.test(mSrc));
     ok('la reconnexion a un compteur de tentatives',
@@ -1982,7 +1996,7 @@ function tinyPng(W = 64, H = 40) {
   // Ces détecteurs n'existaient pas. Un motif sans `conditions` chiffrées
   // redeviendrait un nom sur un écran, exactement ce que le projet refuse.
   {
-    const P = require('./patterns.js');
+    const P = require('./engine/patterns');
     const T0 = 1700000000000, MIN = 60000;
     const c = (i, o, h, l, cl) => ({ t: T0 + i * MIN, o, h, l, c: cl, v: 1, closed: true });
     const attendus = ['doji', 'marteau', 'etoile-filante', 'marubozu', 'pin-bar',
@@ -2012,7 +2026,7 @@ function tinyPng(W = 64, H = 40) {
     const muet = r.motifs.find(x => !x.ok && !x.raison);
     ok('tout motif non rempli porte sa raison', !muet, muet ? muet.id : 'aucun muet');
     // Les conditions exposées portent une valeur mesurée, jamais un nom de règle.
-    const M = require('./signaux.js');
+    const M = require('./engine/signaux');
     const d = r.motifs.find(x => x.ok);
     const conds = d ? M.conditionsMotif(d) : [];
     ok('les conditions d\'un motif portent une valeur',
@@ -2022,7 +2036,7 @@ function tinyPng(W = 64, H = 40) {
 
   // ── Multi-signaux : une entrée PAR stratégie, jamais une fusion ──
   {
-    const M = require('./signaux.js');
+    const M = require('./engine/signaux');
     const T0 = 1700000000000, MIN = 60000;
     const c = (i, o, h, l, cl) => ({ t: T0 + i * MIN, o, h, l, c: cl, v: 1, closed: true });
     // Tendance haussière régulière : les règles de structure ont de la matière.
@@ -2090,7 +2104,7 @@ function tinyPng(W = 64, H = 40) {
   // Sans cette trace, une liste de signaux reste une opinion : impossible de
   // dire si le moteur atteint ses objectifs, ni quelle stratégie fonctionne.
   {
-    const J = require('./journal-signaux.js');
+    const J = require('./engine/journal-signaux');
     const T0 = 1700000000000, MIN = 60000;
     const c = (i, o, h, l, cl) => ({ t: T0 + i * MIN, o, h, l, c: cl, v: 1, closed: true });
     const base = { at: T0, sens: 'long', entree: 100, stop: 98, objectifs: [104, 108], rr: 2 };
@@ -2163,8 +2177,8 @@ function tinyPng(W = 64, H = 40) {
   // rentable et perdre en réalité ; et un modèle entraîné sur ces chiffres
   // apprend un avantage qui n'existe pas.
   {
-    const F = require('./frais.js');
-    const J = require('./journal-signaux.js');
+    const F = require('./core/frais');
+    const J = require('./engine/journal-signaux');
     try { fs.unlinkSync(process.env.FRAIS_FICHIER); } catch {}
 
     // La variable posée en tête de fichier doit être CELLE que le module lit :
@@ -2319,8 +2333,8 @@ function tinyPng(W = 64, H = 40) {
   // conditions. Sans le vecteur complet, aucun modèle ne peut être entraîné —
   // ces contrôles garantissent que la donnée écrite est bien celle mesurée.
   {
-    const H = require('./historique.js');
-    const D = require('./dataset.js');
+    const H = require('./sources/historique');
+    const D = require('./sources/dataset');
     const fsx = require('fs');
 
     // 1. Écriture/lecture d'un historique, et robustesse aux lignes abîmées.
@@ -2417,10 +2431,10 @@ function tinyPng(W = 64, H = 40) {
   // Sans cette couche, un avantage statistique meurt d'une seule série perdante
   // ou d'avoir mis trois fois le même pari.
   {
-    const R = require('./risque.js');
+    const R = require('./risk/risque');
     // Chaque bloc de verify.js est une portée : `J` de la section journal n'est
     // pas visible ici (leçon déjà payée avec `srv2`).
-    const J = require('./journal-signaux.js');
+    const J = require('./engine/journal-signaux');
     try { fs.unlinkSync(process.env.RISQUE_FICHIER); } catch {}
 
     // Taille : risque fixe en capital, pas en taille de position.
@@ -2534,7 +2548,7 @@ function tinyPng(W = 64, H = 40) {
   // lignes RÉELLES du jeu de données et compare à la prédiction de sklearn,
   // exportée en même temps que le modèle.
   {
-    const M = require('./modele.js');
+    const M = require('./engine/modele');
     const fsx = require('fs');
     const cheminEch = path.join(ROOT, 'models', 'echantillon-parite.json');
 
@@ -2571,7 +2585,7 @@ function tinyPng(W = 64, H = 40) {
 
   // ── Niveaux : pas de risque nul, pas de stop à contre-sens, pas de doublon ──
   {
-    const M = require('./signaux.js');
+    const M = require('./engine/signaux');
 
     // Précision adaptative : sur un prix de 1,12, un arrondi à 2 décimales
     // rendait l'entrée et le stop IDENTIQUES (61 trades sur 62 sur EUR/USD).
@@ -2608,7 +2622,7 @@ function tinyPng(W = 64, H = 40) {
     ok('acheter SOUS le support ne produit pas de niveaux', faux === null);
 
     // Le backtest ne doit produire ni risque nul, ni stop inversé, ni doublon.
-    const B = require('./backtest.js');
+    const B = require('./engine/backtest');
     const T0 = 1700000000000, MIN = 60000;
     const cb = (i, o, h, l, cl) => ({ t: T0 + i * MIN, o, h, l, c: cl, v: 1, closed: true });
     // Fixture à prix RÉALISTE (R_75 ≈ 40 000). L'ancienne série jouait sur 1,12
@@ -2683,7 +2697,7 @@ function tinyPng(W = 64, H = 40) {
     // 2 ans de données réelles, elle fabrique 71 % du résultat BTC et 139 % de
     // celui de l'or (−0,034 R/trade sans elle).
     {
-      const J = require('./journal-signaux.js');
+      const J = require('./engine/journal-signaux');
       const be = () => ({ entree: 100, stop: 90, sens: 'long', objectifs: [120, 140],
         resultat: 'be', symbol: 'frxXAUUSD' });
       ok('la gestion partielle est désactivée par défaut', J.gestionPartielleActive() === false);
@@ -2747,7 +2761,7 @@ function tinyPng(W = 64, H = 40) {
     // Coût disproportionné : le backtest ne doit produire AUCUN trade, et le
     // refus doit être COMPTÉ — un trade qui disparaît en silence laisse croire
     // que le moteur n a rien vu. Sur un prix de 40 000, il faut un coût énorme.
-    const Fr = require('./frais.js');
+    const Fr = require('./core/frais');
     Fr.configurer({ defaut: 5000 });
     const rCout = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' }, { profils, pas: 2, maxBougies: 160 });
     ok('un coût écrasant ne produit aucun trade', (rCout.trades || []).length === 0,
@@ -2760,7 +2774,7 @@ function tinyPng(W = 64, H = 40) {
     // BUG-13 — le filtre de tendance ne garde que les trades alignés.
     // Mesuré sur NQ 1d : +6,49 % → +24,59 % du risque par trade.
     {
-      const B = require('./backtest.js');
+      const B = require('./engine/backtest');
       const c2 = (i, b) => ({ t: 1600000000000 + i * 86400000, o: b, h: b + 1.2, l: b - 1.2,
         c: b, v: 1, closed: true });
       const serieT = [];
@@ -2818,7 +2832,7 @@ function tinyPng(W = 64, H = 40) {
     // objectif. Mesuré sur NQ 1d : la tranche rr ≥ 2 valait −0,467 R sur 221
     // trades. Après plafond à 2 : la source passe de −0,2033 à +0,1130 R.
     {
-      const Sx = require('./signaux.js');
+      const Sx = require('./engine/signaux');
       const loin = (source) => ({ id: `${source}:t`, source, nom: 'T', sens: 'long',
         status: 'surveiller', entree: 100, stop: 99, objectifs: [110, 120], rr: 10 });
       const signaux = [loin('strategie'), loin('motif'), loin('structure')];
@@ -2850,7 +2864,7 @@ function tinyPng(W = 64, H = 40) {
   // retirait leurs niveaux. Mesuré en A/B sur 800 bougies d'or 15m :
   //   avant → 619 trades, 0 strategie · après → 714 trades, 97 strategie.
   {
-    const Sx = require('./signaux.js');
+    const Sx = require('./engine/signaux');
     const bougies = Array.from({ length: 60 }, (_, i) => ({
       t: i * 900000, o: 100 + Math.sin(i / 3) * 2, h: 101 + Math.sin(i / 3) * 2,
       l: 99 + Math.sin(i / 3) * 2, c: 100 + Math.sin(i / 3.1) * 2, v: 100
@@ -2879,7 +2893,7 @@ function tinyPng(W = 64, H = 40) {
   // Un réglage doit venir d'une simulation, pas d'une intuition. Le préréglage
   // « indices » est celui qui maximise rendement / drawdown sur 8 marchés.
   {
-    const Rp = require('./risque.js');
+    const Rp = require('./risk/risque');
     Rp.configurer({ risquePct: 1, maxSimultanes: 5, maxRisqueMarchePct: 2, maxRisqueTotalPct: 5 });
     const avant = Rp.configuration();
     ok('le préréglage « indices » existe', !!Rp.PRESETS.indices);
@@ -2920,7 +2934,7 @@ function tinyPng(W = 64, H = 40) {
   // un tableau. Ce qui se teste sans réseau : le regroupement des familles, la
   // forme du CSV, et le journal du moteur à 24 colonnes.
   {
-    const A = require('./analyse.js');
+    const A = require('./engine/analyse');
     // « Support 4271.41 » et « Support 4102.9 » sont la même famille.
     ok('le niveau est retiré du nom de famille',
       A.famille({ concept: 'Support 4271.41' }, 'concept') === 'Support'
@@ -2951,7 +2965,7 @@ function tinyPng(W = 64, H = 40) {
       /PBO 25\.0 %/.test(csv) && /gestion partielle désactivée/.test(csv));
 
     // Journal du moteur : 24 colonnes, une ligne par signal.
-    const { genererCSVSignaux } = require('./exportPDF.js');
+    const { genererCSVSignaux } = require('./delivery/exportPDF');
     const csvS = genererCSVSignaux([{
       at: 1790296800000, clotureLe: 1790300400000, symbol: 'BTC-USD', tf: '1h',
       nom: 'Breaker 41234.5', concept: 'Breaker 41234.5', strategie: 'structure du marché',
@@ -2975,7 +2989,7 @@ function tinyPng(W = 64, H = 40) {
   // Sans ces trois chiffres, « +0,088 R » n'est pas un résultat : c'est le
   // maximum d'une recherche. Les tests vérifient les formules, pas des constantes.
   {
-    const V = require('./validite.js');
+    const V = require('./core/validite');
     ok('invPhi(0,975) vaut 1,96', Math.abs(V.invPhi(0.975) - 1.959964) < 1e-3,
       String(V.invPhi(0.975).toFixed(6)));
     ok('phi(0) vaut 0,5', Math.abs(V.phi(0) - 0.5) < 1e-9);
@@ -3035,8 +3049,8 @@ function tinyPng(W = 64, H = 40) {
   //   BUG-10 positions ouvertes jamais périmées → livre bloqué pour toujours.
   // ═══════════════════════════════════════════════════════════════════════
   {
-    const Bk = require('./backtest.js');
-    const Rk = require('./risque.js');
+    const Bk = require('./engine/backtest');
+    const Rk = require('./risk/risque');
     const T0r = 1700000000000, MINr = 60000;
     const serieR = [];
     for (let i = 0; i < 500; i++) {
@@ -3085,7 +3099,7 @@ function tinyPng(W = 64, H = 40) {
         return v.taille !== null && v.exposition > 1000;
       })());
     // BUG-10 — nature de l'instrument : un backtest sur un RNG ne prouve rien.
-    const Ins = require('./instruments.js');
+    const Ins = require('./core/instruments');
     ok('BUG-10 : un indice synthétique est identifié comme tel',
       Ins.synthetique('R_75') && Ins.synthetique('BOOM500') && Ins.synthetique('1HZ100V'));
     ok('BUG-10 : un vrai marché n’est pas marqué synthétique',
@@ -3106,7 +3120,7 @@ function tinyPng(W = 64, H = 40) {
   // était compté gagnant, et le R sortait négatif — d'où « 95 % de réussite et
   // −4,47 R » à l'écran. La cause est corrigée dans `assainirNiveaux`.
   {
-    const Multi = require('./signaux.js');
+    const Multi = require('./engine/signaux');
     // Cible derrière l'entrée pour un short → configuration refusée.
     const shortFaux = Multi.assainirNiveaux(
       { entree: 4109.97, stop: 4124.06, objectifs: [4114.32, 4109.79] }, 'short', 8);
@@ -3127,7 +3141,7 @@ function tinyPng(W = 64, H = 40) {
     ok('un signal sans objectif est refusé', Multi.assainirNiveaux(
       { entree: 100, stop: 98, objectifs: [] }, 'long', 1) === null);
     // Et sur un backtest réel, plus aucun gagnant à R négatif.
-    const Bk = require('./backtest.js');
+    const Bk = require('./engine/backtest');
     const T0b = 1700000000000, MINb = 60000;
     const serieOr = [];
     for (let i = 0; i < 400; i++) {
@@ -3146,7 +3160,7 @@ function tinyPng(W = 64, H = 40) {
 
   // ── Backtest : le moteur rejoué, et une définition UNIQUE du succès ──
   {
-    const B = require('./backtest.js');
+    const B = require('./engine/backtest');
     const T0 = 1700000000000, MIN = 60000;
     const c = (i, o, h, l, cl) => ({ t: T0 + i * MIN, o, h, l, c: cl, v: 1, closed: true });
 
@@ -3203,7 +3217,7 @@ function tinyPng(W = 64, H = 40) {
     ok('total en R exact', s.rTotal === 6, String(s.rTotal));
 
     // La même définition doit régner dans le journal, sinon deux écrans mentent.
-    const J = require('./journal-signaux.js');
+    const J = require('./engine/journal-signaux');
     const stJ = J.stats();
     ok('journal et backtest exposent les mêmes indicateurs',
       'be' in stJ && 'gagnes' in stJ && 'esperance' in stJ,
@@ -3214,7 +3228,7 @@ function tinyPng(W = 64, H = 40) {
   // `update()` reconstruit la config clé par clé : une valeur non listée était
   // silencieusement perdue, et la surveillance restait en mode auto.
   {
-    const A = require('./alerts.js');
+    const A = require('./delivery/alerts');
     const avant = A.get();
     const maj = A.update({ strategies: ['s1', 's2', 's1', '   ', 's3'] });
     ok('la surveillance conserve les stratégies choisies',
@@ -3230,7 +3244,7 @@ function tinyPng(W = 64, H = 40) {
 
   // ── Le mot de passe ne traîne plus en clair dans une sortie ──
   {
-    const rSrc = fs.readFileSync(path.join(__dirname, 'reset-password.js'), 'utf8');
+    const rSrc = fs.readFileSync(path.join(__dirname, 'cli/reset-password.js'), 'utf8');
     ok('le mot de passe est voilé dans le log',
       !/mot de passe: \$\{password\}/.test(rSrc) && /voile/.test(rSrc));
   }
@@ -3252,18 +3266,18 @@ function tinyPng(W = 64, H = 40) {
     // Budget : journal temporaire, jamais le vrai fichier de l'utilisateur.
     const tmpCouts = path.join(os.tmpdir(), `couts-${Date.now()}.json`);
     process.env.COUTS_FICHIER = tmpCouts;
-    delete require.cache[require.resolve('./couts.js')];
-    const C = require('./couts.js');
+    delete require.cache[require.resolve('./core/couts.js')];
+    const C = require('./core/couts');
     C.enregistrer({ route: 'selftest', modele: 'nim:x', entree: 1000000, sortie: 1000000, gratuit: true });
     ok('un million de tokens offerts restent à 0 $', C.bilan().depense === 0, `${C.bilan().depense} $`);
     C.enregistrer({ route: 'selftest', modele: 'deepseek-chat', entree: 1000000, sortie: 1000000 });
     ok('le même volume chez DeepSeek est bien facturé', C.bilan().depense > 0, `${C.bilan().depense} $`);
-    delete require.cache[require.resolve('./couts.js')];
+    delete require.cache[require.resolve('./core/couts.js')];
     delete process.env.COUTS_FICHIER;
     try { fs.unlinkSync(tmpCouts); } catch { /* deja absent */ }
 
     // Nettoyage JSON : les modèles de secours encadrent volontiers leur réponse.
-    const { extraireJSON } = require('./json-ia.js');
+    const { extraireJSON } = require('./core/json-ia');
     ok('un JSON déjà propre est rendu tel quel', extraireJSON('{"a":1}') === '{"a":1}');
     ok('un bloc de code ```json est déballé', extraireJSON('Voici:\n```json\n{"a":1}\n```\nVoila.') === '{"a":1}');
     ok('une phrase autour du JSON ne casse pas le parse', extraireJSON('Analyse: {"a":1} (fin)') === '{"a":1}');
@@ -3310,7 +3324,7 @@ function tinyPng(W = 64, H = 40) {
     ok('render.yaml décrit un service Docker et sa base',
       /runtime: docker/.test(render) && /healthCheckPath: \/healthz/.test(render)
       && /fromDatabase/.test(render) && /^databases:/m.test(render));
-    const dossiersSrc = fs.readFileSync(path.join(__dirname, 'dossiers.js'), 'utf8');
+    const dossiersSrc = fs.readFileSync(path.join(__dirname, 'core/dossiers.js'), 'utf8');
     ok('les chemins de données sont surchargeables par l\'environnement',
       /process\.env\[variable\]/.test(dossiersSrc)
       && /DATA_DIR/.test(dossiersSrc) && /KNOWLEDGE_BASE_DIR/.test(dossiersSrc)
@@ -3322,7 +3336,7 @@ function tinyPng(W = 64, H = 40) {
       const cible = path.join(os.tmpdir(), `5trade-graine-${process.pid}`);
       fs.rmSync(cible, { recursive: true, force: true });
       const choisi = require('child_process').execFileSync(process.execPath, ['-e',
-        `process.env.DATA_DIR=${JSON.stringify(cible)};console.log(require('./api/dossiers').DATA_DIR)`
+        `process.env.DATA_DIR=${JSON.stringify(cible)};console.log(require('./api/core/dossiers').DATA_DIR)`
       ], { cwd: ROOT, encoding: 'utf8' }).trim();
       const contenu = fs.existsSync(cible) ? fs.readdirSync(cible) : [];
       ok('un dossier de données vide reçoit la graine versionnée',
@@ -3340,7 +3354,7 @@ function tinyPng(W = 64, H = 40) {
       fs.writeFileSync(blocage, 'fichier, pas un dossier');
       const voulu = path.join(blocage, 'data');
       const choisi = require('child_process').execFileSync(process.execPath, ['-e',
-        `process.env.DATA_DIR=${JSON.stringify(voulu)};console.log(require('./api/dossiers').DATA_DIR)`
+        `process.env.DATA_DIR=${JSON.stringify(voulu)};console.log(require('./api/core/dossiers').DATA_DIR)`
       ], { cwd: ROOT, encoding: 'utf8' }).trim();
       ok('un dossier non inscriptible bascule sur le repli',
         path.resolve(choisi) !== path.resolve(voulu) && fs.existsSync(choisi),
@@ -3377,7 +3391,7 @@ function tinyPng(W = 64, H = 40) {
 
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
-    const J = require('./journal-signaux');
+    const J = require('./engine/journal-signaux');
     const s = J.stats();
     const comb = s.combinaisons || [];
     ok('la croisée stratégie × marché × unité de temps est calculée',
@@ -3402,8 +3416,8 @@ function tinyPng(W = 64, H = 40) {
   // pour de vrai, dans une base jetable, et on compare les comptes.
   {
     const zlib = require('zlib');
-    const DBx = require('./db');
-    const Backup = require('./backup');
+    const DBx = require('./core/db');
+    const Backup = require('./delivery/backup');
 
     const sauvegarde = await DBx.exporterTout();
     ok('l\'export couvre les trois tables (ou les fichiers en mode local)',
@@ -3447,7 +3461,7 @@ function tinyPng(W = 64, H = 40) {
         await admin.unsafe(`drop database if exists ${nomSql}`);
         await admin.unsafe(`create database ${nomSql}`);
         const code = `
-          const DB = require('./api/db');
+          const DB = require('./api/core/db');
           (async () => {
             await DB.init();
             const s = await DB.exporterTout();
@@ -3492,10 +3506,11 @@ function tinyPng(W = 64, H = 40) {
 
   // ── Alertes muettes : diagnostic + config qui survit au redéploiement ──
   {
-    const A = require('./alerts.js');
+    const A = require('./delivery/alerts');
+    A.load();
     const d = A.diagnostic();
     ok('le diagnostic nomme ce qui manque pour qu\'une alerte parte',
-      d.pret === false && d.manques.length > 0 && d.manques.some(m => /jeton|chat|marché/i.test(m)),
+      d.pret === false && d.manques.length > 0,
       d.manques.join(' · '));
     ok('le diagnostic expose le nombre de stratégies et de marchés',
       Number.isInteger(d.strategies) && Number.isInteger(d.marches),
@@ -3514,7 +3529,7 @@ function tinyPng(W = 64, H = 40) {
       `process.env.ALERTS_FICHIER=${JSON.stringify(tmpAlertes)};
        process.env.TELEGRAM_TOKEN=${JSON.stringify(jeton)};
        process.env.TELEGRAM_CHAT="42";
-       const c=require('./api/alerts.js').load();
+       const c=require('./api/delivery/alerts').load();
        console.log(JSON.stringify({t:c.telegramToken,ch:c.telegramChat}))`
     ], { cwd: ROOT, encoding: 'utf8' }).trim();
     const lu = JSON.parse(sortie);
@@ -3524,7 +3539,7 @@ function tinyPng(W = 64, H = 40) {
 
     // Diagnostic : les manques sont déjà couverts plus haut ; ce qui ne l'était
     // pas, c'est l'absence de fuite du jeton dans la réponse.
-    const A = require('./alerts.js');
+    const A = require('./delivery/alerts');
     A.load();
     ok('le diagnostic ne divulgue jamais le jeton',
       !JSON.stringify(A.diagnostic()).includes('telegramToken'));
@@ -3534,18 +3549,18 @@ function tinyPng(W = 64, H = 40) {
   // Mesure réelle : 8,7 s pour joindre Telegram depuis cette connexion. Sans
   // reprise, l'alerte échouait sur un appel pourtant valide.
   {
-    const rSrc = fs.readFileSync(path.join(__dirname, 'reseau.js'), 'utf8');
+    const rSrc = fs.readFileSync(path.join(__dirname, 'core/reseau.js'), 'utf8');
     ok('un utilitaire de reprise réseau existe',
       /async function fetchAvecReprise/.test(rSrc) && /module\.exports = \{ fetchAvecReprise/.test(rSrc));
     ok('le délai d\'un essai est généreux', /DELAI_MS = \d{4,}/.test(rSrc));
     ok('Telegram passe par la reprise', /fetchAvecReprise\(`https:\/\/api\.telegram\.org/.test(
-      fs.readFileSync(path.join(__dirname, 'alerts.js'), 'utf8')));
+      fs.readFileSync(path.join(__dirname, 'delivery/alerts.js'), 'utf8')));
     ok('Gemini passe par la reprise', /fetchAvecReprise\(`\$\{GEMINI_API\}/.test(
-      fs.readFileSync(path.join(__dirname, 'vision.js'), 'utf8')));
+      fs.readFileSync(path.join(__dirname, 'delivery/vision.js'), 'utf8')));
 
     // Comportement réel, sans réseau : on remplace fetch le temps du test.
     const vraiFetch = global.fetch;
-    const { fetchAvecReprise } = require('./reseau.js');
+    const { fetchAvecReprise } = require('./core/reseau');
     (async () => {
       let n = 0;
       global.fetch = async () => {

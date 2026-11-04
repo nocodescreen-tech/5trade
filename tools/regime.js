@@ -17,9 +17,9 @@
  *
  * Usage : node tools/regime.js [actif]
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
 
 const SPREADS = {
   'NQ=F': 1, 'YM=F': 1, 'ES=F': .25, 'RTY=F': .1, '^GDAXI': 2, '^FTSE': 1,

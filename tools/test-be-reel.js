@@ -5,10 +5,10 @@
  * premier objectif. Si l'avantage de BTC tient uniquement à cette convention, il
  * n'y a rien à annoncer.
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
-const V = require('../api/validite');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
+const V = require('../api/core/validite');
 
 const profils = [{ id: 'p', titre: 'T', regles: ['R1', 'R2', 'R3', 'R4'],
   seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: [], parametres: {} }];

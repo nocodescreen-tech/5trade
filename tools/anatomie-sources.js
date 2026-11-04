@@ -7,9 +7,9 @@
  * Avant de corriger, on regarde ce qu'ils sont : statut, rapport risque/rendement,
  * issue, sens, durée. La cause commande le remède.
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
 
 const SYM = process.argv[2] || 'NQ=F';
 const SPREAD = { 'NQ=F': 1, 'YM=F': 1, 'ES=F': .25, '^GDAXI': 2, '^FTSE': 1, '^N225': 5, '^HSI': 5, 'RTY=F': .1 }[SYM] || 1;

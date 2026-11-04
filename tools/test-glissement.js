@@ -8,10 +8,10 @@
  *
  * Usage : node tools/test-glissement.js [BTC-USD] [1h] [4]
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
-const V = require('../api/validite');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
+const V = require('../api/core/validite');
 
 const [sym = 'BTC-USD', tf = '1h', pasArg = '4'] = process.argv.slice(2);
 const pas = Math.max(1, Number(pasArg) || 4);

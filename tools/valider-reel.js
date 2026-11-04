@@ -11,11 +11,11 @@
  *    supplément de friction n'était pas un avantage.
  */
 const path = require('path');
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
-const V = require('../api/validite');
-const I = require('../api/instruments');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
+const V = require('../api/core/validite');
+const I = require('../api/core/instruments');
 
 const [sym = 'GC=F', tf = '1h', pasArg = '2'] = process.argv.slice(2);
 const pas = Math.max(1, Number(pasArg) || 2);

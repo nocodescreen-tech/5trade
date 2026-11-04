@@ -10,11 +10,11 @@
  *
  * Usage : node tools/portefeuille-sans-actions.js
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
-const R = require('../api/risque');
-const V = require('../api/validite');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
+const R = require('../api/risk/risque');
+const V = require('../api/core/validite');
 
 const MARCHES = {
   'GC=F': { spread: 0.30, nom: 'Or' },

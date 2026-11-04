@@ -8,9 +8,9 @@
  * Usage : node tools/sweep-horizons.js 1d            (tous les instruments)
  *         node tools/sweep-horizons.js 1h BTC-USD    (un instrument)
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
 
 const tf = process.argv[2] || '1d';
 const cible = process.argv[3] || null;

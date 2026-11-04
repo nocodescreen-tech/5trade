@@ -6,9 +6,9 @@
  * 2022 a été une année baissière violente, puis 2023-2026 un rebond : le filtre
  * de tendance doit avoir changé de camp, pas s'être arrêté.
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
 
 const MARCHES = {
   'NQ=F': 1, 'YM=F': 1, 'ES=F': 0.25, 'RTY=F': 0.1,

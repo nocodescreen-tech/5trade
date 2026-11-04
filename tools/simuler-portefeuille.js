@@ -8,10 +8,10 @@
  *
  * Usage : node tools/simuler-portefeuille.js [capital] [risquePct]
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
-const R = require('../api/risque');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
+const R = require('../api/risk/risque');
 
 const capital0 = Number(process.argv[2]) || 1000;
 const risquePct = Number(process.argv[3]) || 1;

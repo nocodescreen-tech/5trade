@@ -12,9 +12,9 @@
  *
  * Usage : node tools/robustesse-regime.js
  */
-const H = require('../api/historique');
-const B = require('../api/backtest');
-const F = require('../api/frais');
+const H = require('../api/sources/historique');
+const B = require('../api/engine/backtest');
+const F = require('../api/core/frais');
 
 const MARCHES = {
   'GC=F': 0.30, 'SI=F': 0.005, 'CT=F': 0.01, 'KC=F': 0.05, 'HG=F': 0.0005,
