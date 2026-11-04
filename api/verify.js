@@ -700,8 +700,12 @@ function tinyPng(W = 64, H = 40) {
     // Le nombre de règles n'est pas fige : il grandit avec le moteur. On verifie
     // donc que TOUTES les regles declarees sont bien reprises, sans en coder 4.
     const nbRegles = Object.keys(Sig.TOUTES_REGLES).length;
-    ok('profil : texte sans indication → toutes les règles (rien d\'omis)',
-      p4.regles.length === nbRegles && !p4.deduitDuTexte, `${p4.regles.length}/${nbRegles}`);
+    // RÈGLE INVERSÉE (fix/core-reliability) : un texte sans indication ne doit
+    // plus hériter de toutes les règles. C'est ce repli qui faisait produire des
+    // signaux génériques sous le nom d'une stratégie qui ne disait rien.
+    ok('profil : texte sans indication → stratégie non exécutable (aucune règle prêtée)',
+      p4.regles.length === 0 && p4.executable === false && !p4.deduitDuTexte,
+      `${p4.regles.length} règle(s), executable=${p4.executable}`);
     ok('profil : une stratégie mono-règle relève son seuil de force',
       p3.seuilRegles === 1 && p3.seuilForce > 0.35, JSON.stringify({ r: p3.seuilRegles, f: p3.seuilForce }));
     ok('profil : une stratégie multi-règles garde le seuil standard',
@@ -3391,6 +3395,51 @@ function tinyPng(W = 64, H = 40) {
       lancer({ ...baseCommune, DATABASE_URL: 'postgresql://u:p@localhost:5432/db' }) === 1);
     ok('le pré-vol donne le feu vert avec une base distante',
       lancer({ ...baseCommune, DATABASE_URL: 'postgresql://u:p@db.exemple.com:5432/db' }) === 0);
+  }
+
+  // ── Moteur : identité de stratégie, conditions obligatoires, refus ──
+  // Scénarios exigés par l'audit fiabilité : une stratégie n'exécute QUE ses
+  // règles, un manque obligatoire interdit le signal, et rien n'hérite en silence.
+  {
+    const Sig = require('./engine/signals');
+    const bougies = Array.from({ length: 120 }, (_, i) => ({
+      t: i * 900000, o: 100 + Math.sin(i / 4) * 3, h: 101.5 + Math.sin(i / 4) * 3,
+      l: 98.5 + Math.sin(i / 4) * 3, c: 100 + Math.sin(i / 4.2) * 3, v: 100, closed: true
+    }));
+    const meta = { symbol: 'EURUSD', timeframe: '15m' };
+
+    // 3. Une stratégie n'exécute pas les règles d'une autre.
+    const unSeul = Sig.detect(bougies, meta, { regles: ['R1'], strict: true });
+    ok('une stratégie n\'exécute que SES règles',
+      unSeul.reglesActives.length === 1 && unSeul.reglesActives[0] === 'R1',
+      unSeul.reglesActives.join('+') || 'aucune');
+
+    // 2. Stratégie sans règle : aucun signal, pas d'héritage silencieux.
+    const vide = Sig.detect(bougies, meta, { regles: [], strict: true });
+    ok('une stratégie sans règle ne produit aucun signal (pas d\'héritage)',
+      vide.status === 'neutre' && vide.reglesActives.length === 0, vide.status);
+    ok('et elle dit pourquoi', /ne déclare aucune règle/.test(vide.summary));
+
+    // 5. Condition obligatoire non satisfaite → refus explicite, sans niveaux.
+    const refus = Sig.detect(bougies, meta, {
+      regles: ['R1', 'R2', 'R3'], strict: true, obligatoires: ['R3', 'R4'],
+      seuilRegles: 1, seuilForce: 0
+    });
+    ok('une condition obligatoire absente interdit le signal',
+      refus.status === 'refuse' && refus.bloquantes.includes('R4'),
+      `${refus.status} · ${refus.bloquantes.join(',') || 'aucune bloquante'}`);
+    ok('un signal refusé ne publie aucun niveau',
+      refus.levels === null && /refus/i.test(refus.levelsRaison || ''));
+    ok('le refus est lisible et nomme la condition',
+      /SIGNAL REFUSÉ/.test(refus.summary) && /obligatoire/i.test(refus.missing.join(' ')));
+
+    // 4. Deux stratégies analysées indépendamment, chacune son verdict.
+    const a = Sig.detect(bougies, meta, { regles: ['R1'], strict: true, strategie: { id: 'A', titre: 'A' } });
+    const b = Sig.detect(bougies, meta, { regles: ['R4'], strict: true, strategie: { id: 'B', titre: 'B' } });
+    ok('deux stratégies sont évaluées séparément, sans mélange de règles',
+      a.reglesActives.join() === 'R1' && b.reglesActives.join() === 'R4');
+    ok('chaque verdict conserve l\'identité de sa stratégie',
+      a.strategie && a.strategie.id === 'A' && b.strategie && b.strategie.id === 'B');
   }
 
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──

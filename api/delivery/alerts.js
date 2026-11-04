@@ -411,7 +411,39 @@ async function verifier(force = false) {
         resultats.push({ ...m, verdict: 'données insuffisantes' });
         continue;
       }
-      const v = deps.signals.detect(closes, { symbol: m.symbol, timeframe: m.tf });
+      // ── Le verdict est rendu SELON LA STRATÉGIE SÉLECTIONNÉE ──
+      // Avant, detect() était appelé sans options : le go/no-go reposait donc sur
+      // toutes les règles génériques, quelle que soit la stratégie cochée. La
+      // stratégie ne changeait que le texte du message — exactement l'illusion
+      // qu'il fallait supprimer.
+      const profils = (typeof deps.profilsSurveillance === 'function')
+        ? (await deps.profilsSurveillance().catch(() => [])) : [];
+      const profilsValides = (profils || []).filter(p => p && p.executable !== false);
+      const profilsInexecutables = (profils || []).filter(p => p && p.executable === false);
+
+      if (!profils.length) {
+        // Aucune stratégie : mode auto assumé, règles génériques, message honnête.
+        resultats.push({ ...m, verdict: 'aucune stratégie sélectionnée : analyse générique' });
+      } else if (!profilsValides.length) {
+        // Toutes les stratégies cochées sont documentaires : on refuse plutôt que
+        // de produire un signal générique sous un nom de stratégie.
+        resultats.push({ ...m, verdict: `signal refusé — stratégie(s) non exécutable(s) : ${
+          profilsInexecutables.map(p => p.titre || p.id).join(', ')}` });
+        continue;
+      }
+
+      // Verdict du moteur, restreint aux règles de la première stratégie retenue.
+      const profil = profilsValides[0];
+      const optionsMoteur = profil ? {
+        regles: profil.regles,
+        obligatoires: profil.obligatoires || [],
+        seuilForce: profil.seuilForce,
+        seuilRegles: profil.seuilRegles,
+        parametres: profil.parametres,
+        strategie: { id: profil.id, titre: profil.titre },
+        strict: true
+      } : {};
+      const v = deps.signals.detect(closes, { symbol: m.symbol, timeframe: m.tf }, optionsMoteur);
 
       // ── Signaux MULTIPLES : la liste, pas un verdict seul ──
       // La surveillance n'utilisait AUCUNE stratégie de l'utilisateur : elle
@@ -421,8 +453,8 @@ async function verifier(force = false) {
       let multi = null;
       if (deps.signaux && typeof deps.signaux.detecterTout === 'function') {
         try {
-          const profils = typeof deps.profilsSurveillance === 'function'
-            ? (await deps.profilsSurveillance()) : [];
+          // On réutilise les profils déjà chargés : les relire ferait deux appels
+          // disque/base par marché et par cycle, pour un résultat identique.
           multi = deps.signaux.detecterTout(closes, { symbol: m.symbol, timeframe: m.tf },
             { profils });
         } catch { multi = null; }
