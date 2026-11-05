@@ -28,7 +28,9 @@ const { DATA_DIR } = require('../core/dossiers');
 // sur le VRAI fichier — lancer le canonique effaçait donc la configuration de
 // l'utilisateur (surveillance éteinte, email vidé, marchés remplacés par un
 // marché de test). Les tests écrivent désormais dans un fichier à part.
-const FICHIER = process.env.ALERTS_FICHIER || path.join(DATA_DIR, 'alerts.json');
+// Chemin résolu À CHAQUE APPEL, pas au chargement : sinon ALERTS_FICHIER posé
+// plus tard (tests) était ignoré et la suite réécrivait la graine versionnée.
+const fichierAlertes = () => process.env.ALERTS_FICHIER || path.join(DATA_DIR, 'alerts.json');
 
 /** Configuration par défaut : surveillance inactive tant qu'aucun email n'est posé. */
 const DEFAUT = {
@@ -80,8 +82,8 @@ function appliquerEnvironnement() {
 
 function load() {
   try {
-    if (fs.existsSync(FICHIER)) {
-      const disque = JSON.parse(fs.readFileSync(FICHIER, 'utf8'));
+    if (fs.existsSync(fichierAlertes())) {
+      const disque = JSON.parse(fs.readFileSync(fichierAlertes(), 'utf8'));
       config = { ...DEFAUT, ...disque };
     }
   } catch (e) {
@@ -95,12 +97,15 @@ function save() {
   // réécrivait la graine versionnée à chaque lancement local (arbre de travail
   // sale, risque de committer une config de test). On ne l'écrit qu'en mode
   // fichiers, ou si ALERTS_FICHIER désigne explicitement un autre chemin.
-  const dbPg = (() => { try { return require('../core/db').isPg(); } catch { return false; } })();
+  // DATABASE_URL suffit : le module est chargé AVANT DB.init(), donc isPg() est
+  // encore faux à ce moment-là et le fichier était réécrit au démarrage.
+  const dbPg = Boolean(process.env.DATABASE_URL)
+    || (() => { try { return require('../core/db').isPg(); } catch { return false; } })();
   const cheminImpose = Boolean(process.env.ALERTS_FICHIER);
   if (!dbPg || cheminImpose) {
     try {
       if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(FICHIER, JSON.stringify(config, null, 2));
+      fs.writeFileSync(fichierAlertes(), JSON.stringify(config, null, 2));
     } catch (e) {
       console.error('   Alertes    : enregistrement impossible —', e.message);
     }
@@ -131,7 +136,7 @@ async function hydrater() {
     appliquerEnvironnement();
     try {
       if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(FICHIER, JSON.stringify(config, null, 2));
+      fs.writeFileSync(fichierAlertes(), JSON.stringify(config, null, 2));
     } catch { /* le cache local est secondaire */ }
     return true;
   } catch (e) {

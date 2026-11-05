@@ -28,6 +28,10 @@ process.env.JOURNAL_SIGNAUX_FICHIER = path.join(os.tmpdir(), `signaux-journal-te
 // Même règle pour les frais de transaction : le canonique ne doit pas écrire
 // les spreads réels de l'utilisateur. Variable posée AVANT tout require.
 process.env.FRAIS_FICHIER = path.join(os.tmpdir(), `frais-test-${process.pid}.json`);
+// Et pour les alertes : la suite appelait Alerts.update() avant que le bloc
+// d'alertes ne pose ALERTS_FICHIER, donc elle réécrivait data/alerts.json (graine
+// versionnée). Posée AVANT tout require, elle ne le touche plus jamais.
+process.env.ALERTS_FICHIER = path.join(os.tmpdir(), `alertes-test-${process.pid}.json`);
 // L'historique long et le jeu de données écrivent aussi hors des données réelles.
 process.env.HISTORIQUE_DOSSIER = path.join(os.tmpdir(), `histo-test-${process.pid}`);
 process.env.DATASET_DOSSIER = path.join(os.tmpdir(), `dataset-test-${process.pid}`);
@@ -692,7 +696,10 @@ function tinyPng(W = 64, H = 40) {
     // configuration réelle de l'utilisateur n'a jamais été ouverte.
     } finally {
       try { fs.unlinkSync(fichierTest); } catch (e) { /* déjà absent */ }
-      delete process.env.ALERTS_FICHIER;
+      // On REMET le fichier temporaire de la suite au lieu de supprimer la
+      // variable : supprimée, les blocs suivants écrivaient la vraie graine
+      // data/alerts.json (arbre de travail sale après chaque npm test).
+      process.env.ALERTS_FICHIER = path.join(os.tmpdir(), `alertes-test-${process.pid}.json`);
     }
   }
 
