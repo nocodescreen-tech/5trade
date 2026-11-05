@@ -3645,6 +3645,86 @@ function tinyPng(W = 64, H = 40) {
       /app\.get\('\/api\/market\/profil', requireAuth/.test(srvM));
   }
 
+  // ── Schéma phase 2 : additif, idempotent, contraintes réellement actives ──
+  {
+    const sqlTexte = fs.readFileSync(path.join(__dirname, 'db', 'schema-phase2.sql'), 'utf8');
+    // Les commentaires parlent de DROP/ALTER pour dire qu'il n'y en a pas : on les
+    // retire avant de contrôler le contenu réel.
+    const sqlCode = sqlTexte.split(/\r?\n/)
+      .filter(x => !x.trim().startsWith('--')).join(' ');
+    ok('le schéma phase 2 est purement additif (aucun DROP/TRUNCATE/ALTER)',
+      !/\bDROP\b/i.test(sqlCode) && !/\bTRUNCATE\b/i.test(sqlCode) && !/\bALTER\s+TABLE\b/i.test(sqlCode));
+    ok('toutes ses créations sont conditionnelles',
+      (sqlTexte.match(/CREATE TABLE/gi) || []).length
+        === (sqlTexte.match(/CREATE TABLE IF NOT EXISTS/gi) || []).length,
+      `${(sqlTexte.match(/CREATE TABLE IF NOT EXISTS/gi) || []).length} table(s)`);
+
+    const urlBase = fs.existsSync(ENV)
+      ? (fs.readFileSync(ENV, 'utf8').match(/^DATABASE_URL=(.+)$/m)?.[1] || '').trim()
+      : '';
+    if (!urlBase) {
+      skipped('schéma phase 2 sur base jetable', 'DATABASE_URL absente du .env');
+    } else {
+      const postgres = require('postgres');
+      const nomTest = '5trade_schema_test';
+      const nomSql = `"${nomTest}"`;
+      const urlAdmin = urlBase.replace(/\/[^/?]+(\?|$)/, '/postgres$1');
+      const urlTest = urlBase.replace(/\/[^/?]+(\?|$)/, `/${nomTest}$1`);
+      const admin = postgres(urlAdmin, { max: 1, onnotice() {} });
+      let tables1 = [], tables2 = [], fkRefusee = false, checkRefuse = false, preuves = 0, erreur = null;
+      try {
+        await admin.unsafe(`drop database if exists ${nomSql}`);
+        await admin.unsafe(`create database ${nomSql}`);
+        const { appliquer } = require('./db/migrer-phase2');
+        tables1 = (await appliquer(urlTest, { silencieux: true })).tables;
+        tables2 = (await appliquer(urlTest, { silencieux: true })).tables;   // rejoué
+
+        const c = postgres(urlTest, { max: 1, onnotice() {} });
+        await c`insert into strategy_versions (strategie_id, version, fiche, hash, etat)
+                values ('ict_smc','1.0.0', ${{ id: 'ict_smc' }}, 'abc123', 'validee')`;
+
+        // Une version inconnue doit être refusée par la clé étrangère.
+        try {
+          await c`insert into strategy_evaluations (strategie_id, version, symbole, timeframe, statut)
+                  values ('ict_smc','9.9.9','EURUSD','5m','VALID')`;
+        } catch { fkRefusee = true; }
+
+        // Un statut hors nomenclature doit être refusé.
+        try {
+          await c`insert into strategy_evaluations (strategie_id, version, symbole, timeframe, statut)
+                  values ('ict_smc','1.0.0','EURUSD','5m','PEUT_ETRE')`;
+        } catch { checkRefuse = true; }
+
+        const [ev] = await c`insert into strategy_evaluations
+          (strategie_id, version, symbole, timeframe, regime, statut, direction, conditions, score)
+          values ('ict_smc','1.0.0','EURUSD','5m','trending','VALID','BUY', ${{ sweep: true }}, 82)
+          returning id`;
+        const [sig] = await c`insert into signals
+          (evaluation_id, strategie_id, version, symbole, timeframe, direction, entree, stop, objectifs, rr)
+          values (${ev.id},'ict_smc','1.0.0','EURUSD','5m','BUY',1.0850,1.0835,array[1.0880, 1.0900]::numeric[],2)
+          returning id`;
+        await c`insert into signal_evidence (signal_id, condition, obligatoire, remplie, detail)
+                values (${sig.id},'liquidity_sweep',true,true,'balayage du creux asiatique')`;
+        const [n] = await c`select count(*)::int as n from signal_evidence where signal_id = ${sig.id}`;
+        preuves = n.n;
+        await c.end({ timeout: 5 });
+      } catch (e) {
+        erreur = e.message;
+      } finally {
+        try { await admin.unsafe(`drop database if exists ${nomSql}`); } catch { /* déjà partie */ }
+        await admin.end({ timeout: 5 });
+      }
+
+      ok('les sept tables de la phase 2 sont créées', !erreur && tables1.length === 7,
+        erreur ? erreur.slice(0, 120) : tables1.join(', '));
+      ok('le schéma est rejouable sans erreur (idempotent)', !erreur && tables2.length === 7);
+      ok('une évaluation sans version de stratégie est refusée', fkRefusee);
+      ok('un statut hors nomenclature est refusé', checkRefuse);
+      ok('le parcours fiche → évaluation → signal → preuve s\'insère',
+        preuves === 1, `${preuves} preuve(s) liée(s)`);
+    }
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');
