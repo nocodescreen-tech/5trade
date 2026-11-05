@@ -3725,6 +3725,100 @@ function tinyPng(W = 64, H = 40) {
     }
   }
 
+  // ── Traçabilité : conditions nommées, preuves, signal rattaché ──
+  {
+    const P = require('./engine/preuves');
+
+    // 1. Conversion d'un verdict en preuves nommées (pur, sans base).
+    const preuves = P.preuvesDepuisVerdict({
+      obligatoires: ['R2'], bloquantes: ['R2'],
+      checklist: [{ label: 'tendance de fond', ok: true }, { label: 'volume confirmé', ok: false }]
+    });
+    ok('un verdict produit une preuve par condition, avec son nom',
+      preuves.length === 3 && preuves[0].condition === 'R2', `${preuves.length} preuve(s)`);
+    ok('une condition obligatoire non remplie est marquée comme telle',
+      preuves[0].obligatoire === true && preuves[0].remplie === false);
+    ok('les confirmations facultatives gardent leur libellé lisible',
+      preuves[1].condition === 'tendance de fond' && preuves[1].obligatoire === false
+      && preuves[1].remplie === true);
+
+    // 2. Écriture réelle : processus séparé, car le reste de la suite tourne en
+    //    mode fichiers (DATABASE_URL retiré). Nettoyage dans le même processus.
+    const urlBase = fs.existsSync(ENV)
+      ? (fs.readFileSync(ENV, 'utf8').match(/^DATABASE_URL=(.+)$/m)?.[1] || '').trim()
+      : '';
+    if (!urlBase) {
+      skipped('traçabilité en base', 'DATABASE_URL absente du .env');
+    } else {
+      const code = [
+        "const DB = require('./api/core/db');",
+        "const P = require('./api/engine/preuves');",
+        "(async () => {",
+        "  await DB.init();",
+        "  const sql = DB.client();",
+        "  const id = '__test_preuves__';",
+        "  const res = {};",
+        "  try {",
+        "    const ev = await P.enregistrerEvaluation({ strategieId: id, version: '1.0.0',",
+        "      symbole: 'EURUSD', timeframe: '5m', statut: 'INVALID', direction: 'BUY',",
+        "      conditions: { R1: true }, manquantes: ['R2'], score: 0.42,",
+        "      preuves: P.preuvesDepuisVerdict({ obligatoires: ['R2'], bloquantes: ['R2'],",
+        "        checklist: [{ label: 'tendance de fond', ok: true }, { label: 'volume confirmé', ok: false }] }) });",
+        "    res.evaluation = ev;",
+        "    const n1 = await sql.unsafe('select count(*)::int as n from signal_evidence where evaluation_id=' + ev.id);",
+        "    res.preuves = n1[0].n;",
+        "    const sig = await P.enregistrerSignal({ evaluationId: ev.id, strategieId: id, version: '1.0.0',",
+        "      symbole: 'EURUSD', timeframe: '5m', direction: 'BUY', entree: 1.08, stop: 1.07,",
+        "      objectifs: [1.09, 1.10], rr: 2 });",
+        "    res.signal = sig;",
+        "    const n2 = await sql.unsafe('select count(*)::int as n from signals where evaluation_id=' + ev.id);",
+        "    res.signaux = n2[0].n;",
+        "    res.incomplet = await P.enregistrerEvaluation({ strategieId: id });",
+        "    res.disponible = await P.disponible();",
+        "  } finally {",
+        "    await sql.unsafe(\"delete from signals where strategie_id='\" + id + \"'\");",
+        "    await sql.unsafe(\"delete from signal_evidence where evaluation_id in (select id from strategy_evaluations where strategie_id='\" + id + \"')\");",
+        "    await sql.unsafe(\"delete from strategy_evaluations where strategie_id='\" + id + \"'\");",
+        "    await sql.unsafe(\"delete from strategy_versions where strategie_id='\" + id + \"'\");",
+        "  }",
+        "  console.log(JSON.stringify(res));",
+        "  process.exit(0);",
+        "})().catch(e => { console.error(e.message); process.exit(1); });"
+      ].join('\n');
+      let resume = null, erreur = null;
+      try {
+        const sortie = require('child_process').execFileSync(process.execPath, ['-e', code], {
+          cwd: ROOT, encoding: 'utf8',
+          env: { ...process.env, DATABASE_URL: urlBase }
+        });
+        const lignes = sortie.split('\n').map(l => l.trim()).filter(l => l.startsWith('{'));
+        resume = JSON.parse(lignes[lignes.length - 1] || '{}');
+      } catch (e) {
+        erreur = e.message.split('\n')[0];
+      }
+      ok('une évaluation est enregistrée avec ses preuves nommées',
+        !erreur && resume && resume.evaluation && resume.evaluation.ok === true && resume.preuves === 3,
+        erreur || `${resume && resume.preuves} preuve(s)`);
+      ok('le signal publié est rattaché à son évaluation',
+        !erreur && resume && resume.signal && resume.signal.ok === true && resume.signaux === 1);
+      ok('une évaluation incomplète est refusée sans lever',
+        !erreur && resume && resume.incomplet && resume.incomplet.ok === false,
+        resume && resume.incomplet && resume.incomplet.raison);
+      ok('le module de traçabilité voit le schéma phase 2',
+        !erreur && resume && resume.disponible === true);
+    }
+
+    // 3. La boucle d'alertes écrit réellement cette trace.
+    const aSrc4 = fs.readFileSync(path.join(__dirname, 'delivery', 'alerts.js'), 'utf8');
+    ok('la surveillance enregistre une évaluation par marché',
+      /deps\.preuves\.enregistrerEvaluation/.test(aSrc4)
+      && /preuvesDepuisVerdict/.test(aSrc4));
+    ok('la surveillance rattache le signal publié à son évaluation',
+      /enregistrerSignal\(\{/.test(aSrc4) && /traceEvaluation\.id/.test(aSrc4));
+    const srvP = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('la traçabilité est injectée dans la surveillance', /preuves: Preuves/.test(srvP));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

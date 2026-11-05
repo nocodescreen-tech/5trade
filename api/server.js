@@ -323,6 +323,8 @@ const Backup = require('./delivery/backup');
 // Phase 1 de l'architecture adaptative : intelligence de marché (classification,
 // régime, profil). Lecture seule, aucun effet sur les signaux existants.
 const ProfilMarche = require('./market-intelligence/market-profile');
+// Traçabilité des évaluations (schéma phase 2) : conditions nommées + preuves.
+const Preuves = require('./engine/preuves');
 
 // ─── Calendrier économique — implémentation dans fundamentals.js ───
 const { filtreCalendrier } = require('./sources/fundamentals');
@@ -3752,6 +3754,9 @@ async function start() {
     // Multi-signaux : permet à la surveillance de dire QUELLE stratégie s'est
     // déclenchée, et de lister les motifs, au lieu d'un verdict anonyme.
     signaux: Multi,
+    // Traçabilité phase 2 : conditions nommées et preuves en base. Absent ou en
+    // panne, la surveillance continue — la trace n'est jamais bloquante.
+    preuves: Preuves,
     // Le journal des signaux : la surveillance l'alimente aussi, sinon il ne
     // contient que ce qui a été vu pendant que l'onglet « Direct » était ouvert.
     journal: JournalSignaux,

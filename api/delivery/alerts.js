@@ -460,6 +460,33 @@ async function verifier(force = false) {
       } : {};
       const v = deps.signals.detect(closes, { symbol: m.symbol, timeframe: m.tf }, optionsMoteur);
 
+      // ── Traçabilité : conditions NOMMÉES + preuve ──
+      // Le journal ne gardait que des compteurs (5/7). On enregistre ici le nom de
+      // chaque condition, si elle était obligatoire, si elle est remplie et ce
+      // qu'elle valait. C'est la réponse à « pourquoi ce signal ? ».
+      let traceEvaluation = null;
+      if (deps.preuves && typeof deps.preuves.enregistrerEvaluation === 'function') {
+        const statutTrace = v.status === 'refuse' ? 'INVALID'
+          : v.status === 'confirme' ? 'VALID'
+            : (v.reglesActives && v.reglesActives.length ? 'WAITING' : 'NO_DATA');
+        try {
+          traceEvaluation = await deps.preuves.enregistrerEvaluation({
+            strategieId: (profil && profil.id) || 'generique',
+            version: profil && profil.version,
+            fiche: profil ? { id: profil.id, titre: profil.titre, regles: profil.regles } : undefined,
+            symbole: m.symbol,
+            timeframe: m.tf,
+            regime: null,
+            statut: statutTrace,
+            direction: v.direction,
+            conditions: Object.fromEntries((v.reglesActives || []).map(r => [r, true])),
+            manquantes: v.bloquantes || [],
+            score: v.strength,
+            preuves: deps.preuves.preuvesDepuisVerdict(v)
+          });
+        } catch { traceEvaluation = null; }
+      }
+
       // ── Signaux MULTIPLES : la liste, pas un verdict seul ──
       // La surveillance n'utilisait AUCUNE stratégie de l'utilisateur : elle
       // appelait detect() sans options, donc en mode auto (toutes les règles).
@@ -620,6 +647,25 @@ async function verifier(force = false) {
       }
       c.deja.push(cle);
       envoyes++;
+      // Signal publié : rattaché à son évaluation, avec ses niveaux. Sans ce lien,
+      // la table signals serait orpheline et la question « pourquoi ce signal ? »
+      // resterait sans réponse.
+      if (traceEvaluation && traceEvaluation.ok && deps.preuves
+        && typeof deps.preuves.enregistrerSignal === 'function') {
+        try {
+          await deps.preuves.enregistrerSignal({
+            evaluationId: traceEvaluation.id,
+            strategieId: (profil && profil.id) || 'generique',
+            version: (profil && profil.version) || undefined,
+            symbole: m.symbol, timeframe: m.tf,
+            direction: v.direction,
+            entree: v.levels ? v.levels.entry : null,
+            stop: v.levels ? v.levels.stop : null,
+            objectifs: v.levels ? [v.levels.target1, v.levels.target2].filter(Number.isFinite) : [],
+            rr: v.levels && Number.isFinite(v.levels.rr) ? v.levels.rr : null
+          });
+        } catch { /* la trace ne doit jamais empêcher l'alerte */ }
+      }
       c.derniers.unshift({
         at: Date.now(), symbol: m.symbol, tf: m.tf, provider: m.provider,
         providerLabel: deps.labelOf ? deps.labelOf(m.provider) : m.provider,

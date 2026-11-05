@@ -729,6 +729,9 @@ function profilDepuisStrategie(doc) {
         atrStop: m.atrStop
       },
       executable: true,
+      // Version de la fiche : c'est elle qui est enregistrée avec chaque
+      // évaluation, pour prouver QUELLES règles ont produit le signal.
+      version: doc.version || null,
       obligatoires: Array.isArray(m.obligatoires) ? m.obligatoires : [],
       deduitDuTexte: false,
       motif: 'moteur défini explicitement'
@@ -766,6 +769,7 @@ function profilDepuisStrategie(doc) {
       : style === 'intraday' ? ['volatilite'] : [],
     parametres: dStyle ? { atrStop: dStyle.atrStop } : undefined,
     executable,
+    version: doc.version || null,
     obligatoires: [],
     deduitDuTexte: trouvees.length > 0,
     motif: trouvees.length
