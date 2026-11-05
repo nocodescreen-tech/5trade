@@ -4407,6 +4407,61 @@ function tinyPng(W = 64, H = 40) {
       && /app\.use\('\/api\/backtest', limiteBacktest\)/.test(srvL));
   }
 
+  // ── Une classe de marché, un profil : R_75 ≠ XAUUSD ──
+  {
+    const C = require('./market-intelligence/profils-classes');
+    const R = require('./market-intelligence/regime-detector');
+    const { profil } = require('./market-intelligence/market-profile');
+
+    ok('chaque classe a ses propres seuils de régime',
+      C.seuilsRegime('forex').efficaciteTendance === 0.40
+      && C.seuilsRegime('synthetique').efficaciteTendance === 0.50
+      && C.seuilsRegime('crypto').atrVolatil === 1.80,
+      `forex ${C.seuilsRegime('forex').efficaciteTendance} · synth ${C.seuilsRegime('synthetique').efficaciteTendance}`);
+
+    ok('les indices synthétiques n\'ont ni séance, ni actualité, ni volume',
+      C.aSessions('synthetique') === false && C.aActualites('synthetique') === false
+      && C.aVolume('synthetique') === false);
+    ok('le forex et les métaux sont soumis aux séances et aux annonces',
+      C.aSessions('forex') === true && C.aActualites('metaux') === true);
+
+    // LA démonstration : une même série, deux lectures.
+    const limite = Array.from({ length: 60 }, (_, i) => {
+      const c = 100 + i * 0.42 + Math.sin(i * 1.6) * 0.95;
+      return { t: Date.now() - (59 - i) * 900000, o: c, h: c + 0.25, l: c - 0.25, c, v: 10, closed: true };
+    });
+    const vueForex = R.detecter(limite, { classe: 'forex' });
+    const vueSynth = R.detecter(limite, { classe: 'synthetique' });
+    ok('une même série est « tendance » en forex et non tranchable en synthétique',
+      vueForex.regime === 'trending' && vueSynth.regime !== 'trending',
+      `forex ${vueForex.regime} (eff ${vueForex.mesures.efficacite} ≥ ${vueForex.seuils.efficaciteTendance}) · ` +
+      `synth ${vueSynth.regime} (seuil ${vueSynth.seuils.efficaciteTendance})`);
+    ok('le régime rend la classe et les seuils utilisés',
+      vueForex.classe === 'forex' && Number.isFinite(vueForex.seuils.efficaciteTendance));
+
+    // Le profil assemble tout, et le dit.
+    let cache = {};
+    try { cache = require('../data/market-cache.json'); } catch { cache = {}; }
+    const bougies = sym => {
+      const cle = Object.keys(cache).find(k => k.includes('|' + sym + '|'));
+      return cle ? cache[cle].filter(x => x.closed !== false) : [];
+    };
+    const pSynth = profil('R_75', bougies('R_75'));
+    ok('un indice synthétique est en 24h/24, sans actualité ni volume',
+      pSynth.sessions.join() === '24h/24' && pSynth.actualites === false && pSynth.volume === false,
+      `${pSynth.sessions.join()} · news ${pSynth.actualites} · vol ${pSynth.volume}`);
+    const pCrypto = profil('BTCUSDT', bougies('BTCUSDT'));
+    ok('la crypto est continue mais fournit un volume',
+      pCrypto.sessions.join() === '24h/24' && pCrypto.volume === true);
+    ok('le profil publie les seuils réellement appliqués',
+      Number.isFinite(pSynth.regime.seuils.efficaciteTendance) && pSynth.regime.classe === 'synthetique');
+
+    // Les seuils v1 sont assumés, pas présentés comme définitifs.
+    ok('chaque profil de classe porte son état de calibration',
+      /v1/.test(C.profilClasse('synthetique').etat) && /v1/.test(C.profilClasse('metaux').etat),
+      C.profilClasse('metaux').etat);
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

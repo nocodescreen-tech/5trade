@@ -11,6 +11,8 @@
  * (voir la roadmap, phase 3). Ils sont regroupés ici pour être versionnés.
  */
 
+// Seuils par défaut. Les seuils EFFECTIFS viennent du profil de la classe de
+// marché (profils-classes.js) : un R_10 et un XAUUSD ne se lisent pas pareil.
 const SEUILS = {
   minimumBougies: 30,
   efficaciteTendance: 0.42,     // part du mouvement net dans le chemin parcouru
@@ -55,22 +57,25 @@ function penteNormalisee(closes, a) {
  * @returns {{regime, confiance, mesures, raison}}
  */
 function detecter(bougies, options = {}) {
+  const { seuilsRegime } = require('./profils-classes');
+  const classe = options.classe || 'inconnu';
+  const S = { ...SEUILS, ...seuilsRegime(classe) };
   const closes = (bougies || [])
     .filter(b => b && Number.isFinite(b.c) && b.closed !== false)
     .map(b => b.c);
 
-  if (closes.length < SEUILS.minimumBougies) {
+  if (closes.length < S.minimumBougies) {
     return {
-      regime: 'UNKNOWN', confiance: 0,
+      regime: 'UNKNOWN', confiance: 0, classe, seuils: S,
       mesures: { bougies: closes.length },
-      raison: `historique insuffisant (${closes.length} bougies, ${SEUILS.minimumBougies} requises) : régime non déterminable`
+      raison: `historique insuffisant (${closes.length} bougies, ${S.minimumBougies} requises) : régime non déterminable`
     };
   }
 
   const fenetre = closes.slice(-40);
   const a = atr((bougies || []).filter(b => b && b.closed !== false), 14);
   if (!a || !Number.isFinite(a) || a <= 0) {
-    return { regime: 'UNKNOWN', confiance: 0, mesures: { bougies: closes.length }, raison: 'ATR non calculable : régime non déterminable' };
+    return { regime: 'UNKNOWN', confiance: 0, mesures: { bougies: closes.length }, classe, seuils: S, raison: 'ATR non calculable : régime non déterminable' };
   }
 
   const aRef = atr((bougies || []).filter(b => b && b.closed !== false).slice(0, -20), 14) || a;
@@ -81,6 +86,7 @@ function detecter(bougies, options = {}) {
 
   const mesures = {
     bougies: closes.length,
+    classe,
     atr: Number(a.toFixed(5)),
     atrRelatif: Number(ratioVolatilite.toFixed(2)),
     efficacite: Number(eff.toFixed(3)),
@@ -89,31 +95,31 @@ function detecter(bougies, options = {}) {
   };
 
   // Volatilité d'abord : un marché brusque n'est ni tendance ni range stable.
-  if (ratioVolatilite >= SEUILS.atrVolatil) {
-    const force = Math.min(1, (ratioVolatilite - SEUILS.atrVolatil) / 1.4 + 0.55);
-    return { regime: 'volatil', confiance: Number(force.toFixed(2)), mesures,
+  if (ratioVolatilite >= S.atrVolatil) {
+    const force = Math.min(1, (ratioVolatilite - S.atrVolatil) / 1.4 + 0.55);
+    return { regime: 'volatil', confiance: Number(force.toFixed(2)), mesures, classe, seuils: S,
       raison: `ATR ${ratioVolatilite.toFixed(2)}× sa référence : mouvements brusques` };
   }
 
-  if (eff >= SEUILS.efficaciteTendance && Math.abs(pente) >= SEUILS.penteTendance) {
-    const force = Math.min(1, 0.5 + (eff - SEUILS.efficaciteTendance) * 1.8);
-    return { regime: 'trending', confiance: Number(force.toFixed(2)), mesures,
+  if (eff >= S.efficaciteTendance && Math.abs(pente) >= S.penteTendance) {
+    const force = Math.min(1, 0.5 + (eff - S.efficaciteTendance) * 1.8);
+    return { regime: 'trending', confiance: Number(force.toFixed(2)), mesures, classe, seuils: S,
       raison: `efficacité ${eff.toFixed(2)} et pente ${pente.toFixed(2)} : mouvement directionnel` };
   }
 
-  if (amplitude <= SEUILS.rangeEtroit && ratioVolatilite < 1) {
-    return { regime: 'faible volatilite', confiance: 0.6, mesures,
+  if (amplitude <= S.rangeEtroit && ratioVolatilite < 1) {
+    return { regime: 'faible volatilite', confiance: 0.6, mesures, classe, seuils: S,
       raison: `amplitude ${amplitude.toFixed(2)} ATR et volatilité en baisse : marché étroit` };
   }
 
   if (eff < 0.25) {
     const force = Math.min(1, 0.5 + (0.25 - eff) * 2);
-    return { regime: 'ranging', confiance: Number(force.toFixed(2)), mesures,
+    return { regime: 'ranging', confiance: Number(force.toFixed(2)), mesures, classe, seuils: S,
       raison: `efficacité ${eff.toFixed(2)} : allers-retours sans direction nette` };
   }
 
   // Signal mixte : on ne tranche pas.
-  return { regime: 'UNKNOWN', confiance: Number(Math.min(0.45, eff).toFixed(2)), mesures,
+  return { regime: 'UNKNOWN', confiance: Number(Math.min(0.45, eff).toFixed(2)), mesures, classe, seuils: S,
     raison: `mesures contradictoires (efficacité ${eff.toFixed(2)}, pente ${pente.toFixed(2)}, volatilité ${ratioVolatilite.toFixed(2)}) : régime non tranchable` };
 }
 

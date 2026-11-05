@@ -9,6 +9,7 @@
 
 const { classifier } = require('./instrument-classifier');
 const { detecter } = require('./regime-detector');
+const { aSessions, aActualites, aVolume, profilClasse } = require('./profils-classes');
 
 /** Sessions indicatives en UTC (les horaires réels varient selon le courtier). */
 const SESSIONS = [
@@ -45,9 +46,11 @@ function sessionsActives(maintenant = new Date()) {
  */
 function profil(symbol, bougies, meta = {}, options = {}) {
   const instrument = classifier(symbol, meta);
-  const regime = detecter(bougies || [], { instrument });
+  // La classe de l'instrument choisit ses seuils de régime : un R_10 et un
+  // XAUUSD ne se lisent pas avec les mêmes tolérances.
+  const regime = detecter(bougies || [], { instrument, classe: instrument.classe });
   const maintenant = options.maintenant || new Date();
-  const sessions = instrument.continu ? ['24h/24'] : sessionsActives(maintenant);
+  const sessions = aSessions(instrument.classe) ? sessionsActives(maintenant) : ['24h/24'];
 
   const manques = [];
   if (!instrument.reconnu) manques.push('instrument non identifié : profil impossible');
@@ -59,7 +62,12 @@ function profil(symbol, bougies, meta = {}, options = {}) {
 
   return {
     instrument,
-    regime: { regime: regime.regime, confiance: regime.confiance, mesures: regime.mesures, raison: regime.raison },
+    // Ce que la classe autorise : séances, actualités, volume exploitable.
+    actualites: aActualites(instrument.classe),
+    volume: aVolume(instrument.classe),
+    profil: profilClasse(instrument.classe).etat,
+    regime: { regime: regime.regime, confiance: regime.confiance, mesures: regime.mesures,
+      classe: regime.classe, seuils: regime.seuils, raison: regime.raison },
     sessions,
     spreadMaxAtr,
     pret: manques.length === 0,
