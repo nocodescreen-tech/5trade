@@ -662,7 +662,8 @@ async function verifier(force = false) {
             entree: v.levels ? v.levels.entry : null,
             stop: v.levels ? v.levels.stop : null,
             objectifs: v.levels ? [v.levels.target1, v.levels.target2].filter(Number.isFinite) : [],
-            rr: v.levels && Number.isFinite(v.levels.rr) ? v.levels.rr : null
+            // `rr` est celui calculé et contrôlé plus haut (le niveau ne le porte pas).
+            rr: Number.isFinite(rr) ? rr : null
           });
         } catch { /* la trace ne doit jamais empêcher l'alerte */ }
       }
