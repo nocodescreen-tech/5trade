@@ -4045,6 +4045,60 @@ function tinyPng(W = 64, H = 40) {
       /documentaires/.test(cli) && /incomplètes|incompletes/.test(cli));
   }
 
+  // ── Risk engine : dimensionnement sur specs réelles, refus explicites ──
+  {
+    const PS = require('./risk-engine/position-sizing');
+    const specOK = { tickSize: 0.01, tickValue: 1, spread: 0.02 };
+
+    // Sans tick value, aucune taille : on refuse au lieu d'estimer.
+    const sansSpecs = PS.dimensionner({ capital: 10000, risquePct: 1, entree: 100, stop: 99.5,
+      instrument: { tickSize: 0.01, tickValue: null, spread: 0.02 } });
+    ok('sans tick value, aucune taille n\'est calculée',
+      sansSpecs.ok === false && /tick value/.test(sansSpecs.raison), sansSpecs.raison);
+
+    // Cas nominal : 1 % de 10 000 sur un stop de 50 ticks à 1 par tick ⇒ 2 lots.
+    const nominal = PS.dimensionner({ capital: 10000, risquePct: 1, entree: 100, stop: 99.5, instrument: specOK });
+    ok('la taille se calcule sur le risque par lot réel',
+      nominal.ok === true && nominal.lots === 2 && nominal.ticks === 50 && nominal.perteReelle === 100,
+      `${nominal.lots} lot(s) · ${nominal.ticks} ticks · ${nominal.perteReelle} risqués`);
+
+    // L'arrondi va vers le BAS : on ne dépasse jamais le risque demandé.
+    const tronque = PS.dimensionner({ capital: 777, risquePct: 1, entree: 100, stop: 99.5, instrument: specOK });
+    ok('la taille est arrondie vers le bas (jamais plus de risque)',
+      tronque.ok === true && tronque.lots <= 0.1554 && tronque.perteReelle <= 7.77,
+      `${tronque.lots} lot(s) · ${tronque.perteReelle}`);
+
+    // Sous le lot minimum : le risque demandé n'est pas atteignable.
+    const tropPetit = PS.dimensionner({ capital: 49, risquePct: 1, entree: 100, stop: 99.5, instrument: specOK });
+    ok('une taille sous le lot minimum est refusée',
+      tropPetit.ok === false && /lot minimum/.test(tropPetit.raison), tropPetit.raison);
+
+    // Stop plus court que le spread : perte programmée.
+    const sousSpread = PS.dimensionner({ capital: 10000, risquePct: 1, entree: 100, stop: 99.99,
+      instrument: { tickSize: 0.01, tickValue: 1, spread: 0.05 } });
+    ok('un stop plus court que le spread est refusé',
+      sousSpread.ok === false && /spread/.test(sousSpread.raison), sousSpread.raison);
+
+    // Plafond de sécurité.
+    const tropRisque = PS.dimensionner({ capital: 10000, risquePct: 10, entree: 100, stop: 99.5, instrument: specOK });
+    ok('un risque au-delà du plafond est refusé',
+      tropRisque.ok === false && /plafond/.test(tropRisque.raison), tropRisque.raison);
+
+    // Rentabilité après coûts : le coût rogne le gain et gonfle le risque.
+    const net = PS.rentableApresFrais({ entree: 100, stop: 99.5, objectif: 101, cout: 0.1, rrMin: 1.5 });
+    ok('le gain/risque est recalculé après coûts',
+      net.ok === true && net.rrBrut === 2 && net.rrNet === 1.5, `brut ${net.rrBrut} · net ${net.rrNet}`);
+    const netKO = PS.rentableApresFrais({ entree: 100, stop: 99.5, objectif: 101, cout: 0.25, rrMin: 1.5 });
+    ok('un trade dont les coûts mangent le gain est refusé',
+      netKO.ok === false && /après coûts/.test(netKO.raison), netKO.raison);
+
+    const srvP2 = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('le dimensionnement est exposé par une route protégée',
+      /app\.get\('\/api\/risk\/position', requireAuth/.test(srvP2));
+    ok('les spécifications du contrat peuvent être renseignées',
+      /app\.put\('\/api\/risk\/instruments\/:symbol', requireAuth/.test(srvP2));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

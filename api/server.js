@@ -327,6 +327,8 @@ const ProfilMarche = require('./market-intelligence/market-profile');
 const Preuves = require('./engine/preuves');
 // Registre persistant des fiches de stratégie (versionnées, hashées).
 const Registry = require('./strategy-engine/registry');
+// Risk engine : dimensionnement sur les spécifications réelles du contrat.
+const PositionSizing = require('./risk-engine/position-sizing');
 
 // ─── Calendrier économique — implémentation dans fundamentals.js ───
 const { filtreCalendrier } = require('./sources/fundamentals');
@@ -2474,6 +2476,77 @@ require('./routes/alerts')(app, { requireAuth, Alerts, sendMail, DB });
 // ─── Market Intelligence (phase 1) : profil d'un instrument ───
 // Lecture seule : classe l'instrument, mesure le régime, décrit la session et la
 // tolérance de spread. N'intervient pas dans la décision de signal.
+// ─── Risk engine : dimensionnement sur les spécifications réelles ───
+// Refuse explicitement quand tick size / tick value manquent : sans elles, toute
+// taille affichée serait inventée.
+app.get('/api/risk/position', requireAuth, async (req, res) => {
+  try {
+    const symbole = String(req.query.symbol || '').trim();
+    const entree = Number(req.query.entree);
+    const stop = Number(req.query.stop);
+    const capital = Number(req.query.capital);
+    const risquePct = Number(req.query.risquePct);
+    if (!symbole) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+
+    const sql = DB.client();
+    let specs = null;
+    if (sql) {
+      const [l] = await sql`
+        select symbole, tick_size, tick_value, taille_contrat, devise_compte
+        from instruments where symbole = ${symbole}`.catch(() => []);
+      if (l) {
+        specs = {
+          tickSize: l.tick_size === null ? null : Number(l.tick_size),
+          tickValue: l.tick_value === null ? null : Number(l.tick_value),
+          tailleContrat: l.taille_contrat === null ? null : Number(l.taille_contrat),
+          deviseCompte: l.devise_compte
+        };
+      }
+    }
+    const frais = require('./core/frais');
+    const cout = frais && typeof frais.fraisPour === 'function' ? frais.fraisPour(symbole) : null;
+    const instrument = { ...(specs || {}), spread: cout && Number.isFinite(cout.spread) ? cout.spread : null };
+
+    const r = PositionSizing.dimensionner({ capital, risquePct, entree, stop, instrument });
+    res.json({
+      success: true, symbole,
+      specifie: Boolean(specs),
+      ...r,
+      instrument: { tickSize: instrument.tickSize ?? null, tickValue: instrument.tickValue ?? null,
+        spread: instrument.spread ?? null }
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Renseigner les spécifications d'un contrat (celles du courtier, pas une estimation).
+app.put('/api/risk/instruments/:symbol', requireAuth, async (req, res) => {
+  try {
+    const sql = DB.client();
+    if (!sql) return res.status(503).json({ error: 'stockage PostgreSQL requis' });
+    const symbole = String(req.params.symbol || '').trim();
+    if (!symbole) return res.status(400).json({ error: 'symbole requis' });
+    const n = v => (v === undefined || v === null || v === '' ? null : Number(v));
+    const tickSize = n(req.body.tickSize);
+    const tickValue = n(req.body.tickValue);
+    if (tickSize === null || tickValue === null) {
+      return res.status(400).json({ error: 'tickSize et tickValue sont obligatoires : sans eux, aucune taille ne sera calculée' });
+    }
+    if (!(tickSize > 0) || !(tickValue > 0)) {
+      return res.status(400).json({ error: 'tickSize et tickValue doivent être strictement positifs' });
+    }
+    const { classifier } = require('./market-intelligence/instrument-classifier');
+    await sql`
+      insert into instruments (symbole, classe, tick_size, tick_value, taille_contrat, devise_compte, source, maj_le)
+      values (${symbole}, ${classifier(symbole).classe}, ${tickSize}, ${tickValue},
+              ${n(req.body.tailleContrat)}, ${req.body.deviseCompte || null}, 'manuel', now())
+      on conflict (symbole) do update set
+        tick_size = excluded.tick_size, tick_value = excluded.tick_value,
+        taille_contrat = excluded.taille_contrat, devise_compte = excluded.devise_compte,
+        source = 'manuel', maj_le = now()`;
+    res.json({ success: true, symbole, tickSize, tickValue });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/market/profil', requireAuth, async (req, res) => {
   try {
     const symbol = String(req.query.symbol || '').trim();
