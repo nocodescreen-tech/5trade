@@ -134,10 +134,17 @@ async function hydrater() {
     config = { ...DEFAUT, ...depuisBase };
     // L'environnement reste prioritaire sur une config relue en base.
     appliquerEnvironnement();
-    try {
-      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(fichierAlertes(), JSON.stringify(config, null, 2));
-    } catch { /* le cache local est secondaire */ }
+    // Cache local : inutile — et nuisible — quand PostgreSQL fait foi. L'écrire
+    // réécrivait la graine versionnée à chaque démarrage (arbre sale, config de
+    // base recopiée dans le dépôt). On ne l'écrit que si le fichier est la source
+    // (mode fichiers) ou si un chemin a été imposé (tests).
+    const cheminImpose = Boolean(process.env.ALERTS_FICHIER);
+    if (cheminImpose) {
+      try {
+        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+        fs.writeFileSync(fichierAlertes(), JSON.stringify(config, null, 2));
+      } catch { /* le cache local est secondaire */ }
+    }
     return true;
   } catch (e) {
     console.error('   Alertes    : relecture en base impossible —', e.message);
