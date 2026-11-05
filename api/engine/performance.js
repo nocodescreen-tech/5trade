@@ -102,6 +102,15 @@ function verdictDepuisMetriques(mIS, mOOS, options = {}) {
   } else if (mOOS.expectancyR <= 0) {
     raisons.push(`espérance hors échantillon ${mOOS.expectancyR} R : la performance ne se reproduit pas`);
   }
+  // Un entraînement nul ou négatif ne devient pas un avantage parce que la
+  // validation est positive : c'est le signe d'une période chanceuse, pas d'une
+  // règle. Et une validation très supérieure à l'entraînement est instable.
+  if (mIS && mIS.n && mIS.expectancyR <= 0) {
+    raisons.push(`entraînement à espérance ${mIS.expectancyR} R : il n'y a rien à valider`);
+  } else if (mIS && mOOS && mOOS.expectancyR > 0 && mIS.expectancyR > 0
+    && mOOS.expectancyR > mIS.expectancyR * 2.5) {
+    raisons.push(`validation (${mOOS.expectancyR} R) très supérieure à l'entraînement (${mIS.expectancyR} R) : instabilité, avantage non établi`);
+  }
   return {
     fiable: raisons.length === 0 && mIS.n >= 20 && mOOS.n >= miniValidation && mOOS.expectancyR > 0,
     raisons, entrainement: mIS, validation: mOOS
@@ -153,4 +162,18 @@ function verifierChronologie(trades) {
   return { ok: anomalies.length === 0, anomalies };
 }
 
-module.exports = { metriques, decouper, verdict, verdictDepuisMetriques, parDimension, verifierChronologie, exploitables };
+/**
+ * Retire un coût déclaré (en R) à chaque trade.
+ *
+ * Le backtest ne connaît pas le spread réel de l'instrument : quand le courtier
+ * ne l'a pas fourni, `fraisActifs` vaut false et le R reste BRUT. Cette fonction
+ * permet de mesurer avec un coût explicite, plutôt que de laisser croire que les
+ * frais n'existent pas.
+ */
+function appliquerCout(trades, coutR) {
+  const cout = Number(coutR);
+  if (!Number.isFinite(cout) || cout <= 0) return (trades || []).slice();
+  return (trades || []).map(t => ({ ...t, rBrut: Number(t.r), r: Number(t.r) - cout }));
+}
+
+module.exports = { metriques, decouper, verdict, verdictDepuisMetriques, appliquerCout, parDimension, verifierChronologie, exploitables };

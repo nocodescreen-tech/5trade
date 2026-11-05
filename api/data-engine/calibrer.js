@@ -37,7 +37,12 @@ function options() {
   // environ 4 minutes pour une grille normale ; au-delà, on découpe davantage
   // sans gagner en nombre de trades (le moteur plafonne à 200 par passe).
   const fenetre = Number(lire('fenetre', '6000'));
-  return { symbol, tf, forces, regles, fenetre: Number.isFinite(fenetre) ? fenetre : 6000 };
+  // Coût explicite en R (spread + commission + slippage estimés). Le backtest ne
+  // connaît pas le spread du courtier : sans cette valeur, le R reste BRUT.
+  const coutR = Number(lire('cout-r', '0'));
+  return { symbol, tf, forces, regles,
+    fenetre: Number.isFinite(fenetre) ? fenetre : 6000,
+    coutR: Number.isFinite(coutR) && coutR > 0 ? coutR : 0 };
 }
 
 const profil = (force, seuilRegles) => ({
@@ -48,7 +53,7 @@ const profil = (force, seuilRegles) => ({
 });
 
 async function principal() {
-  const { symbol, tf, forces, regles, fenetre } = options();
+  const { symbol, tf, forces, regles, fenetre, coutR } = options();
   await DB.init();
   if (!DB.isPg()) { console.log('PostgreSQL requis (npm run migrer).'); return; }
   let serie = await Candles.lire(symbol, tf, { limite: 50000 });
@@ -67,10 +72,13 @@ async function principal() {
   const mesurer = (bougies, force, seuilRegles) => {
     const r = Backtest.lancer(bougies,
       { symbol, timeframe: tf },
-      { profils: [profil(force, seuilRegles)], pas: 2, maxBougies: 20000, plafond: 20000 });
+      { profils: [profil(force, seuilRegles)], pas: 2, maxBougies: 20000, plafond: 20000, limiteTrades: 20000 });
     if (r.indisponible) return { indisponible: true, raison: r.raison };
-    const clos = (r.trades || []).filter(t => Number.isFinite(Number(t.r)));
-    return { ...Performance.metriques(clos), trades: clos.length };
+    // Les 200 trades du résumé public ne suffisent pas pour calibrer : on demande
+    // tout, puis on applique le coût déclaré.
+    const clos = Performance.appliquerCout(
+      (r.trades || []).filter(t => Number.isFinite(Number(t.r))), coutR);
+    return { ...Performance.metriques(clos), trades: clos.length, coutsInclus: r.fraisActifs === true || coutR > 0 };
   };
 
   const resultats = [];
@@ -104,7 +112,13 @@ async function principal() {
 
   // Verdict sur les DEUX périodes déjà mesurées : recalculer une découpe ici
   // produisait un verdict qui contredisait les chiffres affichés juste au-dessus.
+  const coutsInclus = oos.coutsInclus === true;
   const verdict = Performance.verdictDepuisMetriques(meilleur, oos);
+  if (!coutsInclus) {
+    verdict.raisons.push('R BRUT : aucun coût appliqué (spread courtier inconnu) — ' +
+      'relancez avec --cout-r 0.05 pour mesurer net');
+    verdict.fiable = false;
+  }
   console.log(`\n  verdict : ${verdict.fiable ? 'tenable hors échantillon' : 'NON retenu'}` +
     (verdict.raisons.length ? ` — ${verdict.raisons.join(' ; ')}` : ''));
   console.log('  Rappel : une calibration tenable n\'est pas une garantie de gain futur.');

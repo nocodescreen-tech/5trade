@@ -4578,6 +4578,41 @@ function tinyPng(W = 64, H = 40) {
       !/save\(|update\(|configurer\(/.test(calib));
   }
 
+  // ── Coûts réels et sévérité du verdict ──
+  {
+    const P = require('./engine/performance');
+
+    const brut = [{ r: 0.5 }, { r: -0.2 }, { r: 1.0 }];
+    const net = P.appliquerCout(brut, 0.05);
+    ok('un coût déclaré est retiré de chaque trade',
+      net[0].r === 0.45 && net[2].r === 0.95, `${net[0].r} / ${net[2].r}`);
+    ok('le R brut est conservé pour la comparaison', net[0].rBrut === 0.5);
+    ok('sans coût déclaré, les trades sont rendus tels quels',
+      P.appliquerCout(brut, 0)[0].r === 0.5);
+
+    // Un entraînement nul ne devient pas un avantage parce que la validation est verte.
+    const plat = P.metriques(Array.from({ length: 60 }, (_, i) => ({ r: i % 2 ? 0.05 : -0.05 })));
+    const bonOOS = P.metriques(Array.from({ length: 60 }, () => ({ r: 0.2 })));
+    const vPlat = P.verdictDepuisMetriques(plat, bonOOS);
+    ok('un entraînement à espérance nulle est refusé',
+      vPlat.fiable === false && /rien à valider/.test(vPlat.raisons.join(' ')), vPlat.raisons[0]);
+
+    const faible = P.metriques(Array.from({ length: 60 }, () => ({ r: 0.02 })));
+    const fort = P.metriques(Array.from({ length: 60 }, () => ({ r: 0.3 })));
+    const vInstable = P.verdictDepuisMetriques(faible, fort);
+    ok('une validation très supérieure à l\'entraînement est jugée instable',
+      vInstable.fiable === false && /instabilité/.test(vInstable.raisons.join(' ')), vInstable.raisons[0]);
+
+    const stable = P.verdictDepuisMetriques(faible, P.metriques(Array.from({ length: 60 }, () => ({ r: 0.04 }))));
+    ok('deux périodes proches et positives restent recevables', stable.fiable === true);
+
+    const calib2 = fs.readFileSync(path.join(__dirname, 'data-engine', 'calibrer.js'), 'utf8');
+    ok('la calibration lève le plafond de 200 trades pour mesurer',
+      /limiteTrades: 20000/.test(calib2));
+    ok('la calibration accepte un coût explicite et refuse le R brut',
+      /--cout-r/.test(calib2) && /R BRUT/.test(calib2));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');
