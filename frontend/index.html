@@ -3881,6 +3881,55 @@ function JournalSignauxPanel() {
         </div>
       )}
 
+      {(data && (data.preuves || []).length > 0) && (
+        <div style={{ marginTop:14 }}>
+          <div style={{ fontSize:12, color:'var(--muted)', marginBottom:6 }}>
+            <i className="fas fa-list-check" style={{ marginRight:6 }}></i>
+            Pourquoi ce signal — conditions vérifiées, nommées
+          </div>
+          <div style={{ display:'grid', gap:8 }}>
+            {(data.preuves || []).slice(0, 6).map((e, i) => {
+              const teinte = e.statut === 'VALID' ? '#34d399'
+                : e.statut === 'INVALID' ? '#f87171'
+                  : e.statut === 'NO_DATA' ? '#94a3b8' : '#fbbf24';
+              const remplies = (e.preuves || []).filter(p => p.remplie).length;
+              return (
+                <div key={'p' + i} style={{ border:'1px solid var(--border)', borderRadius:8, padding:'8px 10px' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, fontSize:11.5, flexWrap:'wrap' }}>
+                    <span style={{ color:'#e2e8f0', fontWeight:600 }}>{e.symbole} {e.timeframe}</span>
+                    <span style={{ color:'var(--dim)' }}>{e.strategie_id} v{e.version}</span>
+                    <span style={{ color:teinte }}>{e.statut}</span>
+                    {e.direction && <span style={{ color:'var(--dim)' }}>{e.direction}</span>}
+                    <span style={{ flex:'1 1 auto' }}></span>
+                    <span style={{ color:'var(--dim)' }}>
+                      {remplies}/{(e.preuves || []).length} condition(s) remplie(s)
+                    </span>
+                  </div>
+                  <div style={{ display:'grid', gap:2, marginTop:6 }}>
+                    {(e.preuves || []).map((c, j) => (
+                      <div key={'c' + j} style={{ display:'flex', gap:7, alignItems:'baseline', fontSize:11 }}>
+                        <span style={{ color: c.remplie ? '#34d399' : '#f87171', width:12 }}>
+                          {c.remplie ? '✓' : '✗'}
+                        </span>
+                        <span style={{ color: c.remplie ? '#cbd5e1' : '#94a3b8', flex:'1 1 auto' }}>
+                          {c.condition}
+                          {c.obligatoire && (
+                            <span style={{ fontSize:9, color:'#fbbf24', marginLeft:6 }}>obligatoire</span>
+                          )}
+                        </span>
+                        {c.detail && (
+                          <span style={{ fontSize:10, color:'var(--dim)' }}>{String(c.detail).slice(0, 60)}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {st && Object.keys(st.parStrategie || {}).length > 0 && (
         <div style={{ marginTop:12 }}>
           <div style={{ fontSize:12, color:'var(--muted)', marginBottom:6 }}>

@@ -163,7 +163,48 @@ function preuvesDepuisVerdict(v) {
   return preuves;
 }
 
+/**
+ * Dernières évaluations avec leurs preuves nommées — lecture pour l'écran.
+ * Une jointure, pas N requêtes : 20 évaluations = 1 aller-retour.
+ */
+async function dernieresEvaluations({ limite = 20, symbole = null } = {}) {
+  if (!(await disponible())) return [];
+  const sql = DB.client();
+  const max = Math.max(1, Math.min(100, Number(limite) || 20));
+  try {
+    const evals = symbole
+      ? await sql`
+          select id, strategie_id, version, symbole, timeframe, regime, statut, direction, score, at
+          from strategy_evaluations where symbole = ${symbole}
+          order by id desc limit ${max}`
+      : await sql`
+          select id, strategie_id, version, symbole, timeframe, regime, statut, direction, score, at
+          from strategy_evaluations order by id desc limit ${max}`;
+    if (!evals.length) return [];
+
+    const ids = evals.map(e => e.id);
+    const preuves = await sql`
+      select evaluation_id, condition, obligatoire, remplie, detail
+      from signal_evidence where evaluation_id in ${sql(ids)}
+      order by obligatoire desc, id asc`;
+
+    const parEval = new Map();
+    for (const p of preuves) {
+      if (!parEval.has(p.evaluation_id)) parEval.set(p.evaluation_id, []);
+      parEval.get(p.evaluation_id).push({
+        condition: p.condition,
+        obligatoire: p.obligatoire,
+        remplie: p.remplie,
+        detail: p.detail
+      });
+    }
+    return evals.map(e => ({ ...e, preuves: parEval.get(e.id) || [] }));
+  } catch {
+    return [];
+  }
+}
+
 module.exports = {
   disponible, oublierSchema, enregistrerEvaluation, enregistrerSignal,
-  preuvesDepuisVerdict, VERSION_PAR_DEFAUT
+  preuvesDepuisVerdict, dernieresEvaluations, VERSION_PAR_DEFAUT
 };

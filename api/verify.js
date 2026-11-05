@@ -3912,6 +3912,84 @@ function tinyPng(W = 64, H = 40) {
       /app\.get\('\/api\/strategies\/registre', requireAuth/.test(srvR));
   }
 
+  // ── Écran : les conditions nommées, lues en base ──
+  {
+    const urlBase3 = fs.existsSync(ENV)
+      ? (fs.readFileSync(ENV, 'utf8').match(/^DATABASE_URL=(.+)$/m)?.[1] || '').trim()
+      : '';
+    if (!urlBase3) {
+      skipped('lecture des preuves en base', 'DATABASE_URL absente du .env');
+    } else {
+      const code = [
+        "const DB = require('./api/core/db');",
+        "const P = require('./api/engine/preuves');",
+        "(async () => {",
+        "  await DB.init();",
+        "  const sql = DB.client();",
+        "  const id = '__test_lecture__';",
+        "  const res = {};",
+        "  try {",
+        "    const e1 = await P.enregistrerEvaluation({ strategieId: id, version: '1.0.0',",
+        "      symbole: 'EURUSD', timeframe: '5m', statut: 'INVALID', direction: 'BUY',",
+        "      manquantes: ['mss'], score: 0.4,",
+        "      preuves: [ { condition: 'sweep', obligatoire: true, remplie: true },",
+        "                 { condition: 'mss', obligatoire: true, remplie: false },",
+        "                 { condition: 'fvg', obligatoire: false, remplie: true } ] });",
+        "    const e2 = await P.enregistrerEvaluation({ strategieId: id, version: '1.0.0',",
+        "      symbole: 'BTCUSDT', timeframe: '15m', statut: 'VALID', direction: 'SELL',",
+        "      preuves: [ { condition: 'structure', obligatoire: false, remplie: true } ] });",
+        "    const lues = await P.dernieresEvaluations({ limite: 5 });",
+        "    res.nb = lues.length;",
+        "    res.premiere = lues[0] && { symbole: lues[0].symbole, statut: lues[0].statut,",
+        "      nbPreuves: lues[0].preuves.length };",
+        "    res.seconde = lues[1] && { symbole: lues[1].symbole, statut: lues[1].statut,",
+        "      obligatoiresDAbord: lues[1].preuves[0].obligatoire, nonRemplie: lues[1].preuves.some(p => !p.remplie) };",
+        "    res.filtre = (await P.dernieresEvaluations({ limite: 5, symbole: 'EURUSD' })).length;",
+        "  } finally {",
+        "    await sql.unsafe(\"delete from signal_evidence where evaluation_id in (select id from strategy_evaluations where strategie_id='\" + id + \"')\");",
+        "    await sql.unsafe(\"delete from strategy_evaluations where strategie_id='\" + id + \"'\");",
+        "    await sql.unsafe(\"delete from strategy_versions where strategie_id='\" + id + \"'\");",
+        "  }",
+        "  console.log(JSON.stringify(res));",
+        "  process.exit(0);",
+        "})().catch(e => { console.error(e.message); process.exit(1); });"
+      ].join('\n');
+      let r = null, err = null;
+      try {
+        const sortie = require('child_process').execFileSync(process.execPath, ['-e', code], {
+          cwd: ROOT, encoding: 'utf8', env: { ...process.env, DATABASE_URL: urlBase3 }
+        });
+        const lignes = sortie.split('\n').map(l => l.trim()).filter(l => l.startsWith('{'));
+        r = JSON.parse(lignes[lignes.length - 1] || '{}');
+      } catch (e) { err = e.message.split('\n')[0]; }
+
+      ok('les dernières évaluations se relisent avec leurs preuves',
+        !err && r && r.nb === 2 && r.premiere && r.premiere.nbPreuves === 1,
+        err || JSON.stringify(r && r.premiere));
+      ok('les conditions obligatoires sont listées en premier',
+        !err && r && r.seconde && r.seconde.obligatoiresDAbord === true,
+        err || JSON.stringify(r && r.seconde));
+      ok('une condition obligatoire non remplie reste visible',
+        !err && r && r.seconde && r.seconde.nonRemplie === true);
+      ok('la lecture peut être filtrée par symbole',
+        !err && r && r.filtre === 1, err || `${r && r.filtre} ligne(s)`);
+    }
+
+    const srvJ = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('le journal renvoie les preuves nommées à l\'écran',
+      /preuves = await Preuves\.dernieresEvaluations/.test(srvJ)
+      && /stats: JournalSignaux\.stats\(\), preuves/.test(srvJ));
+
+    const front = fs.readFileSync(path.join(ROOT, 'frontend', 'index.html'), 'utf8');
+    ok('l\'écran affiche chaque condition par son nom',
+      /Pourquoi ce signal — conditions vérifiées, nommées/.test(front)
+      && /c\.condition/.test(front));
+    ok('l\'écran distingue une condition obligatoire',
+      /obligatoire<\/span>/.test(front) && /c\.obligatoire/.test(front));
+    ok('l\'écran affiche le nombre de conditions remplies',
+      /condition\(s\) remplie\(s\)/.test(front));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

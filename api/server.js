@@ -3687,7 +3687,7 @@ app.post('/api/frais', requireAuth, (req, res) => {
  * Ce journal est la mémoire du moteur — sans lui, impossible de dire quelle
  * stratégie fonctionne réellement.
  */
-app.get('/api/journal-signaux', requireAuth, (req, res) => {
+app.get('/api/journal-signaux', requireAuth, async (req, res) => {
   try {
     const limite = Math.min(Number(req.query.limite) || 100, 500);
     const signaux = JournalSignaux.lister({
@@ -3696,7 +3696,10 @@ app.get('/api/journal-signaux', requireAuth, (req, res) => {
       source: req.query.source ? String(req.query.source) : undefined,
       limite
     });
-    res.json({ success: true, signaux, stats: JournalSignaux.stats() });
+    // Pourquoi un signal est sorti (ou pas) : les conditions NOMMÉES, lues en base.
+    // Absent du schéma phase 2 ⇒ tableau vide, l'écran n'affiche simplement rien.
+    const preuves = await Preuves.dernieresEvaluations({ limite: 8 }).catch(() => []);
+    res.json({ success: true, signaux, stats: JournalSignaux.stats(), preuves });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
