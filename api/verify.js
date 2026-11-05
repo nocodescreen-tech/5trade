@@ -579,9 +579,18 @@ function tinyPng(W = 64, H = 40) {
     // ensuite visait le fichier de test.
     try {
     const Al = require('./delivery/alerts');
+    // Série MÉMORISÉE : régénérée à chaque appel, chaque bougie aurait un
+    // horodatage neuf, donc une identité de signal neuve — et le test de
+    // déduplication enverrait une alerte à chaque passage.
+    let memoSerie = null;
     const serie = () => {
-      const out = []; let ts = 0;
-      const push = (o, h, l, c) => out.push({ t: ts += 60000, o, h, l, c, v: 1, closed: true });
+      if (memoSerie) return memoSerie;
+      // Bougies DATÉES D'AUJOURD'HUI : depuis l'ajout du contrôle de fraîcheur,
+      // une série partant de 1970 est refusée avant analyse — le test de
+      // déduplication ne testait alors plus rien du tout.
+      const pas = 15 * 60000;                 // le marché surveillé est en 15m
+      const out = []; let ts = Date.now() - 25 * pas;
+      const push = (o, h, l, c) => out.push({ t: ts += pas, o, h, l, c, v: 1, closed: true });
       push(104,105,103,104); push(103,104,102,103); push(102,103,101,102);
       push(101,102,100,100.5); push(100.5,102,100.5,101.5); push(101.5,103,101,102.5);
       push(102.5,103.5,102,103); push(103,104,102.5,102.8); push(102.8,103,100.2,100.4);
@@ -591,6 +600,7 @@ function tinyPng(W = 64, H = 40) {
       push(106.8,107.2,106.5,107); push(107,108,106.8,107.5); push(107.5,108.5,107.2,108.2);
       push(108.2,109,108,108.8); push(108.8,109.5,108.5,109.2);
       push(99.5,101.5,98,101);
+      memoSerie = out;
       return out;
     };
     const faux = { getCandles: async () => ({ candles: serie(), provider: 'test' }),
@@ -3488,6 +3498,35 @@ function tinyPng(W = 64, H = 40) {
     const srvF = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
     ok('le filtre est injecté dans la surveillance',
       /filtreNews: filtreCalendrier/.test(srvF));
+  }
+
+  // ── Fraîcheur des données et unités de temps obligatoires ──
+  {
+    const Sig = require('./engine/signals');
+    const serie = (ageMs, tf = '15m') => Array.from({ length: 30 }, (_, i) => ({
+      t: Date.now() - ageMs - (29 - i) * Sig.TF_MS[tf],
+      o: 100, h: 101, l: 99, c: 100, v: 10, closed: true
+    }));
+
+    const frais = Sig.fraicheur(serie(0), '15m');
+    ok('des bougies fraîches passent le contrôle de fraîcheur', frais.ok === true,
+      `${Math.round((frais.ageMs || 0) / 60000)} min d'âge`);
+
+    const vieux = Sig.fraicheur(serie(5 * 3600 * 1000), '15m');
+    ok('des bougies périmées sont refusées', vieux.ok === false && /périmées/.test(vieux.raison), vieux.raison);
+
+    const retenu = Sig.fraicheur(serie(2 * Sig.TF_MS['15m']), '15m');
+    ok('deux bougies de retard restent dans la tolérance', retenu.ok === true);
+
+    const inconnu = Sig.fraicheur(serie(0), '7m');
+    ok('un timeframe inconnu rend la fraîcheur invérifiable',
+      inconnu.ok === false && /inconnue/.test(inconnu.raison), inconnu.raison);
+
+    const aSrc3 = fs.readFileSync(path.join(__dirname, 'delivery', 'alerts.js'), 'utf8');
+    ok('la surveillance contrôle la fraîcheur avant d\'analyser',
+      /fraicheur\(closes, m\.tf\)/.test(aSrc3));
+    ok('les unités de temps de la stratégie sont celles analysées',
+      /profil\.timeframes/.test(aSrc3) && /unité\(s\) de temps obligatoire/.test(aSrc3));
   }
 
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──

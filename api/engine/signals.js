@@ -1392,9 +1392,37 @@ function verdictAvecConfluence(parTF, options = {}) {
   return { verdict: v, confluence: conf };
 }
 
+/**
+ * Fraîcheur des données : une bougie trop ancienne ne doit jamais être analysée.
+ *
+ * Le moteur calculait sans regarder l'heure : sur un marché fermé ou un flux
+ * interrompu, il rendait un verdict sur des prix d'hier. Tolérance : 3 bougies.
+ *
+ * @returns {{ok:boolean, ageMs?:number, limiteMs?:number, raison:string}}
+ */
+function fraicheur(candles, timeframe, maintenant = Date.now(), tolerance = 3) {
+  const tfMs = TF_MS[timeframe];
+  if (!tfMs) {
+    return { ok: false, raison: `unité de temps inconnue « ${timeframe} » : fraîcheur invérifiable` };
+  }
+  const dernier = (candles || []).filter(c => c && Number.isFinite(c.t)).pop();
+  if (!dernier) return { ok: false, raison: 'aucune bougie datée : fraîcheur invérifiable' };
+
+  const ageMs = maintenant - dernier.t;
+  const limiteMs = tfMs * tolerance;
+  const minutes = n => Math.round(n / 60000);
+  return {
+    ok: ageMs <= limiteMs,
+    ageMs, limiteMs,
+    raison: ageMs > limiteMs
+      ? `données périmées — dernière bougie ${timeframe} vieille de ${minutes(ageMs)} min (limite ${minutes(limiteMs)} min)`
+      : ''
+  };
+}
+
 module.exports = {
   detect, scenarios, checklist, levelsFor, profilDepuisStrategie, TOUTES_REGLES,
-  confluence, verdictAvecConfluence, TF_SUPERIEURS, normaliserMoteur, STYLES, MOTEUR_DEFAUT,
+  confluence, verdictAvecConfluence, TF_SUPERIEURS, TF_MS, fraicheur, normaliserMoteur, STYLES, MOTEUR_DEFAUT,
   filtresDisponibles, CLES_FILTRES, REGLES_INFO,
   ruleSweep, ruleBreak, ruleZone, rulePosition, signalTrade
 };

@@ -394,6 +394,9 @@ async function verifier(force = false) {
   if (!c.marches || !c.marches.length) return { controle: false, raison: 'aucun marché surveillé' };
 
   const resultats = [];
+  // Mode d'analyse du cycle : 'stratégie' (règles de la stratégie sélectionnée)
+  // ou 'générique' (aucune stratégie — on l'assume et on le dit).
+  let modeAnalyse = 'stratégie';
   let envoyes = 0;
 
   // Aucun marche surveille : il n'y a RIEN a controler. Repondre « controle
@@ -411,6 +414,15 @@ async function verifier(force = false) {
         resultats.push({ ...m, verdict: 'données insuffisantes' });
         continue;
       }
+
+      // ── Fraîcheur ──
+      // Un moteur ne doit jamais analyser silencieusement des prix périmés :
+      // marché fermé, flux coupé, cache figé. On refuse, en disant l'âge.
+      const frais = deps.signals.fraicheur ? deps.signals.fraicheur(closes, m.tf) : { ok: true };
+      if (!frais.ok) {
+        resultats.push({ ...m, verdict: frais.raison || 'fraîcheur des données non vérifiable' });
+        continue;
+      }
       // ── Le verdict est rendu SELON LA STRATÉGIE SÉLECTIONNÉE ──
       // Avant, detect() était appelé sans options : le go/no-go reposait donc sur
       // toutes les règles génériques, quelle que soit la stratégie cochée. La
@@ -423,7 +435,10 @@ async function verifier(force = false) {
 
       if (!profils.length) {
         // Aucune stratégie : mode auto assumé, règles génériques, message honnête.
-        resultats.push({ ...m, verdict: 'aucune stratégie sélectionnée : analyse générique' });
+        // Aucune stratégie : mode auto assumé, règles génériques. On ne pousse
+        // PAS d'entrée de résultat ici (elle ferait doublon avec celle du signal
+        // et fausserait le décompte des envois) : on le dit dans le mode.
+        modeAnalyse = 'générique (aucune stratégie sélectionnée)';
       } else if (!profilsValides.length) {
         // Toutes les stratégies cochées sont documentaires : on refuse plutôt que
         // de produire un signal générique sous un nom de stratégie.
@@ -508,19 +523,41 @@ async function verifier(force = false) {
       // 2. Alignement des unités de temps : le contexte doit confirmer.
       let confluence = null;
       if (c.exigerAlignement) {
-        const tfs = deps.signals.TF_SUPERIEURS[m.tf] || [m.tf];
+        // La stratégie peut imposer SES unités (M5 + M1, ou H4 + H1 + M15). On
+        // les utilise telles quelles ; sinon on retombe sur la hiérarchie standard.
+        // Avant, une stratégie M5/M1 était jugée sur les unités supérieures du
+        // symbole, jamais sur celles qu'elle demandait.
+        const declarees = (profil && Array.isArray(profil.timeframes) && profil.timeframes.length)
+          ? profil.timeframes : null;
+        const tfs = declarees || (deps.signals.TF_SUPERIEURS[m.tf] || [m.tf]);
         const parTF = [{ tf: m.tf, verdict: v }];
+        const indisponibles = [];
         for (const t of tfs) {
           if (t === m.tf) continue;
           try {
             const r2 = await deps.market.getCandles(m.symbol, t, 300, m.provider);
             const cl2 = (r2.candles || []).filter(x => x.closed !== false);
             if (cl2.length >= 20) {
-              parTF.push({ tf: t, verdict: deps.signals.detect(cl2, { symbol: m.symbol, timeframe: t }) });
+              // MÊME profil, même seuils : la confluence ne doit pas juger avec
+              // des règles que la stratégie n'a pas demandées.
+              parTF.push({ tf: t, verdict: deps.signals.detect(cl2, { symbol: m.symbol, timeframe: t }, optionsMoteur) });
+            } else {
+              indisponibles.push(`${t} (${cl2.length} bougie(s))`);
             }
-          } catch (e) { /* une unité indisponible ne bloque pas les autres */ }
+          } catch (e) {
+            indisponibles.push(`${t} (indisponible)`);
+          }
         }
-        confluence = deps.signals.confluence(parTF, { seuilAlignes: c.seuilAlignes });
+        // Une unité exigée par la stratégie et absente est une condition
+        // obligatoire manquante : aucun signal, et on dit laquelle.
+        if (declarees && indisponibles.length) {
+          resultats.push({ ...m,
+            verdict: `signal refusé — unité(s) de temps obligatoire(s) indisponible(s) : ${indisponibles.join(', ')}` });
+          continue;
+        }
+        confluence = deps.signals.confluence(parTF, {
+          seuilAlignes: (profil && Number.isFinite(profil.seuilAlignes)) ? profil.seuilAlignes : c.seuilAlignes
+        });
         if (!confluence.aligne) {
           resultats.push({ ...m, verdict: `refusé — alignement insuffisant (${confluence.motif})`, confluence });
           continue;
