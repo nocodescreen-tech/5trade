@@ -4368,6 +4368,45 @@ function tinyPng(W = 64, H = 40) {
       /seriesLues: Object\.keys\(series\)/.test(srvE));
   }
 
+  // ── Limitation de débit sur les routes coûteuses ──
+  {
+    const { creer, middleware } = require('./security/limiteur');
+    let t = 1000000;
+    const L = creer({ max: 3, fenetreMs: 10000, maintenant: () => t });
+
+    ok('les requêtes sous le quota passent',
+      L.consommer('a').autorise && L.consommer('a').autorise && L.consommer('a').autorise);
+    const refus = L.consommer('a');
+    ok('la requête au-delà du quota est refusée avec un délai',
+      refus.autorise === false && refus.restant === 0 && refus.reessayerDansMs > 0,
+      `${refus.reessayerDansMs} ms`);
+    ok('le quota est propre à chaque clé',
+      L.consommer('b').autorise === true);
+    t += 10001;
+    ok('la fenêtre glissante libère le quota',
+      L.consommer('a').autorise === true);
+
+    // Le middleware doit répondre 429 lisible, pas une erreur muette.
+    const mw = middleware(creer({ max: 1, fenetreMs: 60000 }), 'test');
+    const res = { headers: {}, set(k, v) { this.headers[k] = v; return this; },
+      status(c) { this.code = c; return this; }, json(b) { this.corps = b; return this; } };
+    let suivant = 0;
+    mw({ ip: '1.2.3.4' }, res, () => { suivant++; });
+    const res2 = { headers: {}, set(k, v) { this.headers[k] = v; return this; },
+      status(c) { this.code = c; return this; }, json(b) { this.corps = b; return this; } };
+    mw({ ip: '1.2.3.4' }, res2, () => { suivant++; });
+    ok('la première requête passe, la seconde est refusée en 429',
+      suivant === 1 && res2.code === 429 && res2.headers['Retry-After'] !== undefined,
+      `${res2.code} · Retry-After ${res2.headers['Retry-After']}`);
+    ok('le message de refus indique le délai',
+      /Réessayez dans \d+ s/.test(res2.corps.error), res2.corps.error);
+
+    const srvL = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('les routes coûteuses sont limitées',
+      /app\.use\('\/api\/analyze', limiteAnalyse\)/.test(srvL)
+      && /app\.use\('\/api\/backtest', limiteBacktest\)/.test(srvL));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

@@ -109,6 +109,16 @@ app.use((req, res, next) => {
 // surchargeable pour un besoin ponctuel.
 const LIMITE_CORPS = process.env.BODY_LIMIT || '12mb';
 app.use(express.json({ limit: LIMITE_CORPS }));
+
+// ── Limitation de débit sur les routes coûteuses ──
+// Une analyse IA ou un backtest appelés en boucle épuisent le budget API et
+// étouffent la surveillance. Quotas séparés : chaque route a son compteur.
+const { creer: creerLimiteur, middleware: limiteurMiddleware } = require('./security/limiteur');
+const limiteAnalyse = limiteurMiddleware(creerLimiteur({ max: 20, fenetreMs: 60000 }), 'analyse');
+const limiteBacktest = limiteurMiddleware(creerLimiteur({ max: 10, fenetreMs: 60000 }), 'backtest');
+app.use('/api/analyze', limiteAnalyse);
+app.use('/api/backtest', limiteBacktest);
+
 app.use(express.urlencoded({ extended: true, limit: LIMITE_CORPS }));
 // Sonde de sante : permet de savoir si le serveur repond SANS traverser l'auth.
 // Sans elle, un simple controle de disponibilite devait deviner une route.
