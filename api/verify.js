@@ -3990,6 +3990,61 @@ function tinyPng(W = 64, H = 40) {
       /condition\(s\) remplie\(s\)/.test(front));
   }
 
+  // ── Fiches : compléments justifiés, diagnostic honnête ──
+  {
+    const F = require('./strategy-engine/fiches');
+    const R = require('./strategy-engine/registry');
+    const C = require('./strategy-engine/strategy-contract');
+    const { profil } = require('./market-intelligence/market-profile');
+
+    // Un document sans moteur est documentaire, et on dit pourquoi.
+    const dDoc = F.diagnostic({ id: 'x', title: 'Une description' });
+    ok('une description n\'est pas un algorithme',
+      dDoc.executable === false && /aucun moteur/.test(dDoc.manques[0]), dDoc.manques[0]);
+
+    // Un moteur sans marchés ni conditions est incomplet, avec la liste.
+    const dMoteur = F.diagnostic({ id: 'y', moteur: { regles: [], timeframes: [] } });
+    ok('un moteur incomplet est signalé, pas corrigé d\'office',
+      dMoteur.executable === false && dMoteur.manques.length >= 3, dMoteur.manques.join(' · '));
+
+    // Le complément écrit à la main s'applique et reste justifié.
+    const reel = { id: 'man_mv58vzhi9hyrqd', title: 'Scalping sweep + FVG/OB sur indices synthétiques',
+      moteur: { regles: ['R1', 'R3'], timeframes: ['1m'], seuilRegles: 2, seuilForce: 0.5, atrStop: 1 } };
+    const dReel = F.diagnostic(reel);
+    ok('la stratégie réelle est reconnue exécutable', dReel.executable === true && dReel.complement === true);
+
+    const fiche = R.ficheDepuisDocument(reel);
+    ok('la fiche déclare le marché que son titre prouve',
+      fiche.supportedMarkets.join() === 'synthetique', fiche.supportedMarkets.join() || 'aucun');
+    ok('les deux règles du moteur deviennent obligatoires (seuil 2/2)',
+      fiche.requiredConditions.join() === 'R1,R3');
+    ok('la justification accompagne la fiche',
+      /titre/.test(fiche.parameters.justifications.supportedMarkets));
+    ok('une fiche modifiée passe en version 1.1.0 (immuabilité)',
+      fiche.version === '1.1.0', fiche.version);
+
+    // Compatibilité sur données réelles du cache.
+    let cache = {};
+    try { cache = require('../data/market-cache.json'); } catch { cache = {}; }
+    const bougies = sym => {
+      const cle = Object.keys(cache).find(k => k.includes('|' + sym + '|'));
+      return cle ? cache[cle].filter(x => x.closed !== false) : [];
+    };
+    const pSynth = profil('R_75', bougies('R_75'));
+    ok('la stratégie est compatible avec un indice synthétique',
+      C.compatibilite(fiche, pSynth).compatible === true,
+      C.compatibilite(fiche, pSynth).bloquants.join(' · ') || 'compatible');
+    const pForex = profil('EURUSD', bougies('EURUSD'));
+    const cForex = C.compatibilite(fiche, pForex);
+    ok('elle est refusée sur un marché qu\'elle ne déclare pas',
+      cForex.compatible === false && /forex/.test(cForex.bloquants.join(' ')),
+      cForex.bloquants.join(' · '));
+
+    const cli = fs.readFileSync(path.join(__dirname, 'strategy-engine', 'sync-registry.js'), 'utf8');
+    ok('le registre sépare exécutables, documentaires et incomplètes',
+      /documentaires/.test(cli) && /incomplètes|incompletes/.test(cli));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

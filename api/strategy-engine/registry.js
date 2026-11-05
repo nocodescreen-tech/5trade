@@ -133,21 +133,26 @@ async function versionsValidees() {
  */
 function ficheDepuisDocument(doc, { version = '1.0.0' } = {}) {
   const m = (doc && doc.moteur) || {};
+  // Complément écrit à la main (api/strategy-engine/fiches.js) : il prime sur le
+  // moteur, et chaque valeur y est justifiée. Sans lui, on n'invente rien.
+  const c = require('./fiches').complement(doc && doc.id) || {};
   const tf = Array.isArray(m.timeframes) && m.timeframes.length ? m.timeframes : [];
+  const marches = Array.isArray(m.marches) ? m.marches
+    : (Array.isArray(m.markets) ? m.markets : (c.supportedMarkets || []));
   return {
     id: String(doc.id || ''),
     name: String(doc.title || doc.id || ''),
-    version,
-    supportedMarkets: Array.isArray(m.marches) ? m.marches : (Array.isArray(m.markets) ? m.markets : []),
-    supportedRegimes: Array.isArray(m.regimes) ? m.regimes : null,
+    version: (c.version || version),
+    supportedMarkets: marches,
+    supportedRegimes: Array.isArray(m.regimes) ? m.regimes : (c.supportedRegimes || null),
     timeframes: { context: [], confirmation: [], execution: tf },
-    requiredConditions: Array.isArray(m.regles) ? m.regles : [],
-    optionalConditions: [],
+    requiredConditions: Array.isArray(m.regles) && m.regles.length ? m.regles : (c.requiredConditions || []),
+    optionalConditions: Array.isArray(c.optionalConditions) ? c.optionalConditions : [],
     riskModel: {
       stopLoss: m.atrStop ? `atr x${m.atrStop}` : null,
       takeProfit: m.objectifR !== undefined ? `R ${m.objectifR}` : null
     },
-    parameters: { seuilForce: m.seuilForce, seuilRegles: m.seuilRegles, style: m.style }
+    parameters: { seuilForce: m.seuilForce, seuilRegles: m.seuilRegles, style: m.style, justifications: c.justifications }
   };
 }
 
