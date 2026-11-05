@@ -4099,6 +4099,73 @@ function tinyPng(W = 64, H = 40) {
       /app\.put\('\/api\/risk\/instruments\/:symbol', requireAuth/.test(srvP2));
   }
 
+  // ── Performance : métriques honnêtes, hors échantillon ──
+  {
+    const P = require('./engine/performance');
+    const jeu = [
+      { r: 2, at: '2026-01-01T00:00:00Z', strategie: 'A', symbole: 'X' },
+      { r: -1, at: '2026-01-02T00:00:00Z', strategie: 'A', symbole: 'X' },
+      { r: -1, at: '2026-01-03T00:00:00Z', strategie: 'A', symbole: 'X' },
+      { r: 3, at: '2026-01-04T00:00:00Z', strategie: 'B', symbole: 'Y' },
+      { r: 0, at: '2026-01-05T00:00:00Z', strategie: 'B', symbole: 'Y' }
+    ];
+
+    const m = P.metriques(jeu);
+    ok('le profit factor rapporte gains et pertes bruts',
+      m.profitFactor === 2.5 && m.n === 5, `PF ${m.profitFactor} sur ${m.n} trades`);
+    ok('l\'espérance est calculée par trade tranché',
+      m.expectancyR === 0.6, `${m.expectancyR} R/trade`);
+    ok('le drawdown suit le cumul, pas le total',
+      m.maxDrawdownR === 2, `${m.maxDrawdownR} R`);
+    ok('un trade neutre n\'est ni gain ni perte',
+      m.neutres === 1 && m.gagnants === 2 && m.perdants === 2);
+    ok('le taux de réussite exclut les trades neutres',
+      m.winRate === 50, `${m.winRate} %`);
+
+    // Zéro perte : le PF est infini, et on le dit au lieu de mentir.
+    const sansPerte = P.metriques([{ r: 1, at: '2026-01-01' }, { r: 2, at: '2026-01-02' }]);
+    ok('sans aucune perte, le profit factor est annoncé « infini »',
+      sansPerte.profitFactor === 'infini', String(sansPerte.profitFactor));
+
+    // Découpe chronologique : jamais de mélange.
+    const long = Array.from({ length: 60 }, (_, i) => ({
+      r: i % 3 === 0 ? -1 : 1.2, at: new Date(Date.UTC(2026, 0, 1, i)).toISOString(), strategie: 'A'
+    }));
+    const d = P.decouper(long);
+    ok('la découpe sépare entraînement et validation dans l\'ordre du temps',
+      d.entrainement.length === 42 && d.validation.length === 18
+      && new Date(d.entrainement.at(-1).at) < new Date(d.validation[0].at),
+      `${d.entrainement.length} + ${d.validation.length}`);
+    ok('un échantillon trop court n\'est pas découpé de force',
+      P.decouper(long.slice(0, 12)).validation.length === 0);
+
+    // Verdict : sous le minimum, on ne démontre rien.
+    const vCourt = P.verdict(long.slice(0, 30));
+    ok('une validation trop mince interdit de conclure',
+      vCourt.fiable === false && /sous le minimum|pas de découpe/.test(vCourt.raisons.join(' ')),
+      vCourt.raisons[0]);
+
+    // Une performance qui s'effondre hors échantillon est signalée.
+    const effondre = [...Array.from({ length: 100 }, (_, i) => ({ r: 1, at: new Date(Date.UTC(2026, 0, 1, i)).toISOString() })),
+      ...Array.from({ length: 40 }, (_, i) => ({ r: -0.5, at: new Date(Date.UTC(2026, 2, 1, i)).toISOString() }))];
+    const vEff = P.verdict(effondre);
+    ok('une performance qui ne se reproduit pas est refusée',
+      vEff.fiable === false && /ne se reproduit pas/.test(vEff.raisons.join(' ')), vEff.raisons.join(' · '));
+
+    const groupes = P.parDimension(jeu, 'strategie', { minimum: 2 });
+    ok('les groupes trop faibles sont marqués, pas supprimés',
+      groupes.length === 2 && groupes.every(g => g.fiable === true));
+
+    ok('une clôture antérieure à l\'ouverture est détectée',
+      P.verifierChronologie([{ id: 'x', at: '2026-01-02T00:00:00Z', closAt: '2026-01-01T00:00:00Z' }]).ok === false);
+
+    const srvPerf = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('la performance est exposée par une route protégée',
+      /app\.get\('\/api\/performance', requireAuth/.test(srvPerf));
+    ok('la route prévient qu\'aucun trade n\'est rattaché à une stratégie',
+      /signaux GÉNÉRIQUES/.test(srvPerf) && /couverture: \{ avecStrategie/.test(srvPerf));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

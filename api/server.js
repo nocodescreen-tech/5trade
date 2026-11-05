@@ -329,6 +329,8 @@ const Preuves = require('./engine/preuves');
 const Registry = require('./strategy-engine/registry');
 // Risk engine : dimensionnement sur les spécifications réelles du contrat.
 const PositionSizing = require('./risk-engine/position-sizing');
+// Performance : profit factor, espérance, drawdown, hors-échantillon.
+const Performance = require('./engine/performance');
 
 // ─── Calendrier économique — implémentation dans fundamentals.js ───
 const { filtreCalendrier } = require('./sources/fundamentals');
@@ -3760,6 +3762,40 @@ app.post('/api/frais', requireAuth, (req, res) => {
  * Ce journal est la mémoire du moteur — sans lui, impossible de dire quelle
  * stratégie fonctionne réellement.
  */
+// ─── Performance : métriques réelles, séparation entraînement / validation ───
+// Calculé sur les trades TRANCHÉS du journal (R réalisé), pas sur des intentions.
+app.get('/api/performance', requireAuth, (req, res) => {
+  try {
+    const limite = Math.min(Number(req.query.limite) || 2000, 5000);
+    const bruts = JournalSignaux.lister({ limite });
+    const trades = (bruts || [])
+      .filter(s => Number.isFinite(Number(s.r)))
+      .map(s => ({
+        id: s.cle, r: Number(s.r),
+        at: typeof s.at === 'number' ? new Date(s.at).toISOString() : s.at,
+        strategie: s.strategie || (s.source === 'strategie' ? s.nom : null),
+        symbole: s.symbol, timeframe: s.timeframe
+      }));
+    const avecStrategie = trades.filter(t => t.strategie).length;
+    res.json({
+      success: true, trades: trades.length,
+      global: Performance.metriques(trades),
+      parStrategie: Performance.parDimension(trades, 'strategie'),
+      parSymbole: Performance.parDimension(trades, 'symbole'),
+      parTimeframe: Performance.parDimension(trades, 'timeframe'),
+      verdict: Performance.verdict(trades),
+      chronologie: Performance.verifierChronologie(trades),
+      // Provenance : un agrégat de signaux génériques n'est PAS la performance
+      // d'une stratégie. Sans cette précision, les chiffres se lisent de travers.
+      couverture: { avecStrategie, sansStrategie: trades.length - avecStrategie },
+      // Rappel explicite : ces chiffres décrivent le passé, pas une probabilité.
+      avertissement: trades.length && avecStrategie === 0
+        ? 'Aucun trade n\'est rattaché à une stratégie : ces chiffres décrivent les signaux GÉNÉRIQUES (motifs et structure), pas une stratégie nommée.'
+        : 'Performance passée sur trades tranchés : ne garantit aucun résultat futur.'
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/journal-signaux', requireAuth, async (req, res) => {
   try {
     const limite = Math.min(Number(req.query.limite) || 100, 500);
