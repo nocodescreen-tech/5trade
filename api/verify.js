@@ -4271,6 +4271,39 @@ function tinyPng(W = 64, H = 40) {
       && /Quantitative\.marcheAvant/.test(srvQ));
   }
 
+  // ── Un seul cycle de surveillance à la fois ──
+  {
+    const Al = require('./delivery/alerts');
+    let appels = 0;
+    const lent = {
+      getCandles: async () => {
+        appels++;
+        await new Promise(r => setTimeout(r, 150));
+        return { candles: [], provider: 'test' };
+      },
+      listSymbols: () => [{ provider: 'test', providerLabel: 'test' }]
+    };
+    Al.load();
+    Al.update({ actif: true, email: 'cycle@test.local',
+      marches: [{ symbol: 'R_75', tf: '15m', provider: 'test' }] });
+    Al.start({ market: lent, signals: Sig, sendMail: async () => {}, labelOf: () => 'test' });
+
+    const [premier, second] = await Promise.all([Al.verifier(true), Al.verifier(true)]);
+    ok('deux tours simultanés : le second est refusé, pas exécuté en parallèle',
+      premier.controle === true && second.controle === false
+      && /cycle precedent|cycle précédent/.test(second.raison), second.raison);
+    ok('le marché n\'est interrogé qu\'une fois malgré les deux appels', appels === 1, `${appels} appel(s)`);
+
+    const etat = Al.etatCycle();
+    ok('l\'état du cycle est exposé (durée, chevauchements)',
+      etat.enCours === false && Number.isFinite(etat.dureeMs) && etat.chevauchements >= 1,
+      JSON.stringify(etat));
+
+    const srvH = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('la santé du service expose le dernier cycle',
+      /cycle: Alerts\.etatCycle\(\)/.test(srvH));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

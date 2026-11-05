@@ -400,8 +400,33 @@ function compose(v, m, prix, qualite = {}) {
   };
 }
 
-/** Un tour de vérification. Séparé de la boucle pour être testable directement. */
+// ── Verrou de cycle ──
+// setInterval ne regarde pas si le tour precedent est fini. Avec 13 marches et des
+// appels reseau, un cycle peut depasser l'intervalle : deux tours simultanes
+// envoient deux fois la meme alerte et se disputent la base. Un seul tour a la fois.
+let cycleEnCours = false;
+// Dernier cycle : duree et nombre de chevauchements ignores (visible dans /healthz).
+let dernierCycle = { debut: null, fin: null, dureeMs: null, chevauchements: 0 };
+const etatCycle = () => ({ enCours: cycleEnCours, ...dernierCycle });
+
+/** Verifie s'il y a lieu, en refusant de superposer deux tours. */
 async function verifier(force = false) {
+  if (cycleEnCours) {
+    dernierCycle.chevauchements++;
+    return { controle: false, raison: 'cycle precedent encore en cours : tour ignore' };
+  }
+  cycleEnCours = true;
+  const debut = Date.now();
+  try {
+    return await verifierBrut(force);
+  } finally {
+    cycleEnCours = false;
+    dernierCycle = { debut, fin: Date.now(), dureeMs: Date.now() - debut, chevauchements: dernierCycle.chevauchements };
+  }
+}
+
+/** Un tour de verification. Separe de la boucle pour etre testable directement. */
+async function verifierBrut(force = false) {
   // Pas d'exception ici : un contrôle demandé avant le démarrage de la
   // surveillance doit répondre « rien à faire », pas casser l'appelant.
   if (!deps) return { controle: false, raison: 'surveillance non démarrée' };
@@ -768,6 +793,7 @@ function retirerAbonnement(endpoint) {
 }
 
 module.exports = {
+  etatCycle,
   load, save, get, update, resetDedup, verifier, start, stop, compose, DEFAUT,
   hydrater, diagnostic,
   listerAbonnements, ajouterAbonnement, retirerAbonnement

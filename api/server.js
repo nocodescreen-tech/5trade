@@ -130,7 +130,7 @@ app.get('/healthz', async (req, res) => {
       ok: true,
       stockage,
       ia: { deepseek: !!process.env.DEEPSEEK_API_KEY, secoursNvidia: !!process.env.NVIDIA_API_KEY },
-      alertes: Alerts.diagnostic(),
+      alertes: Alerts.diagnostic(), cycle: Alerts.etatCycle(),
       uptime: Math.round(process.uptime()),
       at: new Date().toISOString()
     });
