@@ -333,6 +333,8 @@ const PositionSizing = require('./risk-engine/position-sizing');
 const Performance = require('./engine/performance');
 // Qualité des données : trous, doublons, prix incohérents, séries désynchronisées.
 const Qualite = require('./data-engine/quality');
+// Ratios, Monte Carlo et marche avant : la robustesse, pas la promesse.
+const Quantitative = require('./engine/quantitative');
 
 // ─── Calendrier économique — implémentation dans fundamentals.js ───
 const { filtreCalendrier } = require('./sources/fundamentals');
@@ -3786,6 +3788,9 @@ app.get('/api/performance', requireAuth, (req, res) => {
       parSymbole: Performance.parDimension(trades, 'symbole'),
       parTimeframe: Performance.parDimension(trades, 'timeframe'),
       verdict: Performance.verdict(trades),
+      ratios: Quantitative.ratios(trades),
+      monteCarlo: Quantitative.monteCarlo(trades, { iterations: 1000 }),
+      marcheAvant: Quantitative.marcheAvant(trades, { blocs: 4 }),
       chronologie: Performance.verifierChronologie(trades),
       // Provenance : un agrégat de signaux génériques n'est PAS la performance
       // d'une stratégie. Sans cette précision, les chiffres se lisent de travers.

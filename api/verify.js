@@ -4230,6 +4230,47 @@ function tinyPng(W = 64, H = 40) {
       /qualite: Qualite/.test(fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8')));
   }
 
+  // ── Ratios, Monte Carlo, marche avant ──
+  {
+    const Q = require('./engine/quantitative');
+
+    const r4 = Q.ratios([{ r: 1 }, { r: 1 }, { r: 1 }, { r: -1 }]);
+    ok('le Sharpe est calculé par trade, en R', r4.sharpe === 0.5, String(r4.sharpe));
+    ok('le Sortino ne pénalise que la volatilité baissière', r4.sortino === 0.5, String(r4.sortino));
+    ok('le Calmar rapporte la performance au drawdown', r4.calmar === 2, String(r4.calmar));
+    ok('les pertes consécutives sont comptées',
+      Q.ratios([{ r: 1 }, { r: -1 }, { r: -1 }, { r: -1 }, { r: 1 }]).pertesConsecutives === 3);
+    ok('moins de deux trades : aucun ratio',
+      Q.ratios([{ r: 1 }]).sharpe === null && /aucun ratio/.test(Q.ratios([{ r: 1 }]).note));
+
+    // Monte Carlo : la permutation ne change pas le total, seulement la douleur.
+    const melange = Array.from({ length: 60 }, (_, i) => ({ r: i % 4 === 0 ? -1.5 : 0.8 }));
+    const mc = Q.monteCarlo(melange, { iterations: 500, graine: 7 });
+    ok('le Monte Carlo refuse un échantillon trop mince',
+      Q.monteCarlo([{ r: 1 }, { r: -1 }]).ok === false);
+    ok('le total ne change pas, seul l\'ordre change',
+      mc.ok === true && mc.total === 13.5
+      && mc.total === Math.round(melange.reduce((a, t) => a + t.r, 0) * 100) / 100, `${mc.total} R`);
+    ok('le drawdown extrême dépasse le drawdown médian',
+      mc.drawdown95 >= mc.drawdownMedian && mc.pireSequentiel >= mc.drawdown95,
+      `médian ${mc.drawdownMedian} · 95% ${mc.drawdown95} · pire ${mc.pireSequentiel}`);
+    ok('le Monte Carlo est reproductible à graine égale',
+      Q.monteCarlo(melange, { iterations: 500, graine: 7 }).drawdownMedian === mc.drawdownMedian);
+
+    // Marche avant : chaque bloc doit tenir debout tout seul.
+    const mw = Q.marcheAvant(melange);
+    ok('la marche avant découpe en blocs chronologiques',
+      mw.ok === true && mw.blocs.length === 4
+      && mw.blocs.every(b => Number.isFinite(b.esperance)), mw.lecture);
+    ok('un échantillon trop court n\'est pas découpé',
+      Q.marcheAvant([{ r: 1 }, { r: 2 }]).ok === false);
+
+    const srvQ = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('la route de performance expose ratios, Monte Carlo et marche avant',
+      /Quantitative\.ratios/.test(srvQ) && /Quantitative\.monteCarlo/.test(srvQ)
+      && /Quantitative\.marcheAvant/.test(srvQ));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');
