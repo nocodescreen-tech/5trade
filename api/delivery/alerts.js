@@ -443,6 +443,19 @@ async function verifier(force = false) {
         resultats.push({ ...m, verdict: frais.raison || 'fraîcheur des données non vérifiable' });
         continue;
       }
+
+      // ── Qualité des données ──
+      // La fraîcheur ne dit rien des trous, doublons, prix incohérents ni bougies
+      // aberrantes : ces défauts faussent le calcul sans jamais lever d'erreur.
+      let qualite = null;
+      if (deps.qualite && typeof deps.qualite.analyser === 'function') {
+        qualite = deps.qualite.analyser(closes, { timeframe: m.tf });
+        if (!qualite.ok) {
+          const graves = qualite.problemes.filter(p => p.gravite === 'critique').map(p => p.detail);
+          resultats.push({ ...m, verdict: `données non fiables — ${graves.join(' ; ')}`, qualite });
+          continue;
+        }
+      }
       // ── Le verdict est rendu SELON LA STRATÉGIE SÉLECTIONNÉE ──
       // Avant, detect() était appelé sans options : le go/no-go reposait donc sur
       // toutes les règles génériques, quelle que soit la stratégie cochée. La
@@ -578,6 +591,8 @@ async function verifier(force = false) {
           ? profil.timeframes : null;
         const tfs = declarees || (deps.signals.TF_SUPERIEURS[m.tf] || [m.tf]);
         const parTF = [{ tf: m.tf, verdict: v }];
+        // Séries conservées pour vérifier la synchronisation temporelle des unités.
+        const series = [{ timeframe: m.tf, bougies: closes }];
         const indisponibles = [];
         for (const t of tfs) {
           if (t === m.tf) continue;
@@ -588,6 +603,7 @@ async function verifier(force = false) {
               // MÊME profil, même seuils : la confluence ne doit pas juger avec
               // des règles que la stratégie n'a pas demandées.
               parTF.push({ tf: t, verdict: deps.signals.detect(cl2, { symbol: m.symbol, timeframe: t }, optionsMoteur) });
+              series.push({ timeframe: t, bougies: cl2 });
             } else {
               indisponibles.push(`${t} (${cl2.length} bougie(s))`);
             }
@@ -601,6 +617,15 @@ async function verifier(force = false) {
           resultats.push({ ...m,
             verdict: `signal refusé — unité(s) de temps obligatoire(s) indisponible(s) : ${indisponibles.join(', ')}` });
           continue;
+        }
+        // Un H1 figé depuis trois heures ne confirme rien sur un M5 : la
+        // synchronisation est vérifiée avant d'utiliser la confluence.
+        if (deps.qualite && typeof deps.qualite.synchroniser === 'function' && series.length > 1) {
+          const sync = deps.qualite.synchroniser(series);
+          if (!sync.aligne) {
+            resultats.push({ ...m, verdict: 'unités de temps désynchronisées — ' + sync.raison, sync });
+            continue;
+          }
         }
         confluence = deps.signals.confluence(parTF, {
           seuilAlignes: (profil && Number.isFinite(profil.seuilAlignes)) ? profil.seuilAlignes : c.seuilAlignes

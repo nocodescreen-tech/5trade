@@ -331,6 +331,8 @@ const Registry = require('./strategy-engine/registry');
 const PositionSizing = require('./risk-engine/position-sizing');
 // Performance : profit factor, espérance, drawdown, hors-échantillon.
 const Performance = require('./engine/performance');
+// Qualité des données : trous, doublons, prix incohérents, séries désynchronisées.
+const Qualite = require('./data-engine/quality');
 
 // ─── Calendrier économique — implémentation dans fundamentals.js ───
 const { filtreCalendrier } = require('./sources/fundamentals');
@@ -3902,6 +3904,8 @@ async function start() {
     // Traçabilité phase 2 : conditions nommées et preuves en base. Absent ou en
     // panne, la surveillance continue — la trace n'est jamais bloquante.
     preuves: Preuves,
+    // Contrôle de qualité AVANT toute décision : une série trouée ne décide de rien.
+    qualite: Qualite,
     // Le journal des signaux : la surveillance l'alimente aussi, sinon il ne
     // contient que ce qui a été vu pendant que l'onglet « Direct » était ouvert.
     journal: JournalSignaux,

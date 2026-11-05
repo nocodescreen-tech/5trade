@@ -4166,6 +4166,70 @@ function tinyPng(W = 64, H = 40) {
       /signaux GÉNÉRIQUES/.test(srvPerf) && /couverture: \{ avecStrategie/.test(srvPerf));
   }
 
+  // ── Qualité des données : trouver avant de décider ──
+  {
+    const Q = require('./data-engine/quality');
+    const pas = 900000;
+    const serie = (n, { ageMs = 0, f = i => 100 + Math.sin(i / 3) } = {}) => {
+      const out = []; let t = Date.now() - ageMs - n * pas;
+      for (let i = 0; i < n; i++) {
+        const c = f(i);
+        out.push({ t: t += pas, o: c, h: c + 0.5, l: c - 0.5, c, v: 10, closed: true });
+      }
+      return out;
+    };
+
+    const propre = Q.analyser(serie(40), { timeframe: '15m' });
+    ok('une série saine obtient le score maximal',
+      propre.ok === true && propre.score === 1 && propre.critiques === 0, `score ${propre.score}`);
+
+    const trouee = serie(40); trouee.splice(10, 6);
+    const qTrou = Q.analyser(trouee, { timeframe: '15m' });
+    ok('un trou est mesuré en bougies manquantes et bloque',
+      qTrou.ok === false && qTrou.problemes.some(p => p.type === 'trous' && p.gravite === 'critique'),
+      qTrou.problemes.map(p => p.detail).join(' ; '));
+
+    const doublee = serie(40); doublee.splice(20, 0, { ...doublee[19] });
+    ok('un horodatage en double est signalé',
+      Q.analyser(doublee, { timeframe: '15m' }).problemes.some(p => p.type === 'doublon'));
+
+    const incoherente = serie(40); incoherente[15] = { ...incoherente[15], h: 90, l: 120 };
+    const qInc = Q.analyser(incoherente, { timeframe: '15m' });
+    ok('une bougie incohérente (haut < bas) est critique',
+      qInc.problemes.some(p => p.type === 'incoherence' && p.gravite === 'critique'));
+
+    const desordre = serie(40); [desordre[10], desordre[11]] = [desordre[11], desordre[10]];
+    ok('un ordre chronologique rompu est critique',
+      Q.analyser(desordre, { timeframe: '15m' }).problemes.some(p => p.type === 'ordre' && p.gravite === 'critique'));
+
+    ok('une série figée est refusée',
+      Q.analyser(serie(40, { ageMs: 6 * 3600000 }), { timeframe: '15m' })
+        .problemes.some(p => p.type === 'peremption' && p.gravite === 'critique'));
+
+    const enorme = serie(40); enorme[30] = { ...enorme[30], h: enorme[30].h + 40, l: enorme[30].l - 40 };
+    ok('une bougie d\'amplitude démesurée est signalée',
+      Q.analyser(enorme, { timeframe: '15m' }).problemes.some(p => p.type === 'amplitude'));
+
+    const volumeNegatif = serie(40); volumeNegatif[5].v = -3;
+    ok('un volume négatif est critique',
+      Q.analyser(volumeNegatif, { timeframe: '15m' }).problemes.some(p => p.type === 'volume' && p.gravite === 'critique'));
+
+    const s1 = serie(30), s2 = serie(30, { ageMs: 5 * 3600000 });
+    ok('des unités de temps synchronisées passent',
+      Q.synchroniser([{ timeframe: '15m', bougies: s1 }, { timeframe: '5m', bougies: serie(30) }]).aligne === true);
+    const desync = Q.synchroniser([{ timeframe: '15m', bougies: s1 }, { timeframe: '1h', bougies: s2 }]);
+    ok('une unité de temps en retard invalide la confluence',
+      desync.aligne === false && /retard|figée/.test(desync.raison), desync.raison);
+
+    const aSrcQ = fs.readFileSync(path.join(__dirname, 'delivery', 'alerts.js'), 'utf8');
+    ok('la surveillance refuse une série de mauvaise qualité',
+      /deps\.qualite\.analyser/.test(aSrcQ) && /données non fiables/.test(aSrcQ));
+    ok('la surveillance vérifie la synchronisation des unités',
+      /deps\.qualite\.synchroniser/.test(aSrcQ) && /désynchronisées/.test(aSrcQ));
+    ok('le contrôle de qualité est injecté dans la surveillance',
+      /qualite: Qualite/.test(fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8')));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');
