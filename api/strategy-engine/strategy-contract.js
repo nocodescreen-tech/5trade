@@ -30,8 +30,12 @@ function valider(brut) {
   if (!brut.name || typeof brut.name !== 'string') erreurs.push('name manquant');
   if (!VERSION.test(String(brut.version || ''))) erreurs.push('version absente ou non semver (x.y.z)');
 
-  const marches = Array.isArray(brut.supportedMarkets) ? brut.supportedMarkets : [];
-  if (!marches.length) erreurs.push('supportedMarkets vide : la stratégie ne déclare aucun marché');
+  const marches = Array.isArray(brut.supportedMarkets) ? brut.supportedMarkets.filter(Boolean) : [];
+  if (!marches.length) {
+    // Avertissement, pas erreur : la fiche reste enregistrable (brouillon), mais
+    // aucun contrôle de compatibilité ne pourra la déclarer utilisable.
+    avertissements.push('supportedMarkets vide : la stratégie ne sera compatible avec aucun marché');
+  }
   for (const m of marches) {
     if (!CLASSES_CONNUES.includes(m)) erreurs.push(`marché inconnu « ${m} » (attendu : ${CLASSES_CONNUES.join(', ')})`);
   }

@@ -325,6 +325,8 @@ const Backup = require('./delivery/backup');
 const ProfilMarche = require('./market-intelligence/market-profile');
 // Traçabilité des évaluations (schéma phase 2) : conditions nommées + preuves.
 const Preuves = require('./engine/preuves');
+// Registre persistant des fiches de stratégie (versionnées, hashées).
+const Registry = require('./strategy-engine/registry');
 
 // ─── Calendrier économique — implémentation dans fundamentals.js ───
 const { filtreCalendrier } = require('./sources/fundamentals');
@@ -2710,6 +2712,21 @@ async function profilsStrategies() {
   return (strategies || []).map(x => Signals.profilDepuisStrategie(x));
 }
 
+// Registre des fiches : ce que le moteur sait réellement exécuter, avec la version
+// exacte des règles. Lecture seule.
+app.get('/api/strategies/registre', requireAuth, async (req, res) => {
+  try {
+    const sql = DB.client();
+    if (!sql) return res.json({ success: true, disponible: false, raison: 'stockage fichiers', fiches: [] });
+    const lignes = await sql`
+      select strategie_id, version, etat, hash, cree_le
+      from strategy_versions order by strategie_id, cree_le desc`;
+    res.json({ success: true, disponible: true, fiches: lignes });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/strategies/profiles', requireAuth, async (req, res) => {
   try {
     const profils = await profilsStrategies();
@@ -3734,6 +3751,22 @@ async function start() {
   await DB.init();
   await loadSessions();
 
+  // Registre des fiches de stratégie (schéma phase 2) : enregistre les fiches
+  // exécutables pour que chaque trace cite la version exacte des règles. Ne bloque
+  // jamais le démarrage, et ne dit rien si la base est en mode fichiers.
+  try {
+    const r = await Registry.synchroniser(await loadAllStrategies());
+    if (r.disponible) {
+      console.log(`   Registre   : ${r.enregistrees} fiche(s) enregistrée(s), ` +
+        `${r.identiques} identique(s), ${r.refusees.length} refusée(s)`);
+      for (const ref of r.refusees.slice(0, 3)) {
+        console.log(`                refusée ${ref.id} : ${[ref.raison, ...(ref.erreurs || [])].join(' — ')}`);
+      }
+    }
+  } catch (e) {
+    console.log(`   Registre   : indisponible (${String(e.message).slice(0, 80)})`);
+  }
+
   // Alertes : la base fait foi (le fichier local est un cache). Sans cette
   // relecture, une config saisie dans l'interface était perdue au redéploiement.
   await Alerts.hydrater();
@@ -3769,10 +3802,18 @@ async function start() {
         const ids = Array.isArray(c.strategies) ? c.strategies.filter(Boolean) : [];
         if (!ids.length) return [];
         const strategies = await loadAllStrategies();
+        // Version réellement enregistrée de chaque fiche : c'est elle qui part
+        // dans la trace, pour prouver QUELLES règles ont produit le signal.
+        const carte = await Registry.carteVersions().catch(() => ({}));
         return ids
           .map(id => (strategies || []).find(x => x.id === id))
           .filter(Boolean)
-          .map(doc => Signals.profilDepuisStrategie(doc));
+          .map(doc => {
+            const p = Signals.profilDepuisStrategie(doc);
+            const enr = carte[doc.id];
+            if (enr) { p.version = enr.version; p.versionEtat = enr.etat; }
+            return p;
+          });
       } catch { return []; }
     },
     sendMail,

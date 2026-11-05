@@ -3819,6 +3819,92 @@ function tinyPng(W = 64, H = 40) {
     ok('la traçabilité est injectée dans la surveillance', /preuves: Preuves/.test(srvP));
   }
 
+  // ── Registre : fiches persistées, versions immuables ──
+  {
+    const R = require('./strategy-engine/registry');
+
+    // Comparaison sémantique, pas alphabétique : 1.10.0 est plus récent que 1.9.0.
+    ok('les versions sont comparées numériquement',
+      R.comparerVersions('1.10.0', '1.9.0') > 0 && R.comparerVersions('2.0.0', '1.99.0') > 0
+      && R.comparerVersions('1.0.0', '1.0.0') === 0);
+
+    // Une fiche construite depuis un document ne doit RIEN inventer.
+    const docSansMarches = { id: 'x1', title: 'Test', moteur: { regles: ['R1'], timeframes: ['5m'] } };
+    const fiche = R.ficheDepuisDocument(docSansMarches);
+    ok('une fiche déduite ne déclare pas de marché qu\'elle n\'a pas',
+      Array.isArray(fiche.supportedMarkets) && fiche.supportedMarkets.length === 0,
+      `${fiche.supportedMarkets.length} marché(s)`);
+    ok('elle reprend les règles et unités du moteur',
+      fiche.requiredConditions.join() === 'R1' && fiche.timeframes.execution.join() === '5m');
+
+    const urlBase2 = fs.existsSync(ENV)
+      ? (fs.readFileSync(ENV, 'utf8').match(/^DATABASE_URL=(.+)$/m)?.[1] || '').trim()
+      : '';
+    if (!urlBase2) {
+      skipped('registre persistant', 'DATABASE_URL absente du .env');
+    } else {
+      const code = [
+        "const DB = require('./api/core/db');",
+        "const R = require('./api/strategy-engine/registry');",
+        "(async () => {",
+        "  await DB.init();",
+        "  const sql = DB.client();",
+        "  const id = '__test_registre__';",
+        "  const res = {};",
+        "  const fiche = { id, name: 'Test registre', version: '1.0.0',",
+        "    supportedMarkets: ['forex'], supportedRegimes: ['trending'],",
+        "    timeframes: { context: ['4h'], confirmation: ['15m'], execution: ['5m'] },",
+        "    requiredConditions: ['sweep'], optionalConditions: ['fvg'],",
+        "    riskModel: { stopLoss: 'structure', takeProfit: 'liquidity' } };",
+        "  try {",
+        "    res.creee = await R.enregistrer(fiche);",
+        "    res.identique = await R.enregistrer(fiche);",
+        "    res.conflit = await R.enregistrer({ ...fiche, requiredConditions: ['sweep', 'mss'] });",
+        "    res.invalide = await R.enregistrer({ ...fiche, version: '2.0.0', requiredConditions: [] });",
+        "    res.carte = await R.carteVersions();",
+        "    res.derniere = await R.derniere(id);",
+        "  } finally {",
+        "    await sql.unsafe(\"delete from strategy_versions where strategie_id='\" + id + \"'\");",
+        "  }",
+        "  console.log(JSON.stringify(res));",
+        "  process.exit(0);",
+        "})().catch(e => { console.error(e.message); process.exit(1); });"
+      ].join('\n');
+      let r = null, err = null;
+      try {
+        const sortie = require('child_process').execFileSync(process.execPath, ['-e', code], {
+          cwd: ROOT, encoding: 'utf8', env: { ...process.env, DATABASE_URL: urlBase2 }
+        });
+        const lignes = sortie.split('\n').map(l => l.trim()).filter(l => l.startsWith('{'));
+        r = JSON.parse(lignes[lignes.length - 1] || '{}');
+      } catch (e) { err = e.message.split('\n')[0]; }
+
+      ok('une fiche valide est enregistrée avec son hash',
+        !err && r && r.creee && r.creee.ok === true && r.creee.etat === 'creee',
+        err || (r && r.creee && (r.creee.etat || r.creee.raison)));
+      ok('la même fiche rejouée est reconnue identique (pas de doublon)',
+        !err && r && r.identique && r.identique.etat === 'identique');
+      ok('une version déjà publiée ne peut pas changer de contenu',
+        !err && r && r.conflit && r.conflit.ok === false && r.conflit.etat === 'conflit',
+        r && r.conflit && r.conflit.raison);
+      ok('une fiche sans condition obligatoire est refusée par le registre',
+        !err && r && r.invalide && r.invalide.ok === false);
+      ok('la carte des versions alimente la trace',
+        !err && r && r.carte && r.carte['__test_registre__']
+        && r.carte['__test_registre__'].version === '1.0.0');
+      ok('la dernière version est relue avec sa fiche complète',
+        !err && r && r.derniere && r.derniere.version === '1.0.0'
+        && r.derniere.fiche && r.derniere.fiche.requiredConditions[0] === 'sweep');
+    }
+
+    const srvR = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('le registre est synchronisé au démarrage', /Registry\.synchroniser\(await loadAllStrategies\(\)\)/.test(srvR));
+    ok('la surveillance reçoit la version enregistrée',
+      /carteVersions\(\)/.test(srvR) && /p\.version = enr\.version/.test(srvR));
+    ok('le registre est consultable par une route protégée',
+      /app\.get\('\/api\/strategies\/registre', requireAuth/.test(srvR));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

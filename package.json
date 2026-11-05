@@ -8,6 +8,7 @@
     "verify": "npm --prefix api run verify",
     "start": "npm --prefix api start",
     "dev": "npm --prefix api run dev",
-    "migrer": "npm --prefix api run migrer-phase2"
+    "migrer": "npm --prefix api run migrer-phase2",
+    "registre": "npm --prefix api run registre"
   }
 }
