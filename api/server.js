@@ -329,6 +329,8 @@ const Preuves = require('./engine/preuves');
 const Registry = require('./strategy-engine/registry');
 // Risk engine : dimensionnement sur les spécifications réelles du contrat.
 const PositionSizing = require('./risk-engine/position-sizing');
+// Exposition : risque cumulé, positions corrélées, série de pertes.
+const Exposition = require('./risk-engine/exposure-manager');
 // Performance : profit factor, espérance, drawdown, hors-échantillon.
 const Performance = require('./engine/performance');
 // Qualité des données : trous, doublons, prix incohérents, séries désynchronisées.
@@ -3800,6 +3802,43 @@ app.get('/api/performance', requireAuth, (req, res) => {
         ? 'Aucun trade n\'est rattaché à une stratégie : ces chiffres décrivent les signaux GÉNÉRIQUES (motifs et structure), pas une stratégie nommée.'
         : 'Performance passée sur trades tranchés : ne garantit aucun résultat futur.'
     });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Exposition du portefeuille : le risque d'ENSEMBLE, pas par trade ───
+// Dix positions qui misent la même chose ne sont pas dix trades, c'est un trade
+// démesuré. Corrélations calculées sur les clôtures réellement disponibles.
+app.post('/api/risk/exposition', requireAuth, async (req, res) => {
+  try {
+    const capital = Number(req.body && req.body.capital);
+    const nouvelle = (req.body && req.body.nouvelle) || null;
+    const ouvertes = Array.isArray(req.body && req.body.ouvertes) ? req.body.ouvertes : [];
+    const symboles = [...new Set([
+      ...(nouvelle && nouvelle.symbole ? [nouvelle.symbole] : []),
+      ...ouvertes.map(o => o && o.symbole)
+    ].filter(Boolean))].slice(0, 6);
+
+    const series = {};
+    for (const s of symboles) {
+      try {
+        const r = await Market.getCandles(s, '15m', 200);
+        series[s] = (r.candles || []).filter(c => c.closed !== false).map(c => c.c);
+      } catch { /* série indisponible : la corrélation sera simplement ignorée */ }
+    }
+
+    // Série de pertes : lue sur le journal réel, jamais inventée.
+    let trades = [];
+    try {
+      trades = JournalSignaux.lister({ limite: 200 })
+        .filter(x => Number.isFinite(Number(x.r)))
+        .map(x => ({ r: Number(x.r) }));
+    } catch { trades = []; }
+
+    const verdict = Exposition.verifier({
+      capital, nouvelle, ouvertes, series, trades,
+      limites: req.body && req.body.limites
+    });
+    res.json({ success: true, seriesLues: Object.keys(series), ...verdict });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

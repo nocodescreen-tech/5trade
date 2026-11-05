@@ -4304,6 +4304,70 @@ function tinyPng(W = 64, H = 40) {
       /cycle: Alerts\.etatCycle\(\)/.test(srvH));
   }
 
+  // ── Exposition : risque d'ensemble, corrélation, série de pertes ──
+  {
+    const E = require('./risk-engine/exposure-manager');
+    const closes = Array.from({ length: 60 }, (_, i) => 100 + Math.sin(i / 4) * 3);
+
+    ok('la corrélation vaut 1 pour deux séries identiques',
+      E.correlation(closes, closes.slice()) === 1);
+    ok('la corrélation vaut -1 pour deux séries opposées',
+      E.correlation(closes, closes.map(v => 200 - v)) === -1);
+    ok('une corrélation n\'est pas calculée sur un échantillon trop court',
+      E.correlation(closes.slice(0, 10), closes.slice(0, 10)) === null);
+
+    // Risque cumulé : dix petits trades peuvent valoir un gros.
+    const cumul = E.verifier({ capital: 10000,
+      nouvelle: { symbole: 'EURUSD', direction: 'BUY', risqueMontant: 400 },
+      ouvertes: [{ symbole: 'GBPUSD', direction: 'BUY', risqueMontant: 300 }] });
+    ok('le risque cumulé au-delà du plafond est bloqué',
+      cumul.ok === false && /risque cumulé 7 %/.test(cumul.bloquants.join(' ')),
+      cumul.bloquants.join(' · '));
+
+    // Positions corrélées dans le même sens = un seul pari déguisé.
+    const correle = E.verifier({ capital: 100000,
+      nouvelle: { symbole: 'EURUSD', direction: 'BUY', risqueMontant: 100 },
+      ouvertes: [{ symbole: 'GBPUSD', direction: 'BUY', risqueMontant: 100 }],
+      series: { EURUSD: closes, GBPUSD: closes.map(v => v * 1.1) } });
+    ok('deux positions corrélées de même sens sont refusées',
+      correle.ok === false && /corrélée/.test(correle.bloquants.join(' ')),
+      correle.bloquants.join(' · '));
+
+    const couverture = E.verifier({ capital: 100000,
+      nouvelle: { symbole: 'EURUSD', direction: 'BUY', risqueMontant: 100 },
+      ouvertes: [{ symbole: 'GBPUSD', direction: 'SELL', risqueMontant: 100 }],
+      series: { EURUSD: closes, GBPUSD: closes.map(v => v * 1.1) } });
+    ok('une corrélation en sens inverse n\'est qu\'un avertissement',
+      couverture.ok === true && /sens inverse/.test(couverture.avertissements.join(' ')),
+      couverture.avertissements.join(' · '));
+
+    // Trop de positions simultanées.
+    const trop = E.verifier({ capital: 1000000,
+      nouvelle: { symbole: 'X1', risqueMontant: 10 },
+      ouvertes: Array.from({ length: 8 }, (_, i) => ({ symbole: 'Y' + i, risqueMontant: 10 })) });
+    ok('trop de positions simultanées est refusé',
+      trop.ok === false && /positions simultanées/.test(trop.bloquants.join(' ')));
+
+    // Série de pertes : arrêter d'ajouter du risque après trois échecs.
+    const seriePertes = E.verifier({ capital: 10000,
+      nouvelle: { symbole: 'X', risqueMontant: 100 }, ouvertes: [],
+      trades: [{ r: 1 }, { r: -1 }, { r: -1 }, { r: -1 }] });
+    ok('trois pertes consécutives imposent une pause',
+      seriePertes.ok === false && /pertes consécutives/.test(seriePertes.bloquants.join(' ')),
+      seriePertes.bloquants[0]);
+    ok('la série de pertes s\'arrête au premier gain',
+      E.pertesEnCours([{ r: -1 }, { r: -1 }, { r: 1 }, { r: -1 }]) === 1);
+
+    ok('sans capital, aucune limite ne peut être vérifiée',
+      E.verifier({ nouvelle: { symbole: 'X', risqueMontant: 10 } }).ok === false);
+
+    const srvE = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('l\'exposition est exposée par une route protégée',
+      /app\.post\('\/api\/risk\/exposition', requireAuth/.test(srvE));
+    ok('la route lit les séries réelles pour la corrélation',
+      /seriesLues: Object\.keys\(series\)/.test(srvE));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');
