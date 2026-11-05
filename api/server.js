@@ -320,6 +320,9 @@ const vision = require('./delivery/vision');
 const Couts = require('./core/couts');
 const { extraireJSON } = require('./core/json-ia');
 const Backup = require('./delivery/backup');
+// Phase 1 de l'architecture adaptative : intelligence de marché (classification,
+// régime, profil). Lecture seule, aucun effet sur les signaux existants.
+const ProfilMarche = require('./market-intelligence/market-profile');
 
 // ─── Calendrier économique — implémentation dans fundamentals.js ───
 const { filtreCalendrier } = require('./sources/fundamentals');
@@ -2463,6 +2466,25 @@ app.get('/api/market/ticks', requireAuth, (req, res) => {
 // Routes d'alertes : extraites dans api/routes/alerts.js (découpage progressif
 // de server.js en domaines). Les dépendances sont injectées, pas globales.
 require('./routes/alerts')(app, { requireAuth, Alerts, sendMail, DB });
+
+// ─── Market Intelligence (phase 1) : profil d'un instrument ───
+// Lecture seule : classe l'instrument, mesure le régime, décrit la session et la
+// tolérance de spread. N'intervient pas dans la décision de signal.
+app.get('/api/market/profil', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').trim();
+    const tf = String(req.query.tf || '15m').trim();
+    if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+    const r = await Market.getCandles(symbol, tf, 300);
+    const closes = (r.candles || []).filter(c => c.closed !== false);
+    res.json({
+      success: true, symbole: symbol, timeframe: tf, provider: r.provider || null,
+      ...ProfilMarche.profil(symbol, closes, { provider: r.provider })
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.get('/api/market/candles', requireAuth, async (req, res) => {
   try {

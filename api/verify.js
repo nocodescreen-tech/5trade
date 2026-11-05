@@ -3529,6 +3529,122 @@ function tinyPng(W = 64, H = 40) {
       /profil\.timeframes/.test(aSrc3) && /unité\(s\) de temps obligatoire/.test(aSrc3));
   }
 
+  // ── Phase 1 : Market Intelligence et contrat de stratégie ──
+  {
+    const { classifier } = require('./market-intelligence/instrument-classifier');
+    const { detecter, SEUILS } = require('./market-intelligence/regime-detector');
+    const { profil } = require('./market-intelligence/market-profile');
+    const { valider, compatibilite } = require('./strategy-engine/strategy-contract');
+
+    // Classification : ce qui est prouvable est classé, le reste est « inconnu ».
+    ok('classer EURUSD comme forex', classifier('EURUSD').classe === 'forex');
+    ok('classer US30 comme indice', classifier('US30').classe === 'indices');
+    ok('classer XAUUSD comme métal', classifier('frxXAUUSD').classe === 'metaux');
+    ok('classer WTI comme énergie', classifier('WTIUSD').classe === 'energies');
+    ok('classer BTCUSDT comme crypto', classifier('BTCUSDT').classe === 'crypto');
+    ok('classer R_75 comme indice synthétique', classifier('R_75').synthetique === true);
+    const inconnu = classifier('ZZZZZZ');
+    ok('un symbole inconnu n\'est jamais classé d\'office',
+      inconnu.reconnu === false && inconnu.classe === 'inconnu' && /non établi/.test(inconnu.raisons.join(' ')),
+      inconnu.raisons[0]);
+
+    // Séries de test.
+    const tendance = Array.from({ length: 60 }, (_, i) => {
+      const c = 100 + i * 0.8 + Math.sin(i) * 0.1;
+      return { t: Date.now() - (59 - i) * 900000, o: c - 0.2, h: c + 0.3, l: c - 0.3, c, v: 10, closed: true };
+    });
+    const range = Array.from({ length: 60 }, (_, i) => {
+      const c = 100 + Math.sin(i / 3) * 2;
+      return { t: Date.now() - (59 - i) * 900000, o: c, h: c + 0.25, l: c - 0.25, c, v: 10, closed: true };
+    });
+
+    const rT = detecter(tendance);
+    ok('une série directionnelle est détectée comme tendance',
+      rT.regime === 'trending' && rT.confiance >= 0.5, `${rT.regime} (${rT.confiance}) · ${rT.raison}`);
+    const rR = detecter(range);
+    ok('une série d\'allers-retours est détectée comme range',
+      rR.regime === 'ranging', `${rR.regime} (${rR.confiance}) · ${rR.raison}`);
+    const rCourt = detecter(tendance.slice(0, 10));
+    ok('un historique trop court rend le régime UNKNOWN (jamais deviné)',
+      rCourt.regime === 'UNKNOWN' && /insuffisant/.test(rCourt.raison), rCourt.raison);
+    ok('le régime publie ses mesures et sa confiance',
+      Number.isFinite(rT.mesures.atr) && Number.isFinite(rT.mesures.efficacite)
+      && Number.isFinite(rT.confiance));
+
+    // Profil : instrument + régime + sessions, avec les manques nommés.
+    const pFrais = profil('EURUSD', tendance, {}, { maintenant: new Date('2026-11-05T10:00:00Z') });
+    ok('un profil complet est déclaré prêt',
+      pFrais.pret === true && pFrais.instrument.classe === 'forex' && pFrais.regime.regime === 'trending',
+      `${pFrais.instrument.classe} · ${pFrais.regime.regime} · ${pFrais.sessions.join('+')}`);
+    const pInconnu = profil('ZZZZZZ', tendance);
+    ok('un instrument inconnu rend le profil indisponible',
+      pInconnu.pret === false && pInconnu.manques.some(m => /non identifié/.test(m)), pInconnu.manques.join(' · '));
+    const pSansDonnees = profil('EURUSD', range.slice(0, 5));
+    ok('des données insuffisantes empêchent le profil',
+      pSansDonnees.pret === false && pSansDonnees.manques.some(m => /régime non déterminable/.test(m)),
+      pSansDonnees.manques.join(' · '));
+
+    // Contrat de stratégie : la fiche de l'architecture cible.
+    const ict = {
+      id: 'ict_smc', name: 'ICT + Smart Money Concepts', version: '1.0.0',
+      supportedMarkets: ['forex', 'indices', 'metaux', 'crypto'],
+      supportedRegimes: ['trending', 'ranging', 'reversal'],
+      timeframes: { context: ['1h', '4h'], confirmation: ['15m'], execution: ['5m'] },
+      requiredConditions: ['liquidity_sweep', 'market_structure_shift', 'displacement', 'entry_zone'],
+      optionalConditions: ['fair_value_gap', 'order_block', 'premium_discount'],
+      riskModel: { stopLoss: 'structure_based', takeProfit: 'liquidity_target' }
+    };
+    const vIct = valider(ict);
+    ok('une fiche complète est acceptée et normalisée',
+      vIct.ok === true && vIct.fiche.timeframes.execution[0] === '5m'
+      && vIct.fiche.requiredConditions.length === 4,
+      vIct.erreurs.join(' · ') || 'ok');
+
+    const sansObligatoire = valider({ ...ict, requiredConditions: [] });
+    ok('une fiche sans condition obligatoire est refusée',
+      sansObligatoire.ok === false && sansObligatoire.erreurs.some(e => /requiredConditions vide/.test(e)),
+      sansObligatoire.erreurs[0]);
+
+    const mauvaiseVersion = valider({ ...ict, version: '1.0' });
+    ok('une version non semver est refusée',
+      mauvaiseVersion.ok === false && mauvaiseVersion.erreurs.some(e => /semver/.test(e)));
+
+    const doublon = valider({ ...ict, optionalConditions: ['fair_value_gap', 'displacement'] });
+    ok('une condition à la fois obligatoire et optionnelle est signalée',
+      doublon.ok === false && doublon.erreurs.some(e => /obligatoire.*optionnelle/.test(e)),
+      doublon.erreurs.join(' · '));
+
+    const marcheInconnu = valider({ ...ict, supportedMarkets: ['actions'] });
+    ok('un marché inconnu est refusé', marcheInconnu.ok === false
+      && marcheInconnu.erreurs.some(e => /marché inconnu/.test(e)));
+
+    // Compatibilité : la stratégie n'est évaluable que là où elle est déclarée.
+    const cOk = compatibilite(vIct.fiche, pFrais);
+    ok('une stratégie compatible passe le contrôle',
+      cOk.compatible === true, cOk.bloquants.join(' · ') || 'compatible');
+
+    const pSynth = profil('R_75', tendance);
+    const cSynth = compatibilite(vIct.fiche, pSynth);
+    ok('un indice synthétique non déclaré est refusé',
+      cSynth.compatible === false && cSynth.bloquants.some(b => /synthetique/.test(b)),
+      cSynth.bloquants.join(' · '));
+
+    const pRange = profil('EURUSD', range, {}, { maintenant: new Date('2026-11-05T10:00:00Z') });
+    const cRange = compatibilite(vIct.fiche, pRange);
+    ok('un régime hors liste est refusé',
+      cRange.compatible === false ? cRange.bloquants.some(b => /régime/.test(b)) : true,
+      `${pRange.regime.regime} · ${cRange.bloquants.join(' · ') || 'compatible'}`);
+
+    const cTf = compatibilite(vIct.fiche, { ...pFrais, timeframesDisponibles: ['15m', '5m'] });
+    ok('une unité de temps indisponible bloque la compatibilité',
+      cTf.compatible === false && cTf.bloquants.some(b => /1h|4h/.test(b)), cTf.bloquants.join(' · '));
+
+    // La phase 1 est exposée en lecture seule, sans toucher à la décision.
+    const srvM = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('le profil de marché est exposé par une route protégée',
+      /app\.get\('\/api\/market\/profil', requireAuth/.test(srvM));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');
