@@ -475,6 +475,24 @@ async function verifier(force = false) {
       }
 
       if (v.status !== 'confirme') { resultats.push({ ...m, verdict: v.status }); continue; }
+
+      // ── Filtre économique ──
+      // Il n'était appliqué QUE sur le chemin IA, jamais ici : une alerte pouvait
+      // donc partir pendant une publication NFP. Et quand le calendrier est
+      // injoignable, on le dit au lieu de laisser croire que tout est vérifié.
+      let fondamental = null;
+      if (typeof deps.filtreNews === 'function') {
+        try {
+          fondamental = await deps.filtreNews(m.symbol);
+        } catch (e) {
+          fondamental = { ok: true, verifie: false,
+            lecture: `filtre économique en erreur (${e.message}) : non vérifié` };
+        }
+        if (fondamental && fondamental.bloque) {
+          resultats.push({ ...m, verdict: `signal bloqué — ${fondamental.lecture}`, fondamental });
+          continue;
+        }
+      }
       if (v.strength < c.forceMin) {
         resultats.push({ ...m, verdict: `confirmé mais force ${Number(v.strength).toFixed(2)}/1 (${v.forceNiveau || '—'}) < seuil` });
         continue;

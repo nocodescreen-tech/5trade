@@ -3442,6 +3442,54 @@ function tinyPng(W = 64, H = 40) {
       a.strategie && a.strategie.id === 'A' && b.strategie && b.strategie.id === 'B');
   }
 
+  // ── Filtre économique : deux devises, état explicite, jamais silencieux ──
+  {
+    const F = require('./sources/fundamentals');
+
+    // 7. Les DEUX devises d'une paire Forex sont prises en compte.
+    const eur = F.devisesDuSymbole('EURUSD');
+    ok('une paire Forex déclare ses deux devises',
+      eur.applicable && eur.devises.includes('EUR') && eur.devises.includes('USD'),
+      eur.devises.join('/') || 'aucune');
+    const or = F.devisesDuSymbole('frxXAUUSD');
+    ok('un symbole préfixé par le courtier est décomposé correctement',
+      or.devises.includes('USD') && or.devises.some(d => d === 'XAU'),
+      `${or.devises.join('/')} (au lieu de « FRX »)`);
+    const btc = F.devisesDuSymbole('BTCUSDT');
+    ok('USDT est ramené au dollar', btc.devises.includes('USD'), btc.devises.join('/'));
+
+    // Indice synthétique : le calendrier ne s'applique pas, et il le dit.
+    const synth = F.devisesDuSymbole('R_75');
+    ok('un indice synthétique n\'est pas soumis au calendrier économique',
+      synth.applicable === false && /synthétique/i.test(synth.raison), synth.raison);
+    const fSynth = await F.filtreCalendrier('R_75');
+    ok('le filtre explicite son inapplicabilité au lieu de bloquer',
+      fSynth.applicable === false && fSynth.verifie === false && /non applicable/i.test(fSynth.lecture),
+      fSynth.lecture);
+
+    // Source indisponible : état explicite, pas un « tout va bien » muet.
+    const ancienneUrl = process.env.CALENDRIER_URL;
+    process.env.CALENDRIER_URL = 'http://127.0.0.1:9/calendrier-inexistant';
+    F.viderCache();
+    let indispo;
+    try { indispo = await F.filtreCalendrier('EURUSD'); } finally {
+      if (ancienneUrl === undefined) delete process.env.CALENDRIER_URL;
+      else process.env.CALENDRIER_URL = ancienneUrl;
+      F.viderCache();
+    }
+    ok('un calendrier injoignable est signalé comme NON vérifié',
+      indispo.verifie === false && indispo.bloque === false && /NON vérifié/i.test(indispo.lecture),
+      indispo.lecture.slice(0, 90));
+
+    // Et il est réellement branché dans la boucle d'alertes.
+    const aSrc2 = fs.readFileSync(path.join(__dirname, 'delivery', 'alerts.js'), 'utf8');
+    ok('la boucle d\'alertes applique le filtre économique',
+      /deps\.filtreNews/.test(aSrc2) && /fondamental\.bloque/.test(aSrc2));
+    const srvF = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('le filtre est injecté dans la surveillance',
+      /filtreNews: filtreCalendrier/.test(srvF));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

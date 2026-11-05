@@ -3724,6 +3724,9 @@ async function start() {
   Alerts.start({
     market: Market,
     signals: Signals,
+    // Filtre économique : branché dans la boucle d'alertes (il ne l'était que
+    // sur le chemin IA). Un signal ne doit pas partir pendant une publication.
+    filtreNews: filtreCalendrier,
     // Multi-signaux : permet à la surveillance de dire QUELLE stratégie s'est
     // déclenchée, et de lister les motifs, au lieu d'un verdict anonyme.
     signaux: Multi,
