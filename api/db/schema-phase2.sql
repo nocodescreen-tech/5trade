@@ -128,3 +128,26 @@ CREATE TABLE IF NOT EXISTS backtest_results (
   CHECK (periode_fin > periode_debut)
 );
 CREATE INDEX IF NOT EXISTS idx_backtest_strategie ON backtest_results (strategie_id, version, symbole);
+
+-- ── Bougies historiques : la matière première de toute calibration ──────────
+-- Sans plusieurs mois de bougies, aucun réglage de seuil n'est autre chose qu'un
+-- ajustement sur trois jours. Une ligne = une bougie CLÔTURÉE d'un fournisseur.
+-- Clé primaire (symbole, timeframe, t) : réingérer le même historique ne crée
+-- aucun doublon, il complète les trous.
+CREATE TABLE IF NOT EXISTS candles (
+  symbole     text NOT NULL,
+  timeframe   text NOT NULL,
+  t           bigint NOT NULL,
+  o           numeric NOT NULL,
+  h           numeric NOT NULL,
+  l           numeric NOT NULL,
+  c           numeric NOT NULL,
+  v           numeric,
+  fournisseur text,
+  ingere_le   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (symbole, timeframe, t),
+  CHECK (h >= l),
+  CHECK (c >= l AND c <= h),
+  CHECK (o >= l AND o <= h)
+);
+CREATE INDEX IF NOT EXISTS idx_candles_serie ON candles (symbole, timeframe, t DESC);

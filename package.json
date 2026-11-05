@@ -9,6 +9,7 @@
     "start": "npm --prefix api start",
     "dev": "npm --prefix api run dev",
     "migrer": "npm --prefix api run migrer-phase2",
-    "registre": "npm --prefix api run registre"
+    "registre": "npm --prefix api run registre",
+    "ingerer": "npm --prefix api run ingerer"
   }
 }

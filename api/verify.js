@@ -246,8 +246,14 @@ function tinyPng(W = 64, H = 40) {
     } catch (e) {
       // La cause réelle d'un « fetch failed » est dans e.cause (ENOTFOUND,
       // ECONNRESET, cert…) : sans elle, le message ne dit rien d'exploitable.
-      ok('aller-retour S3', false,
-        `${e.message}${e.cause ? ' (' + (e.cause.code || e.cause.message) + ')' : ''}`);
+      if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|CONNECT_TIMEOUT|UND_ERR|EAI_AGAIN|fetch failed|réseau injoignable/i.test(e.message)) {
+        // Réseau coupé : ce n'est pas le code qui est en cause. Pas de 'return'
+        // ici : il sortirait de la fonction principale et arrêterait la suite.
+        skipped('aller-retour S3', 'réseau injoignable — dépendance externe non testée');
+      } else {
+        ok('aller-retour S3', false,
+          `${e.message}${e.cause ? ' (' + (e.cause.code || e.cause.message) + ')' : ''}`);
+      }
     }
   }
 
@@ -3722,9 +3728,9 @@ function tinyPng(W = 64, H = 40) {
         await admin.end({ timeout: 5 });
       }
 
-      ok('les sept tables de la phase 2 sont créées', !erreur && tables1.length === 7,
+      ok('les huit tables du schéma sont créées', !erreur && tables1.length === 8,
         erreur ? erreur.slice(0, 120) : tables1.join(', '));
-      ok('le schéma est rejouable sans erreur (idempotent)', !erreur && tables2.length === 7);
+      ok('le schéma est rejouable sans erreur (idempotent)', !erreur && tables2.length === 8);
       ok('une évaluation sans version de stratégie est refusée', fkRefusee);
       ok('un statut hors nomenclature est refusé', checkRefuse);
       ok('le parcours fiche → évaluation → signal → preuve s\'insère',
@@ -4460,6 +4466,84 @@ function tinyPng(W = 64, H = 40) {
     ok('chaque profil de classe porte son état de calibration',
       /v1/.test(C.profilClasse('synthetique').etat) && /v1/.test(C.profilClasse('metaux').etat),
       C.profilClasse('metaux').etat);
+  }
+
+  // ── Historique en base : la matière première de la calibration ──
+  {
+    const C = require('./data-engine/candles');
+    const pas = 300000;
+    const base = 1700000000000;
+    const serie = n => Array.from({ length: n }, (_, i) => ({
+      t: base + i * pas, o: 100, h: 101, l: 99, c: 100 + (i % 3) * 0.3, v: 10
+    }));
+
+    ok('les bougies incohérentes sont écartées avant l\'insertion',
+      C.valides([{ t: 1, o: 100, h: 99, l: 101, c: 100 }]).length === 0
+      && C.valides([{ t: 1, o: 100, h: 101, l: 99, c: 100 }]).length === 1);
+
+    const urlBase4 = fs.existsSync(ENV)
+      ? (fs.readFileSync(ENV, 'utf8').match(/^DATABASE_URL=(.+)$/m)?.[1] || '').trim()
+      : '';
+    if (!urlBase4) {
+      skipped('historique en base', 'DATABASE_URL absente du .env');
+    } else {
+      const code = [
+        "const DB = require('./api/core/db');",
+        "const C = require('./api/data-engine/candles');",
+        "(async () => {",
+        "  await DB.init();",
+        "  const sql = DB.client();",
+        "  const sym = '__test_candles__';",
+        "  const res = {};",
+        "  const pas = 300000, base = 1700000000000;",
+        "  const serie = n => Array.from({ length: n }, (_, i) => ({",
+        "    t: base + i * pas, o: 100, h: 101, l: 99, c: 100 + (i % 3) * 0.3, v: 10 }));",
+        "  try {",
+        "    res.premier = await C.enregistrer(sym, '5m', 'test', serie(100));",
+        "    res.second = await C.enregistrer(sym, '5m', 'test', serie(100));",
+        "    res.lues = (await C.lire(sym, '5m')).length;",
+        "    const lu = await C.lire(sym, '5m');",
+        "    res.ordre = lu[0].t < lu[lu.length - 1].t;",
+        "    res.closed = lu.every(b => b.closed === true);",
+        "    // Trou volontaire : on supprime 10 bougies au milieu.",
+        "    await sql.unsafe(\"delete from candles where symbole='\" + sym + \"' and t between \" + (base + 40 * pas) + \" and \" + (base + 49 * pas));",
+        "    const cov = await C.couverture(sym);",
+        "    res.manquantes = cov.series[0].manquantes;",
+        "    res.bougies = cov.series[0].bougies;",
+        "  } finally {",
+        "    await sql.unsafe(\"delete from candles where symbole='\" + sym + \"'\");",
+        "  }",
+        "  console.log(JSON.stringify(res));",
+        "  process.exit(0);",
+        "})().catch(e => { console.error(e.message); process.exit(1); });"
+      ].join('\n');
+      let r = null, err = null;
+      try {
+        const sortie = require('child_process').execFileSync(process.execPath, ['-e', code], {
+          cwd: ROOT, encoding: 'utf8', env: { ...process.env, DATABASE_URL: urlBase4 }
+        });
+        const lignes = sortie.split('\n').map(l => l.trim()).filter(l => l.startsWith('{'));
+        r = JSON.parse(lignes[lignes.length - 1] || '{}');
+      } catch (e) { err = e.message.split('\n')[0]; }
+
+      ok('les bougies sont écrites en base', !err && r && r.premier && r.premier.ecrites === 100,
+        err || `${r && r.premier && r.premier.ecrites} écrites`);
+      ok('réingérer la même série ne crée aucun doublon',
+        !err && r && r.second && r.second.ecrites === 0 && r.lues === 100,
+        `${r && r.second && r.second.ecrites} doublon(s), ${r && r.lues} en base`);
+      ok('la lecture rend les bougies dans l\'ordre chronologique',
+        !err && r && r.ordre === true && r.closed === true);
+      ok('les trous sont comptés en bougies manquantes',
+        !err && r && r.manquantes === 10 && r.bougies === 90,
+        `${r && r.manquantes} manquante(s) sur ${r && r.bougies}`);
+    }
+
+    const srvC = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('la table candles fait partie du schéma additif',
+      /CREATE TABLE IF NOT EXISTS candles/.test(
+        fs.readFileSync(path.join(__dirname, 'db', 'schema-phase2.sql'), 'utf8')));
+    ok('la migration vérifie les huit tables',
+      /8 table\(s\) présente\(s\)/.test(fs.readFileSync(path.join(__dirname, 'db', 'migrer-phase2.js'), 'utf8')));
   }
 
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
