@@ -91,11 +91,19 @@ function load() {
 }
 
 function save() {
-  try {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(FICHIER, JSON.stringify(config, null, 2));
-  } catch (e) {
-    console.error('   Alertes    : enregistrement impossible —', e.message);
+  // Quand PostgreSQL fait foi, le fichier n'est qu'un cache de démarrage : l'écrire
+  // réécrivait la graine versionnée à chaque lancement local (arbre de travail
+  // sale, risque de committer une config de test). On ne l'écrit qu'en mode
+  // fichiers, ou si ALERTS_FICHIER désigne explicitement un autre chemin.
+  const dbPg = (() => { try { return require('../core/db').isPg(); } catch { return false; } })();
+  const cheminImpose = Boolean(process.env.ALERTS_FICHIER);
+  if (!dbPg || cheminImpose) {
+    try {
+      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(FICHIER, JSON.stringify(config, null, 2));
+    } catch (e) {
+      console.error('   Alertes    : enregistrement impossible —', e.message);
+    }
   }
   // Persistance en base : sur un PaaS le disque est éphémère, donc une config
   // saisie dans l'interface disparaissait au redéploiement (jeton Telegram,
