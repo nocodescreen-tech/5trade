@@ -4546,6 +4546,38 @@ function tinyPng(W = 64, H = 40) {
       /8 table\(s\) présente\(s\)/.test(fs.readFileSync(path.join(__dirname, 'db', 'migrer-phase2.js'), 'utf8')));
   }
 
+  // ── Calibration : un seul juge, la même découpe ──
+  {
+    const P = require('./engine/performance');
+    const mIS = P.metriques(Array.from({ length: 60 }, () => ({ r: 0.3 })));
+    const mOOSbon = P.metriques(Array.from({ length: 40 }, () => ({ r: 0.2 })));
+    const mOOSmauvais = P.metriques(Array.from({ length: 40 }, () => ({ r: -0.1 })));
+    const mOOSmince = P.metriques(Array.from({ length: 5 }, () => ({ r: 0.5 })));
+
+    ok('un verdict peut être rendu sur des métriques déjà calculées',
+      P.verdictDepuisMetriques(mIS, mOOSbon).fiable === true);
+    ok('une validation négative est refusée avec sa raison',
+      P.verdictDepuisMetriques(mIS, mOOSmauvais).fiable === false
+      && /ne se reproduit pas/.test(P.verdictDepuisMetriques(mIS, mOOSmauvais).raisons.join(' ')));
+    ok('une validation trop mince est refusée',
+      P.verdictDepuisMetriques(mIS, mOOSmince).raisons.some(r => /sous le minimum/.test(r)));
+    ok('verdict() et verdictDepuisMetriques() ne se contredisent plus',
+      (() => {
+        const trades = Array.from({ length: 100 }, (_, i) => ({ r: i < 70 ? 0.4 : 0.3, at: new Date(2026, 0, i + 1).toISOString() }));
+        const parTrades = P.verdict(trades);
+        const parMetriques = P.verdictDepuisMetriques(parTrades.entrainement, parTrades.validation);
+        return parTrades.fiable === parMetriques.fiable;
+      })());
+
+    const calib = fs.readFileSync(path.join(__dirname, 'data-engine', 'calibrer.js'), 'utf8');
+    ok('la calibration découpe 70 / 30 chronologiquement',
+      /0\.7/.test(calib) && /entrainement/.test(calib) && /validation/.test(calib));
+    ok('la calibration juge la même découpe que celle affichée',
+      /verdictDepuisMetriques\(meilleur, oos\)/.test(calib));
+    ok('la calibration n\'écrit aucune configuration',
+      !/save\(|update\(|configurer\(/.test(calib));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

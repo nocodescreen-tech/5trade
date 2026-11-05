@@ -10,7 +10,8 @@
     "expliquer": "node delivery/expliquer.js",
     "migrer-phase2": "node db/migrer-phase2.js",
     "registre": "node strategy-engine/sync-registry.js",
-    "ingerer": "node data-engine/ingerer.js"
+    "ingerer": "node data-engine/ingerer.js",
+    "calibrer": "node data-engine/calibrer.js"
   },
   "dependencies": {
     "cheerio": "^1.0.0",

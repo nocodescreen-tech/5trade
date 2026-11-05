@@ -87,23 +87,37 @@ function decouper(trades, options = {}) {
  * Verdict de fiabilité. Ne dit jamais « rentable » : dit si la performance se
  * reproduit hors échantillon et sur un échantillon suffisant.
  */
+/**
+ * Juge une performance à partir de métriques DÉJÀ calculées sur deux périodes.
+ * Utilisé par la calibration, qui a sa propre découpe : sans cette fonction, le
+ * verdict recalculait sa propre découpe et contredisait les chiffres affichés.
+ */
+function verdictDepuisMetriques(mIS, mOOS, options = {}) {
+  const miniValidation = Number.isFinite(options.minimumValidation) ? options.minimumValidation : 30;
+  const raisons = [];
+  if (!mIS || !mIS.n) raisons.push('aucun trade tranché en entraînement');
+  if (!mOOS || !mOOS.n) raisons.push('aucune validation hors échantillon : performance non confirmée');
+  else if (mOOS.n < miniValidation) {
+    raisons.push(`validation de ${mOOS.n} trade(s) : sous le minimum de ${miniValidation}, rien n'est démontré`);
+  } else if (mOOS.expectancyR <= 0) {
+    raisons.push(`espérance hors échantillon ${mOOS.expectancyR} R : la performance ne se reproduit pas`);
+  }
+  return {
+    fiable: raisons.length === 0 && mIS.n >= 20 && mOOS.n >= miniValidation && mOOS.expectancyR > 0,
+    raisons, entrainement: mIS, validation: mOOS
+  };
+}
+
 function verdict(trades, options = {}) {
   const miniValidation = Number.isFinite(options.minimumValidation) ? options.minimumValidation : 30;
   const { entrainement, validation, motif } = decouper(trades, options);
   const mIS = metriques(entrainement);
   const mOOS = metriques(validation);
-  const raisons = [];
-  if (motif) raisons.push(motif);
-  if (!mIS.n) raisons.push('aucun trade tranché');
-  if (mOOS.n && mOOS.n < miniValidation) {
-    raisons.push(`validation de ${mOOS.n} trade(s) : sous le minimum de ${miniValidation}, rien n'est démontré`);
-  }
-  if (!mOOS.n && mIS.n) raisons.push('aucune validation hors échantillon : performance non confirmée');
-  if (mOOS.n >= miniValidation && mOOS.expectancyR <= 0) {
-    raisons.push(`espérance hors échantillon ${mOOS.expectancyR} R : la performance ne se reproduit pas`);
-  }
-  const fiable = raisons.length === 0 && mIS.n >= 20 && mOOS.n >= miniValidation && mOOS.expectancyR > 0;
-  return { fiable, raisons, entrainement: mIS, validation: mOOS };
+  const base = verdictDepuisMetriques(mIS, mOOS, options);
+  // Le motif de découpe (échantillon trop court) s'ajoute aux raisons, il ne les
+  // remplace pas : un refus doit lister TOUT ce qui bloque, pas la première cause.
+  const raisons = motif ? [motif, ...base.raisons] : base.raisons;
+  return { fiable: base.fiable && !motif, raisons, entrainement: mIS, validation: mOOS };
 }
 
 /**
@@ -139,4 +153,4 @@ function verifierChronologie(trades) {
   return { ok: anomalies.length === 0, anomalies };
 }
 
-module.exports = { metriques, decouper, verdict, parDimension, verifierChronologie, exploitables };
+module.exports = { metriques, decouper, verdict, verdictDepuisMetriques, parDimension, verifierChronologie, exploitables };
