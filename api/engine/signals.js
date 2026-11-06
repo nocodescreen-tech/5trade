@@ -566,11 +566,87 @@ function filtresDisponibles(report) {
  * ne vote pas — la structure reste exposée comme CONTEXTE (affichée, expliquée),
  * mais elle ne peut plus atteindre le seuil de confirmation à elle seule.
  */
+/**
+ * R7 — DÉPLACEMENT (displacement).
+ *
+ * Famille différente des quatre premières : celles-ci lisent la STRUCTURE (niveaux,
+ * swings, zones), celle-ci lit l'INTENSITÉ d'une bougie rapportée à la volatilité
+ * courante. Un corps de bougie supérieur à l'ATR est le signe qu'un participant
+ * important est passé, pas qu'un niveau a été touché.
+ *
+ * Indépendance mesurée : c'est ce que R1..R4 ne mesurent pas.
+ */
+function ruleDeplacement(candles) {
+  const last = candles && candles[candles.length - 1];
+  if (!last || candles.length < 20) return null;
+  const atr = atrLocal(candles, 14);
+  if (!atr || atr <= 0) return null;
+  const corps = Math.abs(last.c - last.o);
+  const ratio = corps / atr;
+  if (!Number.isFinite(ratio) || ratio < 1.1) return null;
+  const direction = last.c > last.o ? 'BUY' : 'SELL';
+  return {
+    rule: 'R7', name: 'Déplacement (corps > ATR)', sigle: 'R7',
+    direction,
+    strength: +Math.min(0.9, 0.35 + (ratio - 1.1) / 3).toFixed(3),
+    detail: `corps de ${ratio.toFixed(2)}× ATR dans le sens ${direction === 'BUY' ? 'haussier' : 'baissier'}`,
+    preuve: `deplacement:${ratio.toFixed(2)}`,
+    source: 'bougie'
+  };
+}
+
+/**
+ * R8 — EXTENSION À LA MOYENNE.
+ *
+ * Le prix s'éloigne de sa moyenne mobile de plus de 1,6 ATR : le retour vers la
+ * moyenne est le scénario privilégié, dans le sens OPPOSÉ à l'extension. C'est une
+ * lecture de contre-tendance, volontairement opposée à R2 (rupture) — elle apporte
+ * donc une information que la structure ne donne pas.
+ */
+function ruleExtension(candles) {
+  const last = candles && candles[candles.length - 1];
+  if (!last || candles.length < 60) return null;
+  const atr = atrLocal(candles, 14);
+  if (!atr || atr <= 0) return null;
+  const closes = candles.map(c => c.c);
+  const periode = 30;
+  const recentes = closes.slice(-periode);
+  const sma = recentes.reduce((a, b) => a + b, 0) / recentes.length;
+  const ecart = (last.c - sma) / atr;
+  if (!Number.isFinite(ecart) || Math.abs(ecart) < 1.6) return null;
+  return {
+    rule: 'R8', name: 'Extension à la moyenne (retour)', sigle: 'R8',
+    direction: ecart > 0 ? 'SELL' : 'BUY',
+    strength: +Math.min(0.85, 0.3 + (Math.abs(ecart) - 1.6) / 2.5).toFixed(3),
+    detail: `prix à ${ecart.toFixed(2)} ATR de sa moyenne ${periode} : retour attendu vers ${num(sma)}`,
+    preuve: `extension:${ecart.toFixed(2)}`,
+    source: 'moyenne'
+  };
+}
+
+/** ATR local, sans dépendre de la structure (évite un couplage inutile). */
+function atrLocal(candles, periode = 14) {
+  if (!Array.isArray(candles) || candles.length < periode + 2) return null;
+  const vrais = [];
+  for (let i = candles.length - periode; i < candles.length; i++) {
+    const b = candles[i], p = candles[i - 1];
+    if (!b || !p) continue;
+    vrais.push(Math.max(b.h - b.l, Math.abs(b.h - p.c), Math.abs(b.l - p.c)));
+  }
+  if (!vrais.length) return null;
+  return vrais.reduce((a, b) => a + b, 0) / vrais.length;
+}
+
 const TOUTES_REGLES = {
   R1: (candles, report) => ruleSweep(candles, report),
   R2: (candles, report) => ruleBreak(candles, report),
   R3: (candles, report) => ruleZone(candles, report),
-  R4: (candles, report) => rulePosition(report)
+  R4: (candles, report) => rulePosition(report),
+  // R7 et R8 : familles différentes (intensité de bougie, écart à la moyenne).
+  // R5 et R6 restent vacants : R5 a été retiré (il dupliquait la structure) et on
+  // ne réutilise pas un identifiant qui a porté une autre définition.
+  R7: (candles) => ruleDeplacement(candles),
+  R8: (candles) => ruleExtension(candles)
 };
 
 /** Ce que chaque règle veut dire, pour l'interface et les messages. */
@@ -578,9 +654,12 @@ const REGLES_INFO = {
   R1: 'Balayage de liquidité',
   R2: 'Rupture de structure (BOS / CHoCH)',
   R3: 'Zone réactive (order block / FVG)',
-  R4: 'Position dans le range (premium / discount)'
+  R4: 'Position dans le range (premium / discount)',
+  R7: 'Déplacement (corps > ATR)',
+  R8: 'Extension à la moyenne (retour)'
 };
-// NB : R5 n'existe plus comme regle. Le sens de la structure est un FILTRE de
+// NB : R5 reste vacant. R7 = deplacement, R8 = extension a la moyenne. Le sens de
+// la structure reste un FILTRE de
 // contexte (voir CLES_FILTRES -> 'structure'), pas une observation qui vote.
 
 const sansAccents = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -1428,5 +1507,5 @@ module.exports = {
   detect, scenarios, checklist, levelsFor, profilDepuisStrategie, TOUTES_REGLES,
   confluence, verdictAvecConfluence, TF_SUPERIEURS, TF_MS, fraicheur, normaliserMoteur, STYLES, MOTEUR_DEFAUT,
   filtresDisponibles, CLES_FILTRES, REGLES_INFO,
-  ruleSweep, ruleBreak, ruleZone, rulePosition, signalTrade
+  ruleSweep, ruleBreak, ruleZone, rulePosition, ruleDeplacement, ruleExtension, signalTrade
 };

@@ -1621,7 +1621,13 @@ function tinyPng(W = 64, H = 40) {
     // Chaque règle doit porter la nature d'empreinte qui lui correspond : c'est ce
     // qui garantit que deux règles de MÊME nature (un niveau) se comparent.
     // R5 n'est plus une regle : elle est devenue le FILTRE 'structure'.
-    const natureAttendue = { R1: 'niveau', R2: 'niveau', R3: 'zone', R4: 'range' };
+    // Chaque règle DÉCLARE la nature de sa preuve. R7 (déplacement) et R8 (écart à
+    // la moyenne) mesurent des grandeurs différentes de la structure : leur empreinte
+    // est donc d'une autre nature, et c'est voulu.
+    const natureAttendue = {
+      R1: 'niveau', R2: 'niveau', R3: 'zone', R4: 'range',
+      R7: 'deplacement', R8: 'extension'
+    };
     const natures = new Set();
     [vague(),
       (() => { const s = []; for (let i = 0; i < 90; i++) { const p = 100 + i * 0.3 + Math.sin(i / 3) * 2; s.push({ t: i * 60000, o: p, h: p + 1, l: p - 1, c: p + 0.4, v: 9 }); } return s; })(),
@@ -4691,6 +4697,46 @@ function tinyPng(W = 64, H = 40) {
     ], { seuilAlignes: 2 });
     ok('une stratégie à deux unités s\'aligne sur deux',
       deuxTF && deuxTF.aligne === true, JSON.stringify(deuxTF && deuxTF.motif));
+  }
+
+  // ── R7 et R8 : des conditions d'une autre famille ──
+  {
+    const S = require('./engine/signals');
+
+    const bougie = (c, o, h, l) => ({ t: 0, o, h, l, c, v: 10 });
+    const plat = n => Array.from({ length: n }, (_, i) => bougie(100, 100, 100.5, 99.5));
+
+    // R7 — déplacement : un corps énorme par rapport à l'ATR doit être vu.
+    const calme = plat(30);
+    ok('R7 ne dit rien sur un marché plat', S.ruleDeplacement(calme) === null);
+    const explosion = [...plat(30), bougie(104, 100, 104.2, 99.9)];
+    const v7 = S.ruleDeplacement(explosion);
+    ok('R7 voit un déplacement haussier et le nomme',
+      v7 && v7.direction === 'BUY' && /corps de/.test(v7.detail), v7 && v7.detail);
+    ok('R7 porte une empreinte de preuve propre', v7 && /^deplacement:/.test(v7.preuve), v7 && v7.preuve);
+    const chute = [...plat(30), bougie(96, 100, 100.1, 95.8)];
+    ok('R7 voit aussi le déplacement baissier', S.ruleDeplacement(chute).direction === 'SELL');
+
+    // R8 — extension à la moyenne : prix loin au-dessus → retour attendu vers le bas.
+    const montee = Array.from({ length: 60 }, (_, i) => {
+      const p = 100 + i * 0.05;
+      return bougie(p, p, p + 0.2, p - 0.2);
+    });
+    montee.push(bougie(120, 119, 121, 118.8));
+    const v8 = S.ruleExtension(montee);
+    ok('R8 propose un retour quand le prix s\'éloigne de sa moyenne',
+      v8 && v8.direction === 'SELL' && /ATR de sa moyenne/.test(v8.detail), v8 && v8.detail);
+    ok('R8 ne dit rien quand le prix est sur sa moyenne', S.ruleExtension(plat(60)) === null);
+
+    // Les identifiants R5 et R6 restent vacants : ils ont porté d'autres définitions.
+    ok('R5 et R6 ne sont pas réutilisés',
+      !S.TOUTES_REGLES.R5 && !S.TOUTES_REGLES.R6, Object.keys(S.TOUTES_REGLES).join(','));
+    ok('les nouvelles règles sont nommées pour l\'écran',
+      /Déplacement/.test(S.REGLES_INFO.R7) && /Extension/.test(S.REGLES_INFO.R8));
+
+    const mesurerSrc3 = fs.readFileSync(path.join(__dirname, 'data-engine', 'mesurer.js'), 'utf8');
+    ok('une combinaison de règles peut être éprouvée sans toucher aux documents',
+      /lire\('regles', ''\)/.test(mesurerSrc3) && /combinaison ad hoc/.test(mesurerSrc3));
   }
 
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──

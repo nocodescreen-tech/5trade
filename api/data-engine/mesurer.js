@@ -32,8 +32,13 @@ function options() {
   // Permet de comparer la fiche courante (durcie) à la version précédente (souple),
   // pour savoir si le durcissement apporte ou retire quelque chose.
   const variante = lire('variante', 'fiche');
+  // Combinaison ad hoc : sert à éprouver une hypothèse (R1+R5, R6 seul…) sans
+  // modifier la fiche enregistrée ni la base.
+  const regles = (lire('regles', '') || '').split(',').map(x => x.trim()).filter(Boolean);
+  const seuilForce = Number(lire('force', '0.65'));
+  const seuilRegles = Number(lire('seuil', '0'));
   return {
-    strategie, symbol, tf, variante,
+    strategie, symbol, tf, variante, regles, seuilForce, seuilRegles,
     fenetre: Number.isFinite(fenetre) ? fenetre : 5000,
     coutR: Number.isFinite(coutR) && coutR >= 0 ? coutR : 0.05
   };
@@ -79,12 +84,18 @@ async function profilDemande(strategie) {
 }
 
 async function principal() {
-  const { strategie, symbol, tf, fenetre, coutR, variante } = options();
+  const { strategie, symbol, tf, fenetre, coutR, variante, regles, seuilForce, seuilRegles } = options();
   await DB.init();
   if (!DB.isPg()) { console.log('PostgreSQL requis (npm run migrer).'); return; }
 
   let { profil, source } = await profilDemande(strategie);
-  if (variante === 'souple') {
+  if (regles.length) {
+    profil = { ...profil, regles, obligatoires: regles,
+      seuilForce: Number.isFinite(seuilForce) ? seuilForce : 0.65,
+      seuilRegles: seuilRegles > 0 ? seuilRegles : regles.length };
+    source = 'combinaison ad hoc : ' + regles.join(' + ') + ' (toutes obligatoires)'
+      + ' · force ' + profil.seuilForce + ' · seuil ' + profil.seuilRegles;
+  } else if (variante === 'souple') {
     // Équivalent de la fiche 1.1.0 : balayage + zone, seuil 2/2.
     profil = { ...profil, regles: ['R1', 'R3'], obligatoires: ['R1', 'R3'],
       seuilForce: 0.5, seuilRegles: 2 };
