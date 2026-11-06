@@ -13,6 +13,16 @@
 const FICHES = {
   // Scalping sweep + FVG/OB sur indices synthétiques.
   // Seule stratégie disposant d'un moteur exécutable (2 règles, seuil 2/2).
+  //
+  // MESURE HORS ÉCHANTILLON du 2026-11-05 (historique en base, coût 0.05 R/trade,
+  // découpe 70/30) — voir docs/MESURE-2026-11-05.md :
+  //   R_75 15m : entraînement 2 012 trades, PF 0.91, -0.052 R (brut -0.002 R)
+  //              validation  761 trades, PF 1.00,  0.000 R
+  //   R_25 15m : entraînement 2 083 trades, PF 0.92, -0.047 R (brut +0.003 R)
+  //              validation  833 trades, PF 1.10, +0.050 R
+  //   Verdict : NON RETENU. L'avantage brut est de quelques millièmes de R, il ne
+  //   survit pas aux frais ; et R1+R3 ne fait pas mieux que le jeu générique R1-R4.
+  //   La fiche reste enregistrée « testée » dans le registre, PAS « validée ».
   man_mv58vzhi9hyrqd: {
     // 1.1.0 : la fiche précédente (1.0.0) ne déclarait aucun marché. Une fiche
     // publiée étant immuable, on publie une nouvelle version.
