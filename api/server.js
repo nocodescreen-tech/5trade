@@ -339,6 +339,7 @@ const ProfilMarche = require('./market-intelligence/market-profile');
 // Traçabilité des évaluations (schéma phase 2) : conditions nommées + preuves.
 const Preuves = require('./engine/preuves');
 const Frais = require('./core/frais');
+const Audit = require('./security/audit');
 // Registre persistant des fiches de stratégie (versionnées, hashées).
 const Registry = require('./strategy-engine/registry');
 // Risk engine : dimensionnement sur les spécifications réelles du contrat.
@@ -1172,6 +1173,12 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
     }
     const okUser = username === account.username || username === account.email;
     if (!okUser || !verifyPassword(password, account.salt, account.hash)) {
+      // Trace de l'échec — jamais le mot de passe, jamais le sel.
+      Audit.enregistrer({
+        acteur: typeof username === 'string' ? username : null,
+        action: 'connexion', cible: 'compte', succes: false, ip: req.ip,
+        detail: { motif: okUser ? 'mot de passe invalide' : 'identifiant inconnu' }
+      }).catch(() => {});
       return res.status(401).json({ error: 'Identifiants incorrects' });
     }
 
@@ -1182,6 +1189,10 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
     if (account.verified !== false && String(process.env.OTP_ON_LOGIN) !== 'true') {
       const token = createSession(account.username);
       setSessionCookie(res, token);
+      // Connexion réussie : la trace compte autant que l'échec — sans elle, on ne
+      // peut pas distinguer « personne n'est entré » de « quelqu'un est entré ».
+      Audit.enregistrer({ acteur: account.username, action: 'connexion', cible: 'compte',
+        ip: req.ip, detail: { methode: 'mot de passe' } }).catch(() => {});
       return res.json({
         success: true,
         user: { username: account.username, email: account.email, handle: account.handle }
@@ -1222,6 +1233,9 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/sauvegarde', requireAuth, (req, res) => res.json(Backup.etat()));
 
 app.post('/api/sauvegarde', requireAuth, async (req, res) => {
+  // Audit AVANT la réponse : l'action est tracée même si elle échoue ensuite.
+  const acteur = (req.session && req.session.user) || 'anonyme';
+  Audit.enregistrer({ acteur, action: 'sauvegarde', cible: 'r2', ip: req.ip }).catch(() => {});
   try {
     res.json(await Backup.sauvegarder());
   } catch (e) {
@@ -2493,7 +2507,7 @@ app.get('/api/market/ticks', requireAuth, (req, res) => {
 
 // Routes d'alertes : extraites dans api/routes/alerts.js (découpage progressif
 // de server.js en domaines). Les dépendances sont injectées, pas globales.
-require('./routes/alerts')(app, { requireAuth, Alerts, sendMail, DB });
+require('./routes/alerts')(app, { requireAuth, Alerts, sendMail, DB, Audit });
 
 // ─── Market Intelligence (phase 1) : profil d'un instrument ───
 // Lecture seule : classe l'instrument, mesure le régime, décrit la session et la
@@ -3881,6 +3895,19 @@ app.get('/api/live/statuts', requireAuth, async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ error: 'statuts indisponibles : ' + e.message.slice(0, 120) });
+  }
+});
+
+// ─── Journal d'audit : ce qui a été fait, par qui, et si ça a réussi ───
+app.get('/api/audit', requireAuth, async (req, res) => {
+  try {
+    const limite = Math.max(1, Math.min(500, Number(req.query.limite) || 100));
+    const action = typeof req.query.action === 'string' ? req.query.action.slice(0, 80) : null;
+    const liste = await Audit.lister({ limite, action });
+    const resume = await Audit.resume({ heures: Number(req.query.heures) || 24 });
+    res.json({ success: true, disponible: liste.disponible, entrees: liste.entrees, resume: resume.actions });
+  } catch (e) {
+    res.status(500).json({ error: "journal d'audit indisponible : " + e.message.slice(0, 120) });
   }
 });
 

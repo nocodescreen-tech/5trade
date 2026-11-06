@@ -151,3 +151,21 @@ CREATE TABLE IF NOT EXISTS candles (
   CHECK (o >= l AND o <= h)
 );
 CREATE INDEX IF NOT EXISTS idx_candles_serie ON candles (symbole, timeframe, t DESC);
+
+-- ── Journal d'audit : qui a fait quoi, quand ────────────────────────────────
+-- Les actions sensibles (connexion, changement de configuration, sauvegarde,
+-- restauration, enregistrement de stratégie) doivent laisser une trace même
+-- quand tout va bien : c'est la seule façon de reconstituer un incident.
+-- Aucun secret n'y est écrit (jamais de mot de passe, jeton ou clé).
+CREATE TABLE IF NOT EXISTS audit_log (
+  id         bigserial PRIMARY KEY,
+  at         timestamptz NOT NULL DEFAULT now(),
+  acteur     text,
+  action     text NOT NULL,
+  cible      text,
+  detail     jsonb,
+  ip         text,
+  succes     boolean NOT NULL DEFAULT true
+);
+CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log (at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log (action, at DESC);

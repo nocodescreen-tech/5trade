@@ -42,10 +42,10 @@ async function appliquer(url, { silencieux = false } = {}) {
       select table_name from information_schema.tables
       where table_schema = 'public'
         and table_name in ('instruments','market_profiles','strategy_versions',
-                           'strategy_evaluations','signals','signal_evidence','backtest_results','candles')
+                           'strategy_evaluations','signals','signal_evidence','backtest_results','candles','audit_log')
       order by table_name`;
     const noms = tables.map(t => t.table_name);
-    log(`schéma phase 2 appliqué : ${lots.length} instruction(s), ${noms.length}/8 table(s) présente(s)`);
+    log(`schéma phase 2 appliqué : ${lots.length} instruction(s), ${noms.length}/9 table(s) présente(s)`);
     log('  ' + noms.join(', '));
     const manquantes = ['instruments', 'market_profiles', 'strategy_versions',
       'strategy_evaluations', 'signals', 'signal_evidence', 'backtest_results', 'candles']

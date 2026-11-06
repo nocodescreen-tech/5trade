@@ -3734,9 +3734,9 @@ function tinyPng(W = 64, H = 40) {
         await admin.end({ timeout: 5 });
       }
 
-      ok('les huit tables du schéma sont créées', !erreur && tables1.length === 8,
+      ok('les neuf tables du schéma sont créées', !erreur && tables1.length === 9,
         erreur ? erreur.slice(0, 120) : tables1.join(', '));
-      ok('le schéma est rejouable sans erreur (idempotent)', !erreur && tables2.length === 8);
+      ok('le schéma est rejouable sans erreur (idempotent)', !erreur && tables2.length === 9);
       ok('une évaluation sans version de stratégie est refusée', fkRefusee);
       ok('un statut hors nomenclature est refusé', checkRefuse);
       ok('le parcours fiche → évaluation → signal → preuve s\'insère',
@@ -4551,8 +4551,8 @@ function tinyPng(W = 64, H = 40) {
     ok('la table candles fait partie du schéma additif',
       /CREATE TABLE IF NOT EXISTS candles/.test(
         fs.readFileSync(path.join(__dirname, 'db', 'schema-phase2.sql'), 'utf8')));
-    ok('la migration vérifie les huit tables',
-      /8 table\(s\) présente\(s\)/.test(fs.readFileSync(path.join(__dirname, 'db', 'migrer-phase2.js'), 'utf8')));
+    ok('la migration vérifie les neuf tables',
+      /9 table\(s\) présente\(s\)/.test(fs.readFileSync(path.join(__dirname, 'db', 'migrer-phase2.js'), 'utf8')));
   }
 
   // ── Calibration : un seul juge, la même découpe ──
@@ -4999,6 +4999,68 @@ function tinyPng(W = 64, H = 40) {
     const pkgRacine = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
     ok('une commande de vérification est disponible sans saisie',
       typeof pkgRacine.scripts.restauration === 'string');
+  }
+
+  // ── Journal d'audit : qui a fait quoi, sans jamais écrire un secret ──
+  {
+    const A = require('./security/audit');
+
+    const masque = A.nettoyer({ password: 'secret123', token: 'abc', marches: ['a', 'b'], sous: { apikey: 'z' } });
+    ok('un mot de passe n\'entre jamais dans le journal',
+      masque.password === '[masqué]' && masque.token === '[masqué]', JSON.stringify(masque.password));
+    ok('une clé imbriquée est masquée aussi', masque.sous.apikey === '[masqué]');
+    ok('une liste est résumée par sa taille', masque.marches === '[2 élément(s)]');
+
+    const srvA = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('la connexion réussie et l\'échec sont tracés',
+      /action: 'connexion', cible: 'compte', succes: false/.test(srvA)
+      && /action: 'connexion', cible: 'compte'/.test(srvA));
+    ok('une route de lecture du journal existe',
+      /app\.get\('\/api\/audit', requireAuth/.test(srvA));
+    const rA = fs.readFileSync(path.join(__dirname, 'routes', 'alerts.js'), 'utf8');
+    ok('un changement de configuration d\'alertes est tracé',
+      /action: 'alertes\.config'/.test(rA));
+    ok('le jeton Telegram n\'est jamais recopié, seulement sa présence',
+      /telegram: !!c\.telegramToken/.test(rA) && !/telegramToken: c\.telegramToken/.test(rA));
+
+    const urlBase6 = fs.existsSync(ENV)
+      ? (fs.readFileSync(ENV, 'utf8').match(/^DATABASE_URL=(.+)$/m)?.[1] || '').trim()
+      : '';
+    if (!urlBase6) {
+      skipped('journal d\'audit (base)', 'DATABASE_URL absente du .env');
+    } else {
+      const code = [
+        "const DB = require('./api/core/db');",
+        "const A = require('./api/security/audit');",
+        "(async () => {",
+        "  await DB.init();",
+        "  const res = {};",
+        "  res.sansAction = await A.enregistrer({});",
+        "  res.ecrit = await A.enregistrer({ acteur: '__t__', action: '__test_audit__',",
+        "    detail: { password: 'xyz', marches: 3 } });",
+        "  const l = await A.lister({ limite: 20, action: '__test_audit__' });",
+        "  res.n = l.entrees.length;",
+        "  res.detail = l.entrees[0] && l.entrees[0].detail;",
+        "  const sql = DB.client();",
+        "  await sql.unsafe(\"delete from audit_log where action='__test_audit__'\").catch(() => {});",
+        "  console.log(JSON.stringify(res));",
+        "  process.exit(0);",
+        "})().catch(e => { console.error(e.message); process.exit(1); });"
+      ].join('\n');
+      let r = null, err = null;
+      try {
+        const sortie = require('child_process').execFileSync(process.execPath, ['-e', code], {
+          cwd: ROOT, encoding: 'utf8', env: { ...process.env, DATABASE_URL: urlBase6 }
+        });
+        const lignes = sortie.split('\n').map(l => l.trim()).filter(l => l.startsWith('{'));
+        r = JSON.parse(lignes[lignes.length - 1] || '{}');
+      } catch (e) { err = e.message.split('\n')[0]; }
+
+      ok('une action sans nom est refusée', !err && r && r.sansAction && r.sansAction.ok === false);
+      ok('une action est réellement écrite en base', !err && r && r.ecrit && r.ecrit.ok === true);
+      ok('le journal se relit et ne contient aucun secret',
+        !err && r && r.n === 1 && r.detail.password === '[masqué]', JSON.stringify(r && r.detail));
+    }
   }
 
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
