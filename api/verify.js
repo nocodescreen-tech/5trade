@@ -4899,6 +4899,53 @@ function tinyPng(W = 64, H = 40) {
       /serie\.slice\(0, i \+ 1\)/.test(runner), 'décision sur les bougies 0..i');
   }
 
+  // ── Coûts : « inconnu » n'est pas « zéro » ──
+  {
+    const F = require('./core/frais');
+
+    // Rien n'est saisi : aucun coût n'est appliqué, mais ce n'est pas « gratuit » —
+    // c'est « inconnu », et le drapeau le dit.
+    const or = F.fraisPour('frxXAUUSD', 4100);
+    ok("un coût non saisi n'est pas appliqué", or.applique === false, or.source);
+    ok('mais il est marqué « inconnu », pas « zéro »',
+      or.source === 'inconnu' && or.connu === false);
+    ok('des frais non saisis restent inactifs pour le backtest', F.actifs() === false);
+    ok('des frais non saisis ne sont pas déclarés vérifiés', F.verifies(['frxXAUUSD']) === false);
+
+    const inconnu = F.fraisPour('__SYMBOLE_ABSENT__', 100);
+    ok('un symbole absent est traité comme inconnu, pas comme gratuit',
+      inconnu.applique === false && inconnu.source === 'inconnu');
+
+    // Une référence est PROPOSÉE, jamais installée d'office.
+    const prop = F.suggestions(['frxXAUUSD'])[0];
+    ok('une référence est proposée pour un symbole connu',
+      prop && prop.suggestion && prop.suggestion.spread > 0 && prop.configure === false);
+    ok('un symbole sans référence est signalé comme à saisir',
+      F.suggestions(['__SYMBOLE_ABSENT__'])[0].aSaisir === true);
+    ok("les références ne s'installent pas toutes seules",
+      typeof F.semerReferences === 'function' && F.actifs() === false);
+
+    const srvH = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok("la sonde de santé expose l'état des coûts",
+      srvH.includes('verifies: Frais.verifies()'));
+  }
+
+  // ── Sauvegardes : purge des anciennes copies ──
+  {
+    const B = require('./delivery/backup');
+    ok('une purge des sauvegardes existe', typeof B.purger === 'function');
+    ok('le nombre de copies gardées a une valeur par défaut',
+      B.GARDER >= 1 && B.GARDER <= 100, String(B.GARDER));
+
+    const src = fs.readFileSync(path.join(__dirname, 'delivery', 'backup.js'), 'utf8');
+    ok('la purge s\'exécute APRÈS le dépôt réussi',
+      src.indexOf('await purger(cle)') > src.indexOf('uploadToS3'));
+    ok('un objet déjà absent n\'est pas compté comme une erreur',
+      /r\.status === 404/.test(src));
+    ok('le manifeste des sauvegardes est persisté',
+      /kvEcrire\(CLE_MANIFESTE/.test(src));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

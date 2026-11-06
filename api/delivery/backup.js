@@ -47,6 +47,51 @@ async function construire() {
   };
 }
 
+
+// ── Purge des sauvegardes ──
+// Sans purge, chaque sauvegarde s'accumule indéfiniment dans le stockage : au bout
+// d'un an à raison d'une toutes les 6 h, c'est 1 460 objets. On garde les dernières
+// et on supprime le reste — une sauvegarde de l'an dernier ne sert plus à rien.
+const GARDER = Number(process.env.BACKUP_GARDER) > 0 ? Number(process.env.BACKUP_GARDER) : 14;
+const CLE_MANIFESTE = 'sauvegardes';
+
+/**
+ * Enregistre la nouvelle clé, puis supprime les plus anciennes au-delà de GARDER.
+ * @returns {{gardees:number, supprimees:string[], erreurs:string[]}}
+ */
+async function purger(cle) {
+  const erreurs = [];
+  let manifeste = [];
+  try {
+    const brut = await DB.kvLire(CLE_MANIFESTE, []);
+    manifeste = Array.isArray(brut) ? brut.filter(Boolean) : [];
+  } catch (e) { erreurs.push('manifeste illisible : ' + e.message.slice(0, 80)); }
+
+  if (cle) manifeste.push(cle);
+  const uniques = [...new Set(manifeste)];
+  const gardees = uniques.slice(-GARDER);
+  const aSupprimer = uniques.slice(0, Math.max(0, uniques.length - GARDER));
+
+  const supprimees = [];
+  for (const vieille of aSupprimer) {
+    try {
+      const d = S3.s3Sign('DELETE', vieille, null);
+      const r = await fetch(d.url, { method: 'DELETE', headers: d.headers });
+      // 404 = déjà absente : ce n'est pas une erreur, c'est le résultat voulu.
+      if (r.ok || r.status === 404) supprimees.push(vieille);
+      else erreurs.push(vieille + ' → HTTP ' + r.status);
+    } catch (e) {
+      erreurs.push(vieille + ' → ' + e.message.slice(0, 60));
+    }
+  }
+
+  try { await DB.kvEcrire(CLE_MANIFESTE, gardees); }
+  catch (e) { erreurs.push('manifeste non enregistré : ' + e.message.slice(0, 80)); }
+
+  if (supprimees.length) console.log('[sauvegarde] purge : ' + supprimees.length + ' ancienne(s) copie(s) supprimée(s)');
+  return { gardees: gardees.length, supprimees, erreurs };
+}
+
 /** Sauvegarde complète : export, compression, dépôt R2. */
 async function sauvegarder() {
   const t0 = Date.now();
@@ -72,6 +117,13 @@ async function sauvegarder() {
     version: sauvegarde.version, mode: sauvegarde.mode,
     octets, octetsBruts, dureeMs: Date.now() - t0
   };
+  // Purge APRÈS le dépôt : si elle échoue, la sauvegarde du jour reste valide.
+  try {
+    const purge = await purger(cle);
+    dernier.purge = purge;
+  } catch (e) {
+    dernier.purge = { erreurs: [e.message.slice(0, 120)] };
+  }
   console.log(`[sauvegarde] ${cle} — ${tables.kv} kv, ${tables.strategies} stratégies, ` +
     `${tables.trades} trades (${Math.round(octets / 1024)} Ko gz) en ${dernier.dureeMs} ms`);
   return dernier;
@@ -102,4 +154,4 @@ function stop() {
   minuteur = null;
 }
 
-module.exports = { construire, sauvegarder, etat, start, stop, nomFichier };
+module.exports = { construire, sauvegarder, purger, etat, start, stop, nomFichier, GARDER };

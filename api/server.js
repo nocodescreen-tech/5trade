@@ -141,6 +141,9 @@ app.get('/healthz', async (req, res) => {
       stockage,
       ia: { deepseek: !!process.env.DEEPSEEK_API_KEY, secoursNvidia: !!process.env.NVIDIA_API_KEY },
       alertes: Alerts.diagnostic(), cycle: Alerts.etatCycle(),
+      // « inconnu » n'est pas « zéro » : on expose si les coûts sont saisis chez le
+      // courtier, seulement estimés par la table de références, ou absents.
+      frais: { actifs: Frais.actifs(), verifies: Frais.verifies() },
       uptime: Math.round(process.uptime()),
       at: new Date().toISOString()
     });
@@ -335,6 +338,7 @@ const Backup = require('./delivery/backup');
 const ProfilMarche = require('./market-intelligence/market-profile');
 // Traçabilité des évaluations (schéma phase 2) : conditions nommées + preuves.
 const Preuves = require('./engine/preuves');
+const Frais = require('./core/frais');
 // Registre persistant des fiches de stratégie (versionnées, hashées).
 const Registry = require('./strategy-engine/registry');
 // Risk engine : dimensionnement sur les spécifications réelles du contrat.
