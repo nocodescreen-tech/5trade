@@ -11,6 +11,7 @@
     "migrer": "npm --prefix api run migrer-phase2",
     "registre": "npm --prefix api run registre",
     "ingerer": "npm --prefix api run ingerer",
-    "calibrer": "npm --prefix api run calibrer"
+    "calibrer": "npm --prefix api run calibrer",
+    "mesurer": "npm --prefix api run mesurer"
   }
 }

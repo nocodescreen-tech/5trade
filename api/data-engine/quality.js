@@ -113,9 +113,11 @@ function analyser(bougies, options = {}) {
       GRAVITE.avertissement);
   }
 
-  // 5. Fraîcheur : la dernière bougie doit être récente.
+  // 5. Fraîcheur : la dernière bougie doit être récente — SAUF pour un historique
+  //    stocké, où une série qui s'arrête est normale : on mesure alors sa
+  //    couverture, pas sa fraîcheur.
   const derniere = horodatees[horodatees.length - 1];
-  if (derniere && intervalle) {
+  if (derniere && intervalle && !options.historique) {
     const age = maintenant - Number(derniere.t);
     mesures.ageMin = Math.round(age / 60000);
     if (age > intervalle * tolerance) {

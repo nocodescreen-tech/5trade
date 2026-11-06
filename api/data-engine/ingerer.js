@@ -77,7 +77,7 @@ async function principal() {
   console.log('\n  couverture en base :');
   const cov = await Candles.couverture();
   for (const s of cov.series) {
-    const q = Qualite.analyser(await Candles.lire(s.symbole, s.timeframe, { limite: 5000 }), { timeframe: s.timeframe });
+    const q = Qualite.analyser(await Candles.lire(s.symbole, s.timeframe, { limite: 5000 }), { timeframe: s.timeframe, historique: true });
     console.log(`    ${s.symbole.padEnd(10)} ${s.timeframe.padEnd(4)} ${String(s.bougies).padStart(6)} bougies · ` +
       `${String(s.jours).padStart(5)} j · ${s.manquantes === null ? '?' : s.manquantes} manquante(s) · ` +
       `qualité ${q.score} ${q.ok ? '✓' : '✗ ' + q.problemes.filter(p => p.gravite === 'critique').map(p => p.type).join(',')}`);

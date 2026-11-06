@@ -4613,6 +4613,33 @@ function tinyPng(W = 64, H = 40) {
       /--cout-r/.test(calib2) && /R BRUT/.test(calib2));
   }
 
+  // ── Historique stocké : la fraîcheur n'a pas de sens ──
+  {
+    const Q = require('./data-engine/quality');
+    const pas = 900000;
+    const vieille = Array.from({ length: 40 }, (_, i) => {
+      const c = 100 + Math.sin(i / 3);
+      return { t: Date.now() - 60 * 86400000 + i * pas, o: c, h: c + 0.5, l: c - 0.5, c, v: 10, closed: true };
+    });
+
+    const enDirect = Q.analyser(vieille, { timeframe: '15m' });
+    ok('en direct, une série figée depuis 60 jours est refusée',
+      enDirect.problemes.some(p => p.type === 'peremption'));
+
+    const enBase = Q.analyser(vieille, { timeframe: '15m', historique: true });
+    ok('en historique stocké, la même série n\'est pas « périmée »',
+      !enBase.problemes.some(p => p.type === 'peremption') && enBase.score > 0.9,
+      `score ${enBase.score}`);
+
+    const mesurerSrc = fs.readFileSync(path.join(__dirname, 'data-engine', 'mesurer.js'), 'utf8');
+    ok('la mesure utilise la fiche réelle de la base, pas un profil inventé',
+      /profilDepuisStrategie\(doc\)/.test(mesurerSrc) && /executable/.test(mesurerSrc));
+    ok('la mesure applique un coût et publie le brut pour comparaison',
+      /appliquerCout/.test(mesurerSrc) && /brut, sans coût/.test(mesurerSrc));
+    ok('la mesure juge avec la même découpe que celle affichée',
+      /verdictDepuisMetriques\(is, oos\)/.test(mesurerSrc));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');
