@@ -37,8 +37,11 @@ function options() {
   const regles = (lire('regles', '') || '').split(',').map(x => x.trim()).filter(Boolean);
   const seuilForce = Number(lire('force', '0.65'));
   const seuilRegles = Number(lire('seuil', '0'));
+  // Famille de plan : balayage | deplacement | zone. Sans plan, presque aucun
+  // signal ne peut devenir un trade (voir docs/MESURE-2026-11-05.md).
+  const plan = lire('plan', '');
   return {
-    strategie, symbol, tf, variante, regles, seuilForce, seuilRegles,
+    strategie, symbol, tf, variante, regles, seuilForce, seuilRegles, plan,
     fenetre: Number.isFinite(fenetre) ? fenetre : 5000,
     coutR: Number.isFinite(coutR) && coutR >= 0 ? coutR : 0.05
   };
@@ -84,13 +87,13 @@ async function profilDemande(strategie) {
 }
 
 async function principal() {
-  const { strategie, symbol, tf, fenetre, coutR, variante, regles, seuilForce, seuilRegles } = options();
+  const { strategie, symbol, tf, fenetre, coutR, variante, regles, seuilForce, seuilRegles, plan } = options();
   await DB.init();
   if (!DB.isPg()) { console.log('PostgreSQL requis (npm run migrer).'); return; }
 
   let { profil, source } = await profilDemande(strategie);
   if (regles.length) {
-    profil = { ...profil, regles, obligatoires: regles,
+    profil = { ...profil, regles, obligatoires: regles, plan: plan || profil.plan,
       seuilForce: Number.isFinite(seuilForce) ? seuilForce : 0.65,
       seuilRegles: seuilRegles > 0 ? seuilRegles : regles.length };
     source = 'combinaison ad hoc : ' + regles.join(' + ') + ' (toutes obligatoires)'

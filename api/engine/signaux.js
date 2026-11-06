@@ -26,6 +26,7 @@ const Signals = require('./signals');
 // premium, loin de toute zone. Un signal sans son contexte de marché n'est pas un
 // signal : c'est une figure géométrique.
 const Structure = require('./structure');
+const Plans = require('./plans');
 const Patterns = require('./patterns');
 // Frais de transaction : le plafond de coût (étape 5 de detecterTout) a besoin
 // de la configuration réelle. Sans ce require, `Frais is not defined` ne casse
@@ -407,11 +408,25 @@ function signalStrategie(candles, meta, profil) {
   const sensSignal = sensDe(v.direction);
   const atrNiveaux = Number.isFinite(v.atr) ? v.atr
     : (() => { try { return Structure.atr(candles, 14); } catch { return null; } })();
-  const brut = v.levels ? {
+  // Plan de trade : celui du moteur s'il en produit un, sinon celui de la FAMILLE
+  // de setup déclarée par la stratégie (`profil.plan`). Sans ce second chemin,
+  // toutes les stratégies étaient limitées aux rares cas où la structure fournit
+  // un plan complet — c'est ce qui plafonnait le nombre de trades mesurables.
+  let brut = v.levels ? {
     entree: arrondiPrix(v.levels.entry),
     stop: arrondiPrix(v.levels.stop),
     objectifs: [arrondiPrix(v.levels.target1), arrondiPrix(v.levels.target2)].filter(Number.isFinite)
   } : null;
+  if (!brut && profil.plan) {
+    const construit = Plans.construire(candles, sensSignal, profil.plan, options.planOptions || {});
+    if (construit) {
+      brut = {
+        entree: construit.entree,
+        stop: construit.stop,
+        objectifs: construit.objectifs
+      };
+    }
+  }
   const niveaux = assainirNiveaux(brut, sensSignal, atrNiveaux);
 
   return {

@@ -4809,6 +4809,40 @@ function tinyPng(W = 64, H = 40) {
     }
   }
 
+  // ── Plans de trade par famille de setup ──
+  {
+    const PL = require('./engine/plans');
+    const serie = Array.from({ length: 60 }, (_, i) => {
+      const p = 100 + Math.sin(i / 5) * 2;
+      return { t: i * 300000, o: p, h: p + 0.6, l: p - 0.6, c: p + 0.2, v: 10 };
+    });
+
+    for (const mode of ['balayage', 'deplacement', 'zone']) {
+      const a = PL.construire(serie, 'BUY', mode);
+      const b = PL.construire(serie, 'SELL', mode);
+      ok(`un plan ${mode} est produit dans les deux sens`,
+        a && b && a.stop < a.entree && b.stop > b.entree,
+        a ? `achat : stop ${a.stop} < entrée ${a.entree}` : 'aucun');
+      ok(`le plan ${mode} annonce un rapport gain/risque`,
+        a && Number.isFinite(a.rr) && a.rr > 0, a && String(a.rr));
+    }
+
+    ok('aucun plan sans direction valide',
+      PL.construire(serie, 'NEUTRE', 'zone') === null && PL.construire(serie, null, 'zone') === null);
+    ok('aucun plan sur une série trop courte',
+      PL.construire(serie.slice(0, 10), 'BUY', 'deplacement') === null);
+    ok('un plan dont les objectifs sont du mauvais côté est rejeté',
+      PL.valide({ entree: 100, stop: 99, objectifs: [98] }, 'BUY') === null);
+    ok('un stop égal à l\'entrée n\'est pas un plan',
+      PL.valide({ entree: 100, stop: 100, objectifs: [102] }, 'BUY') === null);
+
+    const sigSrc = fs.readFileSync(path.join(__dirname, 'engine', 'signaux.js'), 'utf8');
+    ok('le moteur utilise le plan de la famille quand la structure n\'en donne pas',
+      /if \(!brut && profil\.plan\)/.test(sigSrc) && /Plans\.construire/.test(sigSrc));
+    const mesSrc = fs.readFileSync(path.join(__dirname, 'data-engine', 'mesurer.js'), 'utf8');
+    ok('la mesure accepte une famille de plan', /lire\('plan', ''\)/.test(mesSrc));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');
