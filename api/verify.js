@@ -4843,6 +4843,62 @@ function tinyPng(W = 64, H = 40) {
     ok('la mesure accepte une famille de plan', /lire\('plan', ''\)/.test(mesSrc));
   }
 
+  // ── Stratégie autonome « retour à la moyenne » ──
+  {
+    const S = require('./strategies/retour-moyenne');
+    const R = require('./data-engine/stratégie'.replace('é', 'e'));
+    const b = (c, h, l) => ({ t: 0, o: c, h: h === undefined ? c + 0.4 : h, l: l === undefined ? c - 0.4 : l, c, v: 10 });
+
+    // A. Marché calme : oscillation serrée autour de 100, dernier prix sur la moyenne.
+    const calme = Array.from({ length: 80 }, (_, i) => b(100 + Math.sin(i / 2) * 0.3));
+    const vCalme = S.evaluer(calme);
+    ok('sans écart significatif, la stratégie refuse',
+      vCalme.trade === null && /écart insuffisant/.test(vCalme.raison), vCalme.raison);
+
+    // B. Écart extrême MAIS marché haché : la chute finale est le seul mouvement net,
+    //    le chemin parcouru reste long — donc le filtre de tendance laisse passer.
+    const hache = Array.from({ length: 76 }, (_, i) => b(100 + Math.sin(i * 1.7) * 1.2));
+    const detache = [...hache, b(98), b(97), b(96), b(95)];
+    const vDetache = S.evaluer(detache);
+    ok('un écart extrême sur un marché haché produit un plan de retour',
+      vDetache.trade !== null, vDetache.raison);
+    if (vDetache.trade) {
+      ok('le retour se fait vers la moyenne (achat après une chute)',
+        vDetache.trade.sens === 'BUY', vDetache.trade.sens);
+      ok('le stop est sous l\'entrée pour un achat', vDetache.trade.stop < vDetache.trade.entree);
+      ok('l\'objectif est la moyenne, au-dessus de l\'entrée',
+        vDetache.trade.objectif > vDetache.trade.entree);
+      ok('le rapport gain/risque est annoncé et suffisant',
+        vDetache.trade.rr >= 1, String(vDetache.trade.rr));
+    }
+
+    // C. Tendance franche ET écart fort : le filtre de tendance doit bloquer.
+    const tendance = Array.from({ length: 80 }, (_, i) => b(100 + i * 0.5));
+    tendance.push(b(150, 150.5, 149.5));
+    const vTrend = S.evaluer(tendance);
+    ok('une tendance forte interdit le retour à la moyenne',
+      vTrend.trade === null && /tendance trop forte/.test(vTrend.raison), vTrend.raison);
+
+    ok('l\'historique insuffisant ne produit rien',
+      S.evaluer(calme.slice(0, 10)).trade === null);
+
+    // Déroulement : le stop est testé avant l'objectif (prudence).
+    const trade = { sens: 'BUY', entree: 100, stop: 99, objectif: 102 };
+    const toucheStop = R.derouler(trade, [{ h: 100.5, l: 98.8, c: 99.2 }, { h: 103, l: 99, c: 102.5 }], 0);
+    ok('le stop est honoré même si l\'objectif est atteint ensuite',
+      toucheStop.r === -1 && toucheStop.sortie === 'stop', `${toucheStop.r} · ${toucheStop.sortie}`);
+    const toucheObjectif = R.derouler(trade, [{ h: 102.5, l: 99.5, c: 102 }], 0);
+    ok('l\'objectif rend le gain en R attendu',
+      Math.abs(toucheObjectif.r - 2) < 1e-9 && toucheObjectif.sortie === 'objectif', String(toucheObjectif.r));
+
+    const doc = fs.readFileSync(path.join(__dirname, 'strategies', 'retour-moyenne.js'), 'utf8');
+    ok('ses paramètres sont déclarés et versionnables',
+      /PARAMETRES/.test(doc) && /Z_ENTREE/.test(doc));
+    const runner = fs.readFileSync(path.join(__dirname, 'data-engine', 'strategie.js'), 'utf8');
+    ok('le dérouleur ne voit que le passé pour décider',
+      /serie\.slice\(0, i \+ 1\)/.test(runner), 'décision sur les bougies 0..i');
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

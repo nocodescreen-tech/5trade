@@ -13,6 +13,7 @@
     "ingerer": "npm --prefix api run ingerer",
     "calibrer": "npm --prefix api run calibrer",
     "mesurer": "npm --prefix api run mesurer",
-    "redondance": "npm --prefix api run redondance"
+    "redondance": "npm --prefix api run redondance",
+    "strategie": "npm --prefix api run strategie"
   }
 }

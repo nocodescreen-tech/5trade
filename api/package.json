@@ -13,7 +13,8 @@
     "ingerer": "node data-engine/ingerer.js",
     "calibrer": "node data-engine/calibrer.js",
     "mesurer": "node data-engine/mesurer.js",
-    "redondance": "node data-engine/redondance.js"
+    "redondance": "node data-engine/redondance.js",
+    "strategie": "node data-engine/strategie.js"
   },
   "dependencies": {
     "cheerio": "^1.0.0",
