@@ -137,6 +137,11 @@ function ficheDepuisDocument(doc, { version = '1.0.0' } = {}) {
   // moteur, et chaque valeur y est justifiée. Sans lui, on n'invente rien.
   const c = require('./fiches').complement(doc && doc.id) || {};
   const tf = Array.isArray(m.timeframes) && m.timeframes.length ? m.timeframes : [];
+  // La fiche peut ÉLARGIR les règles du moteur (variante durcie) : sans cela, une
+  // condition obligatoire ajoutée ne serait jamais évaluée et le moteur refuserait
+  // tout — ce qui masquerait le vrai résultat.
+  const regles = Array.isArray(c.regles) && c.regles.length ? c.regles
+    : (Array.isArray(m.regles) ? m.regles : []);
   const marches = Array.isArray(m.marches) ? m.marches
     : (Array.isArray(m.markets) ? m.markets : (c.supportedMarkets || []));
   return {
@@ -146,13 +151,16 @@ function ficheDepuisDocument(doc, { version = '1.0.0' } = {}) {
     supportedMarkets: marches,
     supportedRegimes: Array.isArray(m.regimes) ? m.regimes : (c.supportedRegimes || null),
     timeframes: { context: [], confirmation: [], execution: tf },
-    requiredConditions: Array.isArray(m.regles) && m.regles.length ? m.regles : (c.requiredConditions || []),
+    requiredConditions: Array.isArray(c.requiredConditions) && c.requiredConditions.length
+      ? c.requiredConditions
+      : (regles.length ? regles : []),
     optionalConditions: Array.isArray(c.optionalConditions) ? c.optionalConditions : [],
     riskModel: {
       stopLoss: m.atrStop ? `atr x${m.atrStop}` : null,
       takeProfit: m.objectifR !== undefined ? `R ${m.objectifR}` : null
     },
-    parameters: { seuilForce: m.seuilForce, seuilRegles: m.seuilRegles, style: m.style, justifications: c.justifications }
+    parameters: { seuilForce: c.seuilForce ?? m.seuilForce, seuilRegles: c.seuilRegles ?? m.seuilRegles,
+      style: m.style, justifications: c.justifications }
   };
 }
 

@@ -4022,12 +4022,15 @@ function tinyPng(W = 64, H = 40) {
     const fiche = R.ficheDepuisDocument(reel);
     ok('la fiche déclare le marché que son titre prouve',
       fiche.supportedMarkets.join() === 'synthetique', fiche.supportedMarkets.join() || 'aucun');
-    ok('les deux règles du moteur deviennent obligatoires (seuil 2/2)',
-      fiche.requiredConditions.join() === 'R1,R3');
+    // v1.2.0 : variante durcie — la confluence complète est exigée, pas 2 règles
+    // sur 2. La 1.1.0 (R1+R3) a été mesurée et écartée : -0.052 R hors coûts.
+    ok('la fiche durcie exige la confluence complète',
+      fiche.requiredConditions.join() === 'R1,R2,R3,R4' && fiche.parameters.seuilRegles === 4,
+      fiche.requiredConditions.join());
     ok('la justification accompagne la fiche',
       /titre/.test(fiche.parameters.justifications.supportedMarkets));
-    ok('une fiche modifiée passe en version 1.1.0 (immuabilité)',
-      fiche.version === '1.1.0', fiche.version);
+    ok('une fiche modifiée passe en version 1.2.0 (immuabilité)',
+      fiche.version === '1.2.0', fiche.version);
 
     // Compatibilité sur données réelles du cache.
     let cache = {};
@@ -4632,8 +4635,8 @@ function tinyPng(W = 64, H = 40) {
       `score ${enBase.score}`);
 
     const mesurerSrc = fs.readFileSync(path.join(__dirname, 'data-engine', 'mesurer.js'), 'utf8');
-    ok('la mesure utilise la fiche réelle de la base, pas un profil inventé',
-      /profilDepuisStrategie\(doc\)/.test(mesurerSrc) && /executable/.test(mesurerSrc));
+    ok('la mesure part de la fiche réellement enregistrée, pas du champ moteur seul',
+      /ficheDepuisDocument\(doc\)/.test(mesurerSrc) && /valider\(brute\)/.test(mesurerSrc));
     ok('la mesure applique un coût et publie le brut pour comparaison',
       /appliquerCout/.test(mesurerSrc) && /brut, sans coût/.test(mesurerSrc));
     ok('la mesure juge avec la même découpe que celle affichée',

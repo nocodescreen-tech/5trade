@@ -377,6 +377,22 @@ function signalStrategie(candles, meta, profil) {
     ok: (v.strength || 0) >= (profil.seuilForce || 0)
   });
 
+  // ── Conditions OBLIGATOIRES de la stratégie ──
+  // Ce moteur (utilisé par le BACKTEST et par la liste multi-signaux) ne les
+  // appliquait pas : une stratégie pouvait donc être « confirmée » au backtest
+  // alors que le direct refuse le signal. Deux moteurs, deux vérités — le défaut
+  // le plus grave possible pour une mesure.
+  const obligatoires = Array.isArray(profil.obligatoires) ? profil.obligatoires.filter(Boolean) : [];
+  const bloquees = obligatoires.filter(id => !pour.has(id));
+  if (obligatoires.length) {
+    conditions.push({
+      nom: 'Conditions obligatoires',
+      valeur: `${obligatoires.length - bloquees.length}/${obligatoires.length}`,
+      seuil: 'toutes',
+      ok: bloquees.length === 0
+    });
+  }
+
   // Les filtres exigés bloquent la confirmation : ils doivent apparaître.
   for (const f of (v.filtres || [])) {
     if (!v.filtresExiges || !v.filtresExiges.includes(f.cle)) continue;
@@ -406,7 +422,12 @@ function signalStrategie(candles, meta, profil) {
     concept: null,
     tf: meta.timeframe || null,
     sens: sensSignal,
-    status: statutDe(v.status),
+    // Une condition obligatoire manquante interdit la confirmation, quel que soit
+    // le score : c'est la même règle que le direct.
+    // 'refuse' et non 'surveiller' : le backtest accepte les deux premiers, un
+    // signal qui viole une condition obligatoire ne doit pas être compté du tout.
+    status: bloquees.length ? 'refuse' : statutDe(v.status),
+    bloquees: bloquees.length ? bloquees : undefined,
     force: r2(v.strength) || 0,
     conditions,
     preuves: v.preuves || [],

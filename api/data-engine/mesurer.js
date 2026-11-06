@@ -47,13 +47,31 @@ async function profilDemande(strategie) {
   const docs = await DB.listStrategies();
   const doc = (docs || []).find(d => d.id === strategie);
   if (!doc) throw new Error(`stratégie « ${strategie} » absente de la base`);
-  const p = Signals.profilDepuisStrategie(doc);
-  if (!p.executable) {
-    throw new Error(`« ${doc.title} » n'est pas exécutable : ${p.motif || 'aucune règle identifiable'}`);
+  // On mesure la FICHE (compléments inclus), pas le seul champ « moteur » du
+  // document : c'est la fiche qui porte les conditions obligatoires réellement
+  // appliquées, et c'est elle qui est versionnée.
+  const Registry = require('../strategy-engine/registry');
+  const brute = Registry.ficheDepuisDocument(doc);
+  const controle = require('../strategy-engine/strategy-contract').valider(brute);
+  if (!controle.ok) {
+    throw new Error(`fiche invalide : ${controle.erreurs.join(' ; ')}`);
   }
+  const fiche = controle.fiche;
+  const p = {
+    id: fiche.id,
+    titre: fiche.name,
+    version: fiche.version,
+    regles: fiche.requiredConditions,
+    obligatoires: fiche.requiredConditions,
+    seuilForce: fiche.parameters.seuilForce,
+    seuilRegles: fiche.parameters.seuilRegles,
+    timeframes: fiche.timeframes.execution,
+    parametres: { atrStop: 1 }
+  };
   return {
     profil: p,
-    source: `fiche « ${doc.title} » · règles ${p.regles.join(', ')} · seuil ${p.seuilForce} / ${p.seuilRegles}`
+    source: `fiche ${fiche.id} v${fiche.version} · règles ${p.regles.join(', ')} (toutes obligatoires)` +
+      ` · seuil ${p.seuilForce} / ${p.seuilRegles}`
   };
 }
 

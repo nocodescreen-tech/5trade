@@ -26,15 +26,21 @@ const FICHES = {
   man_mv58vzhi9hyrqd: {
     // 1.1.0 : la fiche précédente (1.0.0) ne déclarait aucun marché. Une fiche
     // publiée étant immuable, on publie une nouvelle version.
-    version: '1.1.0',
+    version: '1.2.0',
     supportedMarkets: ['synthetique'],
-    // R1 et R3 sont les seules règles du moteur, avec seuilRegles = 2 :
-    // les deux sont donc obligatoires, l'une ne suffit pas.
-    requiredConditions: ['R1', 'R3'],
+    // 1.2.0 — VARIANTE DURCIE, à éprouver. La version 1.1.0 exigeait 2 règles
+    // sur 2 (R1 sweep + R3 zone) : mesurée à -0.052 R hors frais compris, elle a
+    // été écartée. On ne l'ajuste pas en douce : on publie une nouvelle fiche qui
+    // exige la CONFLUENCE COMPLÈTE — balayage, rupture de structure, zone, position
+    // dans le range — au lieu d'une combinaison partielle.
+    regles: ['R1', 'R2', 'R3', 'R4'],
+    seuilForce: 0.70,
+    seuilRegles: 4,
+    requiredConditions: ['R1', 'R2', 'R3', 'R4'],
     optionalConditions: [],
     justifications: {
       supportedMarkets: 'titre de la stratégie : « sur indices synthétiques »',
-      requiredConditions: 'moteur : regles [R1, R3] et seuilRegles 2 sur 2 règles',
+      requiredConditions: 'v1.2.0 : confluence complète exigée (4 règles sur 4) — le moteur ne déclarait que R1 et R3',
       supportedRegimes: 'non déclaré par la stratégie : laissé vide, donc évaluée sur tous les régimes'
     }
   }
