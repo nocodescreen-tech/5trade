@@ -49,6 +49,18 @@ const PART_MAX_COUT = 0.15;
  * réelles, sinon on remplace une ignorance par une supposition.
  */
 const REFERENCES_A_VERIFIER = {
+  // Paires crypto supplémentaires : la commission d'un exchange spot (0,1 % par
+  // côté) est une valeur PUBLIÉE, contrairement au spread qui dépend du carnet.
+  // On ne renseigne donc que ce qui est vérifiable.
+  EURUSDT: { spread: 0.01, commissionPct: 0.001 },
+  GBPUSDT: { spread: 0.01, commissionPct: 0.001 },
+  BNBUSDT: { spread: 0.01, commissionPct: 0.001 },
+  ADAUSDT: { spread: 0.0002, commissionPct: 0.001 },
+  DOGEUSDT: { spread: 0.00005, commissionPct: 0.001 },
+  // Indices synthétiques voisins de R_75 : mêmes ordres de grandeur, À VÉRIFIER.
+  R_25: { spread: 0.35, commissionPct: 0 },
+  R_50: { spread: 0.50, commissionPct: 0 },
+  R_100: { spread: 0.90, commissionPct: 0 },
   frxXAUUSD: { spread: 0.30, commissionPct: 0 },
   frxXAGUSD: { spread: 0.03, commissionPct: 0 },
   frxEURUSD: { spread: 0.00012, commissionPct: 0 },
@@ -147,6 +159,9 @@ function configurer(patch = {}) {
 function fraisPour(symbol, entree) {
   const cfg = configuration();
   const perso = symbol && cfg.parSymbole[symbol];
+  // Les références NE sont PAS appliquées d'office : un coût estimé appliqué en
+  // silence remplacerait une ignorance par une supposition. Elles sont proposées
+  // par `suggestions()` et n'entrent dans le calcul qu'une fois saisies.
   const spread = perso ? perso.spread : cfg.defaut;
   const commissionPct = perso ? perso.commissionPct : cfg.commissionDefaut;
   const commission = Number.isFinite(Number(entree)) && commissionPct
@@ -159,11 +174,19 @@ function fraisPour(symbol, entree) {
   const glissement = (perso && Number.isFinite(Number(perso.glissement)))
     ? Number(perso.glissement)
     : (Number(cfg.glissement) || 0);
+  // connu = quelqu'un a réellement fourni un spread pour ce symbole (ou une
+  // valeur par défaut explicite). Sinon le total vaut 0 par construction, et ce
+  // zéro ne doit JAMAIS être lu comme « gratuit ».
+  const connu = !!perso;                       // valeur réellement saisie
+  const applique = !!perso || Number(cfg.defaut) > 0;
   return {
     spread: +spread.toFixed(6),
     commission: +commission.toFixed(6),
     glissement: +(glissement * 2).toFixed(6),
-    total: +(spread + commission + glissement * 2).toFixed(6)
+    total: +(spread + commission + glissement * 2).toFixed(6),
+    connu,
+    applique,
+    source: perso ? 'symbole' : (Number(cfg.defaut) > 0 ? 'defaut' : 'inconnu')
   };
 }
 
@@ -180,6 +203,55 @@ function actifs() {
   if (cfg.defaut > 0 || cfg.commissionDefaut > 0 || cfg.glissement > 0) return true;
   return Object.values(cfg.parSymbole)
     .some(v => v.spread > 0 || v.commissionPct > 0 || v.glissement > 0);
+}
+
+/**
+ * Ce que l'on peut proposer pour un symbole, sans l'appliquer.
+ * L'écran s'en sert pour pré-remplir ; l'owner décide de valider.
+ */
+function suggestions(symbols) {
+  const cfg = configuration();
+  const liste = Array.isArray(symbols) && symbols.length ? symbols : Object.keys(REFERENCES_A_VERIFIER);
+  return liste.map(sym => {
+    const ref = REFERENCES_A_VERIFIER[sym] || null;
+    return {
+      symbole: sym,
+      configure: !!cfg.parSymbole[sym],
+      suggestion: ref,
+      // Un symbole sans référence doit être saisi : aucune valeur inventée.
+      aSaisir: !cfg.parSymbole[sym] && !ref
+    };
+  });
+}
+
+/**
+ * Écrit les références dans la configuration. Action EXPLICITE : c'est l'owner qui
+ * décide d'utiliser ces ordres de grandeur, ils ne s'installent jamais tout seuls.
+ * @returns {{ok:boolean, ecrits:number, ignores:number}}
+ */
+function semerReferences() {
+  const cfg = configuration();
+  const parSymbole = { ...cfg.parSymbole };
+  let ecrits = 0, ignores = 0;
+  for (const [sym, ref] of Object.entries(REFERENCES_A_VERIFIER)) {
+    if (parSymbole[sym]) { ignores++; continue; }   // une valeur saisie prime toujours
+    parSymbole[sym] = { spread: ref.spread, commissionPct: ref.commissionPct };
+    ecrits++;
+  }
+  if (ecrits) configurer({ parSymbole });
+  return { ok: true, ecrits, ignores };
+}
+
+/**
+ * Les coûts sont-ils VÉRIFIÉS (saisis) ou seulement estimés (références) ?
+ * Un R net calculé sur une référence n'a pas la même valeur qu'un R net calculé
+ * sur le spread réel du courtier : l'écran doit pouvoir le dire.
+ */
+function verifies(symbols) {
+  const cfg = configuration();
+  const liste = Array.isArray(symbols) && symbols.length ? symbols : Object.keys(cfg.parSymbole);
+  if (!liste.length) return false;
+  return liste.every(sym => !!cfg.parSymbole[sym]);
 }
 
 /**
@@ -245,5 +317,6 @@ function plafondCout(entree, stop, symbol, partMax = null) {
 
 module.exports = {
   FICHIER, REFERENCES_A_VERIFIER, DEFAUT, PART_MAX_COUT,
-  configuration, configurer, fraisPour, coutEnR, actifs, coutCritique, normaliser, plafondCout
+  configuration, configurer, fraisPour, coutEnR, actifs, verifies, suggestions, semerReferences,
+  coutCritique, normaliser, plafondCout
 };

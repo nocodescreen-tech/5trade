@@ -566,11 +566,87 @@ function filtresDisponibles(report) {
  * ne vote pas — la structure reste exposée comme CONTEXTE (affichée, expliquée),
  * mais elle ne peut plus atteindre le seuil de confirmation à elle seule.
  */
+/**
+ * R7 — DÉPLACEMENT (displacement).
+ *
+ * Famille différente des quatre premières : celles-ci lisent la STRUCTURE (niveaux,
+ * swings, zones), celle-ci lit l'INTENSITÉ d'une bougie rapportée à la volatilité
+ * courante. Un corps de bougie supérieur à l'ATR est le signe qu'un participant
+ * important est passé, pas qu'un niveau a été touché.
+ *
+ * Indépendance mesurée : c'est ce que R1..R4 ne mesurent pas.
+ */
+function ruleDeplacement(candles) {
+  const last = candles && candles[candles.length - 1];
+  if (!last || candles.length < 20) return null;
+  const atr = atrLocal(candles, 14);
+  if (!atr || atr <= 0) return null;
+  const corps = Math.abs(last.c - last.o);
+  const ratio = corps / atr;
+  if (!Number.isFinite(ratio) || ratio < 1.1) return null;
+  const direction = last.c > last.o ? 'BUY' : 'SELL';
+  return {
+    rule: 'R7', name: 'Déplacement (corps > ATR)', sigle: 'R7',
+    direction,
+    strength: +Math.min(0.9, 0.35 + (ratio - 1.1) / 3).toFixed(3),
+    detail: `corps de ${ratio.toFixed(2)}× ATR dans le sens ${direction === 'BUY' ? 'haussier' : 'baissier'}`,
+    preuve: `deplacement:${ratio.toFixed(2)}`,
+    source: 'bougie'
+  };
+}
+
+/**
+ * R8 — EXTENSION À LA MOYENNE.
+ *
+ * Le prix s'éloigne de sa moyenne mobile de plus de 1,6 ATR : le retour vers la
+ * moyenne est le scénario privilégié, dans le sens OPPOSÉ à l'extension. C'est une
+ * lecture de contre-tendance, volontairement opposée à R2 (rupture) — elle apporte
+ * donc une information que la structure ne donne pas.
+ */
+function ruleExtension(candles) {
+  const last = candles && candles[candles.length - 1];
+  if (!last || candles.length < 60) return null;
+  const atr = atrLocal(candles, 14);
+  if (!atr || atr <= 0) return null;
+  const closes = candles.map(c => c.c);
+  const periode = 30;
+  const recentes = closes.slice(-periode);
+  const sma = recentes.reduce((a, b) => a + b, 0) / recentes.length;
+  const ecart = (last.c - sma) / atr;
+  if (!Number.isFinite(ecart) || Math.abs(ecart) < 1.6) return null;
+  return {
+    rule: 'R8', name: 'Extension à la moyenne (retour)', sigle: 'R8',
+    direction: ecart > 0 ? 'SELL' : 'BUY',
+    strength: +Math.min(0.85, 0.3 + (Math.abs(ecart) - 1.6) / 2.5).toFixed(3),
+    detail: `prix à ${ecart.toFixed(2)} ATR de sa moyenne ${periode} : retour attendu vers ${num(sma)}`,
+    preuve: `extension:${ecart.toFixed(2)}`,
+    source: 'moyenne'
+  };
+}
+
+/** ATR local, sans dépendre de la structure (évite un couplage inutile). */
+function atrLocal(candles, periode = 14) {
+  if (!Array.isArray(candles) || candles.length < periode + 2) return null;
+  const vrais = [];
+  for (let i = candles.length - periode; i < candles.length; i++) {
+    const b = candles[i], p = candles[i - 1];
+    if (!b || !p) continue;
+    vrais.push(Math.max(b.h - b.l, Math.abs(b.h - p.c), Math.abs(b.l - p.c)));
+  }
+  if (!vrais.length) return null;
+  return vrais.reduce((a, b) => a + b, 0) / vrais.length;
+}
+
 const TOUTES_REGLES = {
   R1: (candles, report) => ruleSweep(candles, report),
   R2: (candles, report) => ruleBreak(candles, report),
   R3: (candles, report) => ruleZone(candles, report),
-  R4: (candles, report) => rulePosition(report)
+  R4: (candles, report) => rulePosition(report),
+  // R7 et R8 : familles différentes (intensité de bougie, écart à la moyenne).
+  // R5 et R6 restent vacants : R5 a été retiré (il dupliquait la structure) et on
+  // ne réutilise pas un identifiant qui a porté une autre définition.
+  R7: (candles) => ruleDeplacement(candles),
+  R8: (candles) => ruleExtension(candles)
 };
 
 /** Ce que chaque règle veut dire, pour l'interface et les messages. */
@@ -578,9 +654,12 @@ const REGLES_INFO = {
   R1: 'Balayage de liquidité',
   R2: 'Rupture de structure (BOS / CHoCH)',
   R3: 'Zone réactive (order block / FVG)',
-  R4: 'Position dans le range (premium / discount)'
+  R4: 'Position dans le range (premium / discount)',
+  R7: 'Déplacement (corps > ATR)',
+  R8: 'Extension à la moyenne (retour)'
 };
-// NB : R5 n'existe plus comme regle. Le sens de la structure est un FILTRE de
+// NB : R5 reste vacant. R7 = deplacement, R8 = extension a la moyenne. Le sens de
+// la structure reste un FILTRE de
 // contexte (voir CLES_FILTRES -> 'structure'), pas une observation qui vote.
 
 const sansAccents = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -655,6 +734,11 @@ function normaliserMoteur(m = {}) {
     // lieu de la jeter. L'interface peut ainsi écrire noir sur blanc qu'une règle
     // demandée n'a pas été appliquée, au lieu de laisser croire qu'elle l'est.
     reglesEcartees: [...new Set(ecartees)],
+    // Conditions OBLIGATOIRES : sous-ensemble des règles dont l'absence interdit
+    // le signal. Une stratégie peut ainsi dire « sans balayage de liquidité, pas
+    // de trade » au lieu de laisser un score élevé compenser ce manque.
+    obligatoires: Array.isArray(m.obligatoires)
+      ? [...new Set(m.obligatoires.filter(r => brutes.includes(r)))].slice(0, 8) : [],
     seuilForce: borner(m.seuilForce, 0, 1, MOTEUR_DEFAUT.seuilForce),
     // Les filtres aussi peuvent être mal orthographiés : on garde la trace.
     filtresEcartes: Array.isArray(m.filtres)
@@ -723,6 +807,11 @@ function profilDepuisStrategie(doc) {
         impulsion: m.impulsion,
         atrStop: m.atrStop
       },
+      executable: true,
+      // Version de la fiche : c'est elle qui est enregistrée avec chaque
+      // évaluation, pour prouver QUELLES règles ont produit le signal.
+      version: doc.version || null,
+      obligatoires: Array.isArray(m.obligatoires) ? m.obligatoires : [],
       deduitDuTexte: false,
       motif: 'moteur défini explicitement'
     };
@@ -730,8 +819,12 @@ function profilDepuisStrategie(doc) {
 
   const texte = sansAccents(`${doc.title || ''} ${doc.content || ''} ${(doc.tags || []).join(' ')}`);
   const trouvees = [...new Set(MOTIFS_REGLE.filter(m => m.motifs.test(texte)).flatMap(m => m.regles))];
-  const tous = Object.keys(TOUTES_REGLES);
-  const regles = trouvees.length ? trouvees : tous;
+  // Une stratégie dont AUCUNE règle n'est identifiable n'est pas exécutable.
+  // Avant, on lui prêtait toutes les règles du moteur : elle produisait alors des
+  // signaux génériques sous son nom, ce qui est exactement le faux positif à
+  // interdire. Mieux vaut zéro signal qu'un signal mal attribué.
+  const regles = trouvees;
+  const executable = trouvees.length > 0;
 
   // Style déduit du texte : c'est lui qui décide des unités de temps à croiser
   // et de la largeur du stop. Une stratégie « scalping » ne se juge pas en 4 h.
@@ -754,10 +847,13 @@ function profilDepuisStrategie(doc) {
     filtres: style === 'scalping' ? ['volatilite', 'session']
       : style === 'intraday' ? ['volatilite'] : [],
     parametres: dStyle ? { atrStop: dStyle.atrStop } : undefined,
+    executable,
+    version: doc.version || null,
+    obligatoires: [],
     deduitDuTexte: trouvees.length > 0,
     motif: trouvees.length
       ? `règles déduites du texte${style ? ` · style ${dStyle.label}` : ''}`
-      : `texte sans indication : toutes les règles appliquées${style ? ` · style ${dStyle.label}` : ''}`
+      : 'stratégie non exécutable : aucune règle identifiable dans son texte (elle n\'hérite plus des règles génériques)'
   };
 }
 
@@ -790,8 +886,12 @@ function detect(candles, meta = {}, options = {}) {
   try { report._macd = macd(clean); } catch { report._macd = { macd: [], signal: [], histogram: [] }; }
 
   // Règles actives : celles demandées, sinon toutes.
+  // `strict` change ce repli : une stratégie qui ne déclare aucune règle ne doit
+  // PAS hériter de toutes les règles du moteur. C'est ce repli silencieux qui
+  // faisait passer un motif ou une structure pour la stratégie sélectionnée.
   const demandees = Array.isArray(options.regles) ? options.regles.filter(r => TOUTES_REGLES[r]) : [];
-  const actives = demandees.length ? demandees : Object.keys(TOUTES_REGLES);
+  const actives = demandees.length ? demandees
+    : (options.strict === true ? [] : Object.keys(TOUTES_REGLES));
   const rules = actives
     .map(id => { try { return TOUTES_REGLES[id](clean, report); } catch { return null; } })
     .filter(Boolean);
@@ -935,9 +1035,21 @@ function detect(candles, meta = {}, options = {}) {
   const seuilRegles = Number.isFinite(options.seuilRegles) ? options.seuilRegles : 2;
   const seuilForce = Number.isFinite(options.seuilForce) ? options.seuilForce : 0.35;
   const seuilSurveiller = Math.max(0.3, seuilForce - 0.05);
-  const status = (!desaccordFranc && !filtresKO.length
-    && independent >= seuilRegles && strength >= seuilForce) ? 'confirme'
-    : (independent >= 1 && strength >= seuilSurveiller) ? 'surveiller' : 'neutre';
+
+  // ── Conditions OBLIGATOIRES ──
+  // Une stratégie peut déclarer des règles dont l'absence interdit tout signal.
+  // Sans ce verrou, un score élevé compensait une condition critique manquante :
+  // deux règles à 0,9 valaient mieux qu'une règle vitale à zéro. C'est le faux
+  // positif que le moteur doit refuser de produire.
+  const obligatoires = Array.isArray(options.obligatoires)
+    ? options.obligatoires.filter(r => TOUTES_REGLES[r]) : [];
+  const bloquantes = obligatoires.filter(cle => !winner.some(w => w.rule === cle));
+
+  const status = bloquantes.length ? 'refuse'
+    : actives.length === 0 ? 'neutre'
+      : (!desaccordFranc && !filtresKO.length
+        && independent >= seuilRegles && strength >= seuilForce) ? 'confirme'
+        : (independent >= 1 && strength >= seuilSurveiller) ? 'surveiller' : 'neutre';
 
   // Ce que chaque camp avance, pour que le désaccord soit lisible.
   const camp = r => ({ rule: r.rule, name: r.name, direction: r.direction, strength: r.strength });
@@ -956,6 +1068,14 @@ function detect(candles, meta = {}, options = {}) {
   // Pourquoi ce n'est pas confirmé : on l'écrit au lieu de laisser deviner.
   const missing = [];
   if (status !== 'confirme') {
+    // En premier : la condition qui interdit le signal, quelle que soit la force.
+    if (bloquantes.length) {
+      missing.push(`condition(s) obligatoire(s) non remplie(s) : ${bloquantes
+        .map(c => `${c} (${TOUTES_REGLES[c].nom || 'règle'})`).join(', ')} — signal refusé`);
+    }
+    if (actives.length === 0) {
+      missing.push('cette stratégie ne déclare aucune règle : rien à exécuter (aucune règle générique n\'est appliquée à sa place)');
+    }
     if (desaccordFranc) missing.push(contradiction.lecture);
     for (const f of filtresKO) missing.push(`filtre non rempli — ${f.label} : ${f.detail}`);
     if (independent < seuilRegles) {
@@ -982,20 +1102,25 @@ function detect(candles, meta = {}, options = {}) {
   // quatre `null` (qui se lisent « calculé, puis vidé » et donnent un « — » muet
   // à l'écran) mais **null accompagné de la raison**, qui renvoie aux DEUX jeux
   // complets de `scenarios`. Ce qui n'est pas affiché doit dire pourquoi.
-  const levels = status === 'neutre'
+  // Un signal refusé n'a pas de niveaux à publier : en afficher reviendrait à
+  // proposer une entrée que le moteur vient d'interdire.
+  const sansNiveaux = status === 'neutre' || status === 'refuse';
+  const levels = sansNiveaux
     ? null
     : levelsFor(report, direction, options.parametres && options.parametres.atrStop);
-  const levelsRaison = status === 'neutre'
-    ? 'statut neutre : aucune direction activée, donc pas d\'entrée unique à annoncer. '
-      + `Les deux jeux complets sont dans scenarios — achat si ${sc.bullish.trigger}, `
-      + `vente si ${sc.bearish.trigger}`
+  const levelsRaison = sansNiveaux
+    ? (status === 'refuse'
+      ? 'signal refusé : condition obligatoire non remplie, aucun niveau n\'est publié'
+      : 'statut neutre : aucune direction activée, donc pas d\'entrée unique à annoncer. '
+        + `Les deux jeux complets sont dans scenarios — achat si ${sc.bullish.trigger}, `
+        + `vente si ${sc.bearish.trigger}`)
     : null;
   const fmt = v => (v === null || v === undefined ? '—' : v);
 
   const entete = options.strategie && options.strategie.titre
     ? `[${options.strategie.titre}] ` : '';
-  const summary = status === 'neutre'
-    ? `${entete}Aucun signal confirmé : ${missing.join(' ; ') || 'conditions insuffisantes'}.`
+  const summary = (status === 'neutre' || status === 'refuse')
+    ? `${entete}${status === 'refuse' ? 'SIGNAL REFUSÉ' : 'Aucun signal confirmé'} : ${missing.join(' ; ') || 'conditions insuffisantes'}.`
       + ` Biais ${sc.biais} (${sc.raisonBiais}).`
       + ` Scénarios : achat si ${sc.bullish.trigger}, vente si ${sc.bearish.trigger}.`
     : `${entete}${direction === 'BUY' ? 'ACHAT' : 'VENTE'} ${status === 'confirme' ? 'CONFIRMÉ' : 'à surveiller'}`
@@ -1087,6 +1212,12 @@ function detect(candles, meta = {}, options = {}) {
       ? `${reglesPour.length} d'accord · ${reglesContre.length} contre · ${reglesSansAvis.length} sans avis (${reglesSansAvis.join(', ')} : rien à dire sur ce graphique, ni pour ni contre)`
       : `${reglesPour.length} d'accord · ${reglesContre.length} contre · aucune règle muette`,
     seuils: { regles: seuilRegles, force: seuilForce },
+    // Conditions obligatoires : celles exigées et celles qui ont bloqué. C'est la
+    // trace qui permet de répondre à « pourquoi ce signal n'est pas sorti » sans
+    // relire le code.
+    obligatoires,
+    bloquantes,
+    refuse: status === 'refuse',
     // Biais d'ensemble et sa justification : quel scénario est privilégié, et
     // pourquoi. Sans ça, les deux scénarios auraient toujours le même poids.
     biais: sc.biais,
@@ -1344,9 +1475,37 @@ function verdictAvecConfluence(parTF, options = {}) {
   return { verdict: v, confluence: conf };
 }
 
+/**
+ * Fraîcheur des données : une bougie trop ancienne ne doit jamais être analysée.
+ *
+ * Le moteur calculait sans regarder l'heure : sur un marché fermé ou un flux
+ * interrompu, il rendait un verdict sur des prix d'hier. Tolérance : 3 bougies.
+ *
+ * @returns {{ok:boolean, ageMs?:number, limiteMs?:number, raison:string}}
+ */
+function fraicheur(candles, timeframe, maintenant = Date.now(), tolerance = 3) {
+  const tfMs = TF_MS[timeframe];
+  if (!tfMs) {
+    return { ok: false, raison: `unité de temps inconnue « ${timeframe} » : fraîcheur invérifiable` };
+  }
+  const dernier = (candles || []).filter(c => c && Number.isFinite(c.t)).pop();
+  if (!dernier) return { ok: false, raison: 'aucune bougie datée : fraîcheur invérifiable' };
+
+  const ageMs = maintenant - dernier.t;
+  const limiteMs = tfMs * tolerance;
+  const minutes = n => Math.round(n / 60000);
+  return {
+    ok: ageMs <= limiteMs,
+    ageMs, limiteMs,
+    raison: ageMs > limiteMs
+      ? `données périmées — dernière bougie ${timeframe} vieille de ${minutes(ageMs)} min (limite ${minutes(limiteMs)} min)`
+      : ''
+  };
+}
+
 module.exports = {
   detect, scenarios, checklist, levelsFor, profilDepuisStrategie, TOUTES_REGLES,
-  confluence, verdictAvecConfluence, TF_SUPERIEURS, normaliserMoteur, STYLES, MOTEUR_DEFAUT,
+  confluence, verdictAvecConfluence, TF_SUPERIEURS, TF_MS, fraicheur, normaliserMoteur, STYLES, MOTEUR_DEFAUT,
   filtresDisponibles, CLES_FILTRES, REGLES_INFO,
-  ruleSweep, ruleBreak, ruleZone, rulePosition, signalTrade
+  ruleSweep, ruleBreak, ruleZone, rulePosition, ruleDeplacement, ruleExtension, signalTrade
 };

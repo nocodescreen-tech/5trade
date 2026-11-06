@@ -4,3 +4,7 @@
 Dockerfile      text eol=lf
 .dockerignore   text eol=lf
 docker-entrypoint.sh text eol=lf
+
+# Les graines JSON ne doivent jamais etre renormalisees : git les reecrivait
+# entierement a chaque commit (932 lignes), noyant les vraies modifications.
+data/*.json -text

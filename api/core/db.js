@@ -83,6 +83,10 @@ async function init() {
 
 const isPg = () => usePg;
 
+/** Accès brut au client SQL (null en mode fichiers). Réservé aux modules qui ont
+ *  besoin d'écrire hors des clés kv — par exemple la traçabilité des évaluations. */
+const client = () => (usePg ? sql : null);
+
 /**
  * Export complet, pour la sauvegarde. Aucune transformation : on veut pouvoir
  * restaurer à l'identique (comptes, sessions, OTP, stratégies, trades).
@@ -315,7 +319,7 @@ async function ping() {
 }
 
 module.exports = {
-  init, isPg, ping, exporterTout, restaurer,
+  init, isPg, ping, exporterTout, restaurer, client,
   kvLire: kvGet, kvEcrire: kvSet,
   getAccount, saveAccount,
   loadSessions, saveSessions,

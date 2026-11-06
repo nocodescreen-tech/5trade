@@ -33,6 +33,23 @@ module.exports = function monterAlertes(app, deps) {
     try {
       const c = Alerts.update(req.body || {});
       Alerts.start();                    // applique tout de suite le nouvel intervalle
+      // Changement de configuration = action sensible : elle décide de ce qui sera
+      // envoyé et à qui. On trace QUI l'a fait et ce qui a changé, sans jamais
+      // recopier le jeton Telegram ni l'adresse email en clair.
+      if (deps.Audit) {
+        deps.Audit.enregistrer({
+          acteur: (req.session && req.session.user) || 'anonyme',
+          action: 'alertes.config', cible: 'surveillance', ip: req.ip,
+          detail: {
+            actif: c.actif === true,
+            marches: Array.isArray(c.marches) ? c.marches.length : 0,
+            strategies: Array.isArray(c.strategies) ? c.strategies.length : 0,
+            intervalleSec: Math.round((c.intervalleMs || 0) / 1000),
+            telegram: !!c.telegramToken,
+            email: !!c.email
+          }
+        }).catch(() => {});
+      }
       res.json({ success: true, config: c });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });

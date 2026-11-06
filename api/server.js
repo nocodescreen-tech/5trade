@@ -109,6 +109,16 @@ app.use((req, res, next) => {
 // surchargeable pour un besoin ponctuel.
 const LIMITE_CORPS = process.env.BODY_LIMIT || '12mb';
 app.use(express.json({ limit: LIMITE_CORPS }));
+
+// ── Limitation de débit sur les routes coûteuses ──
+// Une analyse IA ou un backtest appelés en boucle épuisent le budget API et
+// étouffent la surveillance. Quotas séparés : chaque route a son compteur.
+const { creer: creerLimiteur, middleware: limiteurMiddleware } = require('./security/limiteur');
+const limiteAnalyse = limiteurMiddleware(creerLimiteur({ max: 20, fenetreMs: 60000 }), 'analyse');
+const limiteBacktest = limiteurMiddleware(creerLimiteur({ max: 10, fenetreMs: 60000 }), 'backtest');
+app.use('/api/analyze', limiteAnalyse);
+app.use('/api/backtest', limiteBacktest);
+
 app.use(express.urlencoded({ extended: true, limit: LIMITE_CORPS }));
 // Sonde de sante : permet de savoir si le serveur repond SANS traverser l'auth.
 // Sans elle, un simple controle de disponibilite devait deviner une route.
@@ -130,7 +140,10 @@ app.get('/healthz', async (req, res) => {
       ok: true,
       stockage,
       ia: { deepseek: !!process.env.DEEPSEEK_API_KEY, secoursNvidia: !!process.env.NVIDIA_API_KEY },
-      alertes: Alerts.diagnostic(),
+      alertes: Alerts.diagnostic(), cycle: Alerts.etatCycle(),
+      // « inconnu » n'est pas « zéro » : on expose si les coûts sont saisis chez le
+      // courtier, seulement estimés par la table de références, ou absents.
+      frais: { actifs: Frais.actifs(), verifies: Frais.verifies() },
       uptime: Math.round(process.uptime()),
       at: new Date().toISOString()
     });
@@ -320,6 +333,25 @@ const vision = require('./delivery/vision');
 const Couts = require('./core/couts');
 const { extraireJSON } = require('./core/json-ia');
 const Backup = require('./delivery/backup');
+// Phase 1 de l'architecture adaptative : intelligence de marché (classification,
+// régime, profil). Lecture seule, aucun effet sur les signaux existants.
+const ProfilMarche = require('./market-intelligence/market-profile');
+// Traçabilité des évaluations (schéma phase 2) : conditions nommées + preuves.
+const Preuves = require('./engine/preuves');
+const Frais = require('./core/frais');
+const Audit = require('./security/audit');
+// Registre persistant des fiches de stratégie (versionnées, hashées).
+const Registry = require('./strategy-engine/registry');
+// Risk engine : dimensionnement sur les spécifications réelles du contrat.
+const PositionSizing = require('./risk-engine/position-sizing');
+// Exposition : risque cumulé, positions corrélées, série de pertes.
+const Exposition = require('./risk-engine/exposure-manager');
+// Performance : profit factor, espérance, drawdown, hors-échantillon.
+const Performance = require('./engine/performance');
+// Qualité des données : trous, doublons, prix incohérents, séries désynchronisées.
+const Qualite = require('./data-engine/quality');
+// Ratios, Monte Carlo et marche avant : la robustesse, pas la promesse.
+const Quantitative = require('./engine/quantitative');
 
 // ─── Calendrier économique — implémentation dans fundamentals.js ───
 const { filtreCalendrier } = require('./sources/fundamentals');
@@ -1141,6 +1173,12 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
     }
     const okUser = username === account.username || username === account.email;
     if (!okUser || !verifyPassword(password, account.salt, account.hash)) {
+      // Trace de l'échec — jamais le mot de passe, jamais le sel.
+      Audit.enregistrer({
+        acteur: typeof username === 'string' ? username : null,
+        action: 'connexion', cible: 'compte', succes: false, ip: req.ip,
+        detail: { motif: okUser ? 'mot de passe invalide' : 'identifiant inconnu' }
+      }).catch(() => {});
       return res.status(401).json({ error: 'Identifiants incorrects' });
     }
 
@@ -1151,6 +1189,10 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
     if (account.verified !== false && String(process.env.OTP_ON_LOGIN) !== 'true') {
       const token = createSession(account.username);
       setSessionCookie(res, token);
+      // Connexion réussie : la trace compte autant que l'échec — sans elle, on ne
+      // peut pas distinguer « personne n'est entré » de « quelqu'un est entré ».
+      Audit.enregistrer({ acteur: account.username, action: 'connexion', cible: 'compte',
+        ip: req.ip, detail: { methode: 'mot de passe' } }).catch(() => {});
       return res.json({
         success: true,
         user: { username: account.username, email: account.email, handle: account.handle }
@@ -1191,6 +1233,9 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/sauvegarde', requireAuth, (req, res) => res.json(Backup.etat()));
 
 app.post('/api/sauvegarde', requireAuth, async (req, res) => {
+  // Audit AVANT la réponse : l'action est tracée même si elle échoue ensuite.
+  const acteur = (req.session && req.session.user) || 'anonyme';
+  Audit.enregistrer({ acteur, action: 'sauvegarde', cible: 'r2', ip: req.ip }).catch(() => {});
   try {
     res.json(await Backup.sauvegarder());
   } catch (e) {
@@ -2462,7 +2507,97 @@ app.get('/api/market/ticks', requireAuth, (req, res) => {
 
 // Routes d'alertes : extraites dans api/routes/alerts.js (découpage progressif
 // de server.js en domaines). Les dépendances sont injectées, pas globales.
-require('./routes/alerts')(app, { requireAuth, Alerts, sendMail, DB });
+require('./routes/alerts')(app, { requireAuth, Alerts, sendMail, DB, Audit });
+
+// ─── Market Intelligence (phase 1) : profil d'un instrument ───
+// Lecture seule : classe l'instrument, mesure le régime, décrit la session et la
+// tolérance de spread. N'intervient pas dans la décision de signal.
+// ─── Risk engine : dimensionnement sur les spécifications réelles ───
+// Refuse explicitement quand tick size / tick value manquent : sans elles, toute
+// taille affichée serait inventée.
+app.get('/api/risk/position', requireAuth, async (req, res) => {
+  try {
+    const symbole = String(req.query.symbol || '').trim();
+    const entree = Number(req.query.entree);
+    const stop = Number(req.query.stop);
+    const capital = Number(req.query.capital);
+    const risquePct = Number(req.query.risquePct);
+    if (!symbole) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+
+    const sql = DB.client();
+    let specs = null;
+    if (sql) {
+      const [l] = await sql`
+        select symbole, tick_size, tick_value, taille_contrat, devise_compte
+        from instruments where symbole = ${symbole}`.catch(() => []);
+      if (l) {
+        specs = {
+          tickSize: l.tick_size === null ? null : Number(l.tick_size),
+          tickValue: l.tick_value === null ? null : Number(l.tick_value),
+          tailleContrat: l.taille_contrat === null ? null : Number(l.taille_contrat),
+          deviseCompte: l.devise_compte
+        };
+      }
+    }
+    const frais = require('./core/frais');
+    const cout = frais && typeof frais.fraisPour === 'function' ? frais.fraisPour(symbole) : null;
+    const instrument = { ...(specs || {}), spread: cout && Number.isFinite(cout.spread) ? cout.spread : null };
+
+    const r = PositionSizing.dimensionner({ capital, risquePct, entree, stop, instrument });
+    res.json({
+      success: true, symbole,
+      specifie: Boolean(specs),
+      ...r,
+      instrument: { tickSize: instrument.tickSize ?? null, tickValue: instrument.tickValue ?? null,
+        spread: instrument.spread ?? null }
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Renseigner les spécifications d'un contrat (celles du courtier, pas une estimation).
+app.put('/api/risk/instruments/:symbol', requireAuth, async (req, res) => {
+  try {
+    const sql = DB.client();
+    if (!sql) return res.status(503).json({ error: 'stockage PostgreSQL requis' });
+    const symbole = String(req.params.symbol || '').trim();
+    if (!symbole) return res.status(400).json({ error: 'symbole requis' });
+    const n = v => (v === undefined || v === null || v === '' ? null : Number(v));
+    const tickSize = n(req.body.tickSize);
+    const tickValue = n(req.body.tickValue);
+    if (tickSize === null || tickValue === null) {
+      return res.status(400).json({ error: 'tickSize et tickValue sont obligatoires : sans eux, aucune taille ne sera calculée' });
+    }
+    if (!(tickSize > 0) || !(tickValue > 0)) {
+      return res.status(400).json({ error: 'tickSize et tickValue doivent être strictement positifs' });
+    }
+    const { classifier } = require('./market-intelligence/instrument-classifier');
+    await sql`
+      insert into instruments (symbole, classe, tick_size, tick_value, taille_contrat, devise_compte, source, maj_le)
+      values (${symbole}, ${classifier(symbole).classe}, ${tickSize}, ${tickValue},
+              ${n(req.body.tailleContrat)}, ${req.body.deviseCompte || null}, 'manuel', now())
+      on conflict (symbole) do update set
+        tick_size = excluded.tick_size, tick_value = excluded.tick_value,
+        taille_contrat = excluded.taille_contrat, devise_compte = excluded.devise_compte,
+        source = 'manuel', maj_le = now()`;
+    res.json({ success: true, symbole, tickSize, tickValue });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/market/profil', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').trim();
+    const tf = String(req.query.tf || '15m').trim();
+    if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+    const r = await Market.getCandles(symbol, tf, 300);
+    const closes = (r.candles || []).filter(c => c.closed !== false);
+    res.json({
+      success: true, symbole: symbol, timeframe: tf, provider: r.provider || null,
+      ...ProfilMarche.profil(symbol, closes, { provider: r.provider })
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.get('/api/market/candles', requireAuth, async (req, res) => {
   try {
@@ -2685,6 +2820,21 @@ async function profilsStrategies() {
   const strategies = await loadAllStrategies();
   return (strategies || []).map(x => Signals.profilDepuisStrategie(x));
 }
+
+// Registre des fiches : ce que le moteur sait réellement exécuter, avec la version
+// exacte des règles. Lecture seule.
+app.get('/api/strategies/registre', requireAuth, async (req, res) => {
+  try {
+    const sql = DB.client();
+    if (!sql) return res.json({ success: true, disponible: false, raison: 'stockage fichiers', fiches: [] });
+    const lignes = await sql`
+      select strategie_id, version, etat, hash, cree_le
+      from strategy_versions order by strategie_id, cree_le desc`;
+    res.json({ success: true, disponible: true, fiches: lignes });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.get('/api/strategies/profiles', requireAuth, async (req, res) => {
   try {
@@ -3646,7 +3796,122 @@ app.post('/api/frais', requireAuth, (req, res) => {
  * Ce journal est la mémoire du moteur — sans lui, impossible de dire quelle
  * stratégie fonctionne réellement.
  */
-app.get('/api/journal-signaux', requireAuth, (req, res) => {
+// ─── Performance : métriques réelles, séparation entraînement / validation ───
+// Calculé sur les trades TRANCHÉS du journal (R réalisé), pas sur des intentions.
+app.get('/api/performance', requireAuth, (req, res) => {
+  try {
+    const limite = Math.min(Number(req.query.limite) || 2000, 5000);
+    const bruts = JournalSignaux.lister({ limite });
+    const trades = (bruts || [])
+      .filter(s => Number.isFinite(Number(s.r)))
+      .map(s => ({
+        id: s.cle, r: Number(s.r),
+        at: typeof s.at === 'number' ? new Date(s.at).toISOString() : s.at,
+        strategie: s.strategie || (s.source === 'strategie' ? s.nom : null),
+        symbole: s.symbol, timeframe: s.timeframe
+      }));
+    const avecStrategie = trades.filter(t => t.strategie).length;
+    res.json({
+      success: true, trades: trades.length,
+      global: Performance.metriques(trades),
+      parStrategie: Performance.parDimension(trades, 'strategie'),
+      parSymbole: Performance.parDimension(trades, 'symbole'),
+      parTimeframe: Performance.parDimension(trades, 'timeframe'),
+      verdict: Performance.verdict(trades),
+      ratios: Quantitative.ratios(trades),
+      monteCarlo: Quantitative.monteCarlo(trades, { iterations: 1000 }),
+      marcheAvant: Quantitative.marcheAvant(trades, { blocs: 4 }),
+      chronologie: Performance.verifierChronologie(trades),
+      // Provenance : un agrégat de signaux génériques n'est PAS la performance
+      // d'une stratégie. Sans cette précision, les chiffres se lisent de travers.
+      couverture: { avecStrategie, sansStrategie: trades.length - avecStrategie },
+      // Rappel explicite : ces chiffres décrivent le passé, pas une probabilité.
+      avertissement: trades.length && avecStrategie === 0
+        ? 'Aucun trade n\'est rattaché à une stratégie : ces chiffres décrivent les signaux GÉNÉRIQUES (motifs et structure), pas une stratégie nommée.'
+        : 'Performance passée sur trades tranchés : ne garantit aucun résultat futur.'
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Exposition du portefeuille : le risque d'ENSEMBLE, pas par trade ───
+// Dix positions qui misent la même chose ne sont pas dix trades, c'est un trade
+// démesuré. Corrélations calculées sur les clôtures réellement disponibles.
+app.post('/api/risk/exposition', requireAuth, async (req, res) => {
+  try {
+    const capital = Number(req.body && req.body.capital);
+    const nouvelle = (req.body && req.body.nouvelle) || null;
+    const ouvertes = Array.isArray(req.body && req.body.ouvertes) ? req.body.ouvertes : [];
+    const symboles = [...new Set([
+      ...(nouvelle && nouvelle.symbole ? [nouvelle.symbole] : []),
+      ...ouvertes.map(o => o && o.symbole)
+    ].filter(Boolean))].slice(0, 6);
+
+    const series = {};
+    for (const s of symboles) {
+      try {
+        const r = await Market.getCandles(s, '15m', 200);
+        series[s] = (r.candles || []).filter(c => c.closed !== false).map(c => c.c);
+      } catch { /* série indisponible : la corrélation sera simplement ignorée */ }
+    }
+
+    // Série de pertes : lue sur le journal réel, jamais inventée.
+    let trades = [];
+    try {
+      trades = JournalSignaux.lister({ limite: 200 })
+        .filter(x => Number.isFinite(Number(x.r)))
+        .map(x => ({ r: Number(x.r) }));
+    } catch { trades = []; }
+
+    const verdict = Exposition.verifier({
+      capital, nouvelle, ouvertes, series, trades,
+      limites: req.body && req.body.limites
+    });
+    res.json({ success: true, seriesLues: Object.keys(series), ...verdict });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Statut en direct : ce que le moteur pense MAINTENANT, pas seulement ce ───
+// qu'il a publié. Chaque cycle écrit une évaluation (VALID / WAITING / INVALID /
+// NO_DATA) même sans signal : c'est cette ligne-là qui manquait à l'écran.
+app.get('/api/live/statuts', requireAuth, async (req, res) => {
+  try {
+    const c = Alerts.get();
+    const r = await Preuves.statutsEnDirect({ limite: 200 });
+    const marches = Array.isArray(c.marches) ? c.marches.length : 0;
+    const strategies = Array.isArray(c.strategies) ? c.strategies.filter(Boolean).length : 0;
+    res.json({
+      success: true,
+      surveillance: {
+        active: c.actif === true,
+        marches,
+        strategies,
+        intervalleSec: Math.round((c.intervalleMs || 60000) / 1000),
+        // Sans stratégie cochée, le moteur tourne en mode générique : le dire,
+        // sinon l'écran laisse croire que des stratégies sont évaluées.
+        mode: strategies ? 'strategies' : 'generique'
+      },
+      disponible: r.disponible,
+      statuts: r.statuts
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'statuts indisponibles : ' + e.message.slice(0, 120) });
+  }
+});
+
+// ─── Journal d'audit : ce qui a été fait, par qui, et si ça a réussi ───
+app.get('/api/audit', requireAuth, async (req, res) => {
+  try {
+    const limite = Math.max(1, Math.min(500, Number(req.query.limite) || 100));
+    const action = typeof req.query.action === 'string' ? req.query.action.slice(0, 80) : null;
+    const liste = await Audit.lister({ limite, action });
+    const resume = await Audit.resume({ heures: Number(req.query.heures) || 24 });
+    res.json({ success: true, disponible: liste.disponible, entrees: liste.entrees, resume: resume.actions });
+  } catch (e) {
+    res.status(500).json({ error: "journal d'audit indisponible : " + e.message.slice(0, 120) });
+  }
+});
+
+app.get('/api/journal-signaux', requireAuth, async (req, res) => {
   try {
     const limite = Math.min(Number(req.query.limite) || 100, 500);
     const signaux = JournalSignaux.lister({
@@ -3655,7 +3920,10 @@ app.get('/api/journal-signaux', requireAuth, (req, res) => {
       source: req.query.source ? String(req.query.source) : undefined,
       limite
     });
-    res.json({ success: true, signaux, stats: JournalSignaux.stats() });
+    // Pourquoi un signal est sorti (ou pas) : les conditions NOMMÉES, lues en base.
+    // Absent du schéma phase 2 ⇒ tableau vide, l'écran n'affiche simplement rien.
+    const preuves = await Preuves.dernieresEvaluations({ limite: 8 }).catch(() => []);
+    res.json({ success: true, signaux, stats: JournalSignaux.stats(), preuves });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -3710,6 +3978,22 @@ async function start() {
   await DB.init();
   await loadSessions();
 
+  // Registre des fiches de stratégie (schéma phase 2) : enregistre les fiches
+  // exécutables pour que chaque trace cite la version exacte des règles. Ne bloque
+  // jamais le démarrage, et ne dit rien si la base est en mode fichiers.
+  try {
+    const r = await Registry.synchroniser(await loadAllStrategies());
+    if (r.disponible) {
+      console.log(`   Registre   : ${r.enregistrees} fiche(s) enregistrée(s), ` +
+        `${r.identiques} identique(s), ${r.refusees.length} refusée(s)`);
+      for (const ref of r.refusees.slice(0, 3)) {
+        console.log(`                refusée ${ref.id} : ${[ref.raison, ...(ref.erreurs || [])].join(' — ')}`);
+      }
+    }
+  } catch (e) {
+    console.log(`   Registre   : indisponible (${String(e.message).slice(0, 80)})`);
+  }
+
   // Alertes : la base fait foi (le fichier local est un cache). Sans cette
   // relecture, une config saisie dans l'interface était perdue au redéploiement.
   await Alerts.hydrater();
@@ -3724,9 +4008,17 @@ async function start() {
   Alerts.start({
     market: Market,
     signals: Signals,
+    // Filtre économique : branché dans la boucle d'alertes (il ne l'était que
+    // sur le chemin IA). Un signal ne doit pas partir pendant une publication.
+    filtreNews: filtreCalendrier,
     // Multi-signaux : permet à la surveillance de dire QUELLE stratégie s'est
     // déclenchée, et de lister les motifs, au lieu d'un verdict anonyme.
     signaux: Multi,
+    // Traçabilité phase 2 : conditions nommées et preuves en base. Absent ou en
+    // panne, la surveillance continue — la trace n'est jamais bloquante.
+    preuves: Preuves,
+    // Contrôle de qualité AVANT toute décision : une série trouée ne décide de rien.
+    qualite: Qualite,
     // Le journal des signaux : la surveillance l'alimente aussi, sinon il ne
     // contient que ce qui a été vu pendant que l'onglet « Direct » était ouvert.
     journal: JournalSignaux,
@@ -3739,10 +4031,18 @@ async function start() {
         const ids = Array.isArray(c.strategies) ? c.strategies.filter(Boolean) : [];
         if (!ids.length) return [];
         const strategies = await loadAllStrategies();
+        // Version réellement enregistrée de chaque fiche : c'est elle qui part
+        // dans la trace, pour prouver QUELLES règles ont produit le signal.
+        const carte = await Registry.carteVersions().catch(() => ({}));
         return ids
           .map(id => (strategies || []).find(x => x.id === id))
           .filter(Boolean)
-          .map(doc => Signals.profilDepuisStrategie(doc));
+          .map(doc => {
+            const p = Signals.profilDepuisStrategie(doc);
+            const enr = carte[doc.id];
+            if (enr) { p.version = enr.version; p.versionEtat = enr.etat; }
+            return p;
+          });
       } catch { return []; }
     },
     sendMail,

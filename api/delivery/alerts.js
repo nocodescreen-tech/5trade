@@ -28,7 +28,9 @@ const { DATA_DIR } = require('../core/dossiers');
 // sur le VRAI fichier — lancer le canonique effaçait donc la configuration de
 // l'utilisateur (surveillance éteinte, email vidé, marchés remplacés par un
 // marché de test). Les tests écrivent désormais dans un fichier à part.
-const FICHIER = process.env.ALERTS_FICHIER || path.join(DATA_DIR, 'alerts.json');
+// Chemin résolu À CHAQUE APPEL, pas au chargement : sinon ALERTS_FICHIER posé
+// plus tard (tests) était ignoré et la suite réécrivait la graine versionnée.
+const fichierAlertes = () => process.env.ALERTS_FICHIER || path.join(DATA_DIR, 'alerts.json');
 
 /** Configuration par défaut : surveillance inactive tant qu'aucun email n'est posé. */
 const DEFAUT = {
@@ -80,8 +82,8 @@ function appliquerEnvironnement() {
 
 function load() {
   try {
-    if (fs.existsSync(FICHIER)) {
-      const disque = JSON.parse(fs.readFileSync(FICHIER, 'utf8'));
+    if (fs.existsSync(fichierAlertes())) {
+      const disque = JSON.parse(fs.readFileSync(fichierAlertes(), 'utf8'));
       config = { ...DEFAUT, ...disque };
     }
   } catch (e) {
@@ -91,11 +93,22 @@ function load() {
 }
 
 function save() {
-  try {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(FICHIER, JSON.stringify(config, null, 2));
-  } catch (e) {
-    console.error('   Alertes    : enregistrement impossible —', e.message);
+  // Quand PostgreSQL fait foi, le fichier n'est qu'un cache de démarrage : l'écrire
+  // réécrivait la graine versionnée à chaque lancement local (arbre de travail
+  // sale, risque de committer une config de test). On ne l'écrit qu'en mode
+  // fichiers, ou si ALERTS_FICHIER désigne explicitement un autre chemin.
+  // DATABASE_URL suffit : le module est chargé AVANT DB.init(), donc isPg() est
+  // encore faux à ce moment-là et le fichier était réécrit au démarrage.
+  const dbPg = Boolean(process.env.DATABASE_URL)
+    || (() => { try { return require('../core/db').isPg(); } catch { return false; } })();
+  const cheminImpose = Boolean(process.env.ALERTS_FICHIER);
+  if (!dbPg || cheminImpose) {
+    try {
+      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(fichierAlertes(), JSON.stringify(config, null, 2));
+    } catch (e) {
+      console.error('   Alertes    : enregistrement impossible —', e.message);
+    }
   }
   // Persistance en base : sur un PaaS le disque est éphémère, donc une config
   // saisie dans l'interface disparaissait au redéploiement (jeton Telegram,
@@ -121,10 +134,17 @@ async function hydrater() {
     config = { ...DEFAUT, ...depuisBase };
     // L'environnement reste prioritaire sur une config relue en base.
     appliquerEnvironnement();
-    try {
-      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(FICHIER, JSON.stringify(config, null, 2));
-    } catch { /* le cache local est secondaire */ }
+    // Cache local : inutile — et nuisible — quand PostgreSQL fait foi. L'écrire
+    // réécrivait la graine versionnée à chaque démarrage (arbre sale, config de
+    // base recopiée dans le dépôt). On ne l'écrit que si le fichier est la source
+    // (mode fichiers) ou si un chemin a été imposé (tests).
+    const cheminImpose = Boolean(process.env.ALERTS_FICHIER);
+    if (cheminImpose) {
+      try {
+        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+        fs.writeFileSync(fichierAlertes(), JSON.stringify(config, null, 2));
+      } catch { /* le cache local est secondaire */ }
+    }
     return true;
   } catch (e) {
     console.error('   Alertes    : relecture en base impossible —', e.message);
@@ -380,8 +400,33 @@ function compose(v, m, prix, qualite = {}) {
   };
 }
 
-/** Un tour de vérification. Séparé de la boucle pour être testable directement. */
+// ── Verrou de cycle ──
+// setInterval ne regarde pas si le tour precedent est fini. Avec 13 marches et des
+// appels reseau, un cycle peut depasser l'intervalle : deux tours simultanes
+// envoient deux fois la meme alerte et se disputent la base. Un seul tour a la fois.
+let cycleEnCours = false;
+// Dernier cycle : duree et nombre de chevauchements ignores (visible dans /healthz).
+let dernierCycle = { debut: null, fin: null, dureeMs: null, chevauchements: 0 };
+const etatCycle = () => ({ enCours: cycleEnCours, ...dernierCycle });
+
+/** Verifie s'il y a lieu, en refusant de superposer deux tours. */
 async function verifier(force = false) {
+  if (cycleEnCours) {
+    dernierCycle.chevauchements++;
+    return { controle: false, raison: 'cycle precedent encore en cours : tour ignore' };
+  }
+  cycleEnCours = true;
+  const debut = Date.now();
+  try {
+    return await verifierBrut(force);
+  } finally {
+    cycleEnCours = false;
+    dernierCycle = { debut, fin: Date.now(), dureeMs: Date.now() - debut, chevauchements: dernierCycle.chevauchements };
+  }
+}
+
+/** Un tour de verification. Separe de la boucle pour etre testable directement. */
+async function verifierBrut(force = false) {
   // Pas d'exception ici : un contrôle demandé avant le démarrage de la
   // surveillance doit répondre « rien à faire », pas casser l'appelant.
   if (!deps) return { controle: false, raison: 'surveillance non démarrée' };
@@ -394,6 +439,9 @@ async function verifier(force = false) {
   if (!c.marches || !c.marches.length) return { controle: false, raison: 'aucun marché surveillé' };
 
   const resultats = [];
+  // Mode d'analyse du cycle : 'stratégie' (règles de la stratégie sélectionnée)
+  // ou 'générique' (aucune stratégie — on l'assume et on le dit).
+  let modeAnalyse = 'stratégie';
   let envoyes = 0;
 
   // Aucun marche surveille : il n'y a RIEN a controler. Repondre « controle
@@ -411,7 +459,91 @@ async function verifier(force = false) {
         resultats.push({ ...m, verdict: 'données insuffisantes' });
         continue;
       }
-      const v = deps.signals.detect(closes, { symbol: m.symbol, timeframe: m.tf });
+
+      // ── Fraîcheur ──
+      // Un moteur ne doit jamais analyser silencieusement des prix périmés :
+      // marché fermé, flux coupé, cache figé. On refuse, en disant l'âge.
+      const frais = deps.signals.fraicheur ? deps.signals.fraicheur(closes, m.tf) : { ok: true };
+      if (!frais.ok) {
+        resultats.push({ ...m, verdict: frais.raison || 'fraîcheur des données non vérifiable' });
+        continue;
+      }
+
+      // ── Qualité des données ──
+      // La fraîcheur ne dit rien des trous, doublons, prix incohérents ni bougies
+      // aberrantes : ces défauts faussent le calcul sans jamais lever d'erreur.
+      let qualite = null;
+      if (deps.qualite && typeof deps.qualite.analyser === 'function') {
+        qualite = deps.qualite.analyser(closes, { timeframe: m.tf });
+        if (!qualite.ok) {
+          const graves = qualite.problemes.filter(p => p.gravite === 'critique').map(p => p.detail);
+          resultats.push({ ...m, verdict: `données non fiables — ${graves.join(' ; ')}`, qualite });
+          continue;
+        }
+      }
+      // ── Le verdict est rendu SELON LA STRATÉGIE SÉLECTIONNÉE ──
+      // Avant, detect() était appelé sans options : le go/no-go reposait donc sur
+      // toutes les règles génériques, quelle que soit la stratégie cochée. La
+      // stratégie ne changeait que le texte du message — exactement l'illusion
+      // qu'il fallait supprimer.
+      const profils = (typeof deps.profilsSurveillance === 'function')
+        ? (await deps.profilsSurveillance().catch(() => [])) : [];
+      const profilsValides = (profils || []).filter(p => p && p.executable !== false);
+      const profilsInexecutables = (profils || []).filter(p => p && p.executable === false);
+
+      if (!profils.length) {
+        // Aucune stratégie : mode auto assumé, règles génériques, message honnête.
+        // Aucune stratégie : mode auto assumé, règles génériques. On ne pousse
+        // PAS d'entrée de résultat ici (elle ferait doublon avec celle du signal
+        // et fausserait le décompte des envois) : on le dit dans le mode.
+        modeAnalyse = 'générique (aucune stratégie sélectionnée)';
+      } else if (!profilsValides.length) {
+        // Toutes les stratégies cochées sont documentaires : on refuse plutôt que
+        // de produire un signal générique sous un nom de stratégie.
+        resultats.push({ ...m, verdict: `signal refusé — stratégie(s) non exécutable(s) : ${
+          profilsInexecutables.map(p => p.titre || p.id).join(', ')}` });
+        continue;
+      }
+
+      // Verdict du moteur, restreint aux règles de la première stratégie retenue.
+      const profil = profilsValides[0];
+      const optionsMoteur = profil ? {
+        regles: profil.regles,
+        obligatoires: profil.obligatoires || [],
+        seuilForce: profil.seuilForce,
+        seuilRegles: profil.seuilRegles,
+        parametres: profil.parametres,
+        strategie: { id: profil.id, titre: profil.titre },
+        strict: true
+      } : {};
+      const v = deps.signals.detect(closes, { symbol: m.symbol, timeframe: m.tf }, optionsMoteur);
+
+      // ── Traçabilité : conditions NOMMÉES + preuve ──
+      // Le journal ne gardait que des compteurs (5/7). On enregistre ici le nom de
+      // chaque condition, si elle était obligatoire, si elle est remplie et ce
+      // qu'elle valait. C'est la réponse à « pourquoi ce signal ? ».
+      let traceEvaluation = null;
+      if (deps.preuves && typeof deps.preuves.enregistrerEvaluation === 'function') {
+        const statutTrace = v.status === 'refuse' ? 'INVALID'
+          : v.status === 'confirme' ? 'VALID'
+            : (v.reglesActives && v.reglesActives.length ? 'WAITING' : 'NO_DATA');
+        try {
+          traceEvaluation = await deps.preuves.enregistrerEvaluation({
+            strategieId: (profil && profil.id) || 'generique',
+            version: profil && profil.version,
+            fiche: profil ? { id: profil.id, titre: profil.titre, regles: profil.regles } : undefined,
+            symbole: m.symbol,
+            timeframe: m.tf,
+            regime: null,
+            statut: statutTrace,
+            direction: v.direction,
+            conditions: Object.fromEntries((v.reglesActives || []).map(r => [r, true])),
+            manquantes: v.bloquantes || [],
+            score: v.strength,
+            preuves: deps.preuves.preuvesDepuisVerdict(v)
+          });
+        } catch { traceEvaluation = null; }
+      }
 
       // ── Signaux MULTIPLES : la liste, pas un verdict seul ──
       // La surveillance n'utilisait AUCUNE stratégie de l'utilisateur : elle
@@ -421,8 +553,8 @@ async function verifier(force = false) {
       let multi = null;
       if (deps.signaux && typeof deps.signaux.detecterTout === 'function') {
         try {
-          const profils = typeof deps.profilsSurveillance === 'function'
-            ? (await deps.profilsSurveillance()) : [];
+          // On réutilise les profils déjà chargés : les relire ferait deux appels
+          // disque/base par marché et par cycle, pour un résultat identique.
           multi = deps.signaux.detecterTout(closes, { symbol: m.symbol, timeframe: m.tf },
             { profils });
         } catch { multi = null; }
@@ -443,6 +575,24 @@ async function verifier(force = false) {
       }
 
       if (v.status !== 'confirme') { resultats.push({ ...m, verdict: v.status }); continue; }
+
+      // ── Filtre économique ──
+      // Il n'était appliqué QUE sur le chemin IA, jamais ici : une alerte pouvait
+      // donc partir pendant une publication NFP. Et quand le calendrier est
+      // injoignable, on le dit au lieu de laisser croire que tout est vérifié.
+      let fondamental = null;
+      if (typeof deps.filtreNews === 'function') {
+        try {
+          fondamental = await deps.filtreNews(m.symbol);
+        } catch (e) {
+          fondamental = { ok: true, verifie: false,
+            lecture: `filtre économique en erreur (${e.message}) : non vérifié` };
+        }
+        if (fondamental && fondamental.bloque) {
+          resultats.push({ ...m, verdict: `signal bloqué — ${fondamental.lecture}`, fondamental });
+          continue;
+        }
+      }
       if (v.strength < c.forceMin) {
         resultats.push({ ...m, verdict: `confirmé mais force ${Number(v.strength).toFixed(2)}/1 (${v.forceNiveau || '—'}) < seuil` });
         continue;
@@ -458,19 +608,76 @@ async function verifier(force = false) {
       // 2. Alignement des unités de temps : le contexte doit confirmer.
       let confluence = null;
       if (c.exigerAlignement) {
-        const tfs = deps.signals.TF_SUPERIEURS[m.tf] || [m.tf];
+        // La stratégie peut imposer SES unités (M5 + M1, ou H4 + H1 + M15). On
+        // les utilise telles quelles ; sinon on retombe sur la hiérarchie standard.
+        // Avant, une stratégie M5/M1 était jugée sur les unités supérieures du
+        // symbole, jamais sur celles qu'elle demandait.
+        // Une stratégie peut déclarer 1, 2 ou 3 unités — et sous deux formes : un
+        // tableau, ou un objet par rôle {context, confirmation, execution}. Avant,
+        // seule la forme tableau était lue : une fiche écrite par rôle voyait ses
+        // unités IGNORÉES et se faisait juger sur la hiérarchie standard du
+        // symbole. Une stratégie en 2 unités était donc évaluée sur d'autres.
+        const declarees = (() => {
+          const d = profil && profil.timeframes;
+          if (Array.isArray(d)) return d.length ? d : null;
+          if (d && typeof d === 'object') {
+            const liste = ['context', 'confirmation', 'execution']
+              .flatMap(role => (Array.isArray(d[role]) ? d[role] : []));
+            return liste.length ? [...new Set(liste)] : null;
+          }
+          return null;
+        })();
+        const tfs = declarees || (deps.signals.TF_SUPERIEURS[m.tf] || [m.tf]);
         const parTF = [{ tf: m.tf, verdict: v }];
+        // Séries conservées pour vérifier la synchronisation temporelle des unités.
+        const series = [{ timeframe: m.tf, bougies: closes }];
+        const indisponibles = [];
         for (const t of tfs) {
           if (t === m.tf) continue;
           try {
             const r2 = await deps.market.getCandles(m.symbol, t, 300, m.provider);
             const cl2 = (r2.candles || []).filter(x => x.closed !== false);
             if (cl2.length >= 20) {
-              parTF.push({ tf: t, verdict: deps.signals.detect(cl2, { symbol: m.symbol, timeframe: t }) });
+              // MÊME profil, même seuils : la confluence ne doit pas juger avec
+              // des règles que la stratégie n'a pas demandées.
+              parTF.push({ tf: t, verdict: deps.signals.detect(cl2, { symbol: m.symbol, timeframe: t }, optionsMoteur) });
+              series.push({ timeframe: t, bougies: cl2 });
+            } else {
+              indisponibles.push(`${t} (${cl2.length} bougie(s))`);
             }
-          } catch (e) { /* une unité indisponible ne bloque pas les autres */ }
+          } catch (e) {
+            indisponibles.push(`${t} (indisponible)`);
+          }
         }
-        confluence = deps.signals.confluence(parTF, { seuilAlignes: c.seuilAlignes });
+        // Une unité exigée par la stratégie et absente est une condition
+        // obligatoire manquante : aucun signal, et on dit laquelle.
+        if (declarees && indisponibles.length) {
+          resultats.push({ ...m,
+            verdict: `signal refusé — unité(s) de temps obligatoire(s) indisponible(s) : ${indisponibles.join(', ')}` });
+          continue;
+        }
+        // Un H1 figé depuis trois heures ne confirme rien sur un M5 : la
+        // synchronisation est vérifiée avant d'utiliser la confluence.
+        if (deps.qualite && typeof deps.qualite.synchroniser === 'function' && series.length > 1) {
+          const sync = deps.qualite.synchroniser(series);
+          if (!sync.aligne) {
+            resultats.push({ ...m, verdict: 'unités de temps désynchronisées — ' + sync.raison, sync });
+            continue;
+          }
+        }
+        // Le seuil d'alignement doit rester compatible avec ce que la stratégie
+        // déclare : exiger 2 unités alignées sur une stratégie qui n'en déclare
+        // qu'une la refusait systématiquement. Quand la stratégie déclare ses
+        // unités, ce sont ses conditions : elles doivent toutes s'aligner.
+        const seuilDemande = (profil && Number.isFinite(profil.seuilAlignes))
+          ? profil.seuilAlignes : c.seuilAlignes;
+        const seuilEffectif = declarees
+          ? Math.min(seuilDemande, Math.max(1, parTF.length))
+          : seuilDemande;
+        confluence = deps.signals.confluence(parTF, { seuilAlignes: seuilEffectif });
+        confluence.seuilDemande = seuilDemande;
+        confluence.seuilApplique = seuilEffectif;
+        confluence.unitesDeclarees = declarees || null;
         if (!confluence.aligne) {
           resultats.push({ ...m, verdict: `refusé — alignement insuffisant (${confluence.motif})`, confluence });
           continue;
@@ -533,6 +740,26 @@ async function verifier(force = false) {
       }
       c.deja.push(cle);
       envoyes++;
+      // Signal publié : rattaché à son évaluation, avec ses niveaux. Sans ce lien,
+      // la table signals serait orpheline et la question « pourquoi ce signal ? »
+      // resterait sans réponse.
+      if (traceEvaluation && traceEvaluation.ok && deps.preuves
+        && typeof deps.preuves.enregistrerSignal === 'function') {
+        try {
+          await deps.preuves.enregistrerSignal({
+            evaluationId: traceEvaluation.id,
+            strategieId: (profil && profil.id) || 'generique',
+            version: (profil && profil.version) || undefined,
+            symbole: m.symbol, timeframe: m.tf,
+            direction: v.direction,
+            entree: v.levels ? v.levels.entry : null,
+            stop: v.levels ? v.levels.stop : null,
+            objectifs: v.levels ? [v.levels.target1, v.levels.target2].filter(Number.isFinite) : [],
+            // `rr` est celui calculé et contrôlé plus haut (le niveau ne le porte pas).
+            rr: Number.isFinite(rr) ? rr : null
+          });
+        } catch { /* la trace ne doit jamais empêcher l'alerte */ }
+      }
       c.derniers.unshift({
         at: Date.now(), symbol: m.symbol, tf: m.tf, provider: m.provider,
         providerLabel: deps.labelOf ? deps.labelOf(m.provider) : m.provider,
@@ -589,6 +816,7 @@ function retirerAbonnement(endpoint) {
 }
 
 module.exports = {
+  etatCycle,
   load, save, get, update, resetDedup, verifier, start, stop, compose, DEFAUT,
   hydrater, diagnostic,
   listerAbonnements, ajouterAbonnement, retirerAbonnement
