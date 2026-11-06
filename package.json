@@ -12,6 +12,7 @@
     "registre": "npm --prefix api run registre",
     "ingerer": "npm --prefix api run ingerer",
     "calibrer": "npm --prefix api run calibrer",
-    "mesurer": "npm --prefix api run mesurer"
+    "mesurer": "npm --prefix api run mesurer",
+    "redondance": "npm --prefix api run redondance"
   }
 }

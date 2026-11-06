@@ -4643,6 +4643,29 @@ function tinyPng(W = 64, H = 40) {
       /verdictDepuisMetriques\(is, oos\)/.test(mesurerSrc));
   }
 
+  // ── Redondance des règles, et mesure réellement attribuée ──
+  {
+    const R = require('./data-engine/redondance');
+
+    // phi : deux variables identiques valent 1, opposées -1, indépendantes 0.
+    ok('phi vaut 1 pour deux votes identiques', R.phi([1, 1, 0, 0], [1, 1, 0, 0]) === 1);
+    ok('phi vaut -1 pour deux votes opposés', R.phi([1, 1, 0, 0], [0, 0, 1, 1]) === -1);
+    ok('phi vaut 0 quand les votes sont indépendants',
+      R.phi([1, 0, 1, 0], [1, 1, 0, 0]) === 0);
+
+    const mesurerSrc2 = fs.readFileSync(path.join(__dirname, 'data-engine', 'mesurer.js'), 'utf8');
+    // Sans ce filtre, on mesure les motifs et la structure en croyant mesurer la
+    // stratégie : 2 000 trades attribués à une stratégie qui en produit 4.
+    ok('la mesure ne compte que les signaux de stratégie',
+      /sources: \['strategie'\]/.test(mesurerSrc2));
+    ok('la mesure peut comparer variante souple et durcie',
+      /variante === 'souple'/.test(mesurerSrc2));
+
+    const redSrc = fs.readFileSync(path.join(__dirname, 'data-engine', 'redondance.js'), 'utf8');
+    ok('la redondance utilise les vrais votes du moteur et non une approximation',
+      /Signals\.detect\(fen/.test(redSrc) && /reglesPour/.test(redSrc));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

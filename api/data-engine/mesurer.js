@@ -29,8 +29,11 @@ function options() {
   const tf = lire('tf', libres[2] || '15m');
   const fenetre = Number(lire('fenetre', '5000'));
   const coutR = Number(lire('cout-r', '0.05'));
+  // Permet de comparer la fiche courante (durcie) à la version précédente (souple),
+  // pour savoir si le durcissement apporte ou retire quelque chose.
+  const variante = lire('variante', 'fiche');
   return {
-    strategie, symbol, tf,
+    strategie, symbol, tf, variante,
     fenetre: Number.isFinite(fenetre) ? fenetre : 5000,
     coutR: Number.isFinite(coutR) && coutR >= 0 ? coutR : 0.05
   };
@@ -76,11 +79,17 @@ async function profilDemande(strategie) {
 }
 
 async function principal() {
-  const { strategie, symbol, tf, fenetre, coutR } = options();
+  const { strategie, symbol, tf, fenetre, coutR, variante } = options();
   await DB.init();
   if (!DB.isPg()) { console.log('PostgreSQL requis (npm run migrer).'); return; }
 
-  const { profil, source } = await profilDemande(strategie);
+  let { profil, source } = await profilDemande(strategie);
+  if (variante === 'souple') {
+    // Équivalent de la fiche 1.1.0 : balayage + zone, seuil 2/2.
+    profil = { ...profil, regles: ['R1', 'R3'], obligatoires: ['R1', 'R3'],
+      seuilForce: 0.5, seuilRegles: 2 };
+    source += ' — VARIANTE SOUPLE (R1+R3, seuil 2/2)';
+  }
   let serie = await Candles.lire(symbol, tf, { limite: 50000 });
   if (!serie.length) {
     console.log(`Aucune bougie pour ${symbol} ${tf}. Lancez « npm run ingerer -- ${symbol} ${tf} 10000 ».`);
@@ -95,7 +104,12 @@ async function principal() {
 
   const mesurer = bougies => {
     const r = Backtest.lancer(bougies, { symbol, timeframe: tf },
-      { profils: [profil], pas: 3, maxBougies: 20000, plafond: 20000, limiteTrades: 20000 });
+      {
+        profils: [profil], pas: 3, maxBougies: 20000, plafond: 20000, limiteTrades: 20000,
+        // LA correction : ne garder que les signaux de STRATÉGIE. Sans ce filtre,
+        // 2 000 trades de motifs se glissaient dans la mesure d'une stratégie.
+        sources: ['strategie']
+      });
     if (r.indisponible) return { indisponible: true, raison: r.raison };
     const clos = Performance.appliquerCout(
       (r.trades || []).filter(t => Number.isFinite(Number(t.r))), coutR);
