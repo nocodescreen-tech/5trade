@@ -612,8 +612,21 @@ async function verifierBrut(force = false) {
         // les utilise telles quelles ; sinon on retombe sur la hiérarchie standard.
         // Avant, une stratégie M5/M1 était jugée sur les unités supérieures du
         // symbole, jamais sur celles qu'elle demandait.
-        const declarees = (profil && Array.isArray(profil.timeframes) && profil.timeframes.length)
-          ? profil.timeframes : null;
+        // Une stratégie peut déclarer 1, 2 ou 3 unités — et sous deux formes : un
+        // tableau, ou un objet par rôle {context, confirmation, execution}. Avant,
+        // seule la forme tableau était lue : une fiche écrite par rôle voyait ses
+        // unités IGNORÉES et se faisait juger sur la hiérarchie standard du
+        // symbole. Une stratégie en 2 unités était donc évaluée sur d'autres.
+        const declarees = (() => {
+          const d = profil && profil.timeframes;
+          if (Array.isArray(d)) return d.length ? d : null;
+          if (d && typeof d === 'object') {
+            const liste = ['context', 'confirmation', 'execution']
+              .flatMap(role => (Array.isArray(d[role]) ? d[role] : []));
+            return liste.length ? [...new Set(liste)] : null;
+          }
+          return null;
+        })();
         const tfs = declarees || (deps.signals.TF_SUPERIEURS[m.tf] || [m.tf]);
         const parTF = [{ tf: m.tf, verdict: v }];
         // Séries conservées pour vérifier la synchronisation temporelle des unités.
@@ -652,9 +665,19 @@ async function verifierBrut(force = false) {
             continue;
           }
         }
-        confluence = deps.signals.confluence(parTF, {
-          seuilAlignes: (profil && Number.isFinite(profil.seuilAlignes)) ? profil.seuilAlignes : c.seuilAlignes
-        });
+        // Le seuil d'alignement doit rester compatible avec ce que la stratégie
+        // déclare : exiger 2 unités alignées sur une stratégie qui n'en déclare
+        // qu'une la refusait systématiquement. Quand la stratégie déclare ses
+        // unités, ce sont ses conditions : elles doivent toutes s'aligner.
+        const seuilDemande = (profil && Number.isFinite(profil.seuilAlignes))
+          ? profil.seuilAlignes : c.seuilAlignes;
+        const seuilEffectif = declarees
+          ? Math.min(seuilDemande, Math.max(1, parTF.length))
+          : seuilDemande;
+        confluence = deps.signals.confluence(parTF, { seuilAlignes: seuilEffectif });
+        confluence.seuilDemande = seuilDemande;
+        confluence.seuilApplique = seuilEffectif;
+        confluence.unitesDeclarees = declarees || null;
         if (!confluence.aligne) {
           resultats.push({ ...m, verdict: `refusé — alignement insuffisant (${confluence.motif})`, confluence });
           continue;

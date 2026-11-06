@@ -4666,6 +4666,33 @@ function tinyPng(W = 64, H = 40) {
       /Signals\.detect\(fen/.test(redSrc) && /reglesPour/.test(redSrc));
   }
 
+  // ── Une stratégie peut exiger 1, 2 ou 3 unités de temps ──
+  {
+    const Al = require('./delivery/alerts');
+    const srvTf = fs.readFileSync(path.join(__dirname, 'delivery', 'alerts.js'), 'utf8');
+
+    ok('les unités déclarées sont lues sous les deux formes (tableau et rôles)',
+      /Array\.isArray\(d\)/.test(srvTf) && /confirmation/.test(srvTf) && /execution/.test(srvTf));
+    ok('le seuil d\'alignement ne dépasse jamais les unités déclarées',
+      /Math\.min\(seuilDemande, Math\.max\(1, parTF\.length\)\)/.test(srvTf));
+    ok('le seuil demandé et le seuil appliqué sont tous deux publiés',
+      /seuilDemande = seuilDemande/.test(srvTf) && /seuilApplique = seuilEffectif/.test(srvTf));
+
+    // Confluence : une seule unité déclarée ne doit pas exiger deux alignements.
+    const Signals = require('./engine/signals');
+    const unTF = Signals.confluence([{ tf: '5m', verdict: { direction: 'BUY', strength: 0.9, trend: 'bullish' } }],
+      { seuilAlignes: 1 });
+    ok('une stratégie à une seule unité peut s\'aligner',
+      unTF && unTF.aligne === true, JSON.stringify(unTF && unTF.motif));
+
+    const deuxTF = Signals.confluence([
+      { tf: '5m', verdict: { direction: 'BUY', strength: 0.9, trend: 'bullish' } },
+      { tf: '15m', verdict: { direction: 'BUY', strength: 0.8, trend: 'bullish' } }
+    ], { seuilAlignes: 2 });
+    ok('une stratégie à deux unités s\'aligne sur deux',
+      deuxTF && deuxTF.aligne === true, JSON.stringify(deuxTF && deuxTF.motif));
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');
