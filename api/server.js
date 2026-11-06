@@ -3852,6 +3852,34 @@ app.post('/api/risk/exposition', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Statut en direct : ce que le moteur pense MAINTENANT, pas seulement ce ───
+// qu'il a publié. Chaque cycle écrit une évaluation (VALID / WAITING / INVALID /
+// NO_DATA) même sans signal : c'est cette ligne-là qui manquait à l'écran.
+app.get('/api/live/statuts', requireAuth, async (req, res) => {
+  try {
+    const c = Alerts.get();
+    const r = await Preuves.statutsEnDirect({ limite: 200 });
+    const marches = Array.isArray(c.marches) ? c.marches.length : 0;
+    const strategies = Array.isArray(c.strategies) ? c.strategies.filter(Boolean).length : 0;
+    res.json({
+      success: true,
+      surveillance: {
+        active: c.actif === true,
+        marches,
+        strategies,
+        intervalleSec: Math.round((c.intervalleMs || 60000) / 1000),
+        // Sans stratégie cochée, le moteur tourne en mode générique : le dire,
+        // sinon l'écran laisse croire que des stratégies sont évaluées.
+        mode: strategies ? 'strategies' : 'generique'
+      },
+      disponible: r.disponible,
+      statuts: r.statuts
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'statuts indisponibles : ' + e.message.slice(0, 120) });
+  }
+});
+
 app.get('/api/journal-signaux', requireAuth, async (req, res) => {
   try {
     const limite = Math.min(Number(req.query.limite) || 100, 500);

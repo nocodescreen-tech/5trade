@@ -4739,6 +4739,76 @@ function tinyPng(W = 64, H = 40) {
       /lire\('regles', ''\)/.test(mesurerSrc3) && /combinaison ad hoc/.test(mesurerSrc3));
   }
 
+  // ── Statut en direct : ce que le moteur pense, pas seulement ce qu'il publie ──
+  {
+    const srvS = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('une route expose les statuts en direct',
+      /app\.get\('\/api\/live\/statuts', requireAuth/.test(srvS));
+    ok('le mode générique est signalé explicitement',
+      /mode: strategies \? 'strategies' : 'generique'/.test(srvS));
+
+    const frontSrc = fs.readFileSync(path.join(ROOT, 'frontend', 'index.html'), 'utf8');
+    ok('l\'écran affiche le statut en direct',
+      /function StatutDirectPanel/.test(frontSrc) && /<StatutDirectPanel \/>/.test(frontSrc));
+    ok('l\'écran distingue stratégie, motif et structure',
+      /s\.source === 'strategie' \? 'stratégie'/.test(frontSrc));
+
+    const urlBase5 = fs.existsSync(ENV)
+      ? (fs.readFileSync(ENV, 'utf8').match(/^DATABASE_URL=(.+)$/m)?.[1] || '').trim()
+      : '';
+    if (!urlBase5) {
+      skipped('statuts en direct (base)', 'DATABASE_URL absente du .env');
+    } else {
+      const code = [
+        "const DB = require('./api/core/db');",
+        "const P = require('./api/engine/preuves');",
+        "(async () => {",
+        "  await DB.init();",
+        "  const sql = DB.client();",
+        "  const res = {};",
+        "  try {",
+        "    const e1 = await P.enregistrerEvaluation({ strategieId: '__t_stat__', version: '1.0.0',",
+        "      symbole: '__SYM__', timeframe: '5m', statut: 'WAITING', direction: 'BUY', score: 0.4,",
+        "      preuves: [{ condition: 'R1', remplie: false, obligatoire: true }, { condition: 'R7', remplie: true }] });",
+        "    res.e1 = e1 && e1.ok;",
+        "    await new Promise(r => setTimeout(r, 15));",
+        "    const e2 = await P.enregistrerEvaluation({ strategieId: '__t_stat__', version: '1.0.0',",
+        "      symbole: '__SYM__', timeframe: '5m', statut: 'VALID', direction: 'SELL', score: 0.9,",
+        "      preuves: [{ condition: 'R1', remplie: true, obligatoire: true }, { condition: 'R7', remplie: true }] });",
+        "    res.e2 = e2 && e2.ok;",
+        "    const r = await P.statutsEnDirect({ limite: 200 });",
+        "    const mien = (r.statuts || []).filter(s => s.strategie === '__t_stat__');",
+        "    res.nombre = mien.length;",
+        "    res.statut = mien[0] && mien[0].statut;",
+        "    res.conditions = mien[0] ? mien[0].conditionRemplies + '/' + mien[0].conditionTotal : null;",
+        "    res.manquantes = mien[0] ? mien[0].obligatoiresManquantes : null;",
+        "  } finally {",
+        "    await sql.unsafe(\"delete from signal_evidence where evaluation_id in (select id from strategy_evaluations where strategie_id='__t_stat__')\").catch(() => {});",
+        "    await sql.unsafe(\"delete from strategy_evaluations where strategie_id='__t_stat__'\").catch(() => {});",
+        "  }",
+        "  console.log(JSON.stringify(res));",
+        "  process.exit(0);",
+        "})().catch(e => { console.error(e.message); process.exit(1); });"
+      ].join('\n');
+      let r = null, err = null;
+      try {
+        const sortie = require('child_process').execFileSync(process.execPath, ['-e', code], {
+          cwd: ROOT, encoding: 'utf8', env: { ...process.env, DATABASE_URL: urlBase5 }
+        });
+        const lignes = sortie.split('\n').map(l => l.trim()).filter(l => l.startsWith('{'));
+        r = JSON.parse(lignes[lignes.length - 1] || '{}');
+      } catch (e) { err = e.message.split('\n')[0]; }
+
+      ok('une évaluation peut être enregistrée avec ses conditions', !err && r && r.e1 === true, err || '');
+      ok('le statut en direct ne rend qu\'une ligne par couple stratégie × marché',
+        !err && r && r.nombre === 1, `${r && r.nombre} ligne(s)`);
+      ok('c\'est la PLUS RÉCENTE qui est rendue',
+        !err && r && r.statut === 'VALID', err || (r && r.statut));
+      ok('les conditions remplies sont comptées',
+        !err && r && r.conditions === '2/2', `${r && r.conditions}`);
+    }
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

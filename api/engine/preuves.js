@@ -204,7 +204,76 @@ async function dernieresEvaluations({ limite = 20, symbole = null } = {}) {
   }
 }
 
+
+/**
+ * Statut EN DIRECT de chaque couple (stratégie, marché).
+ *
+ * Une évaluation est écrite à chaque cycle de surveillance, même quand aucun
+ * signal n'est publié : c'est là que vit le statut réel (VALID, WAITING,
+ * INVALID, NO_DATA). Sans cette lecture, l'utilisateur ne voit que les signaux
+ * publiés et croit que le moteur ne fait rien — ou pire, que tout est bon.
+ *
+ * DISTINCT ON garde la plus récente par couple : une requête, pas N+1.
+ */
+async function statutsEnDirect({ limite = 200, fraicheurMs = 3600000 } = {}) {
+  if (!(await disponible())) return { disponible: false, statuts: [] };
+  const sql = DB.client();
+  const max = Math.max(1, Math.min(500, Number(limite) || 200));
+  try {
+    const lignes = await sql`
+      select distinct on (strategie_id, symbole)
+        id, strategie_id, version, symbole, timeframe, statut, direction, score, at, regime
+      from strategy_evaluations
+      order by strategie_id, symbole, at desc, id desc
+      limit ${max}`;
+
+    if (!lignes.length) return { disponible: true, statuts: [] };
+
+    const ids = lignes.map(l => l.id);
+    const preuves = await sql`
+      select evaluation_id, condition, obligatoire, remplie, detail
+      from signal_evidence where evaluation_id in ${sql(ids)}
+      order by obligatoire desc, id asc`;
+
+    const parEval = new Map();
+    for (const pr of preuves) {
+      if (!parEval.has(pr.evaluation_id)) parEval.set(pr.evaluation_id, []);
+      parEval.get(pr.evaluation_id).push({
+        condition: pr.condition,
+        obligatoire: pr.obligatoire === true,
+        remplie: pr.remplie === true,
+        detail: pr.detail
+      });
+    }
+
+    const maintenant = Date.now();
+    return {
+      disponible: true,
+      statuts: lignes.map(l => {
+        const at = new Date(l.at).getTime();
+        const conditions = parEval.get(l.id) || [];
+        const obligatoires = conditions.filter(c => c.obligatoire);
+        return {
+          strategie: l.strategie_id,
+          version: l.version,
+          symbole: l.symbole,
+          timeframe: l.timeframe,
+          statut: l.statut,
+          direction: l.direction,
+          score: l.score === null ? null : Number(l.score),
+          conditionRemplies: conditions.filter(c => c.remplie).length,
+          conditionTotal: conditions.length,
+          obligatoiresManquantes: obligatoires.filter(c => !c.remplie).map(c => c.condition),
+          ageMs: Number.isFinite(at) ? Math.max(0, maintenant - at) : null,
+          frais: Number.isFinite(at) ? (maintenant - at) <= fraicheurMs : false,
+          at: l.at
+        };
+      })
+    };
+  } catch { return { disponible: false, statuts: [] }; }
+}
+
 module.exports = {
   disponible, oublierSchema, enregistrerEvaluation, enregistrerSignal,
-  preuvesDepuisVerdict, dernieresEvaluations, VERSION_PAR_DEFAUT
+  preuvesDepuisVerdict, dernieresEvaluations, statutsEnDirect, VERSION_PAR_DEFAUT
 };

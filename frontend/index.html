@@ -3705,6 +3705,117 @@ function ResultBadge({ result, status }) {
 // émis par le moteur est enregistré avec ses niveaux, puis réévalué sur les
 // bougies suivantes. On voit donc si l'objectif 1 a été atteint, si le stop a
 // été touché, ou si le prix est revenu au point d'entrée (BE).
+// ── Statut EN DIRECT des stratégies ────────────────────────────────────────
+// Le journal ne montre que les signaux PUBLIÉS. Or le moteur évalue chaque
+// marché à chaque cycle, même quand il ne publie rien : c'est ce statut-là
+// (VALID / WAITING / INVALID / NO_DATA) qui dit ce qu'il pense maintenant.
+function StatutDirectPanel() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+
+  const charger = async () => {
+    try {
+      const r = await (await api('/live/statuts')).json();
+      if (!r.success) throw new Error(r.error || 'lecture impossible');
+      setData(r); setErr('');
+    } catch (e) { setErr(e.message); }
+  };
+  useEffect(() => {
+    charger();
+    const t = setInterval(charger, 30000);
+    return () => clearInterval(t);
+  }, []);
+
+  const teinte = { VALID: '#34d399', WAITING: '#fbbf24', INVALID: '#f87171', NO_DATA: '#94a3b8' };
+  const libelle = { VALID: 'Valide', WAITING: 'En attente', INVALID: 'Invalidé', NO_DATA: 'Pas de données' };
+  const surv = data && data.surveillance;
+  const statuts = (data && data.statuts) ? data.statuts : [];
+  const age = ms => ms === null || ms === undefined ? '—'
+    : ms < 60000 ? Math.round(ms / 1000) + ' s'
+    : ms < 3600000 ? Math.round(ms / 60000) + ' min' : Math.round(ms / 3600000) + ' h';
+
+  return (
+    <div className="panel" style={{ padding:'14px 18px', marginBottom:16 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', marginBottom:10 }}>
+        <i className="fas fa-satellite-dish" style={{ color: surv && surv.active ? '#34d399' : '#94a3b8' }}></i>
+        <b style={{ fontSize:13.5, color:'#fff' }}>Statut en direct</b>
+        {surv && (
+          <>
+            <span className="badge" style={{ fontSize:10,
+              background: surv.active ? 'rgba(34,211,138,.14)' : 'rgba(148,163,184,.12)',
+              color: surv.active ? '#34d399' : 'var(--muted)' }}>
+              {surv.active ? 'surveillance active' : 'surveillance arrêtée'}
+            </span>
+            <span className="badge" style={{ fontSize:10, background:'rgba(96,165,250,.13)', color:'#93c5fd' }}>
+              {surv.marches} marché(s) · {surv.strategies} stratégie(s) · toutes les {surv.intervalleSec} s
+            </span>
+            {surv.mode === 'generique' && (
+              <span className="badge" style={{ fontSize:10, background:'rgba(245,158,11,.14)', color:'#fbbf24' }}
+                title="Aucune stratégie cochée : le moteur juge avec ses règles génériques, pas avec une stratégie.">
+                mode générique
+              </span>
+            )}
+          </>
+        )}
+      </div>
+
+      {err && <div style={{ fontSize:11.5, color:'#f87171' }}>{err}</div>}
+      {!err && statuts.length === 0 && (
+        <div style={{ fontSize:11.5, color:'var(--muted)' }}>
+          Aucune évaluation enregistrée pour l'instant. Chaque cycle de surveillance en
+          écrit une — si cette liste reste vide alors que la surveillance est active,
+          c'est que le moteur n'a pas encore tourné.
+        </div>
+      )}
+
+      {statuts.length > 0 && (
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11.5 }}>
+            <thead>
+              <tr style={{ color:'var(--muted)', textAlign:'left' }}>
+                <th style={{ padding:'4px 8px 4px 0' }}>Marché</th>
+                <th style={{ padding:'4px 8px' }}>Unité</th>
+                <th style={{ padding:'4px 8px' }}>Stratégie</th>
+                <th style={{ padding:'4px 8px' }}>Statut</th>
+                <th style={{ padding:'4px 8px' }}>Conditions</th>
+                <th style={{ padding:'4px 8px' }}>Manquantes</th>
+                <th style={{ padding:'4px 8px' }}>Âge</th>
+              </tr>
+            </thead>
+            <tbody>
+              {statuts.slice(0, 40).map((s, i) => (
+                <tr key={i} style={{ borderTop:'1px solid rgba(148,163,184,.12)' }}>
+                  <td style={{ padding:'5px 8px 5px 0', color:'#fff' }}>{s.symbole}</td>
+                  <td style={{ padding:'5px 8px', color:'var(--muted)' }}>{s.timeframe || '—'}</td>
+                  <td style={{ padding:'5px 8px', color:'var(--muted)' }}>
+                    {s.strategie}{s.version ? ' · v' + s.version : ''}
+                  </td>
+                  <td style={{ padding:'5px 8px' }}>
+                    <span style={{ fontSize:10, padding:'2px 7px', borderRadius:999,
+                      background: (teinte[s.statut] || '#94a3b8') + '22',
+                      color: teinte[s.statut] || '#94a3b8' }}>
+                      {libelle[s.statut] || s.statut}
+                    </span>
+                  </td>
+                  <td style={{ padding:'5px 8px', color:'var(--muted)' }}>
+                    {s.conditionTotal ? s.conditionRemplies + '/' + s.conditionTotal : '—'}
+                  </td>
+                  <td style={{ padding:'5px 8px', color: s.obligatoiresManquantes.length ? '#f87171' : 'var(--muted)' }}>
+                    {s.obligatoiresManquantes.length ? s.obligatoiresManquantes.join(', ') : '—'}
+                  </td>
+                  <td style={{ padding:'5px 8px', color: s.frais ? 'var(--muted)' : '#fbbf24' }}>
+                    {age(s.ageMs)}{s.frais ? '' : ' (figé)'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function JournalSignauxPanel() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
@@ -3802,6 +3913,17 @@ function JournalSignauxPanel() {
               {s.symbol} {s.timeframe}
             </span>
             <b style={{ fontSize:12, color:'#e2e8f0' }}>{(s.strategie || s.nom || '').slice(0, 40)}</b>
+            {/* D'où vient ce signal : une stratégie, un motif de chandelier ou
+                la structure du marché. Sans cette étiquette, un motif de
+                chandelier ressemble à un signal de stratégie — et personne
+                ne peut savoir ce qui a réellement parlé. */}
+            <span className="badge" style={{ fontSize:9, background:'rgba(148,163,184,.10)',
+              color: s.source === 'strategie' ? '#93c5fd' : 'var(--muted)' }}
+              title={s.source === 'strategie'
+                ? 'Signal produit par une stratégie déclarée'
+                : 'Signal générique : motif ou structure, aucune stratégie déclarée'}>
+              {s.source === 'strategie' ? 'stratégie' : s.source === 'motif' ? 'motif' : s.source === 'structure' ? 'structure' : (s.source || 'générique')}
+            </span>
             <span className="badge" style={{ fontSize:9, background:'transparent', border:`1px solid ${s.sens === 'long' ? '#34d399' : '#f87171'}`, color: s.sens === 'long' ? '#34d399' : '#f87171' }}>
               {s.sens === 'long' ? 'ACHAT' : 'VENTE'}
             </span>
@@ -4535,6 +4657,7 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
     <>
       {/* Le devenir des signaux du moteur, en tête du journal : c'est la seule
           partie qui ne dépend pas d'une saisie manuelle. */}
+      <StatutDirectPanel />
       <JournalSignauxPanel />
       <BacktestPanel />
 
