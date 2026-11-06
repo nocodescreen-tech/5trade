@@ -4946,6 +4946,61 @@ function tinyPng(W = 64, H = 40) {
       /kvEcrire\(CLE_MANIFESTE/.test(src));
   }
 
+  // ── Frontend sans CDN : l'application ne doit pas dépendre d'un tiers ──
+  {
+    const front = fs.readFileSync(path.join(ROOT, 'frontend', 'index.html'), 'utf8');
+    for (const f of ['react.production.min.js', 'react-dom.production.min.js', 'babel.min.js', 'tailwind.js']) {
+      const existe = fs.existsSync(path.join(ROOT, 'frontend', 'vendor', f));
+      ok(`le fichier local ${f} est présent`, existe);
+    }
+    ok('React, ReactDOM et Babel sont chargés depuis le dépôt',
+      !/unpkg\.com\/react/.test(front) && !/unpkg\.com\/@babel/.test(front),
+      'aucun unpkg dans les balises script');
+    ok('Tailwind est servi localement',
+      !/cdn\.tailwindcss\.com/.test(front) && /\/vendor\/tailwind\.js/.test(front));
+    ok('le graphique essaie le fichier local en premier',
+      front.indexOf("'lightweight-charts.js?v=4.2.3'") < front.indexOf('unpkg.com/lightweight-charts'));
+  }
+
+  // ── Sauvegardes : vérifier qu'elles sont restaurables ──
+  {
+    const R = require('./data-engine/restauration');
+
+    const valide = { version: 1, at: '2026-11-06T00:00:00Z', mode: 'postgresql',
+      kv: [{ key: 'a' }], strategies: [{ id: 'x' }], trades: [] };
+    const v1 = R.verifierSauvegarde(valide);
+    ok('une sauvegarde au format plat est reconnue restaurable',
+      v1.ok === true && v1.infos.total === 2, `total ${v1.infos.total}`);
+
+    const sansKv = { version: 1, mode: 'postgresql', strategies: [] };
+    ok('une sauvegarde sans la table vitale est refusée',
+      R.verifierSauvegarde(sansKv).problemes.some(p => /kv/.test(p)),
+      R.verifierSauvegarde(sansKv).problemes.join(' | '));
+
+    const pasListe = { version: 1, mode: 'postgresql', kv: 'du texte' };
+    ok('un contenu qui n\'est pas une liste est refusé',
+      R.verifierSauvegarde(pasListe).problemes.some(p => /liste/.test(p)));
+
+    const sansVersion = { mode: 'postgresql', kv: [] };
+    ok('une sauvegarde sans version de format est refusée',
+      R.verifierSauvegarde(sansVersion).problemes.some(p => /version/.test(p)));
+
+    const modeInconnu = { version: 1, mode: 'autre', kv: [] };
+    ok('un mode inconnu est refusé',
+      R.verifierSauvegarde(modeInconnu).problemes.some(p => /mode inconnu/.test(p)));
+
+    const fichierCasse = { version: 1, mode: 'fichiers', fichiers: { 'a.json': '{cassé' } };
+    ok('un fichier JSON invalide rend la copie non restaurable',
+      R.verifierSauvegarde(fichierCasse).ok === false);
+
+    const src = fs.readFileSync(path.join(__dirname, 'data-engine', 'restauration.js'), 'utf8');
+    ok('la vérification n\'écrit jamais en base',
+      !/kvEcrire\(|insert into|restaurer\(/.test(src), 'lecture seule');
+    const pkgRacine = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    ok('une commande de vérification est disponible sans saisie',
+      typeof pkgRacine.scripts.restauration === 'string');
+  }
+
   // ── Où ça gagne vraiment : la croisée stratégie × marché × unité de temps ──
   {
     const J = require('./engine/journal-signaux');

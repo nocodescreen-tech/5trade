@@ -14,7 +14,8 @@
     "calibrer": "node data-engine/calibrer.js",
     "mesurer": "node data-engine/mesurer.js",
     "redondance": "node data-engine/redondance.js",
-    "strategie": "node data-engine/strategie.js"
+    "strategie": "node data-engine/strategie.js",
+    "restauration": "node data-engine/restauration.js"
   },
   "dependencies": {
     "cheerio": "^1.0.0",

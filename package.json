@@ -14,6 +14,7 @@
     "calibrer": "npm --prefix api run calibrer",
     "mesurer": "npm --prefix api run mesurer",
     "redondance": "npm --prefix api run redondance",
-    "strategie": "npm --prefix api run strategie"
+    "strategie": "npm --prefix api run strategie",
+    "restauration": "npm --prefix api run restauration"
   }
 }
