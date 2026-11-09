@@ -3950,13 +3950,13 @@ function tinyPng(W = 64, H = 40) {
         "    const e2 = await P.enregistrerEvaluation({ strategieId: id, version: '1.0.0',",
         "      symbole: 'BTCUSDT', timeframe: '15m', statut: 'VALID', direction: 'SELL',",
         "      preuves: [ { condition: 'structure', obligatoire: false, remplie: true } ] });",
-        "    const lues = await P.dernieresEvaluations({ limite: 5 });",
+        "    const lues = await P.dernieresEvaluations({ limite: 5, strategieId: id });",
         "    res.nb = lues.length;",
         "    res.premiere = lues[0] && { symbole: lues[0].symbole, statut: lues[0].statut,",
         "      nbPreuves: lues[0].preuves.length };",
         "    res.seconde = lues[1] && { symbole: lues[1].symbole, statut: lues[1].statut,",
         "      obligatoiresDAbord: lues[1].preuves[0].obligatoire, nonRemplie: lues[1].preuves.some(p => !p.remplie) };",
-        "    res.filtre = (await P.dernieresEvaluations({ limite: 5, symbole: 'EURUSD' })).length;",
+        "    res.filtre = (await P.dernieresEvaluations({ limite: 5, symbole: 'EURUSD', strategieId: id })).length;",
         "  } finally {",
         "    await sql.unsafe(\"delete from signal_evidence where evaluation_id in (select id from strategy_evaluations where strategie_id='\" + id + \"')\");",
         "    await sql.unsafe(\"delete from strategy_evaluations where strategie_id='\" + id + \"'\");",
@@ -3975,6 +3975,8 @@ function tinyPng(W = 64, H = 40) {
         r = JSON.parse(lignes[lignes.length - 1] || '{}');
       } catch (e) { err = e.message.split('\n')[0]; }
 
+      // La lecture est filtrée sur la stratégie du test : sans ce filtre, la
+      // table réelle contient d'autres évaluations et « nb === 2 » ne veut rien dire.
       ok('les dernières évaluations se relisent avec leurs preuves',
         !err && r && r.nb === 2 && r.premiere && r.premiere.nbPreuves === 1,
         err || JSON.stringify(r && r.premiere));

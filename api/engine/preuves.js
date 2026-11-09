@@ -167,19 +167,24 @@ function preuvesDepuisVerdict(v) {
  * Dernières évaluations avec leurs preuves nommées — lecture pour l'écran.
  * Une jointure, pas N requêtes : 20 évaluations = 1 aller-retour.
  */
-async function dernieresEvaluations({ limite = 20, symbole = null } = {}) {
+async function dernieresEvaluations({ limite = 20, symbole = null, strategieId = null } = {}) {
   if (!(await disponible())) return [];
   const sql = DB.client();
   const max = Math.max(1, Math.min(100, Number(limite) || 20));
   try {
-    const evals = symbole
-      ? await sql`
+    // Filtres composables : un test qui vient d'écrire ses propres évaluations ne
+    // doit pas dépendre du reste de la table, et l'écran veut parfois la dernière
+    // évaluation d'UNE stratégie.
+    const filtres = [];
+    if (symbole) filtres.push(sql`symbole = ${symbole}`);
+    if (strategieId) filtres.push(sql`strategie_id = ${strategieId}`);
+    const where = filtres.length
+      ? sql`where ${filtres.reduce((acc, f) => sql`${acc} and ${f}`)}`
+      : sql``;
+    const evals = await sql`
           select id, strategie_id, version, symbole, timeframe, regime, statut, direction, score, at
-          from strategy_evaluations where symbole = ${symbole}
-          order by id desc limit ${max}`
-      : await sql`
-          select id, strategie_id, version, symbole, timeframe, regime, statut, direction, score, at
-          from strategy_evaluations order by id desc limit ${max}`;
+          from strategy_evaluations ${where}
+          order by id desc limit ${max}`;
     if (!evals.length) return [];
 
     const ids = evals.map(e => e.id);
