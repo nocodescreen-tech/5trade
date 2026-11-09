@@ -4733,6 +4733,54 @@ function tinyPng(W = 64, H = 40) {
       `seuil ${deuxSurDeux && deuxSurDeux.seuilAlignes}`);
   }
 
+  // ── Deux niveaux : scan silencieux de tout, alertes sur une liste courte ──
+  {
+    const Scan = require('./delivery/scan');
+    const srcScan = fs.readFileSync(path.join(__dirname, 'delivery', 'scan.js'), 'utf8');
+    const srcAlerts = fs.readFileSync(path.join(__dirname, 'delivery', 'alerts.js'), 'utf8');
+
+    ok('le scan complet ne peut pas notifier (aucun envoi dans son code)',
+      !/sendMail|sendPush|telegram/i.test(srcScan));
+
+    // Marché et moteur factices : on vérifie la lecture, pas le réseau.
+    const market = {
+      listSymbols: () => [
+        { symbol: 'AAA', provider: 'p' }, { symbol: 'BBB', provider: 'p' },
+        { symbol: 'CCC', provider: 'p' }, { symbol: 'DDD', provider: 'p' }
+      ],
+      getCandles: async (sym) => {
+        if (sym === 'DDD') return { candles: [{ closed: true }] };        // trop court
+        if (sym === 'CCC') throw new Error('source muette');
+        return { candles: Array.from({ length: 40 }, () => ({ closed: true })) };
+      }
+    };
+    const signals = {
+      detect: (closes, meta) => meta.symbol === 'AAA'
+        ? { direction: 'BUY', status: 'confirme', strength: 0.9, trend: 'bullish', confirmations: 3 }
+        : { direction: 'SELL', status: 'surveiller', strength: 0.4, trend: 'bearish', confirmations: 1 }
+    };
+
+    const r = await Scan.scanComplet({ market, signals, tf: '15m' });
+    ok('le scan parcourt tous les symboles déclarés', r.marches === 4, `${r.marches} marché(s)`);
+    ok('le scan ne retient que les signaux directionnels', r.signaux === 2, `${r.signaux} signal/signaux`);
+    ok('le scan classe par force décroissante',
+      r.resultats.length === 2 && r.resultats[0].symbole === 'AAA', r.resultats.map(x => x.symbole).join(' > '));
+    ok('une source en panne n\'interrompt pas le scan (erreur nommée)',
+      r.dureeMs >= 0 && Scan.dernierScan().erreurs.length === 2,
+      Scan.dernierScan().erreurs.join(' · ').slice(0, 90));
+
+    // La surveillance reste la seule à envoyer, et elle porte un cooldown.
+    ok('la surveillance garde le cooldown comme garde-fou',
+      /cooldownMin/.test(srcAlerts) && /déjà alerté \(cooldown\)/.test(srcAlerts));
+    const Al = require('./delivery/alerts');
+    ok('cooldown par défaut de 30 minutes', Al.DEFAUT.cooldownMin === 30, `${Al.DEFAUT.cooldownMin} min`);
+    ok('le cooldown refuse une valeur absurde',
+      /cooldownMin.*entre 0 et 1440/.test(srcAlerts));
+    ok('les alertes restent limitées à une liste de marchés choisie',
+      Array.isArray(Al.DEFAUT.marches) && Al.DEFAUT.marches.length >= 1 && Al.DEFAUT.marches.length <= 8,
+      `${Al.DEFAUT.marches.length} marché(s) surveillé(s)`);
+  }
+
   // ── R7 et R8 : des conditions d'une autre famille ──
   {
     const S = require('./engine/signals');

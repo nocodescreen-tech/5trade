@@ -38,6 +38,9 @@ const DEFAUT = {
   email: null,               // destinataire (par défaut : l'email du compte)
   forceMin: 0.5,             // n'alerter qu'au-delà de cette force
   intervalleSec: 60,         // fréquence de contrôle
+  // Cooldown par signal (marché + unité + direction + motifs) : un même setup ne
+  // repart pas toutes les minutes. 0 = pas de cooldown (dédoublonnage permanent).
+  cooldownMin: 30,
   // ── Garde-fous de fiabilité ──────────────────────────────────────────────
   // Un signal confirmé sur une seule unité de temps, ou qui va contre le
   // contexte supérieur, n'a rien à faire dans une boîte mail : c'est du bruit.
@@ -63,6 +66,7 @@ const DEFAUT = {
   ],
   derniers: [],              // 50 dernières alertes envoyées
   deja: [],                   // 200 dernières clés déjà notifiées (anti-doublon)
+  dejaAt: {},                 // clé → horodatage, pour le cooldown
   abonnements: []            // abonnements push navigateur [{ endpoint, keys, at }]
 };
 
@@ -190,6 +194,11 @@ function update(patch = {}) {
   if ('exigerAlignement' in patch) c.exigerAlignement = !!patch.exigerAlignement;
   if ('refuserContreTendance' in patch) c.refuserContreTendance = !!patch.refuserContreTendance;
   if ('refuserDesaccord' in patch) c.refuserDesaccord = !!patch.refuserDesaccord;
+  if ('cooldownMin' in patch) {
+    const v = Math.round(Number(patch.cooldownMin));
+    if (!Number.isFinite(v) || v < 0 || v > 1440) throw new Error('« cooldownMin » doit être entre 0 et 1440');
+    c.cooldownMin = v;
+  }
   if ('seuilAlignes' in patch) {
     const a = Math.round(Number(patch.seuilAlignes));
     if (!Number.isFinite(a) || a < 1 || a > 5) throw new Error('« seuilAlignes » doit être entre 1 et 5');
@@ -715,7 +724,19 @@ async function verifierBrut(force = false) {
         : '';
       const cleBase = `${m.provider}|${m.symbol}|${m.tf}|${v.direction}|${v.at}`;
       const cle = sigKey ? `${cleBase}|${sigKey}` : cleBase;
-      if (c.deja.includes(cle)) { resultats.push({ ...m, verdict: 'déjà alerté' }); continue; }
+      // Dédoublonnage : un signal identique déjà parti ne repart pas. Le cooldown
+      // est ce qui distingue « ce setup a déjà été signalé » de « il y a deux
+      // minutes » : sans lui, un marché calme renvoie la même alerte à chaque cycle.
+      const cooldownMs = (Number.isFinite(c.cooldownMin) ? c.cooldownMin : 30) * 60_000;
+      const vuA = c.dejaAt && Number.isFinite(c.dejaAt[cle]) ? c.dejaAt[cle] : null;
+      if (!cooldownMs && c.deja.includes(cle)) {
+        resultats.push({ ...m, verdict: 'déjà alerté' });
+        continue;
+      }
+      if (cooldownMs && vuA !== null && Date.now() - vuA < cooldownMs) {
+        resultats.push({ ...m, verdict: 'déjà alerté (cooldown)' });
+        continue;
+      }
 
       const msg = compose(v, m, r.candles[r.candles.length - 1].c, { confluence, rr, multi });
       let emailOk = false;
@@ -744,6 +765,7 @@ async function verifierBrut(force = false) {
         catch (e) { resultats.push({ ...m, verdict: 'alerte envoyée, Telegram en échec : ' + e.message }); }
       }
       c.deja.push(cle);
+      c.dejaAt = { ...(c.dejaAt || {}), [cle]: Date.now() };
       envoyes++;
       // Signal publié : rattaché à son évaluation, avec ses niveaux. Sans ce lien,
       // la table signals serait orpheline et la question « pourquoi ce signal ? »
@@ -782,6 +804,9 @@ async function verifierBrut(force = false) {
 
   if (envoyes) {
     config.deja = config.deja.slice(-200);
+    const gardees = new Set(config.deja);
+    config.dejaAt = Object.fromEntries(
+      Object.entries(config.dejaAt || {}).filter(([k]) => gardees.has(k)));
     config.derniers = config.derniers.slice(0, 50);
     save();
   }

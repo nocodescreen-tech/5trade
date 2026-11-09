@@ -460,6 +460,7 @@ const Backtest = require('./engine/backtest');
 // Actualités et calendrier économique : flux publics, sans clé ni compte.
 const News = require('./sources/news');
 const Alerts = require('./delivery/alerts');
+const Scan = require('./delivery/scan');
 const Lexique = require('./delivery/lexique');
 // Base de concepts : les définitions des termes, injectées dans l'analyse IA.
 const Concepts = require('./delivery/concepts');
@@ -1231,6 +1232,19 @@ app.post('/api/logout', (req, res) => {
 // Planifiée dans le processus : elle hérite des variables d'environnement, donc
 // elle fonctionne sur n'importe quel hébergeur sans cron à configurer.
 app.get('/api/sauvegarde', requireAuth, (req, res) => res.json(Backup.etat()));
+
+// Scan complet : lecture silencieuse de TOUS les marchés. Aucune notification
+// n'est envoyée ici — c'est la différence avec la surveillance (liste courte).
+app.get('/api/scan', requireAuth, (req, res) => res.json(Scan.dernierScan()));
+app.post('/api/scan', requireAuth, async (req, res) => {
+  try {
+    const tf = String((req.body && req.body.tf) || '15m');
+    const r = await Scan.scanComplet({ market: Market, signals: Signals, tf });
+    res.json({ success: true, ...r });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
 
 app.post('/api/sauvegarde', requireAuth, async (req, res) => {
   // Audit AVANT la réponse : l'action est tracée même si elle échoue ensuite.
@@ -4052,6 +4066,10 @@ async function start() {
       return s ? s.providerLabel : id;
     }
   });
+
+  // Scan complet SILENCIEUX : tous les marchés, toutes les 15 min, aucun envoi.
+  // La surveillance (au-dessus) reste seule à alerter, sur sa liste courte.
+  Scan.start({ market: Market, signals: Signals, tf: '15m' });
 
 // ─────────────────────────────────────────────────────────────
 // Journal des signaux : suivi périodique des issues. Toutes les deux minutes on
