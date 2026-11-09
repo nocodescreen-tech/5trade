@@ -30,7 +30,7 @@ const etat = {
  * Parcourt TOUS les symboles connus et rend les verdicts, sans rien envoyer.
  * @param {{market:object, signals:object, tf?:string, intervalleMin?:number}} deps
  */
-async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERVALLE_MIN } = {}) {
+async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERVALLE_MIN, strategie = null } = {}) {
   if (!market || !signals) throw new Error('scan complet : market et signals sont requis');
   const debut = Date.now();
   const symboles = market.listSymbols() || [];
@@ -47,7 +47,19 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
         erreurs.push(`${symbole} : ${closes.length} bougie(s)`);
         continue;
       }
-      const v = signals.detect(closes, { symbol: symbole, timeframe: tf }, {});
+      // Sans stratégie : moteur générique (repérage). Avec : les règles, les
+      // conditions obligatoires et les seuils DE CETTE STRATÉGIE, exactement
+      // comme la surveillance — sinon le scan annoncerait des signaux que la
+      // stratégie refuserait.
+      const options = strategie ? {
+        regles: strategie.regles,
+        obligatoires: strategie.obligatoires || [],
+        seuilForce: strategie.seuilForce,
+        seuilRegles: strategie.seuilRegles,
+        parametres: strategie.parametres,
+        strategie: { id: strategie.id, titre: strategie.titre }
+      } : {};
+      const v = signals.detect(closes, { symbol: symbole, timeframe: tf }, options);
       if (!v) continue;
       // On ne garde que ce qui dit quelque chose : un univers entier de
       // « NEUTRE » n'aide personne à décider.
@@ -61,6 +73,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
         force: typeof v.force === 'number' ? v.force : (v.strength || 0),
         trend: v.trend || null,
         confirmations: v.confirmations || 0,
+        strategie: strategie ? (strategie.titre || strategie.id) : null,
         raison: v.raison || null
       });
     } catch (e) {
@@ -72,6 +85,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
   etat.dernier = {
     at: new Date().toISOString(),
     tf,
+    strategie: strategie ? (strategie.titre || strategie.id) : null,
     marches: symboles.length,
     signaux: signaux.length,
     dureeMs: Date.now() - debut,

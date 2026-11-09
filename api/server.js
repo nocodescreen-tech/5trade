@@ -1239,7 +1239,21 @@ app.get('/api/scan', requireAuth, (req, res) => res.json(Scan.dernierScan()));
 app.post('/api/scan', requireAuth, async (req, res) => {
   try {
     const tf = String((req.body && req.body.tf) || '15m');
-    const r = await Scan.scanComplet({ market: Market, signals: Signals, tf });
+    const idStrategie = (req.body && req.body.strategie) || null;
+    // Une stratégie choisie dans l'écran doit être appliquée AVEC ses règles et
+    // ses seuils : scanner avec le moteur générique puis annoncer « signal de la
+    // stratégie X » serait un mensonge.
+    let profil = null;
+    if (idStrategie) {
+      const docs = await loadAllStrategies();
+      const doc = (docs || []).find(d => d.id === idStrategie);
+      if (!doc) return res.status(404).json({ success: false, error: 'Stratégie introuvable' });
+      profil = Signals.profilDepuisStrategie(doc);
+      if (profil.executable === false) {
+        return res.status(409).json({ success: false, error: 'Cette stratégie n\'est pas exécutable : ' + (profil.motif || 'règles non identifiées') });
+      }
+    }
+    const r = await Scan.scanComplet({ market: Market, signals: Signals, tf, strategie: profil });
     res.json({ success: true, ...r });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });

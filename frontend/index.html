@@ -4199,6 +4199,11 @@ function BacktestPanel() {
           <option value={2}>pas 2 (recommandé)</option>
           <option value={3}>pas 3 (rapide)</option>
         </select>
+        <select className="fld" aria-label="Stratégie appliquée au scan" style={{ margin: 0, width: 'auto', maxWidth: 260 }}
+          value={choix} onChange={e => setChoix(e.target.value)}>
+          <option value="">Moteur générique</option>
+          {strategies.map(x => <option key={x.id} value={x.id}>{x.titre || x.id}</option>)}
+        </select>
         <button className="btn sm" onClick={lancer} disabled={busy}>
           {busy ? <Spinner /> : <i className="fas fa-play"></i>} Lancer le backtest
         </button>
@@ -5037,6 +5042,8 @@ function PanneauScan() {
   const [tf, setTf] = useState('15m');
   const [busy, setBusy] = useState(false);
   const [info, setInfo] = useState('');
+  const [choix, setChoix] = useState('');
+  const [strategies, setStrategies] = useState([]);
 
   const lire = async () => {
     try { const r = await api('/scan'); const d = await r.json(); setEtat(d); }
@@ -5046,11 +5053,12 @@ function PanneauScan() {
     setBusy(true); setInfo('');
     try {
       const r = await api('/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tf }) });
+        body: JSON.stringify({ tf, strategie: choix || null }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'scan refusé');
       setEtat({ actif: true, dernier: d, erreurs: d.erreurs || [] });
-      setInfo(`${d.signaux} signal/signaux sur ${d.marches} marché(s) en ${(d.dureeMs / 1000).toFixed(1)} s`);
+      setInfo(`${d.signaux} signal/signaux sur ${d.marches} marché(s) en ${(d.dureeMs / 1000).toFixed(1)} s`
+        + (d.strategie ? ` — stratégie « ${d.strategie} »` : ' — moteur générique'));
     } catch (e) { setInfo(e.message); } finally { setBusy(false); }
   };
   // Un signal repéré ici peut passer sous surveillance en un clic : c'est le
@@ -5072,7 +5080,14 @@ function PanneauScan() {
     } catch (e) { setInfo(e.message); }
   };
 
-  useEffect(() => { lire(); }, []);
+  useEffect(() => {
+    lire();
+    // Stratégies réellement exécutables, pour scanner AVEC leurs règles.
+    fetch('/api/strategies/profiles', { credentials: 'same-origin' })
+      .then(r => r.json())
+      .then(d => setStrategies((d.profils || []).filter(x => x && x.executable !== false)))
+      .catch(() => setStrategies([]));
+  }, []);
 
   const dernier = etat.dernier;
   const lignes = (dernier && dernier.resultats) || [];
@@ -5090,13 +5105,18 @@ function PanneauScan() {
           value={tf} onChange={e => setTf(e.target.value)}>
           {['5m', '15m', '1h', '4h'].map(t => <option key={t} value={t}>{t}</option>)}
         </select>
+        <select className="fld" aria-label="Stratégie appliquée au scan" style={{ margin: 0, width: 'auto', maxWidth: 260 }}
+          value={choix} onChange={e => setChoix(e.target.value)}>
+          <option value="">Moteur générique</option>
+          {strategies.map(x => <option key={x.id} value={x.id}>{x.titre || x.id}</option>)}
+        </select>
         <button className="btn sm" onClick={lancer} disabled={busy}>
           <i className="fas fa-play"></i>{busy ? 'Scan en cours…' : 'Lancer le scan'}
         </button>
         {dernier && (
           <span style={{ fontSize: 12, color: 'var(--dim)' }}>
             {new Date(dernier.at).toLocaleString('fr-FR')} · {dernier.tf} · {dernier.marches} marché(s)
-            · {dernier.signaux} signal/signaux
+            · {dernier.signaux} signal/signaux · {dernier.strategie || 'moteur générique'}
           </span>
         )}
       </div>
@@ -5118,6 +5138,7 @@ function PanneauScan() {
               </span>
               <span style={{ color: 'var(--muted)' }}>
                 force {Number(x.force || 0).toFixed(2)} · {x.status || '—'} · {x.confirmations || 0} règle(s)
+                {x.strategie ? ` · ${x.strategie}` : ''}
               </span>
               <button className="btn ghost sm" onClick={() => ajouterAuSuivi(x)}
                 title="Ajouter à la liste de surveillance">

@@ -4771,6 +4771,26 @@ function tinyPng(W = 64, H = 40) {
       r.dureeMs >= 0 && Scan.dernierScan().erreurs.length === 2,
       Scan.dernierScan().erreurs.join(' · ').slice(0, 90));
 
+    // Le scan peut tourner AVEC une stratégie : ses règles et ses seuils doivent
+    // être transmis au moteur, sinon on annoncerait ses signaux sans les appliquer.
+    const recus = [];
+    const signals2 = {
+      detect: (c, meta, opts) => {
+        recus.push(opts || {});
+        return { direction: 'BUY', status: 'confirme', strength: 0.5, confirmations: 1 };
+      }
+    };
+    const fiche = { id: 's1', titre: 'S1 cassure', regles: ['R1', 'R2'], obligatoires: ['R1'],
+      seuilForce: 0.6, seuilRegles: 2, parametres: {} };
+    const r2 = await Scan.scanComplet({ market, signals: signals2, tf: '15m', strategie: fiche });
+    ok('le scan transmet les règles de la stratégie au moteur',
+      recus.length > 0 && recus.every(o => Array.isArray(o.regles) && o.regles.length === 2 && o.obligatoires[0] === 'R1'),
+      JSON.stringify(recus[0] && { regles: recus[0].regles, obligatoires: recus[0].obligatoires }));
+    ok('chaque ligne du scan porte le nom de la stratégie appliquée',
+      r2.resultats.length > 0 && r2.resultats.every(x => x.strategie === 'S1 cassure'));
+    ok('le scan sans stratégie reste en moteur générique (aucune règle imposée)',
+      r.resultats.every(x => x.strategie === null));
+
     // La surveillance reste la seule à envoyer, et elle porte un cooldown.
     ok('la surveillance garde le cooldown comme garde-fou',
       /cooldownMin/.test(srcAlerts) && /déjà alerté \(cooldown\)/.test(srcAlerts));
