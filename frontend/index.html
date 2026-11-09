@@ -5029,6 +5029,113 @@ class Garde extends React.Component {
 
 /* ══════════════ ALERTES ══════════════ */
 
+// ── Scan complet : tous les marchés, silencieux ─────────────────────────────
+// La surveillance n'alerte que sur sa liste courte. Ce panneau-ci regarde tout,
+// ne prévient personne, et sert à décider quoi mettre sous surveillance.
+function PanneauScan() {
+  const [etat, setEtat] = useState({ dernier: null, erreurs: [] });
+  const [tf, setTf] = useState('15m');
+  const [busy, setBusy] = useState(false);
+  const [info, setInfo] = useState('');
+
+  const lire = async () => {
+    try { const r = await api('/scan'); const d = await r.json(); setEtat(d); }
+    catch (e) { setInfo(e.message); }
+  };
+  const lancer = async () => {
+    setBusy(true); setInfo('');
+    try {
+      const r = await api('/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tf }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'scan refusé');
+      setEtat({ actif: true, dernier: d, erreurs: d.erreurs || [] });
+      setInfo(`${d.signaux} signal/signaux sur ${d.marches} marché(s) en ${(d.dureeMs / 1000).toFixed(1)} s`);
+    } catch (e) { setInfo(e.message); } finally { setBusy(false); }
+  };
+  // Un signal repéré ici peut passer sous surveillance en un clic : c'est le
+  // seul pont entre le scan silencieux et la liste courte qui notifie.
+  const ajouterAuSuivi = async (x) => {
+    try {
+      const d0 = await (await api('/alerts')).json();
+      const cfg = d0.config || {};
+      const marches = cfg.marches || [];
+      if (marches.some(y => y.symbol === x.symbole && y.tf === x.tf)) {
+        setInfo(`${x.symbole} ${x.tf} est déjà sous surveillance.`);
+        return;
+      }
+      const r = await api('/alerts', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...cfg, marches: [...marches, { symbol: x.symbole, tf: x.tf, provider: x.provider }] }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'ajout refusé');
+      setInfo(`${x.symbole} ${x.tf} ajouté à la surveillance.`);
+    } catch (e) { setInfo(e.message); }
+  };
+
+  useEffect(() => { lire(); }, []);
+
+  const dernier = etat.dernier;
+  const lignes = (dernier && dernier.resultats) || [];
+  return (
+    <div className="panel" style={{ padding: 20 }}>
+      <h2 style={{ fontSize: 17, fontWeight: 800, margin: '0 0 6px' }}>
+        <i className="fas fa-radar" style={{ color: '#38bdf8', marginRight: 9 }}></i>Scan du marché
+      </h2>
+      <p style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--muted)' }}>
+        Tous les marchés disponibles, toutes les 15 minutes, <b>sans aucune notification</b>.
+        C'est le repérage ; la surveillance au-dessus reste seule à prévenir.
+      </p>
+      <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+        <select className="fld" aria-label="Unité du scan" style={{ margin: 0, width: 'auto' }}
+          value={tf} onChange={e => setTf(e.target.value)}>
+          {['5m', '15m', '1h', '4h'].map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <button className="btn sm" onClick={lancer} disabled={busy}>
+          <i className="fas fa-play"></i>{busy ? 'Scan en cours…' : 'Lancer le scan'}
+        </button>
+        {dernier && (
+          <span style={{ fontSize: 12, color: 'var(--dim)' }}>
+            {new Date(dernier.at).toLocaleString('fr-FR')} · {dernier.tf} · {dernier.marches} marché(s)
+            · {dernier.signaux} signal/signaux
+          </span>
+        )}
+      </div>
+      {info && <div style={{ fontSize: 12.5, color: '#93c5fd', marginBottom: 10 }}>{info}</div>}
+      {!lignes.length && (
+        <div style={{ fontSize: 12.5, color: 'var(--dim)' }}>
+          Aucun signal directionnel au dernier passage. Lance un scan pour rafraîchir.
+        </div>
+      )}
+      {lignes.length > 0 && (
+        <div style={{ display: 'grid', gap: 6 }}>
+          {lignes.slice(0, 40).map((x, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10,
+              alignItems: 'center', fontSize: 12.5, paddingBottom: 6,
+              borderBottom: '1px solid rgba(27,36,51,.5)' }}>
+              <span style={{ color: '#fff' }}>
+                <b style={{ color: x.direction === 'BUY' ? '#34d399' : '#f87171' }}>{x.direction}</b>
+                {' '}{x.symbole} <span style={{ color: 'var(--dim)' }}>· {x.tf}</span>
+              </span>
+              <span style={{ color: 'var(--muted)' }}>
+                force {Number(x.force || 0).toFixed(2)} · {x.status || '—'} · {x.confirmations || 0} règle(s)
+              </span>
+              <button className="btn ghost sm" onClick={() => ajouterAuSuivi(x)}
+                title="Ajouter à la liste de surveillance">
+                <i className="fas fa-bell"></i>Surveiller
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {(etat.erreurs || []).length > 0 && (
+        <div style={{ marginTop: 10, fontSize: 11.5, color: 'var(--dim)' }}>
+          Ignorés : {etat.erreurs.slice(0, 6).join(' · ')}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Alertes() {
   const [cfg, setCfg] = useState(null);
   // Stratégies de la base : la surveillance peut les appliquer, au lieu de
@@ -5372,6 +5479,18 @@ function Alertes() {
                 onChange={e => setCfg({ ...cfg, intervalleSec: Number(e.target.value) })}
                 onBlur={() => sauver({ intervalleSec: cfg.intervalleSec })} />
             </label>
+            <label style={{ display:'grid', gap:5 }}>
+              <span style={{ fontSize:12, color:'var(--muted)' }}>
+                Silence entre deux rappels (min)
+              </span>
+              <input className="fld" style={{ margin:0 }} type="number" min="0" max="1440"
+                value={cfg.cooldownMin === undefined ? 30 : cfg.cooldownMin}
+                onChange={e => setCfg({ ...cfg, cooldownMin: Number(e.target.value) })}
+                onBlur={() => sauver({ cooldownMin: cfg.cooldownMin })} />
+              <span style={{ fontSize:11, color:'var(--dim)' }}>
+                0 = aucun rappel. Un même signal ne repart pas avant ce délai.
+              </span>
+            </label>
           </div>
 
           <div style={{ display:'flex', gap:10, marginTop:16, flexWrap:'wrap' }}>
@@ -5536,7 +5655,24 @@ function Alertes() {
           {(cfg.marches || []).map((m, i) => (
             <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
               gap:10, paddingBottom:7, borderBottom:'1px solid rgba(27,36,51,.5)' }}>
-              <span style={{ fontSize:13, color:'#fff' }}>{libelle(m.symbol, m.provider)} <span style={{ color:'var(--dim)' }}>· {m.tf}</span></span>
+              <span style={{ fontSize:13, color:'#fff' }}>
+                {libelle(m.symbol, m.provider)} <span style={{ color:'var(--dim)' }}>· {m.tf}</span>
+                <span style={{ color:'var(--dim)', fontSize:11.5 }}>
+                  {' · '}{(cfg.strategies || []).length || 'toutes'} stratégie(s)
+                  {(cfg.strategies || []).length === 1 ? '' : ''}
+                </span>
+                {(() => {
+                  // Dernière alerte pour ce marché : dit si le cooldown court encore.
+                  const d = (cfg.derniers || []).find(a => a.symbol === m.symbol && a.tf === m.tf);
+                  if (!d) return null;
+                  const reste = Math.max(0, Math.round(
+                    ((Number(cfg.cooldownMin === undefined ? 30 : cfg.cooldownMin) * 60_000)
+                      - (Date.now() - new Date(d.at).getTime())) / 60_000));
+                  return <span style={{ color: reste > 0 ? '#fbbf24' : 'var(--dim)', fontSize:11.5 }}>
+                    {' · '}{reste > 0 ? `silence ${reste} min` : 'prêt'}
+                  </span>;
+                })()}
+              </span>
               <button onClick={() => retirerMarche(i)} disabled={busy}
                 style={{ background:'none', border:'none', color:'#f87171', cursor:'pointer', fontSize:12.5 }}>
                 <i className="fas fa-trash"></i>
@@ -5546,6 +5682,8 @@ function Alertes() {
           {!(cfg.marches || []).length && <span style={{ color:'var(--dim)', fontSize:12.5 }}>Aucun marché surveillé.</span>}
         </div>
       </div>
+
+      <PanneauScan />
 
       <div className="panel" style={{ padding:20 }}>
         <h3 style={{ margin:'0 0 12px', fontSize:15 }}>Alertes envoyées</h3>
