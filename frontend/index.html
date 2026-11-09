@@ -1793,13 +1793,22 @@ function Strategies({ strategies, onDelete, onSaved }) {
                             {TF_INFO.map(t => (
                               <label key={t} style={{ display:'flex', gap:4, alignItems:'center', fontSize:12, cursor:'pointer' }}>
                                 <input type="checkbox" checked={(moteur.timeframes || []).includes(t)}
-                                  onChange={() => setMoteur(m => ({ ...m,
-                                    timeframes: (m.timeframes || []).includes(t)
+                                  onChange={() => setMoteur(m => {
+                                    // Le seuil suit le nombre d'unités cochées : 2 unités → 2
+                                    // alignements exigés, 3 → 3, 4 → 4. C'est la règle de la
+                                    // stratégie, pas un plafond de la plateforme.
+                                    const liste = (m.timeframes || []).includes(t)
                                       ? (m.timeframes || []).filter(x => x !== t)
-                                      : [...(m.timeframes || []), t] }))} />
+                                      : [...(m.timeframes || []), t];
+                                    return { ...m, timeframes: liste, seuilAlignes: liste.length || 1 };
+                                  })} />
                                 {t}
                               </label>
                             ))}
+                          </div>
+                          <div style={{ color:'var(--muted)', fontSize:11.5, marginTop:6 }}>
+                            Toutes les unités cochées doivent s'aligner : {(moteur.timeframes || []).length || 0} cochée(s)
+                            → seuil {moteur.seuilAlignes || 1}. Une stratégie en 2 unités n'exige pas de 3e.
                           </div>
                         </div>
 
