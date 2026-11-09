@@ -68,6 +68,14 @@ async function profilDemande(strategie) {
     throw new Error(`fiche invalide : ${controle.erreurs.join(' ; ')}`);
   }
   const fiche = controle.fiche;
+  // Les unités de temps de la stratégie, dans l'ordre du travail : exécution,
+  // puis confirmation, puis contexte. Une fiche peut en déclarer 1, 2, 3, 4…
+  // Avant, seule l'unité d'exécution était transmise : une stratégie écrite en
+  // deux unités (confirmation + exécution) était mesurée sur une seule, donc
+  // jamais confirmée — elle ne sortait aucun signal.
+  const ordre = ['execution', 'confirmation', 'context'];
+  const unites = [...new Set(ordre.flatMap(role =>
+    (Array.isArray(fiche.timeframes[role]) ? fiche.timeframes[role] : [])))];
   const p = {
     id: fiche.id,
     titre: fiche.name,
@@ -76,7 +84,11 @@ async function profilDemande(strategie) {
     obligatoires: fiche.requiredConditions,
     seuilForce: fiche.parameters.seuilForce,
     seuilRegles: fiche.parameters.seuilRegles,
-    timeframes: fiche.timeframes.execution,
+    // Toutes les unités déclarées, éventuellement une seule.
+    timeframes: unites.length ? unites : fiche.timeframes.execution,
+    // Le seuil suit le nombre d'unités écrites dans la fiche : 2 déclarées →
+    // 2 requises, 3 → 3, etc. Une fiche qui impose `seuilAlignes` fait foi.
+    seuilAlignes: Number.isFinite(fiche.seuilAlignes) ? fiche.seuilAlignes : unites.length || null,
     parametres: { atrStop: 1 }
   };
   return {

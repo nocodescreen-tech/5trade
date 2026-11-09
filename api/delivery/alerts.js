@@ -668,11 +668,16 @@ async function verifierBrut(force = false) {
         // Le seuil d'alignement doit rester compatible avec ce que la stratégie
         // déclare : exiger 2 unités alignées sur une stratégie qui n'en déclare
         // qu'une la refusait systématiquement. Quand la stratégie déclare ses
-        // unités, ce sont ses conditions : elles doivent toutes s'aligner.
+        // unités, ce sont ses conditions : elles doivent toutes s'aligner — 2
+        // déclarées → 2 requises, 3 → 3, 4 → 4. Le seuil suit donc SON nombre
+        // d'unités, sans plafond global, sauf valeur explicitement imposée par
+        // la fiche (auquel cas elle fait foi, bornée aux unités disponibles).
         const seuilDemande = (profil && Number.isFinite(profil.seuilAlignes))
           ? profil.seuilAlignes : c.seuilAlignes;
         const seuilEffectif = declarees
-          ? Math.min(seuilDemande, Math.max(1, parTF.length))
+          ? Math.min(
+              Number.isFinite(profil && profil.seuilAlignes) ? profil.seuilAlignes : declarees.length,
+              Math.max(1, parTF.length))
           : seuilDemande;
         confluence = deps.signals.confluence(parTF, { seuilAlignes: seuilEffectif });
         confluence.seuilDemande = seuilDemande;

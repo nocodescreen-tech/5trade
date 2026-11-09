@@ -4679,24 +4679,58 @@ function tinyPng(W = 64, H = 40) {
 
     ok('les unités déclarées sont lues sous les deux formes (tableau et rôles)',
       /Array\.isArray\(d\)/.test(srvTf) && /confirmation/.test(srvTf) && /execution/.test(srvTf));
-    ok('le seuil d\'alignement ne dépasse jamais les unités déclarées',
-      /Math\.min\(seuilDemande, Math\.max\(1, parTF\.length\)\)/.test(srvTf));
+    ok('le seuil ne dépasse jamais les unités réellement disponibles',
+      /Math\.min\([\s\S]{0,160}Math\.max\(1, parTF\.length\)\)/.test(srvTf));
     ok('le seuil demandé et le seuil appliqué sont tous deux publiés',
       /seuilDemande = seuilDemande/.test(srvTf) && /seuilApplique = seuilEffectif/.test(srvTf));
 
-    // Confluence : une seule unité déclarée ne doit pas exiger deux alignements.
     const Signals = require('./engine/signals');
-    const unTF = Signals.confluence([{ tf: '5m', verdict: { direction: 'BUY', strength: 0.9, trend: 'bullish' } }],
-      { seuilAlignes: 1 });
+    const verdict = tf => ({ direction: 'BUY', strength: 0.9, trend: 'bullish', status: 'confirme', tf });
+
+    // Une seule unité déclarée : elle suffit, on n'exige pas deux alignements.
+    const unTF = Signals.confluence([{ tf: '5m', verdict: verdict('5m') }], { seuilAlignes: 1 });
     ok('une stratégie à une seule unité peut s\'aligner',
       unTF && unTF.aligne === true, JSON.stringify(unTF && unTF.motif));
 
+    // Deux unités déclarées : les deux doivent parler.
     const deuxTF = Signals.confluence([
-      { tf: '5m', verdict: { direction: 'BUY', strength: 0.9, trend: 'bullish' } },
-      { tf: '15m', verdict: { direction: 'BUY', strength: 0.8, trend: 'bullish' } }
+      { tf: '5m', verdict: verdict('5m') },
+      { tf: '15m', verdict: verdict('15m') }
     ], { seuilAlignes: 2 });
     ok('une stratégie à deux unités s\'aligne sur deux',
       deuxTF && deuxTF.aligne === true, JSON.stringify(deuxTF && deuxTF.motif));
+
+    // Le seuil suit AUTOMATIQUEMENT le nombre d'unités écrites dans la fiche :
+    // 2 → 2, 3 → 3, 4 → 4. Aucun plafond de la maison, aucune obligation de 3.
+    const seuilAuto = (timeframes, attendu) => {
+      const m = Signals.normaliserMoteur({ regles: ['R1'], timeframes });
+      return m.seuilAlignes === attendu && m.timeframes.length === attendu;
+    };
+    ok('2 unités écrites en rôles → seuil automatique de 2 (exécution puis confirmation)',
+      seuilAuto({ execution: ['5m'], confirmation: ['15m'] }, 2));
+    ok('3 unités écrites en rôles → seuil automatique de 3',
+      seuilAuto({ context: ['1h'], confirmation: ['15m'], execution: ['5m'] }, 3));
+    ok('4 unités écrites en tableau → seuil automatique de 4',
+      seuilAuto(['5m', '15m', '1h', '4h'], 4));
+
+    const quatre = Signals.confluence([
+      { tf: '5m', verdict: verdict('5m') },
+      { tf: '15m', verdict: verdict('15m') },
+      { tf: '1h', verdict: verdict('1h') },
+      { tf: '4h', verdict: verdict('4h') }
+    ], { seuilAlignes: 4 });
+    ok('quatre unités d\'accord valident une stratégie à quatre unités',
+      quatre && quatre.aligne === true && quatre.nbAlignes === 4, JSON.stringify(quatre && quatre.motif));
+
+    // Deux unités déclarées ne doivent jamais être jugées sur une troisième :
+    // l'unité de trop ne peut ni valider ni refuser à leur place.
+    const deuxSurDeux = Signals.confluence([
+      { tf: '5m', verdict: verdict('5m') },
+      { tf: '15m', verdict: verdict('15m') }
+    ], { seuilAlignes: Math.min(2, 2) });
+    ok('aucune troisième unité n\'est exigée d\'une stratégie qui en déclare deux',
+      deuxSurDeux && deuxSurDeux.aligne === true && deuxSurDeux.seuilAlignes === 2,
+      `seuil ${deuxSurDeux && deuxSurDeux.seuilAlignes}`);
   }
 
   // ── R7 et R8 : des conditions d'une autre famille ──

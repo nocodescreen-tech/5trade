@@ -715,17 +715,37 @@ function normaliserMoteur(m = {}) {
   const style = (m.style && STYLES[m.style]) ? m.style : null;
   const dStyle = style ? STYLES[style] : null;
 
-  // Unités de temps propres à la stratégie. Si elle n'en déclare pas, on prend
-  // celles de son style, sinon l'analyse retombera sur l'unité de travail.
-  let tf = Array.isArray(m.timeframes) ? m.timeframes.filter(t => TF_VALIDES.includes(t)) : [];
+  // Unités de temps propres à la stratégie. Deux formes acceptées :
+  //   - un tableau  ['5m','15m']
+  //   - un objet par rôle { context: ['1h'], confirmation: ['15m'], execution: ['5m'] }
+  // L'ordre est celui du travail : exécution d'abord (c'est l'unité sur laquelle on
+  // agirait), puis confirmation, puis contexte. Une stratégie peut en déclarer 1,
+  // 2, 3, 4… : le seuil suit SON nombre d'unités, sans plafond imposé par la maison.
+  const declarees = (() => {
+    const t = m.timeframes;
+    if (Array.isArray(t)) return t.filter(x => TF_VALIDES.includes(x));
+    if (t && typeof t === 'object') {
+      return ['execution', 'confirmation', 'context']
+        .flatMap(role => (Array.isArray(t[role]) ? t[role] : []))
+        .filter(x => TF_VALIDES.includes(x));
+    }
+    return [];
+  })();
+  const explicites = [...new Set(declarees)].slice(0, 5);
+  let tf = explicites.length ? explicites : [];
   if (!tf.length && dStyle) tf = [...dStyle.timeframes];
   tf = [...new Set(tf)].slice(0, 5);
 
   // Combien d'unités doivent être d'accord pour valider (jamais plus que le
   // nombre d'unités examinées, sinon la confirmation serait impossible).
+  // Quand la stratégie ÉCRIT ses unités, ce sont ses conditions : elles doivent
+  // toutes s'aligner. Le seuil suit donc automatiquement leur nombre (2 → 2,
+  // 3 → 3, 4 → 4…), sauf si la fiche impose explicitement une autre valeur.
+  const seuilParDefaut = explicites.length
+    ? tf.length
+    : ((dStyle && dStyle.seuilAlignes) || Math.ceil(tf.length / 2));
   const seuilAlignes = tf.length
-    ? Math.round(borner(m.seuilAlignes, 1, tf.length,
-      (dStyle && dStyle.seuilAlignes) || Math.ceil(tf.length / 2)))
+    ? Math.round(borner(m.seuilAlignes, 1, tf.length, seuilParDefaut))
     : null;
 
   return {
