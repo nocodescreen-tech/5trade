@@ -4199,11 +4199,6 @@ function BacktestPanel() {
           <option value={2}>pas 2 (recommandé)</option>
           <option value={3}>pas 3 (rapide)</option>
         </select>
-        <select className="fld" aria-label="Stratégie appliquée au scan" style={{ margin: 0, width: 'auto', maxWidth: 260 }}
-          value={choix} onChange={e => setChoix(e.target.value)}>
-          <option value="">Moteur générique</option>
-          {strategies.map(x => <option key={x.id} value={x.id}>{x.titre || x.id}</option>)}
-        </select>
         <button className="btn sm" onClick={lancer} disabled={busy}>
           {busy ? <Spinner /> : <i className="fas fa-play"></i>} Lancer le backtest
         </button>

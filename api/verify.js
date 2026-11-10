@@ -4791,6 +4791,18 @@ function tinyPng(W = 64, H = 40) {
     ok('le scan sans stratégie reste en moteur générique (aucune règle imposée)',
       r.resultats.every(x => x.strategie === null));
 
+    // Plusieurs stratégies cochées = plusieurs évaluations réelles. Avant, seule
+    // la première tournait, et la clé d'anti-doublon ne distinguait pas les fiches :
+    // la deuxième aurait été vue comme un doublon de la première.
+    ok('chaque stratégie cochée est évaluée (boucle, plus « [0] »)',
+      /for \(const profil of cibles\)/.test(srcAlerts)
+      && /profilsValides\.length \? profilsValides : \[null\]/.test(srcAlerts)
+      && !/const profil = profilsValides\[0\]/.test(srcAlerts));
+    ok('l\'anti-doublon distingue les stratégies entre elles',
+      /\|\$\{v\.at\}`\s*\n?\s*\+ \(profil \? `\|\$\{profil\.id\}`/.test(srcAlerts));
+    ok('le verdict d\'envoi nomme la stratégie qui a déclenché',
+      /ALERTE ENVOYÉE', force: v\.strength, strategie: profil\.titre/.test(srcAlerts));
+
     // La surveillance reste la seule à envoyer, et elle porte un cooldown.
     ok('la surveillance garde le cooldown comme garde-fou',
       /cooldownMin/.test(srcAlerts) && /déjà alerté \(cooldown\)/.test(srcAlerts));

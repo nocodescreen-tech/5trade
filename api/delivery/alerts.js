@@ -514,8 +514,17 @@ async function verifierBrut(force = false) {
         continue;
       }
 
-      // Verdict du moteur, restreint aux règles de la première stratégie retenue.
-      const profil = profilsValides[0];
+      // Verdict du moteur, restreint aux règles de CHAQUE stratégie cochée.
+      // Avant, seule la première était évaluée : cocher trois stratégies n'en
+      // faisait tourner qu'une, en silence. Chaque fiche rend désormais son
+      // propre verdict et son propre signal, tracés sous son nom.
+      // Aucune stratégie cochée = mode générique : on évalue UNE fois sans fiche.
+      const cibles = profilsValides.length ? profilsValides : [null];
+      for (const profil of cibles) {
+        // Tout verdict de cette passe porte le nom de la fiche : à l'écran, on doit
+        // pouvoir dire « c'est SMC/ICT qui a refusé », pas un « neutre » anonyme.
+        const etiquette = profil ? (profil.titre || profil.id) : null;
+        const dire = (obj) => resultats.push({ ...m, strategie: etiquette, ...obj });
       const optionsMoteur = profil ? {
         regles: profil.regles,
         obligatoires: profil.obligatoires || [],
@@ -583,7 +592,7 @@ async function verifierBrut(force = false) {
         } catch { /* le journal ne doit jamais bloquer une alerte */ }
       }
 
-      if (v.status !== 'confirme') { resultats.push({ ...m, verdict: v.status }); continue; }
+      if (v.status !== 'confirme') { dire({ verdict: v.status }); continue; }
 
       // ── Filtre économique ──
       // Il n'était appliqué QUE sur le chemin IA, jamais ici : une alerte pouvait
@@ -598,19 +607,19 @@ async function verifierBrut(force = false) {
             lecture: `filtre économique en erreur (${e.message}) : non vérifié` };
         }
         if (fondamental && fondamental.bloque) {
-          resultats.push({ ...m, verdict: `signal bloqué — ${fondamental.lecture}`, fondamental });
+          dire({ verdict: `signal bloqué — ${fondamental.lecture}`, fondamental });
           continue;
         }
       }
       if (v.strength < c.forceMin) {
-        resultats.push({ ...m, verdict: `confirmé mais force ${Number(v.strength).toFixed(2)}/1 (${v.forceNiveau || '—'}) < seuil` });
+        dire({ verdict: `confirmé mais force ${Number(v.strength).toFixed(2)}/1 (${v.forceNiveau || '—'}) < seuil` });
         continue;
       }
 
       // ── Garde-fous : on ne réveille personne pour un signal douteux ──
       // 1. Règles en désaccord franc : deux règles opposées ne sont pas un signal.
       if (c.refuserDesaccord && v.contradiction && v.contradiction.franche) {
-        resultats.push({ ...m, verdict: `refusé — ${v.contradiction.lecture}` });
+        dire({ verdict: `refusé — ${v.contradiction.lecture}` });
         continue;
       }
 
@@ -661,7 +670,7 @@ async function verifierBrut(force = false) {
         // Une unité exigée par la stratégie et absente est une condition
         // obligatoire manquante : aucun signal, et on dit laquelle.
         if (declarees && indisponibles.length) {
-          resultats.push({ ...m,
+          dire({
             verdict: `signal refusé — unité(s) de temps obligatoire(s) indisponible(s) : ${indisponibles.join(', ')}` });
           continue;
         }
@@ -670,7 +679,7 @@ async function verifierBrut(force = false) {
         if (deps.qualite && typeof deps.qualite.synchroniser === 'function' && series.length > 1) {
           const sync = deps.qualite.synchroniser(series);
           if (!sync.aligne) {
-            resultats.push({ ...m, verdict: 'unités de temps désynchronisées — ' + sync.raison, sync });
+            dire({ verdict: 'unités de temps désynchronisées — ' + sync.raison, sync });
             continue;
           }
         }
@@ -693,11 +702,11 @@ async function verifierBrut(force = false) {
         confluence.seuilApplique = seuilEffectif;
         confluence.unitesDeclarees = declarees || null;
         if (!confluence.aligne) {
-          resultats.push({ ...m, verdict: `refusé — alignement insuffisant (${confluence.motif})`, confluence });
+          dire({ verdict: `refusé — alignement insuffisant (${confluence.motif})`, confluence });
           continue;
         }
         if (c.refuserContreTendance && confluence.contreTendance) {
-          resultats.push({ ...m, verdict: `refusé — contre-tendance (${confluence.motif})`, confluence });
+          dire({ verdict: `refusé — contre-tendance (${confluence.motif})`, confluence });
           continue;
         }
       }
@@ -710,7 +719,7 @@ async function verifierBrut(force = false) {
         && Number.isFinite(lv.target1) && Math.abs(lv.entry - lv.stop) > 0) {
         rr = Math.abs(lv.target1 - lv.entry) / Math.abs(lv.entry - lv.stop);
         if (rr < c.rrMin) {
-          resultats.push({ ...m, verdict: `refusé — gain/risque ${rr.toFixed(2)} < ${c.rrMin}` });
+          dire({ verdict: `refusé — gain/risque ${rr.toFixed(2)} < ${c.rrMin}` });
           continue;
         }
       }
@@ -722,7 +731,8 @@ async function verifierBrut(force = false) {
       const sigKey = multi
         ? multi.signaux.filter(s => s.status === 'confirme').map(s => s.id).sort().join('+')
         : '';
-      const cleBase = `${m.provider}|${m.symbol}|${m.tf}|${v.direction}|${v.at}`;
+      const cleBase = `${m.provider}|${m.symbol}|${m.tf}|${v.direction}|${v.at}`
+        + (profil ? `|${profil.id}` : '');
       const cle = sigKey ? `${cleBase}|${sigKey}` : cleBase;
       // Dédoublonnage : un signal identique déjà parti ne repart pas. Le cooldown
       // est ce qui distingue « ce setup a déjà été signalé » de « il y a deux
@@ -730,11 +740,11 @@ async function verifierBrut(force = false) {
       const cooldownMs = (Number.isFinite(c.cooldownMin) ? c.cooldownMin : 30) * 60_000;
       const vuA = c.dejaAt && Number.isFinite(c.dejaAt[cle]) ? c.dejaAt[cle] : null;
       if (!cooldownMs && c.deja.includes(cle)) {
-        resultats.push({ ...m, verdict: 'déjà alerté' });
+        dire({ verdict: 'déjà alerté' });
         continue;
       }
       if (cooldownMs && vuA !== null && Date.now() - vuA < cooldownMs) {
-        resultats.push({ ...m, verdict: 'déjà alerté (cooldown)' });
+        dire({ verdict: 'déjà alerté (cooldown)' });
         continue;
       }
 
@@ -755,14 +765,14 @@ async function verifierBrut(force = false) {
         } catch { /* le mail déjà parti reste valide */ }
       }
       if (!emailOk && pushOk <= 0) {
-        resultats.push({ ...m, verdict: 'aucun canal disponible' });
+        dire({ verdict: 'aucun canal disponible' });
         continue;
       }
       // Telegram en plus : l'email peut attendre, le telephone non. Un echec
       // Telegram ne remet pas en cause l'alerte email deja partie.
       if (c.telegramToken && c.telegramChat) {
         try { await envoyerTelegram(c, v, m, { confluence, rr, multi }); }
-        catch (e) { resultats.push({ ...m, verdict: 'alerte envoyée, Telegram en échec : ' + e.message }); }
+        catch (e) { dire({ verdict: 'alerte envoyée, Telegram en échec : ' + e.message }); }
       }
       c.deja.push(cle);
       c.dejaAt = { ...(c.dejaAt || {}), [cle]: Date.now() };
@@ -795,7 +805,8 @@ async function verifierBrut(force = false) {
         sl: v.levels ? v.levels.stop : null, tp: v.levels ? v.levels.target1 : null,
         summary: v.summary, cle
       });
-      resultats.push({ ...m, verdict: 'ALERTE ENVOYÉE', force: v.strength });
+      resultats.push({ ...m, verdict: 'ALERTE ENVOYÉE', force: v.strength, strategie: profil.titre || profil.id });
+      }
     } catch (e) {
       // Un marché en échec ne doit jamais empêcher les autres d'être surveillés.
       resultats.push({ ...m, verdict: 'erreur', detail: e.message });
