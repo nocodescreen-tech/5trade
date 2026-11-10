@@ -4022,10 +4022,12 @@ async function start() {
     console.log(`   Registre   : indisponible (${String(e.message).slice(0, 80)})`);
   }
 
-  // Alertes : la base fait foi (le fichier local est un cache). Sans cette
-  // relecture, une config saisie dans l'interface était perdue au redéploiement.
-  await Alerts.hydrater();
+  // Alertes : la base fait foi (le fichier local est un cache). L'ordre compte :
+  // load() lit le fichier, hydrater() le remplace par la base. Inversé, load()
+  // écrasait la config de la base par la graine du fichier — la surveillance
+  // perdait ses stratégies et ses marchés à chaque redémarrage, sans rien dire.
   Alerts.load();
+  await Alerts.hydrater();
   // Sauvegarde de la base vers R2 : planifiée ici, donc elle hérite de
   // l'environnement (aucun cron à configurer sur l'hébergeur).
   Backup.start();

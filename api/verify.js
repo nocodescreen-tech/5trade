@@ -4803,6 +4803,14 @@ function tinyPng(W = 64, H = 40) {
     ok('le verdict d\'envoi nomme la stratégie qui a déclenché',
       /ALERTE ENVOYÉE', force: v\.strength, strategie: profil\.titre/.test(srcAlerts));
 
+    // L'ordre de démarrage compte : load() lit le fichier, hydrater() met la base
+    // par-dessus. Inversé, la config de la base était écrasée par la graine du
+    // fichier — stratégies et marchés disparaissaient à chaque redémarrage.
+    const srcSrv = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+    ok('la config des alertes est relue en base APRÈS le fichier',
+      srcSrv.indexOf('Alerts.load();') > -1
+      && srcSrv.indexOf('await Alerts.hydrater();') > srcSrv.indexOf('Alerts.load();'));
+
     // La surveillance reste la seule à envoyer, et elle porte un cooldown.
     ok('la surveillance garde le cooldown comme garde-fou',
       /cooldownMin/.test(srcAlerts) && /déjà alerté \(cooldown\)/.test(srcAlerts));
@@ -5299,9 +5307,13 @@ function tinyPng(W = 64, H = 40) {
     const A = require('./delivery/alerts');
     A.load();
     const d = A.diagnostic();
+    // Le diagnostic dépend de l'environnement (un jeton Telegram posé dans .env
+    // rend « prêt » vrai). On teste donc l'INVARIANT : prêt ⇔ aucune manque, et
+    // chaque manque est une phrase lisible, pas un code.
     ok('le diagnostic nomme ce qui manque pour qu\'une alerte parte',
-      d.pret === false && d.manques.length > 0,
-      d.manques.join(' · '));
+      Array.isArray(d.manques) && d.pret === (d.manques.length === 0)
+      && d.manques.every(m => typeof m === 'string' && m.length > 5),
+      d.pret ? 'prêt (' + d.manques.length + ' manque(s))' : d.manques.join(' · '));
     ok('le diagnostic expose le nombre de stratégies et de marchés',
       Number.isInteger(d.strategies) && Number.isInteger(d.marches),
       `${d.strategies} stratégie(s), ${d.marches} marché(s)`);
