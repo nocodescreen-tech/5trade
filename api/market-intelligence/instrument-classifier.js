@@ -30,11 +30,12 @@ const INDICES = [
 ];
 
 const METAUX = ['XAU', 'XAG', 'XPT', 'XPD', 'GOLD', 'SILVER', 'PLATINUM'];
-const ENERGIES = ['WTI', 'BRENT', 'USOIL', 'UKOIL', 'NATGAS', 'NGAS', 'CL', 'NG', 'GASOLINE', 'HEATOIL'];
+// XTI/XBR : les contrats pétrole de Deriv (XTIUSD, XBRUSD) ne s'écrivent pas WTI/BRENT.
+const ENERGIES = ['WTI', 'BRENT', 'XTI', 'XBR', 'USOIL', 'UKOIL', 'NATGAS', 'NGAS', 'CL', 'NG', 'GASOLINE', 'HEATOIL'];
 const CRYPTO = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'BNB', 'LTC', 'DOT', 'AVAX', 'MATIC', 'LINK', 'TRX', 'TON'];
 
 /** Indices synthétiques Deriv : R_10..R_100, BOOM/CRASH/STEP, 1HZ… */
-const SYNTHETIQUE = /^(R\d+|BOOM\d*|CRASH\d*|STEP\w*|JD\d+|STPRNG\d*|1HZ\d+)$/;
+const SYNTHETIQUE = /^(R\d+|BOOM\d*|CRASH\d*|STEP\w*|JD\d+|STPRNG\d*|1HZ\d+\w*)$/;
 
 const net = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const sansPrefixeCourtier = s => s.replace(/^(FRX|CFI|FX|OTC|IDX|CASH|SPOT)/, '');

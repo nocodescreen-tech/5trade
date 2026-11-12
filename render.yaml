@@ -22,14 +22,10 @@ services:
       - key: NODE_ENV
         value: production
       # Secrets : à saisir dans le dashboard (sync: false ne les versionne pas).
-      - key: DEEPSEEK_API_KEY
-        sync: false
-      - key: DEEPSEEK_MODEL
-        value: deepseek-chat
       - key: NVIDIA_API_KEY
         sync: false
       - key: NVIDIA_MODELS
-        value: nvidia/nemotron-3-ultra-550b-a55b,openai/gpt-oss-20b,nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+        value: nvidia/nemotron-3-ultra-550b-a55b,mistralai/mistral-large-4-1t-a52b,nvidia/nemotron-3-nano-omni-30b-a3b-reasoning,nvidia/nemotron-3.5-lightning-30b-a3b
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_VISION_MODEL

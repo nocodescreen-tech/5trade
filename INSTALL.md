@@ -26,7 +26,7 @@ npm install
 # Créer le fichier .env dans le dossier api
 cd ../api
 cp .env.example .env
-# Éditer .env avec votre DeepSeek API Key
+# Éditer .env avec votre clé NVIDIA_API_KEY (gratuite, build.nvidia.com)
 ```
 
 ## 4. Démarrer l'application

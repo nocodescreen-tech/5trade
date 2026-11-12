@@ -86,3 +86,7 @@ data/dump-*.sql
 # Modeles de variables et blueprints : versionnes, sans secret
 !.env.deploy.example
 knowledge-base/documents/.hermes-tmp*
+
+# Artefacts locaux : sauvegardes de fichiers et captures de vérification visuelle
+/backups/
+/shots/

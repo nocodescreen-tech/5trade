@@ -22,7 +22,7 @@ Contrôle avant de lancer un build (30 s au lieu de 5 min perdues) :
 | `DATA_DIR` | journal, coûts, lexique, comptes (repli JSON) | /app/state/data |
 | `KNOWLEDGE_BASE_DIR` | stratégies importées, concepts, documents | /app/state/knowledge-base |
 | `UPLOADS_DIR` | captures et fichiers envoyés | /app/state/uploads |
-| `DEEPSEEK_API_KEY` | IA payante | — |
+| `NVIDIA_API_KEY` | Analyse IA (gratuit) | — |
 | `NVIDIA_API_KEY` | secours IA **gratuit**, bascule automatique | — |
 | `GEMINI_API_KEY` | lecture des captures | — |
 | `SMTP_*` | OTP d'inscription | — |
@@ -81,7 +81,7 @@ Contraintes déjà encodées dans le script : nom commençant par une lettre
 
     fly launch --dockerfile Dockerfile --no-deploy
     fly volumes create etat --size 1
-    fly secrets set DATABASE_URL=... DEEPSEEK_API_KEY=... NVIDIA_API_KEY=...
+    fly secrets set DATABASE_URL=... NVIDIA_API_KEY=...
     fly deploy
 
 VPS : `docker run -d -p 3001:3001 --env-file .env -v fivetrade-state:/app/state

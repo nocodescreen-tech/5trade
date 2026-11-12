@@ -269,7 +269,7 @@ function resetDedup() { config.deja = []; save(); return config; }
  * stratégies et plusieurs motifs peuvent se déclencher en même temps, chacun avec
  * son sens. Les fondre en une ligne efface ce que le trader a demandé à voir.
  * Chaque ligne porte donc : le nom, la stratégie d'origine (ou le motif), le sens
- * et la force. Les non-remplis sont comptés, pas listés (le message resterait
+ * et la force. Les rejetés sont comptés, pas listés (le message resterait
  * illisible) — ils restent visibles dans l'app.
  */
 function blocSignaux(multi) {
@@ -563,36 +563,80 @@ async function verifierBrut(force = false) {
         } catch { traceEvaluation = null; }
       }
 
-      // ── Signaux MULTIPLES : la liste, pas un verdict seul ──
-      // La surveillance n'utilisait AUCUNE stratégie de l'utilisateur : elle
-      // appelait detect() sans options, donc en mode auto (toutes les règles).
-      // On évalue ici chaque stratégie configurée séparément, plus les motifs,
-      // pour que l'alerte dise QUELLE stratégie s'est déclenchée.
+      // ── DECISION ENGINE : arbitrage central (remplace verdict unique + multi-signaux) ──
+      let decision = null;
+      // `multi` doit vivre pendant TOUT le tour de boucle : la clé anti-doublon,
+      // la composition du message et l'envoi Telegram le lisent bien plus bas.
+      // Déclaré dans le seul bloc de repli, il provoquait « multi is not defined »
+      // dès que le Decision Engine répondait — donc en production, à chaque cycle.
       let multi = null;
-      if (deps.signaux && typeof deps.signaux.detecterTout === 'function') {
+      // Alignement multi-unités : la décision l'EXIGE (c.exigerAlignement) mais ne
+      // peut pas le calculer — elle ne reçoit qu'une série. Sans cette fourniture,
+      // le contrôle restait inopérant et la surveillance confirmait sans lui.
+      let confluenceSurveillance = null;
+      if (typeof deps.alignementMtf === 'function') {
         try {
-          // On réutilise les profils déjà chargés : les relire ferait deux appels
-          // disque/base par marché et par cycle, pour un résultat identique.
-          multi = deps.signaux.detecterTout(closes, { symbol: m.symbol, timeframe: m.tf },
-            { profils });
-        } catch { multi = null; }
+          const al = await deps.alignementMtf(m.symbol, m.tf, m.provider);
+          confluenceSurveillance = (al && al.confluence) || null;
+        } catch { /* une unité indisponible ne bloque pas la surveillance */ }
       }
-
-      // Le journal se remplit ICI aussi, pas seulement quand l'onglet « Direct »
-      // est ouvert. Sans ça, un signal émis pendant que l'app est fermée
-      // n'entrait jamais dans le journal : les statistiques ne décrivaient qu'une
-      // partie de la réalité, et le backtest seul ne pouvait rien dire du live.
-      // Le dédoublonnage par identité évite le doublon avec le flux.
-      if (multi && deps.journal && typeof deps.journal.enregistrer === 'function') {
+      // Garde-fou de COMPTE : un refus de risque doit empêcher l'alerte, exactement
+      // comme il empêche la décision. Le serveur fournit la fabrique — lui seul
+      // connaît le journal, donc l'état réel du compte.
+      let verificateurRisque;
+      if (typeof deps.verificateurRisque === 'function') {
+        try { verificateurRisque = deps.verificateurRisque(); } catch { verificateurRisque = undefined; }
+      }
+      if (deps.DecisionEngine && typeof deps.DecisionEngine.decider === 'function') {
         try {
-          deps.journal.enregistrer(
-            multi.signaux.filter(x => x.status === 'confirme' || x.status === 'surveiller'),
-            { symbol: m.symbol, timeframe: m.tf, provider: m.provider, at: v.at }
-          );
-        } catch { /* le journal ne doit jamais bloquer une alerte */ }
+          decision = deps.DecisionEngine.decider(closes, { symbol: m.symbol, timeframe: m.tf }, {
+            profils,
+            rrMin: c.rrMin,
+            exigerAlignement: c.exigerAlignement,
+            refuserDesaccord: c.refuserDesaccord,
+            refuserContreTendance: c.refuserContreTendance,
+            verifierFrais: true,
+            verifierModele: true,
+            confluence: confluenceSurveillance,
+            verificateurRisque
+          });
+        } catch { decision = null; }
       }
+      // Fallback : si DecisionEngine indisponible, on garde l'ancien chemin (v + multi)
+      if (!decision) {
+        if (deps.signaux && typeof deps.signaux.detecterTout === 'function') {
+          try {
+            multi = deps.signaux.detecterTout(closes, { symbol: m.symbol, timeframe: m.tf }, { profils });
+          } catch { multi = null; }
+        }
+        // Le journal est écrit PLUS BAS, après tous les filtres. Il l'était ici,
+        // donc AVANT le filtre économique, la force minimale, le désaccord,
+        // l'alignement MTF et le RR : une position qu'on n'annonçait jamais
+        // restait ouverte au journal, consommait un slot de `maxSimultanes` et
+        // faussait l'état du compte pour les prises suivantes.
 
-      if (v.status !== 'confirme') { dire({ verdict: v.status }); continue; }
+        if (v.status !== 'confirme') { dire({ verdict: v.status }); continue; }
+      } else {
+        // Decision Engine a produit un verdict : on l'utilise pour l'alerte
+        if (decision.decision !== 'ACHAT' && decision.decision !== 'VENTE') {
+          dire({ verdict: `décision : ${decision.decision} — ${decision.raison}` });
+          continue;
+        }
+        // Meilleur signal retenu par l'arbitrage = celui qu'on alerte
+        const s = decision.signal;
+        if (!s || !s.levels || !Number.isFinite(s.levels.entry) || !Number.isFinite(s.levels.stop)) {
+          dire({ verdict: 'décision sans niveaux exploitables' });
+          continue;
+        }
+        // On utilise ce signal pour le reste de la logique (filtres, RR, envoi)
+        // On adapte les variables attendues par le code existant
+        v.direction = s.sens === 'long' ? 'BUY' : 'SELL';
+        v.strength = s.force;
+        v.levels = s.levels;
+        v.price = decision.price;
+        v.summary = decision.raison;
+        v.at = decision.at;
+      }
 
       // ── Filtre économique ──
       // Il n'était appliqué QUE sur le chemin IA, jamais ici : une alerte pouvait
@@ -748,7 +792,25 @@ async function verifierBrut(force = false) {
         continue;
       }
 
-      const msg = compose(v, m, r.candles[r.candles.length - 1].c, { confluence, rr, multi });
+      // ── JOURNAL — APRÈS TOUS LES FILTRES, POUR LES DEUX CHEMINS ────────
+      // Écrit ici et pas plus haut : le signal a passé le filtre économique, la
+      // force minimale, le désaccord, l'alignement MTF, le RR et le cooldown.
+      // Avant, le chemin de repli enregistrait la position AVANT ces filtres —
+      // une position jamais annoncée restait ouverte au journal, consommait un
+      // slot de `maxSimultanes` et faussait `Risque.verifierPrise` au cycle suivant.
+      if (deps.journal && typeof deps.journal.enregistrer === 'function') {
+        const retenus = ((multi ? multi.signaux : (decision && decision.signaux)) || [])
+          .filter(x => x.status === 'confirme' || x.status === 'surveiller');
+        if (retenus.length) {
+          try {
+            deps.journal.enregistrer(retenus, {
+              symbol: m.symbol, timeframe: m.tf, provider: m.provider, at: v.at
+            });
+          } catch { /* le journal ne doit jamais bloquer une alerte */ }
+        }
+      }
+
+      const msg = compose(v, m, r.candles[r.candles.length - 1].c, { confluence: decision?.confluence, rr: rr, multi: decision ? { signaux: decision.signaux, synthese: decision.synthese, carte: decision.carte } : multi });
       let emailOk = false;
       if (c.email) {
         await deps.sendMail({ to: c.email, subject: msg.subject, html: msg.html });
@@ -805,7 +867,7 @@ async function verifierBrut(force = false) {
         sl: v.levels ? v.levels.stop : null, tp: v.levels ? v.levels.target1 : null,
         summary: v.summary, cle
       });
-      resultats.push({ ...m, verdict: 'ALERTE ENVOYÉE', force: v.strength, strategie: profil.titre || profil.id });
+      resultats.push({ ...m, verdict: 'ALERTE ENVOYÉE', force: v.strength, strategie: profil ? (profil.titre || profil.id) : null });
       }
     } catch (e) {
       // Un marché en échec ne doit jamais empêcher les autres d'être surveillés.

@@ -9,8 +9,9 @@
  *   4. search   → recherche web autonome + scraping + sauvegarde
  *   5. forums   → sources connues (forexfactory, tradingview, reddit, babypips)
  *
- * Analyse : DeepSeek multimodal (jusqu'à 4 captures TradingView multi-timeframes)
+ * Analyse : vision Gemini sur jusqu'à 4 captures TradingView multi-timeframes,
  * puis recherche dans la base + combinaison de 2-3 stratégies → plan d'action.
+ * Le texte est produit par NVIDIA NIM (gratuit, chaîne de modèles en cascade).
  */
 
 const express = require('express');
@@ -28,22 +29,25 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
-// URL surchargeable : pointe-la vers un relai local OpenAI-compatible
-// (ex. Ollama : http://localhost:11434/v1/chat/completions) pour du 0 $.
-const DEEPSEEK_URL = process.env.DEEPSEEK_URL || 'https://api.deepseek.com/v1/chat/completions';
 
-// ─── Secours gratuit NVIDIA NIM ───
-// Quand DeepSeek refuse l'appel (solde épuisé, quota, 401/402/429/5xx, panne
-// réseau, ou plafond mensuel local atteint), on rejoue la MÊME requête sur un
-// modèle gratuit de build.nvidia.com. Aucun frais : le journal les marque
-// `gratuit` et le budget reste intact.
-//   NVIDIA_MODELS = liste ordonnée, séparée par des virgules. Le premier qui
-//   répond correctement gagne ; les suivants servent de secours en cascade.
+// ─── Analyse IA : NVIDIA NIM exclusivement (build.nvidia.com) ───
+// DeepSeek a été retiré : plus AUCUN appel payant dans l'app. Tous les modèles
+// ci-dessous sont gratuits, donc le budget IA ne peut plus être consommé par une
+// analyse de texte.
+//
+// NVIDIA_MODELS = liste ORDONNÉE, séparée par des virgules. Le premier qui
+// répond correctement gagne ; les suivants prennent le relais en cascade, ce qui
+// rend l'analyse résiliente à la panne ou à la saturation d'un seul modèle.
+// Les identifiants ci-dessous ont été MESURÉS un par un (sonde du 2026-11-11) :
+// les modèles retirés par NVIDIA (404/410) sont volontairement absents — un
+// identifiant annoncé mais mort ne sert à rien dans une chaîne de secours.
 const NVIDIA_URL = process.env.NVIDIA_URL || 'https://integrate.api.nvidia.com/v1/chat/completions';
 const NVIDIA_MODELS = String(
   process.env.NVIDIA_MODELS ||
-  'mistralai/mistral-large-4-1t-a52b,nvidia/nemotron-3.5-lightning-30b-a3b'
+  'nvidia/nemotron-3-ultra-550b-a55b,' +
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning,' +
+  'nvidia/nemotron-3.5-lightning-30b-a3b,' +
+  'mistralai/mistral-large-4-1t-a52b'
 ).split(',').map(m => m.trim()).filter(Boolean);
 const NVIDIA_TIMEOUT_MS = Number(process.env.NVIDIA_TIMEOUT_MS || 45000);
 
@@ -139,7 +143,7 @@ app.get('/healthz', async (req, res) => {
     res.json({
       ok: true,
       stockage,
-      ia: { deepseek: !!process.env.DEEPSEEK_API_KEY, secoursNvidia: !!process.env.NVIDIA_API_KEY },
+      ia: { nvidia: !!process.env.NVIDIA_API_KEY, modeles: NVIDIA_MODELS.length },
       alertes: Alerts.diagnostic(), cycle: Alerts.etatCycle(),
       // « inconnu » n'est pas « zéro » : on expose si les coûts sont saisis chez le
       // courtier, seulement estimés par la table de références, ou absents.
@@ -152,9 +156,9 @@ app.get('/healthz', async (req, res) => {
   }
 });
 
-// Sonde du secours IA — montée UNIQUEMENT si IA_SELFTEST=1.
-// Elle prouve, en un appel, que la chaîne DeepSeek → NVIDIA NIM répond, et dit
-// QUI a répondu (`source`). Sert à diagnostiquer un « solde épuisé » en prod
+// Sonde de l'IA — montée UNIQUEMENT si IA_SELFTEST=1.
+// Elle prouve, en un appel, que la chaîne NVIDIA NIM répond, et dit QUEL modèle
+// a répondu (`fournisseur`). Sert à diagnostiquer une panne de modèle en prod
 // sans lancer une analyse complète. Fermée par défaut : sans le drapeau,
 // la route n'existe pas (404).
 if (process.env.IA_SELFTEST === '1') {
@@ -165,14 +169,14 @@ if (process.env.IA_SELFTEST === '1') {
     }];
     try {
       const avant = Couts.bilan();
-      const contenu = await deepseek(messages, { maxTokens: 300, json: true, route: 'selftest' });
+      const contenu = await analyserIA(messages, { maxTokens: 300, json: true, route: 'selftest' });
       const apres = Couts.bilan();
       res.json({
         ok: true,
-        fournisseur: dernierFournisseur,     // « deepseek » ou « nim:<modele> »
+        fournisseur: dernierFournisseur,     // « nim:<modele> »
         contenu,
         budget: { avant: avant.depense, apres: apres.depense, plafond: apres.plafond },
-        modeles: { deepseek: DEEPSEEK_MODEL, nvidia: NVIDIA_MODELS }
+        modeles: NVIDIA_MODELS
       });
     } catch (e) {
       res.status(e.status || 500).json({ ok: false, erreur: e.message });
@@ -396,7 +400,10 @@ const { getTauxInteret, ecartTaux, analyseTaux, classeTaux } = require('./source
 const { detecterPatterns } = require('./engine/patternRecognition');
 
 // ─── Signal Scoring ML — implémentation dans signalScoring.js ───
-const { entrainerModele, predireSucces, ajusterSeuil, evaluerModele } = require('./engine/signalScoring');
+const {
+  entrainerModele, predireSucces, ajusterSeuil, evaluerModele,
+  evaluerHorsEchantillon, MIN_ENTRAINEMENT, APPLIQUE_AUX_DECISIONS
+} = require('./engine/signalScoring');
 
 // ─── Order Flow — implémentation dans orderFlow.js ───
 const { analyserOrderFlow } = require('./engine/orderFlow');
@@ -447,6 +454,8 @@ const Signals = require('./engine/signals');
 // Moteur multi-signaux : une liste de signaux (un par stratégie, un par motif)
 // au lieu d'un verdict unique. Voir signaux.js et patterns.js.
 const Multi = require('./engine/signaux');
+// Decision Engine — arbitrage central : Détection → Validation → Confirmation → Exécution → Arbitrage
+const DecisionEngine = require('./engine/DecisionEngine');
 const Patterns = require('./engine/patterns');
 // Journal des signaux : persiste chaque signal émis puis enregistre son ISSUE
 // réelle (objectif 1/2, stop, retour à l'entrée). Sans ça, aucune stratégie ne
@@ -459,6 +468,11 @@ const Analyse = require('./engine/analyse');
 const Backtest = require('./engine/backtest');
 // Actualités et calendrier économique : flux publics, sans clé ni compte.
 const News = require('./sources/news');
+// Impact directionnel des dépêches : ACHAT / VENTE / NEUTRE, avec cache disque.
+const NewsImpact = require('./delivery/news-impact');
+// Contrat de sortie commun aux moteurs : le verdict est rendu dans la même forme
+// que les signaux du multi (une seule lecture pour l'écran, les alertes, le journal).
+const Contrat = require('./engine/contrat');
 const Alerts = require('./delivery/alerts');
 const Scan = require('./delivery/scan');
 const Lexique = require('./delivery/lexique');
@@ -567,60 +581,10 @@ function appendHistory(entry) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// DeepSeek
+// NVIDIA NIM — source UNIQUE des analyses texte (gratuit)
 // ─────────────────────────────────────────────────────────────
-async function appelDeepSeek(messages, { maxTokens = 2000, json = false } = {}) {
-  const key = process.env.DEEPSEEK_API_KEY;
-  if (!key || key.includes('your_deepseek')) {
-    const e = new Error('DEEPSEEK_API_KEY non configurée dans .env');
-    e.code = 'NO_KEY';
-    throw e;
-  }
-  // Garde-fou : on refuse AVANT de dépenser si le plafond mensuel est atteint.
-  // L'erreur remonte au répartiteur, qui bascule alors sur le secours gratuit.
-  Couts.verifierBudget();
-  const body = {
-    model: DEEPSEEK_MODEL,
-    messages,
-    max_tokens: maxTokens,
-    temperature: 0.3
-  };
-  if (json) body.response_format = { type: 'json_object' };
-
-  const res = await fetch(DEEPSEEK_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${key}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30000) // 30s max — un API qui ne répond pas ne doit pas bloquer le serveur
-  });
-
-  const data = await res.json();
-  if (!res.ok) {
-    const msg = data.error?.message || `DeepSeek HTTP ${res.status}`;
-    // Solde épuisé : message actionnable au lieu d'un code obscur.
-    if (res.status === 402 || /insufficient|balance|quota|exceeded|billing/i.test(msg)) {
-      const e = new Error(
-        `Solde IA épuisé (${msg}). L'onglet Direct (moteur local, gratuit) reste ` +
-        `disponible ; recharge ton solde ou pointe DEEPSEEK_URL vers un relai local (Ollama).`
-      );
-      e.status = 503;
-      throw e;
-    }
-    throw new Error(msg);
-  }
-  const contenu = data.choices[0].message.content;
-  return { contenu, modele: body.model, usage: data.usage || {} };
-}
-
-// ─────────────────────────────────────────────────────────────
-// Secours gratuit — NVIDIA NIM (build.nvidia.com)
-// ─────────────────────────────────────────────────────────────
-// DeepSeek est le seul appel PAYANT. NVIDIA NIM est gratuit : quand DeepSeek
-// tombe (solde, quota, 429, panne, plafond local), on rejoue la même requête
-// ici sans que ça coûte un centime. Le nettoyage JSON vit dans json-ia.js.
+// DeepSeek a été retiré du chemin d'analyse : il n'y a plus d'appel payant.
+// Le nettoyage JSON vit dans json-ia.js.
 
 async function appelNvidia(modele, messages, { maxTokens = 2000, json = false } = {}) {
   const key = process.env.NVIDIA_API_KEY;
@@ -698,47 +662,22 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false } 
 }
 
 /**
- * Point d'entrée IA unique de l'app.
- *   1. DeepSeek (payant) si la clé existe et que le budget mensuel n'est pas atteint.
- *   2. Sinon — ou si DeepSeek échoue — bascule AUTOMATIQUE sur NVIDIA NIM (gratuit),
- *      modèle après modèle, jusqu'à une réponse exploitable.
- * Le coût DeepSeek est journalisé comme avant ; les appels NVIDIA le sont à 0 $.
+ * Point d'entrée IA UNIQUE de l'app — NVIDIA NIM, en cascade.
+ *
+ * Il n'y a plus de fournisseur payant : chaque modèle de NVIDIA_MODELS est
+ * essayé dans l'ordre jusqu'à une réponse exploitable. Un modèle en panne,
+ * saturé ou retiré côté NVIDIA ne bloque donc jamais une analyse : le suivant
+ * prend le relais. Le coût est journalisé à 0 $ (champ `gratuit`).
  */
-// Qui a répondu au dernier appel IA (« deepseek » ou « nim:<modele> »).
-// Exposé par la sonde /api/ia-selftest : en prod, c'est la seule façon de
-// savoir si le secours gratuit a réellement pris le relais.
+// Qui a répondu au dernier appel IA (« nim:<modele> »), exposé par /api/ia-selftest.
 let dernierFournisseur = 'aucun';
-async function deepseek(messages, { maxTokens = 2000, json = false, route = 'ia' } = {}) {
-  const raisons = [];
-  // 1) Voie payante.
-  try {
-    const r = await appelDeepSeek(messages, { maxTokens, json });
-    try {
-      const usage = r.usage || {};
-      Couts.enregistrer({
-        route,
-        modele: r.modele,
-        entree: Number(usage.prompt_tokens) || Couts.estimerEntree(messages),
-        sortie: Number(usage.completion_tokens) || Couts.estimerTokens(r.contenu)
-      });
-    } catch { /* le comptage ne doit jamais casser une analyse */ }
-    dernierFournisseur = 'deepseek';
-    return r.contenu;
-  } catch (e) {
-    // Une requête malformée échouera aussi ailleurs : on ne la rejoue pas.
-    if (e.status === 400) throw e;
-    raisons.push(`DeepSeek: ${e.message}`);
-    console.warn(`[IA] DeepSeek indisponible → secours gratuit NVIDIA (${e.message.slice(0, 140)})`);
-  }
-
-  // 2) Secours gratuit, en cascade.
+async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'ia' } = {}) {
   if (!process.env.NVIDIA_API_KEY) {
-    const e = new Error(
-      `${raisons.join(' | ')} — et NVIDIA_API_KEY n'est pas configurée : aucun secours gratuit disponible.`
-    );
+    const e = new Error('NVIDIA_API_KEY non configurée dans .env : aucune IA disponible.');
     e.status = 503;
     throw e;
   }
+  const raisons = [];
   for (const modele of NVIDIA_MODELS) {
     try {
       const r = await appelNvidia(modele, messages, { maxTokens, json });
@@ -750,17 +689,22 @@ async function deepseek(messages, { maxTokens = 2000, json = false, route = 'ia'
           sortie: Number(r.usage.completion_tokens) || Couts.estimerTokens(r.contenu),
           gratuit: true
         });
-      } catch { /* idem : jamais bloquant */ }
-      console.log(`[IA] Secours gratuit : ${modele} a répondu (${route}).`);
+      } catch { /* le comptage ne doit jamais casser une analyse */ }
+      if (dernierFournisseur !== `nim:${modele}`) {
+        console.log(`[IA] ${modele} a répondu (${route}).`);
+      }
       dernierFournisseur = `nim:${modele}`;
       return r.contenu;
     } catch (e) {
+      // 400 = requête malformée : elle échouera aussi ailleurs, on ne la rejoue pas.
+      if (e.status === 400) throw e;
       raisons.push(`${modele}: ${e.message}`);
-      console.warn(`[IA] Secours ${modele} échoué — ${e.message.slice(0, 140)}`);
+      console.warn(`[IA] ${modele} indisponible — ${e.message.slice(0, 140)}`);
     }
   }
-
-  const e = new Error(`Aucune IA disponible. ${raisons.join(' | ')}`);
+  const e = new Error(
+    `Aucune IA disponible (${NVIDIA_MODELS.length} modèle(s) essayé(s)). ${raisons.join(' | ')}`
+  );
   e.status = 503;
   throw e;
 }
@@ -1239,22 +1183,48 @@ app.get('/api/scan', requireAuth, (req, res) => res.json(Scan.dernierScan()));
 app.post('/api/scan', requireAuth, async (req, res) => {
   try {
     const tf = String((req.body && req.body.tf) || '15m');
-    const idStrategie = (req.body && req.body.strategie) || null;
-    // Une stratégie choisie dans l'écran doit être appliquée AVEC ses règles et
-    // ses seuils : scanner avec le moteur générique puis annoncer « signal de la
-    // stratégie X » serait un mensonge.
-    let profil = null;
-    if (idStrategie) {
+    // N STRATÉGIES, comme le direct et le backtest. `strategies` accepte un
+    // tableau ou une liste « id1,id2 » ; `strategie` (singulier) reste accepté
+    // pour ne pas casser les appels existants. Une stratégie choisie doit être
+    // appliquée AVEC ses règles et ses seuils : scanner avec le moteur générique
+    // puis annoncer « signal de la stratégie X » serait un mensonge.
+    const demandees = (() => {
+      const brut = req.body && (req.body.strategies || req.body.strategie);
+      if (Array.isArray(brut)) return brut.map(x => String(x).trim()).filter(Boolean);
+      if (typeof brut === 'string') return brut.split(',').map(x => x.trim()).filter(Boolean);
+      return [];
+    })();
+
+    const profils = [];
+    const inconnues = [];
+    const nonExecutables = [];
+    if (demandees.length) {
       const docs = await loadAllStrategies();
-      const doc = (docs || []).find(d => d.id === idStrategie);
-      if (!doc) return res.status(404).json({ success: false, error: 'Stratégie introuvable' });
-      profil = Signals.profilDepuisStrategie(doc);
-      if (profil.executable === false) {
-        return res.status(409).json({ success: false, error: 'Cette stratégie n\'est pas exécutable : ' + (profil.motif || 'règles non identifiées') });
+      const parId = new Map((docs || []).map(d => [d.id, d]));
+      for (const id of demandees) {
+        const doc = parId.get(id);
+        if (!doc) { inconnues.push(id); continue; }
+        const profil = Signals.profilDepuisStrategie(doc);
+        if (profil.executable === false) { nonExecutables.push(id); continue; }
+        profils.push(profil);
+      }
+      if (!profils.length) {
+        return res.status(inconnues.length ? 404 : 409).json({
+          success: false,
+          error: inconnues.length
+            ? `Stratégie(s) introuvable(s) : ${inconnues.join(', ')}`
+            : `Aucune stratégie exécutable : ${demandees.join(', ')}`,
+          inconnues, nonExecutables
+        });
       }
     }
-    const r = await Scan.scanComplet({ market: Market, signals: Signals, tf, strategie: profil });
-    res.json({ success: true, ...r });
+
+    const r = await Scan.scanComplet({ market: Market, signals: Signals, tf, strategies: profils });
+    res.json({
+      success: true, ...r,
+      strategiesEvaluees: profils.map(p => p.titre || p.id),
+      inconnues, nonExecutables
+    });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -1515,7 +1485,7 @@ Réponds en JSON strict:
 }`;
 
   try {
-    const out = await deepseek([{ role: 'user', content: prompt }], { maxTokens: 1600, json: true, route: 'structuration-web' });
+    const out = await analyserIA([{ role: 'user', content: prompt }], { maxTokens: 1600, json: true, route: 'structuration-web' });
     const parsed = JSON.parse(out);
     parsed.sourceUrl = sourceUrl;
     return parsed;
@@ -1790,7 +1760,7 @@ app.post('/api/analyze', requireAuth, rateLimitAnalyse, chartUpload, async (req,
     const notes = req.body.notes || '';
     const maxStrategies = parseInt(req.body.maxStrategies || '3', 10);
 
-    // 1. Analyse visuelle par DeepSeek (multimodal)
+    // 1. Analyse visuelle (vision multimodale)
     const visionPrompt = `Tu es un trader professionnel en analyse price action (aucun indicateur, uniquement structure, prix brut, liquidité).
 Analyse les ${files.length} capture(s) de graphique(s) TradingView fournie(s).
 
@@ -1811,7 +1781,7 @@ Sois factuel : ne décris que ce qui est réellement visible. Si une image est i
 
 Réponds en texte structuré, dense et exploitable.`;
 
-    // 1. Analyse visuelle — Gemini (deepseek-chat ne voit pas les images)
+    // 1. Analyse visuelle — Gemini (les modèles texte ne lisent pas les images)
     const images = [];
     for (const f of files) {
       images.push({
@@ -1856,9 +1826,14 @@ Réponds en texte structuré, dense et exploitable.`;
     // 2. Recherche dans la base de connaissance
     const all = await loadAllStrategies();
     const matched = searchKnowledgeBase(all, { pair, timeframes, visionAnalysis });
-    const top = matched.slice(0, maxStrategies);
+    // Les mots-clés ne prouvent pas la compatibilité : on confronte les fiches à
+    // la classe réelle de l'instrument. Faute de fiche déclarant son marché, on
+    // retombe sur les mots-clés MAIS en le disant (verifiee: false).
+    const parClasse = require('./strategy-engine/strategy-contract').filtrerParClasse(matched, pair);
+    const retenues = parClasse.compatibles.length ? parClasse.compatibles : matched;
+    const top = retenues.slice(0, maxStrategies);
 
-    // 3. Combinaison des stratégies + plan d'action via DeepSeek
+    // 3. Combinaison des stratégies + plan d'action (NVIDIA NIM)
     let plan;
     try {
       plan = await buildPlan({ pair, timeframes, visionAnalysis, strategies: top });
@@ -1909,7 +1884,21 @@ Réponds en texte structuré, dense et exploitable.`;
         source: s.source,
         relevanceScore: s.relevanceScore
       })),
-      candidatesFound: matched.length
+      candidatesFound: matched.length,
+      // Ce que la sélection a réellement vérifié, et ce qu'elle n'a pas pu.
+      compatibilite: {
+        instrument: {
+          symbole: parClasse.instrument.symbole,
+          classe: parClasse.instrument.classe,
+          reconnu: parClasse.instrument.reconnu
+        },
+        verifiee: parClasse.compatibles.length > 0,
+        compatibles: parClasse.compatibles.map(x => x.id),
+        refusees: parClasse.refusees.map(x => ({ id: x.id, titre: x.title || x.titre, raison: x.raison })),
+        nonDeclarees: parClasse.nonDeclarees.length,
+        note: parClasse.compatibles.length ? null
+          : 'Aucune fiche ne déclare son marché : sélection par mots-clés, compatibilité NON vérifiée.'
+      }
     };
 
     const historyId = newId('hist_');
@@ -2039,7 +2028,7 @@ Réponds en JSON strict:
     return { ...hit.plan, _cache: true };
   }
 
-  const out = await deepseek([{ role: 'user', content: prompt }], { maxTokens: PLAN_MAX_TOKENS, json: true, route: 'plan-analyse' });
+  const out = await analyserIA([{ role: 'user', content: prompt }], { maxTokens: PLAN_MAX_TOKENS, json: true, route: 'plan-analyse' });
   const plan = JSON.parse(out);
   // Mémorise pour les répétitions. Map bornée : on jette la plus ancienne.
   cachePlan.set(empreinte, { at: Date.now(), plan });
@@ -2252,12 +2241,24 @@ app.get('/api/patterns', requireAuth, async (req, res) => {
 });
 
 // ─── Signal Scoring ML ───
+// Aucune métrique « interne » n'est présentée comme une performance : la seule
+// mesure publiée est hors échantillon (apprentissage sur le passé, mesure sur la
+// suite). Quand elle n'est pas calculable, on dit pourquoi au lieu d'afficher 0.
 app.get('/api/signal-scoring', requireAuth, async (req, res) => {
   try {
     const trades = await DB.listTrades();
     const modele = entrainerModele(trades);
-    const metrics = evaluerModele(modele, trades);
-    res.json({ success: true, modele, metrics });
+    const hors = evaluerHorsEchantillon(trades);
+    res.json({
+      success: true,
+      statut: modele.entraine ? 'entraîné' : 'non entraîné',
+      appliqueAuxDecisions: APPLIQUE_AUX_DECISIONS,
+      tradesClotures: modele.echantillon,      // compté une seule fois, dans le module
+      minimumRequis: MIN_ENTRAINEMENT,
+      modele: { entraine: modele.entraine, echantillon: modele.echantillon, weights: modele.weights, bias: modele.bias },
+      horsEchantillon: hors,
+      avertissement: modele.avertissement || hors.raison || null
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -3026,7 +3027,7 @@ N'invente rien : si une information n'est pas dans la description, mets null ou 
 
   let fiche;
   try {
-    const out = await deepseek([{ role: 'user', content: consigne }], { maxTokens: 2000, json: true, route: 'description-strategie' });
+    const out = await analyserIA([{ role: 'user', content: consigne }], { maxTokens: 2000, json: true, route: 'description-strategie' });
     fiche = JSON.parse(out);
   } catch (e) {
     throw new Error(`L'analyse du texte a échoué (${e.message}).`)
@@ -3244,6 +3245,76 @@ async function optionsAnalyse(src) {
  * adaptatif : une stratégie de scalping ne croise pas les mêmes unités qu'un
  * suivi de tendance.
  */
+/**
+ * Alignement multi-unités — UN SEUL calcul, partagé par l'écran et la décision.
+ *
+ * Les deux parcours construisaient cette liste séparément : l'écran pouvait donc
+ * afficher « 2/3 » pendant que la décision en lisait un autre. Passe par
+ * `verdictAvecConfluence`, qui rend le verdict de synthèse ET l'alignement.
+ */
+async function alignementMtf(symbol, tfBase, provider, options = {}) {
+  const tfs = ((options.timeframes && options.timeframes.length)
+    ? options.timeframes
+    : (Signals.TF_SUPERIEURS[tfBase] || [tfBase])).slice(0, 5);
+
+  const parTF = [];
+  for (const unite of tfs) {
+    try {
+      const r = await Market.getCandles(symbol, unite, 300, provider);
+      const closes = (r.candles || []).filter(c => c.closed !== false);
+      parTF.push(closes.length < 20
+        ? { tf: unite, verdict: null }
+        : { tf: unite, verdict: Signals.detect(closes, { symbol, timeframe: unite }, options) });
+    } catch (e) {
+      parTF.push({ tf: unite, verdict: null, erreur: e.message });
+    }
+  }
+
+  const exploitables = parTF.filter(x => x.verdict);
+  const resultat = exploitables.length
+    ? Signals.verdictAvecConfluence(exploitables, { seuilAlignes: options.seuilAlignes || undefined })
+    : null;
+  return { tfs, exploitables, resultat, confluence: resultat ? resultat.confluence : null };
+}
+
+/**
+ * Profils des stratégies SOUS SURVEILLANCE — pour que le scan automatique juge
+ * avec les mêmes règles que la surveillance, au lieu du moteur générique. Relu à
+ * chaque cycle : la configuration peut changer sans redémarrer le serveur.
+ */
+async function profilsSurveillance() {
+  let ids = [];
+  try { ids = (Alerts.get().strategies || []); } catch { ids = []; }
+  if (!ids.length) return [];
+  const docs = await loadAllStrategies();
+  const parId = new Map((docs || []).map(d => [d.id, d]));
+  const profils = [];
+  for (const id of ids) {
+    const doc = parId.get(id);
+    if (!doc) continue;
+    const p = Signals.profilDepuisStrategie(doc);
+    // Une fiche non exécutable est ignorée ici : la surveillance la refuse aussi.
+    if (p.executable !== false) profils.push(p);
+  }
+  return profils;
+}
+
+/**
+ * Garde-fou de COMPTE — fabrique unique, partagée par la décision et la
+ * surveillance. Elle lit l'état réel depuis le journal et rend une fonction
+ * `(contrat) => verdict de risque`. Un même refus, partout.
+ */
+function verificateurRisqueCompte() {
+  try {
+    const Risque = require('./risk/risque');
+    const journal = JournalSignaux.charger();
+    const etat = Risque.etat(journal.signaux || [], { depuis: journal.reinitialiseLe });
+    return c => Risque.verifierPrise({ entree: c.entree, stop: c.stop, symbol: c.symbol }, etat);
+  } catch {
+    return undefined;
+  }
+}
+
 app.get('/api/signals/confluence', requireAuth, async (req, res) => {
   try {
     const symbol = String(req.query.symbol || '').trim();
@@ -3252,25 +3323,8 @@ app.get('/api/signals/confluence', requireAuth, async (req, res) => {
     if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
 
     const options = await optionsAnalyse(req.query);
-    const tfs = ((options.timeframes && options.timeframes.length)
-      ? options.timeframes
-      : (Signals.TF_SUPERIEURS[tfBase] || [tfBase])).slice(0, 5);
-
-    const parTF = [];
-    for (const tf of tfs) {
-      try {
-        const r = await Market.getCandles(symbol, tf, 300, provider);
-        const closes = (r.candles || []).filter(c => c.closed !== false);
-        parTF.push(closes.length < 20
-          ? { tf, verdict: null }
-          : { tf, verdict: Signals.detect(closes, { symbol, timeframe: tf }, options) });
-      } catch (e) {
-        parTF.push({ tf, verdict: null, erreur: e.message });
-      }
-    }
-
-    const exploitables = parTF.filter(x => x.verdict);
-    if (!exploitables.length) {
+    const { tfs, exploitables, resultat } = await alignementMtf(symbol, tfBase, provider, options);
+    if (!resultat) {
       return res.json({
         success: true, symbol, timeframes: tfs, mode: options.mode,
         strategieAppliquee: options.strategie || null,
@@ -3278,10 +3332,6 @@ app.get('/api/signals/confluence', requireAuth, async (req, res) => {
         note: 'Aucune unité de temps ne fournit assez de bougies (marché fermé ou historique trop court).'
       });
     }
-
-    const resultat = Signals.verdictAvecConfluence(exploitables, {
-      seuilAlignes: options.seuilAlignes || undefined
-    });
     if (resultat.verdict) {
       resultat.verdict.strategies = await strategiesForSignal(resultat.verdict);
     }
@@ -3308,6 +3358,60 @@ app.get('/api/signals/confluence', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// NOUVELLE ROUTE : Decision Engine — verdict global arbitré avec traçabilité complète
+// 5 niveaux : Détection → Validation → Confirmation → Exécution → Arbitrage
+app.get('/api/decision', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').trim();
+    const tf = String(req.query.tf || '5m').trim();
+    const provider = String(req.query.provider || '').trim() || undefined;
+    if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+
+    const options = await optionsAnalyse(req.query);
+    const { candles } = await Market.getCandles(symbol, tf, 300, provider);
+    const closed = candles.filter(c => c.closed !== false);
+    if (closed.length < 20) {
+      return res.json({
+        success: true, provider, offline: false, dataPoints: closed.length,
+        insufficient: true, decision: null,
+        note: `Seulement ${closed.length} bougie(s) clôturée(s) : décision impossible (20 minimum).`
+      });
+    }
+
+    // ALIGNEMENT MULTI-UNITÉS RÉEL — même fonction que l'écran, donc littéralement
+    // le même chiffre des deux côtés. Sans ce bloc, le moteur exigeait un
+    // alignement qu'il ne recevait jamais : le contrôle était inopérant alors que
+    // l'écran affichait « 2/3 unités ».
+    const { confluence } = await alignementMtf(symbol, tf, provider, options);
+
+    // LE RISQUE GARDE LA DÉCISION — le même contrôle que l'inscription au
+    // journal, mais AVANT publication. Sans état de compte lisible, la décision
+    // le dira (`risque.consulte = false`) au lieu de faire semblant de vérifier.
+    const verificateurRisque = verificateurRisqueCompte();
+
+    const decision = DecisionEngine.decider(closed, { symbol, timeframe: tf }, {
+      profils: options.profils || [],
+      confluence,
+      verificateurRisque,
+      rrMin: Number.isFinite(Number(req.query.rrMin)) ? Number(req.query.rrMin) : undefined,
+      exigerAlignement: true,
+      refuserDesaccord: true,
+      refuserContreTendance: true,
+      verifierFrais: true,
+      verifierModele: true
+    });
+
+    res.json({
+      success: true,
+      symbol,
+      timeframe: tf,
+      mode: options.mode,
+      strategieAppliquee: options.strategie || null,
+      decision
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/signals', requireAuth, async (req, res) => {
   try {
     const symbol = String(req.query.symbol || '').trim();
@@ -3316,10 +3420,24 @@ app.get('/api/signals', requireAuth, async (req, res) => {
     const prov = String(req.query.provider || '').trim() || undefined;
     const { candles, provider, offline } = await Market.getCandles(symbol, tf, 300, prov);
     const closed = candles.filter(c => c.closed !== false);
-    if (closed.length < 20) {
+    // ÉTAGE DATA QUALITY — le même module que la surveillance, appliqué ici
+    // aussi : la surveillance refusait une série douteuse, le direct l'analysait
+    // quand même. Un même jeu de données ne peut pas être fiable pour l'une et
+    // pas pour l'autre.
+    const qualite = Qualite.analyser(candles, { timeframe: tf });
+    if (!qualite.ok) {
       return res.json({
         success: true, provider, offline: !!offline, dataPoints: closed.length,
         insufficient: true, verdict: null,
+        qualite: { ok: qualite.ok, score: qualite.score, problemes: qualite.problemes },
+        note: 'Données non fiables : ' + qualite.problemes
+          .filter(p => p.gravite === 'critique').map(p => p.detail).join(' ; ')
+      });
+    }
+    if (closed.length < 20) {
+      return res.json({
+        success: true, provider, offline: !!offline, dataPoints: closed.length,
+        insufficient: true, verdict: null, qualite,
         note: `Seulement ${closed.length} bougie(s) clôturée(s) : signal impossible pour l'instant (20 minimum).`
       });
     }
@@ -3328,7 +3446,14 @@ app.get('/api/signals', requireAuth, async (req, res) => {
     verdict.strategies = await strategiesForSignal(verdict);
     verdict.mode = options.mode;
     verdict.strategieAppliquee = options.strategie || null;
-    res.json({ success: true, provider, offline: !!offline, dataPoints: closed.length, verdict });
+    // Le verdict est aussi rendu dans la FORME COMMUNE (contrat v1) : le même
+    // consommateur lit indifféremment un signal de stratégie, de motif, de
+    // structure ou le verdict global, sans connaître deux dialectes.
+    res.json({
+      success: true, provider, offline: !!offline, dataPoints: closed.length, verdict,
+      qualite: { ok: qualite.ok, score: qualite.score, problemes: qualite.problemes },
+      contrat: Contrat.versContrat(verdict, { symbol, timeframe: tf })
+    });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -3351,6 +3476,14 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
   let optionsFlux = { mode: 'auto' };
   optionsAnalyse(req.query).then(o => { optionsFlux = o; evaluate(); }).catch(() => {});
 
+  // Le flux se réévalue bien plus souvent qu'une route : l'alignement MTF et
+  // l'état de compte n'ont pas à être recalculés à chaque tick. MTF = 60 s
+  // (il ne bouge qu'à la clôture des grandes unités), compte = 15 s.
+  // Sans ce cache, brancher les deux garde-fous aurait multiplié les appels
+  // réseau par le nombre de ticks.
+  const cacheMtf = { at: 0, cle: '', conf: null };
+  const cacheRisque = { at: 0, verif: undefined };
+
   let evaluate = async () => {
     try {
       const { candles } = await Market.getCandles(symbol, tf, 300, provider);
@@ -3368,60 +3501,70 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
       }
       const verdict = Signals.detect(done, { symbol, timeframe: tf }, optionsFlux);
 
-      // ── MOTEUR MULTI-SIGNAUX ────────────────────────────────────────
-      // Un verdict unique efface les stratégies : cinq stratégies choisies
-      // donnaient UN signal qui n'appartenait à aucune. Ici chaque stratégie est
-      // évaluée séparément, et chaque motif de bougie devient son propre signal.
-      // `structure:false` : le `verdict` ci-dessus porte déjà la lecture SMC, on
-      // ne la calcule pas deux fois.
-      let multi = null;
+      // ── DECISION ENGINE ───────────────────────────────────────────────
+      // Remplace le verdict unique + multi-signaux par UN verdict global arbitré
+      // 6 niveaux : Détection → Validation → Confirmation → Exécution → Arbitrage → Risque
+      // ── GARDE-FOUS, IDENTIQUES À /api/decision ──────────────────────────
+      // Le flux décidait sans alignement MTF ni plafonds de compte : un signal
+      // refusé par /api/decision pouvait donc arriver par ici en « ACHAT ».
+      let confluence = cacheMtf.conf;
+      if (Date.now() - cacheMtf.at > 60_000 || cacheMtf.cle !== `${symbol}|${tf}`) {
+        try {
+          const al = await alignementMtf(symbol, tf, provider, optionsFlux);
+          confluence = al.confluence || null;
+        } catch { confluence = null; }
+        cacheMtf.at = Date.now();
+        cacheMtf.cle = `${symbol}|${tf}`;
+        cacheMtf.conf = confluence;
+      }
+
+      let verificateurRisque = cacheRisque.verif;
+      if (Date.now() - cacheRisque.at > 15_000) {
+        verificateurRisque = verificateurRisqueCompte();
+        cacheRisque.at = Date.now();
+        cacheRisque.verif = verificateurRisque;
+      }
+
+      let decision = null;
       try {
-        multi = Multi.detecterTout(done, { symbol, timeframe: tf }, {
+        decision = DecisionEngine.decider(done, { symbol, timeframe: tf }, {
           profils: optionsFlux.profils || [],
-          // `structure` reste ACTIVÉ : c'est lui qui produit la carte de marché
-          // (tendance, BOS/CHoCH, premium/discount, zones) et le contexte de
-          // chaque signal. Le désactiver ici vidait la moitié de la lecture.
-          // Porte du rapport risque/rendement : optionnelle et chiffrée
-          // (`rrMin=1`). Mesurée : elle améliore R_75 sur les trois unités de
-          // temps, et dégrade légèrement l'or en 1h — donc pas de défaut imposé.
-          rrMin: Number.isFinite(Number(req.query.rrMin)) ? Number(req.query.rrMin) : undefined
+          confluence,
+          verificateurRisque,
+          rrMin: Number.isFinite(Number(req.query.rrMin)) ? Number(req.query.rrMin) : undefined,
+          exigerAlignement: true,
+          refuserDesaccord: true,
+          refuserContreTendance: true,
+          verifierFrais: true,
+          verifierModele: true
         });
-      } catch (e) { multi = null; }
+      } catch (e) { decision = null; }
 
-      verdict.signaux = multi ? multi.signaux : [];
-      verdict.synthese = multi ? multi.synthese : null;
-      // La carte de marché (tendance, BOS/CHoCH, premium/discount, zones,
-      // liquidité) part avec le flux : l'écran l'affiche en tête.
-      verdict.carte = multi ? multi.carte : null;
-
-      // Journal : on persiste les signaux RETENUS (confirmés / à surveiller) qui
-      // portent des niveaux. Ils seront réévalués sur les bougies suivantes pour
-      // savoir s'ils ont touché leur objectif, leur stop, ou fini au point
-      // d'entrée. C'est la seule façon de mesurer si le moteur a raison.
-      if (multi) {
+      // Journal : on persiste les signaux RETENUS par l'arbitrage
+      if (decision && decision.signaux) {
         try {
           JournalSignaux.enregistrer(
-            multi.signaux.filter(s => s.status === 'confirme' || s.status === 'surveiller'),
+            decision.signaux.filter(s => s.status === 'confirme' || s.status === 'surveiller'),
             { symbol, timeframe: tf, provider, at: verdict.at }
           );
         } catch { /* le journal ne doit jamais casser le flux */ }
       }
 
-      // La clé de rafraîchissement doit tenir compte des SIGNAUX : sans eux, un
-      // motif qui apparaît (marteau, double bottom) ne changeait pas la clé et
-      // l'écran ne le voyait jamais arriver.
-      const sigKey = multi
-        ? multi.signaux.map(s => `${s.id}:${s.status}:${s.force}`).join('~')
-        : '';
-      const key = [verdict.status, verdict.direction,
-                   (verdict.rules || []).map(r => r.rule).sort().join(','), sigKey].join('|');
+      // Format pour le flux SSE : décision finale + traçabilité
+      const payload = decision ? DecisionEngine.deciderStream(decision) : {
+        status: 'indisponible', direction: 'NEUTRE',
+        summary: 'Decision Engine indisponible'
+      };
+
+      // La clé de rafraîchissement doit tenir compte de la DÉCISION FINALE
+      const key = decision ? [decision.decision, decision.biais, decision.signal?.id || '', decision.signal?.force || 0].join('|') : 'erreur';
       if (key !== lastKey) {
         lastKey = key;
-        verdict.strategies = await strategiesForSignal(verdict);
-      verdict.mode = optionsFlux.mode;
-      verdict.strategieAppliquee = optionsFlux.strategie || null;
-        verdict.at_price = candles[candles.length - 1].c;
-        if (closed) res.write(`event: signal\ndata: ${JSON.stringify(verdict)}\n\n`);
+        payload.strategies = await strategiesForSignal(verdict);
+        payload.mode = optionsFlux.mode;
+        payload.strategieAppliquee = optionsFlux.strategie || null;
+        payload.at_price = candles[candles.length - 1].c;
+        if (closed) res.write(`event: signal\ndata: ${JSON.stringify(payload)}\n\n`);
       }
     } catch { /* bougie incomplète ou réseau : on retentera */ }
   };
@@ -3473,7 +3616,7 @@ app.get('/api/signaux', requireAuth, async (req, res) => {
     if (done.length < 20) {
       return res.json({
         symbol, timeframe: tf, signaux: [], motifs: null, structure: null,
-        synthese: { total: 0, confirmes: 0, aSurveiller: 0, nonRemplis: 0, erreurs: 0, long: 0, short: 0, neutre: 0, strategiesEvaluees: [] },
+        synthese: { total: 0, confirmes: 0, aSurveiller: 0, rejetes: 0, erreurs: 0, long: 0, short: 0, neutre: 0, strategiesEvaluees: [] },
         indisponible: true,
         raison: `Données insuffisantes (${done.length} bougie(s)) : marché fermé ou hors séance.`
       });
@@ -3533,6 +3676,32 @@ app.get('/api/news', requireAuth, async (req, res) => {
     res.json({ success: true, at: r.at, articles: items.slice(0, 80), sources: r.sources, degrade: !!r.degrade });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * GET  /api/news/impact  → cache des impacts déjà calculés (empreinte → sens).
+ * POST /api/news/impact  {articles:[{titre,resume,source,sourceId,actifs}]}
+ *                        → interprète les dépêches NON encore analysées.
+ *
+ * Le sens vient de la chaîne IA NVIDIA (cascade) et d'un cache disque : une
+ * dépêche n'est analysée qu'une fois. Si l'IA est indisponible, la route rend
+ * simplement ce qu'elle a déjà — jamais un impact inventé.
+ */
+app.get('/api/news/impact', requireAuth, (req, res) => {
+  try { res.json({ success: true, parTitre: NewsImpact.parTitre() }); }
+  catch (e) { res.json({ success: false, error: e.message, parTitre: {} }); }
+});
+
+app.post('/api/news/impact', requireAuth, async (req, res) => {
+  try {
+    const articles = Array.isArray(req.body && req.body.articles) ? req.body.articles.slice(0, 25) : [];
+    if (!articles.length) return res.status(400).json({ success: false, error: 'Aucune dépêche fournie' });
+    await NewsImpact.analyser(articles, analyserIA);
+    // On renvoie l'index lisible : l'interface n'a pas à recalculer d'empreinte.
+    res.json({ success: true, parTitre: NewsImpact.parTitre() });
+  } catch (e) {
+    res.status(e.status || 500).json({ success: false, error: e.message, parTitre: NewsImpact.parTitre() });
   }
 });
 
@@ -4044,6 +4213,13 @@ async function start() {
     // Multi-signaux : permet à la surveillance de dire QUELLE stratégie s'est
     // déclenchée, et de lister les motifs, au lieu d'un verdict anonyme.
     signaux: Multi,
+    // Decision Engine — arbitrage central : Détection → Validation → Confirmation → Exécution → Arbitrage
+    DecisionEngine,
+    // Alignement multi-unités : la décision l'exige, donc la surveillance reçoit
+    // le MÊME calcul que l'écran et le direct — un seul chiffre, trois parcours.
+    alignementMtf: (symbole, unite, prov) => alignementMtf(symbole, unite, prov),
+    // Garde-fou de compte : la surveillance refuse ce que la décision refuse.
+    verificateurRisque: verificateurRisqueCompte,
     // Traçabilité phase 2 : conditions nommées et preuves en base. Absent ou en
     // panne, la surveillance continue — la trace n'est jamais bloquante.
     preuves: Preuves,
@@ -4085,7 +4261,18 @@ async function start() {
 
   // Scan complet SILENCIEUX : tous les marchés, toutes les 15 min, aucun envoi.
   // La surveillance (au-dessus) reste seule à alerter, sur sa liste courte.
-  Scan.start({ market: Market, signals: Signals, tf: '15m' });
+  // Le scan silencieux juge chaque marché sur l'unité de travail ET sur celle
+  // sous laquelle il est surveillé : deux parcours, une seule réalité.
+  Scan.start({
+    market: Market,
+    signals: Signals,
+    tf: '15m',
+    // Les stratégies de la surveillance : le scan cesse d'être un radar anonyme.
+    strategies: profilsSurveillance,
+    tfsPour: symbole => (Alerts.get().marches || [])
+      .filter(m => m && m.symbol === symbole)
+      .map(m => m.tf)
+  });
 
 // ─────────────────────────────────────────────────────────────
 // Journal des signaux : suivi périodique des issues. Toutes les deux minutes on
@@ -4108,11 +4295,14 @@ async function start() {
     console.log('═══════════════════════════════════════');
     console.log(`  API        : http://localhost:${PORT}/api`);
     console.log(`  Base       : ${KNOWLEDGE_BASE_DIR}`);
-    console.log(`  Modèle IA  : ${DEEPSEEK_MODEL}`);
+    console.log(`  IA         : ${process.env.NVIDIA_API_KEY
+      ? `NVIDIA NIM gratuit — ${NVIDIA_MODELS.length} modèle(s) en cascade`
+      : '❌ NVIDIA_API_KEY absente (.env)'}`);
     const v = vision.visionInfo();
     console.log(`  Vision     : ${v.provider} / ${v.model}${vision.visionReady() ? '' : '  (clé manquante)'}`);
-    console.log(`  Clé DeepSeek: ${process.env.DEEPSEEK_API_KEY && !process.env.DEEPSEEK_API_KEY.includes('your_deepseek') ? '✅ configurée' : '❌ manquante (.env)'}`);
-    console.log(`  Secours      : ${process.env.NVIDIA_API_KEY ? `NVIDIA NIM gratuit (${NVIDIA_MODELS.length} modèle(s) : ${NVIDIA_MODELS.join(', ')})` : '❌ NVIDIA_API_KEY absente'}`);
+    if (process.env.NVIDIA_API_KEY) {
+      console.log(`  Chaîne IA  : ${NVIDIA_MODELS.join(' → ')}`);
+    }
     {
       // Une alerte muette ne doit jamais être silencieuse : on dit à l'écran
       // pourquoi rien ne partirait (jeton Telegram, marchés, activation).

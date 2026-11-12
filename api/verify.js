@@ -2099,7 +2099,7 @@ function tinyPng(W = 64, H = 40) {
       r.carte ? String(r.carte.timeframe) : 'absente');
 
     // Tous les signaux directionnels portent leur contexte structurel.
-    const directionnels = r.signaux.filter(s => s.sens !== 'neutre' && s.status !== 'non-rempli');
+    const directionnels = r.signaux.filter(s => s.sens !== 'neutre' && s.status !== 'rejete');
     const sansCtx = directionnels.filter(s => !s.structureContexte);
     ok('chaque signal directionnel porte son contexte structurel',
       sansCtx.length === 0, `${sansCtx.length} sans contexte sur ${directionnels.length}`);
@@ -3177,6 +3177,557 @@ function tinyPng(W = 64, H = 40) {
     // Aucun objectif → pas de trade.
     ok('un signal sans objectif est refusé', Multi.assainirNiveaux(
       { entree: 100, stop: 98, objectifs: [] }, 'long', 1) === null);
+
+    // ── Une seule garde pour TOUS les émetteurs de niveaux ────────────────
+    // Le verdict du direct publiait ses niveaux sans passer par elle : mesuré,
+    // 9 verdicts sur 28 sortaient avec un stop à moins de 0,5 ATR.
+    const Niveaux = require('./engine/niveaux');
+    const srcSignals = fs.readFileSync(path.join(__dirname, 'engine', 'signals.js'), 'utf8');
+    const srcSignaux = fs.readFileSync(path.join(__dirname, 'engine', 'signaux.js'), 'utf8');
+    ok('la garde des niveaux vit dans UN module partagé',
+      typeof Niveaux.assainirNiveaux === 'function' && typeof Niveaux.arrondiPrix === 'function');
+    ok('le verdict du direct applique la garde',
+      /require\('\.\/niveaux'\)/.test(srcSignals) && /assainirNiveaux\(\{[\s\S]{0,120}entree: levels\.entry/.test(srcSignals));
+    ok('le moteur multi-signaux utilise la MÊME garde, sans copie locale',
+      /require\('\.\/niveaux'\)/.test(srcSignaux) && !/function assainirNiveaux/.test(srcSignaux));
+
+    // Le plancher doit tenir sur le prix PUBLIÉ : l'arrondi ne doit pas ramener
+    // le stop sous 0,5 ATR (2045.41 arrondi valait 0,4999 ATR).
+    const elargi = Niveaux.assainirNiveaux({ entree: 2050.22, stop: 2045.41, objectifs: [2069] }, 'long', 9.62);
+    ok('le stop élargi respecte le plancher APRÈS arrondi',
+      !!elargi && Math.abs(elargi.entree - elargi.stop) >= 0.5 * 9.62,
+      elargi ? `${(Math.abs(elargi.entree - elargi.stop) / 9.62).toFixed(4)} ATR` : 'refusé');
+
+    // ── Scoring ML : pas de modèle inventé, pas de mesure sur ses propres données ──
+    const Sc = require('./engine/signalScoring');
+    const trade = (i, win) => ({
+      status: 'closed', result: win ? 'win' : 'loss',
+      signalStrength: 0.4 + (i % 5) / 10, signalStatus: i % 2 ? 'confirme' : 'surveille',
+      trend: i % 3 ? 'bullish' : 'flat', position: i % 2 ? 'discount' : 'mid',
+      session: i % 4 ? 'london' : 'asia', atrRel: 0.3 + (i % 7) / 20,
+      closedAt: new Date(1700000000000 + i * 3600000).toISOString()
+    });
+    const peu = Sc.entrainerModele([trade(0, true), trade(1, false)]);
+    ok('trop peu de trades → modèle explicitement NON entraîné',
+      peu.entraine === false && typeof peu.avertissement === 'string' && peu.minimumRequis === 30,
+      `${peu.echantillon} trade(s), min ${peu.minimumRequis}`);
+    ok('un jeu sans les deux issues est refusé (rien à distinguer)',
+      Sc.entrainerModele(Array.from({ length: 40 }, (_, i) => trade(i, true))).entraine === false);
+    const assez = Array.from({ length: 60 }, (_, i) => trade(i, i % 3 !== 0));
+    const modele = Sc.entrainerModele(assez);
+    ok('assez de trades → modèle réellement entraîné', modele.entraine === true, `${modele.echantillon} trades`);
+    ok('la mesure hors échantillon est étiquetée comme telle',
+      (() => { const h = Sc.evaluerHorsEchantillon(assez); return h.valide && h.metrics.type === 'hors-echantillon'; })());
+    ok('la découpe est chronologique et disjointe',
+      (() => {
+        const { apprentissage, test } = Sc.decouper(assez);
+        const d = x => new Date(x.closedAt).getTime();
+        const croissant = apprentissage.every((t, i) => i === 0 || d(t) >= d(apprentissage[i - 1]));
+        const apres = test.every(t => d(t) >= d(apprentissage[apprentissage.length - 1]));
+        return apprentissage.length > 0 && test.length > 0 && croissant && apres
+          && apprentissage.every(t => !test.includes(t));
+      })());
+    ok('une métrique sur moins de 5 trades est refusée, avec sa raison',
+      (() => { const m = Sc.evaluerModele(modele, [trade(0, true)]); return m.valide === false && !!m.raison; })());
+    ok('le score n\'est pas présenté comme appliqué aux décisions',
+      Sc.APPLIQUE_AUX_DECISIONS === false);
+
+    // ── Contrat de sortie commun aux deux moteurs ─────────────────────────
+    // Les deux moteurs restent spécialisés, mais un consommateur doit lire la
+    // même forme des deux côtés — et un signal incohérent ne doit jamais sortir.
+    const Ctr = require('./engine/contrat');
+    const Direct = require('./engine/signals');   // le moteur du direct
+    const Scan = require('./delivery/scan');
+    const bon = {
+      id: 'x', source: 'motif', nom: 'Marteau', tf: '15m', sens: 'long', status: 'confirme',
+      force: 0.7, conditions: [], preuves: [], entree: 100, stop: 99, objectifs: [102], rr: 2
+    };
+    ok('un signal complet respecte le contrat',
+      (() => { const v = Ctr.validerSignal(bon); return v.ok === true; })());
+    ok('une entrée sans stop est refusée par le contrat',
+      (() => { const v = Ctr.validerSignal({ ...bon, stop: null }); return !v.ok && v.invalides.some(x => /sans stop/.test(x)); })());
+    ok('un rr sans premier objectif est refusé par le contrat',
+      (() => { const v = Ctr.validerSignal({ ...bon, objectifs: [] }); return !v.ok; })());
+    ok('une force hors bornes est refusée par le contrat',
+      (() => { const v = Ctr.validerSignal({ ...bon, force: 1.4 }); return !v.ok; })());
+    ok('un champ manquant est nommé, pas deviné',
+      (() => { const v = Ctr.validerSignal({ ...bon, nom: undefined }); return !v.ok && v.manquants.includes('nom'); })());
+    ok('le verdict du direct est exprimé dans la MÊME forme que le multi',
+      (() => {
+        const fausseBougie = i => ({ t: 1700000000000 + i * 300000, o: 100, h: 101, l: 99, c: 100.5, v: 10, closed: true });
+        const serie = Array.from({ length: 60 }, (_, i) => fausseBougie(i));
+        const v = Direct.detect(serie, { symbol: 'TEST', timeframe: '5m' }, {});
+        const cv = Ctr.versContrat(v, { symbol: 'TEST', timeframe: '5m' });
+        const tousPresents = Ctr.CONTRAT.champs.every(k => Object.prototype.hasOwnProperty.call(cv, k));
+        return cv.source === 'verdict' && tousPresents && Ctr.validerSignal(cv).ok === true;
+      })());
+    ok('le multi-signaux publie le résultat du contrat',
+      (() => {
+        const serie = Array.from({ length: 80 }, (_, i) => ({
+          t: 1700000000000 + i * 300000,
+          o: 100 + Math.sin(i / 5), h: 101 + Math.sin(i / 5), l: 99 + Math.sin(i / 5),
+          c: 100.5 + Math.sin(i / 5), v: 10, closed: true
+        }));
+        const out = Multi.detecterTout(serie, { symbol: 'TEST', timeframe: '5m' }, {});
+        const c = out.synthese && out.synthese.contrat;
+        return !!c && c.version === 1 && c.invalides === 0 && c.valides === out.signaux.length;
+      })());
+    ok('DecisionEngine refuse tout signal marqué hors contrat',
+      (() => {
+        const src = fs.readFileSync(path.join(__dirname, 'engine', 'DecisionEngine.js'), 'utf8');
+        return /s\.contrat && s\.contrat\.ok === false/.test(src)
+          && /hors contrat/.test(src);
+      })());
+
+    // ── SIGNAL NORMALIZER : quatre vocabulaires, une seule forme ──────────
+    // Le dépôt parle « sens/entree » (multi), « direction/levels » (verdict),
+    // « symbole/direction » (scan) et « cle/symbol » (journal). Sans normaliseur,
+    // chaque consommateur devait connaître les quatre.
+    ok('un signal multi est normalisé sans perte',
+      (() => {
+        const n = Ctr.normaliser({
+          id: 'strat:x', source: 'strategie', nom: 'S', tf: '15m', sens: 'long',
+          status: 'confirme', force: 0.7, conditions: [], preuves: [],
+          entree: 100, stop: 99, objectifs: [102, 104], rr: 2
+        });
+        return Ctr.validerSignal(n).ok && n.sens === 'long' && n.objectifs.length === 2 && n.entree === 100;
+      })());
+    ok('un verdict direct (direction + levels) est normalisé',
+      (() => {
+        const n = Ctr.normaliser({
+          direction: 'BUY', status: 'surveille', strength: 0.62, timeframe: '1h',
+          levels: { entry: 2050.22, stop: 2045.41, target1: 2069.4, target2: 2079 }
+        });
+        return n.sens === 'long' && n.tf === '1h' && n.objectifs.length === 2
+          && Math.abs(n.entree - 2050.22) < 1e-9 && Ctr.validerSignal(n).ok;
+      })());
+    ok('une ligne de scan (symbole + direction) est normalisée',
+      (() => {
+        const n = Ctr.normaliser({ symbole: 'BTCUSDT', tf: '15m', direction: 'SELL', status: 'confirme', force: 0.51 }, { source: 'scan' });
+        return n.source === 'scan' && n.sens === 'short' && n.symbol === 'BTCUSDT';
+      })());
+    ok('une entrée de journal sans premier objectif est signalée, pas corrigée',
+      (() => {
+        const n = Ctr.normaliser({ cle: 'BTC|15m|x|short', symbol: 'BTCUSDT', timeframe: '15m', sens: 'short', entree: 68000, stop: 68500, statut: 'confirme' });
+        const v = Ctr.validerSignal(n);
+        return n.entree === 68000 && n.stop === 68500 && !v.ok
+          && v.invalides.some(x => /premier objectif/.test(x));
+      })());
+    ok('chaque ligne de scan porte la forme commune',
+      /ligne\.contrat = Contrat\.normaliser/.test(fs.readFileSync(path.join(__dirname, 'delivery', 'scan.js'), 'utf8')));
+
+    // La décision consomme la forme commune : elle ne devine plus le dialecte.
+    ok('DecisionEngine ne devine plus le dialecte des niveaux',
+      (() => {
+        const src = fs.readFileSync(path.join(__dirname, 'engine', 'DecisionEngine.js'), 'utf8');
+        return /Contrat\.normaliser\(s/.test(src)
+          && !/else if \(s\.entree !== undefined\)/.test(src)
+          && !/if \(s\.levels\) \{/.test(src);
+      })());
+
+    // « Confirmé » ne doit pas dire « exécutable ». Le banc de divergence mesure
+    // 4 séries sur 16 où le verdict se dit confirmé sans rien d'exécutable.
+    ok('un verdict confirmé SANS niveaux n\'est pas présenté comme exécutable',
+      (() => {
+        const c1 = Ctr.versContrat({ status: 'confirme', direction: 'BUY', strength: 0.8, levels: null });
+        return c1.reglesAlignees === true && c1.executablePossible === false;
+      })());
+    ok('un verdict confirmé AVEC niveaux expose les deux notions',
+      (() => {
+        const c2 = Ctr.versContrat({
+          status: 'confirme', direction: 'SELL', strength: 0.7,
+          levels: { entry: 100, stop: 101, target1: 98, target2: 96 }
+        });
+        return c2.reglesAlignees === true && c2.executablePossible === true && c2.rr === 2;
+      })());
+    ok('un verdict non confirmé ne prétend pas être aligné',
+      (() => {
+        const c3 = Ctr.versContrat({ status: 'surveiller', direction: 'BUY', strength: 0.4, levels: null });
+        return c3.reglesAlignees === false;
+      })());
+
+    // ── CONFIRMATION & MTF : le contrôle doit RÉELLEMENT s'exécuter ───────
+    // Constat : `detecterTout` ne renseignait jamais `s.confluence`, donc
+    // `exigerAlignement: true` ne bloquait jamais rien — pendant que l'écran
+    // affichait « 2/3 unités » depuis un autre calcul.
+    const bougieM = i => ({
+      t: 1700000000000 + i * 900000, o: 100, h: 101, l: 99, c: 100.5, v: 10, closed: true
+    });
+    const serieM = Array.from({ length: 80 }, (_, i) => bougieM(i));
+    const fauxConfluence = { aligne: false, nbAlignes: 0, seuilAlignes: 2, detail: [{ tf: '5m' }, { tf: '15m' }], motif: 'unités divisées' };
+    ok('l\'alignement fourni est transmis à chaque signal',
+      (() => {
+        const out = Multi.detecterTout(serieM, { symbol: 'TEST', timeframe: '5m' }, { confluence: fauxConfluence });
+        return out.signaux.length > 0 && out.signaux.every(s => s.confluence && s.confluence.nbAlignes === 0);
+      })());
+    ok('sans alignement fourni, la confirmation dit « non vérifié »',
+      (() => {
+        const d = require('./engine/DecisionEngine').decider(serieM, { symbol: 'TEST', timeframe: '5m' },
+          { exigerAlignement: true });
+        const det = (d.trace.confirmation.details || [])[0];
+        return !!det && det.alignementMTF === 'non vérifié';
+      })());
+    ok('avec un alignement insuffisant, la confirmation le dit',
+      (() => {
+        const d = require('./engine/DecisionEngine').decider(serieM, { symbol: 'TEST', timeframe: '5m' },
+          { exigerAlignement: true, confluence: fauxConfluence });
+        const det = (d.trace.confirmation.details || [])[0];
+        return !!det && det.alignementMTF === 'insuffisant';
+      })());
+    ok('la décision calcule son alignement multi-unités',
+      (() => {
+        const src = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+        // Un seul calcul pour l'écran ET la décision : c'est le seul moyen que les
+        // deux affichent le même chiffre.
+        return /async function alignementMtf\(/.test(src)
+          && /alignementMtf\(symbol, tfBase/.test(src)
+          && /alignementMtf\(symbol, tf,/.test(src)
+          && /DecisionEngine\.decider\(closed[\s\S]{0,700}?confluence/.test(src);
+      })());
+    // La surveillance exige aussi l'alignement : elle doit le RECEVOIR, sinon le
+    // contrôle y est inopérant pour la troisième fois.
+    ok('la surveillance reçoit son alignement et le transmet',
+      (() => {
+        const a = fs.readFileSync(path.join(__dirname, 'delivery', 'alerts.js'), 'utf8');
+        const s = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+        return /deps\.alignementMtf/.test(a)
+          && /confluence: confluenceSurveillance/.test(a)
+          && /alignementMtf: \(symbole, unite, prov\) => alignementMtf/.test(s);
+      })());
+
+    // ── RISK ENGINE : un plafond atteint doit GARDER la décision ──────────
+    // Constat : `Risque.verifierPrise` n'était appelé qu'à l'inscription au
+    // journal, donc APRÈS l'affichage. Mesuré : compte en perte de 9 % pour un
+    // plafond de 3 %, et la décision annonçait quand même « VENTE, 1 exécutable ».
+    {
+      const DE = require('./engine/DecisionEngine');
+      const serieR = Array.from({ length: 120 }, (_, i) => {
+        const p = i < 50 ? 100 + i * 0.05 : (i < 60 ? 108 - i * 0.35 : 105 + i * 0.4);
+        return { t: Date.now() - (119 - i) * 900000, o: p, h: p * 1.002, l: p * 0.998, c: p, v: 1000, closed: true };
+      });
+      const O = o => Object.assign({
+        exigerAlignement: true, refuserDesaccord: true,
+        refuserContreTendance: true, verifierFrais: true, verifierModele: true
+      }, o);
+      const sansVerif = DE.decider(serieR, { symbol: 'T', timeframe: '15m' }, O({}));
+      ok('la série de test produit bien un trade exécutable',
+        sansVerif.decision === 'ACHAT' && sansVerif.trace.execution.executables === 1,
+        sansVerif.decision);
+      ok('sans état de compte, le risque est déclaré NON VÉRIFIÉ (jamais « validé »)',
+        sansVerif.risque && sansVerif.risque.consulte === false && sansVerif.risque.ok === null,
+        JSON.stringify(sansVerif.risque));
+
+      const accepte = DE.decider(serieR, { symbol: 'T', timeframe: '15m' },
+        O({ verificateurRisque: () => ({ ok: true, refus: [] }) }));
+      ok('un compte dans les plafonds laisse la décision intacte',
+        accepte.decision === 'ACHAT' && accepte.risque.ok === true && accepte.risque.consulte === true,
+        `${accepte.decision} / ${JSON.stringify(accepte.risque)}`);
+
+      const refuse = DE.decider(serieR, { symbol: 'T', timeframe: '15m' },
+        O({ verificateurRisque: () => ({ ok: false, refus: ['perte du jour 9.00 % pour un plafond de 3 %'] }) }));
+      ok('un refus de risque TRANSFORME la décision en ATTENTE',
+        refuse.decision === 'ATTENTE' && refuse.risque.ok === false
+        && (refuse.risque.refus || []).length === 1,
+        `${refuse.decision} / ${JSON.stringify(refuse.risque.refus)}`);
+      ok('la raison du refus est portée par la décision, pas seulement par la trace',
+        /Risque refusé/.test(refuse.raison || ''), refuse.raison);
+
+      const panne = DE.decider(serieR, { symbol: 'T', timeframe: '15m' },
+        O({ verificateurRisque: () => { throw new Error('journal illisible'); } }));
+      ok('un vérificateur en panne ne bloque ni n\'autorise en silence',
+        panne.decision === 'ACHAT' && panne.risque.consulte === true && panne.risque.ok === null
+        && /journal illisible/.test(panne.risque.erreur || ''),
+        JSON.stringify(panne.risque));
+
+      // Une seule fabrique pour la décision ET la surveillance.
+      const srv = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+      ok('décision et surveillance partagent le même garde-fou de compte',
+        /function verificateurRisqueCompte\(/.test(srv)
+        && /const verificateurRisque = verificateurRisqueCompte\(\)/.test(srv)
+        && /verificateurRisque: verificateurRisqueCompte/.test(srv));
+      ok('l\'écran distingue un refus de risque d\'une simple attente',
+        /ATTENTE_RISQUE/.test(fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8')));
+    }
+
+    // ── PERFORMANCE : brut ou net, jamais confondu ─────────────────────────
+    // Question mesurée : les résultats sont-ils enregistrés sans biais ? Sur le
+    // journal réel, 767 prises sur 796 n'avaient AUCUN frais déduit alors que le
+    // chiffre publié se lisait comme net. Le calcul honnête existait
+    // (`coutCritique`) mais n'était affiché nulle part.
+    {
+      const Jp = require('./engine/journal-signaux');
+      const srcJ = fs.readFileSync(path.join(__dirname, 'engine', 'journal-signaux.js'), 'utf8');
+      const st = Jp.stats();
+
+      ok('les statistiques publient le brut, le net et le seuil de frais',
+        'coutCritique' in st && 'fraisMoyenR' in st && 'rTotalBrut' in st
+        && 'esperanceBrute' in st,
+        Object.keys(st).filter(k => /brut|frais|critique/i.test(k)).join(', '));
+
+      ok('l\'écran ne peut pas présenter du brut comme du net',
+        /coutCritique/.test(fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8')));
+
+      // Bougie ambiguë : le stop est retenu AVANT l'objectif (choix défavorable).
+      ok('sur une bougie ambiguë, le stop passe avant l\'objectif',
+        /sur une même bougie, on retient le cas défavorable/.test(srcJ)
+        && srcJ.indexOf('if (long ? c.l <= stop : c.h >= stop)')
+           < srcJ.indexOf('!sig.atteintTP1 && touche1'));
+
+      // BE : 0 R par défaut — créditer la moitié du 1er objectif serait une hypothèse.
+      ok('un retour à l\'entrée vaut 0 R, sauf gestion partielle activée',
+        /if \(!gestionPartielle\) return 0;/.test(srcJ));
+
+      // Le taux de réussite exclut BE et expirations : seuls objectif ou stop comptent.
+      ok('le taux de réussite ne compte que les prises tranchées',
+        /const decides = gagnes.length \+ perdus.length;/.test(srcJ));
+    }
+
+    // ── CHAÎNAGE DES NIVEAUX : un rejeté ne redevient pas exécutable ──────
+    // Question mesurée : les signaux rejetés sont-ils distingués des confirmés,
+    // y compris au moment de décider ? Avant ce garde-fou, les cinq niveaux
+    // étaient calculés EN PARALLÈLE et l'arbitrage ne lisait que `executable` :
+    // mesuré sur une série réelle, une décision « ACHAT » sortait avec
+    // 0 confirmation et 1 exécutable. Un niveau qui ne conditionne rien n'est
+    // pas un niveau.
+    {
+      const DEc = require('./engine/DecisionEngine');
+      const serieC = Array.from({ length: 120 }, (_, i) => {
+        const p = i < 50 ? 100 + i * 0.05 : (i < 60 ? 108 - i * 0.35 : 105 + i * 0.4);
+        return { t: Date.now() - (119 - i) * 900000, o: p, h: p * 1.002, l: p * 0.998, c: p, v: 1000, closed: true };
+      });
+      const O = o => Object.assign({
+        exigerAlignement: true, refuserDesaccord: true,
+        refuserContreTendance: true, verifierFrais: true, verifierModele: true
+      }, o);
+      const confKO = {
+        aligne: false, nbAlignes: 0, seuilAlignes: 2,
+        detail: [{ tf: '15m' }, { tf: '1h' }], motif: 'unités divisées'
+      };
+
+      const ok4 = DEc.decider(serieC, { symbol: 'T', timeframe: '15m' }, O({}));
+      ok('la série de test produit un exécutable quand rien ne le contredit',
+        ok4.trace.execution.executables === 1 && ok4.trace.confirmation.confirmes === 2,
+        ok4.trace.confirmation.confirmes + ' confirmé(s) / ' + ok4.trace.execution.executables + ' exécutable(s)');
+
+      const ko4 = DEc.decider(serieC, { symbol: 'T', timeframe: '15m' }, O({ confluence: confKO }));
+      ok('un signal rejeté en confirmation n\'est PLUS exécutable',
+        ko4.trace.execution.executables === 0 && ko4.trace.confirmation.confirmes === 0,
+        ko4.trace.confirmation.confirmes + ' confirmé(s) / ' + ko4.trace.execution.executables + ' exécutable(s)');
+      ok('aucune décision directionnelle sans confirmation',
+        ko4.decision !== 'ACHAT' && ko4.decision !== 'VENTE', ko4.decision);
+      ok('le motif du rejet est nommé dans la trace d\'exécution',
+        (ko4.trace.execution.details || []).some(x => (x.blocages || []).some(b => /confirmation non acquise/.test(b))));
+
+      // Le contexte de marché vaut pour TOUTES les sources, pas seulement les
+      // stratégies : un motif ou une structure confirmé contre 0/2 unités
+      // alignées n'est pas une confirmation.
+      const srcDE = fs.readFileSync(path.join(__dirname, 'engine', 'DecisionEngine.js'), 'utf8');
+      ok('l\'exécution reçoit le verdict de la confirmation',
+        /niveauExecution\(\s*signauxEnrichis\.map\(\(s, i\) => \(\{ \.\.\.s, confirme: confirmation\.details\[i\]\?\.ok \}\)\)/.test(srcDE.replace(/\r/g, '')));
+      ok('le contexte MTF s\'applique à toutes les sources',
+        (() => {
+          const iCtx = srcDE.indexOf('CONTEXTE DE MARCHÉ');
+          const iStrat = srcDE.indexOf("if (source === 'strategie')");
+          return iCtx > 0 && iStrat > 0 && iCtx > iStrat;
+        })());
+    }
+
+    // ── SÉPARATION DES MARCHÉS : la classe conditionne la sélection ────────
+    // `searchKnowledgeBase` classe par mots-clés ; un mot commun ne prouve pas
+    // qu'une stratégie Forex s'applique à un indice synthétique. Mesuré sur la
+    // base réelle : 31 fiches, AUCUNE ne déclare son marché — le filtre ne peut
+    // donc rien valider, et il le dit au lieu de laisser croire l'inverse.
+    {
+      const SC = require('./strategy-engine/strategy-contract');
+      const Cl = require('./market-intelligence/instrument-classifier');
+
+      ok('les familles de synthétiques Deriv sont reconnues',
+        ['R_75', 'R_10', 'BOOM1000', 'CRASH1000', 'JD10', 'stpRNG', '1HZ75V']
+          .every(s => Cl.classifier(s).classe === 'synthetique'),
+        ['1HZ75V', 'stpRNG'].map(s => s + '→' + Cl.classifier(s).classe).join(' '));
+
+      ok('crypto, forex, métaux, indices et énergies sont distingués',
+        Cl.classifier('BTCUSDT').classe === 'crypto'
+        && Cl.classifier('frxEURUSD').classe === 'forex'
+        && Cl.classifier('frxXAUUSD').classe === 'metaux'
+        && Cl.classifier('US30').classe === 'indices'
+        && Cl.classifier('XTIUSD').classe === 'energies');
+
+      ok('un synthétique n\'est pas soumis aux sessions ni au calendrier',
+        (() => {
+          const P = require('./market-intelligence/profils-classes');
+          const cl = Cl.classifier('R_75').classe;
+          return P.aSessions(cl) === false && P.aActualites(cl) === false && P.aVolume(cl) === false;
+        })());
+
+      ok('une fiche Forex est REFUSÉE sur un indice synthétique, avec la raison',
+        (() => {
+          const r = SC.filtrerParClasse([{ id: 'x', supportedMarkets: ['forex'] }], 'R_75');
+          return r.compatibles.length === 0 && r.refusees.length === 1
+            && /synthetique/.test(r.refusees[0].raison);
+        })());
+
+      ok('la même fiche est acceptée sur une paire Forex',
+        (() => {
+          const r = SC.filtrerParClasse([{ id: 'x', supportedMarkets: ['forex'] }], 'frxEURUSD');
+          return r.compatibles.length === 1 && r.refusees.length === 0;
+        })());
+
+      ok('une fiche sans marché déclaré est NON ÉVALUABLE, jamais compatible',
+        (() => {
+          const r = SC.filtrerParClasse([{ id: 'z' }], 'R_75');
+          return r.nonDeclarees.length === 1 && r.compatibles.length === 0 && r.refusees.length === 0;
+        })());
+
+      // Le classifieur doit rester sans dépendance : il est appelé par les routes,
+      // le moteur et les tests.
+      ok('le classifieur n\'a aucune dépendance',
+        !/require\(/.test(fs.readFileSync(path.join(__dirname, 'market-intelligence', 'instrument-classifier.js'), 'utf8')));
+    }
+
+    // ── INVARIANT : toute route qui DÉCIDE fournit les deux garde-fous ────
+    // Cartographie mesurée : 108 routes, 2 seulement appellent le Decision
+    // Engine. Le flux temps réel en manquait — un signal refusé par le risque
+    // pouvait donc arriver par le flux en « ACHAT ». Cet invariant empêche la
+    // rechute : il refuse toute route qui décide sans MTF ni état de compte.
+    {
+      const NL = String.fromCharCode(10);
+      const src = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+      const lignes = src.split(NL);
+      const debuts = [];
+      lignes.forEach((l, i) => {
+        if (/app[.](get|post|put|delete|patch)[(]\s*'/.test(l)) debuts.push(i);
+      });
+      const blocDe = (d, k) => lignes.slice(d, debuts[k + 1] || lignes.length).join(NL);
+      const fautives = [];
+      debuts.forEach((d, k) => {
+        const blocRoute = blocDe(d, k);
+        if (!/DecisionEngine[.]decider[(]/.test(blocRoute)) return;
+        const nom = (lignes[d].match(/'([^']+)'/) || [])[1] || ('ligne ' + (d + 1));
+        const manque = [];
+        if (!/alignementMtf[(]/.test(blocRoute)) manque.push('MTF');
+        if (!/verificateurRisque/.test(blocRoute)) manque.push('risque');
+        if (manque.length) fautives.push(nom + ' (manque ' + manque.join(' + ') + ')');
+      });
+      const nbDecident = debuts.filter((d, k) => /DecisionEngine[.]decider[(]/.test(blocDe(d, k))).length;
+      ok('toute route qui décide fournit MTF et garde-fou de compte',
+        fautives.length === 0, fautives.join(' · '));
+      ok('les routes qui décident sont rares et nommées', nbDecident === 2, String(nbDecident));
+    }
+
+    // ── Scan et surveillance doivent juger le même marché sur la même unité ──
+    // Constat : 3 marchés surveillés en 15m, scan en 15m → cohérent par hasard.
+    // Ajouter un marché en 1h suffisait à créer deux vérités sur la même paire.
+    ok('le scan parcourt aussi l\'unité sous laquelle un marché est surveillé',
+      (() => {
+        const TF = { '1m': 1, '5m': 1, '15m': 1, '1h': 1, '4h': 1, '1d': 1 };
+        const plan = sym => Scan.unitesPour(sym, '15m', s => (s === 'AAA' ? ['1h'] : []), TF);
+        return JSON.stringify(plan('AAA')) === JSON.stringify(['15m', '1h'])
+          && JSON.stringify(plan('BBB')) === JSON.stringify(['15m']);
+      })());
+    ok('une unité inconnue est ignorée, pas ajoutée au hasard',
+      (() => {
+        const TF = { '15m': 1, '1h': 1 };
+        const plan = Scan.unitesPour('AAA', '15m', () => ['W1', '1h', 'n\'importe quoi'], TF);
+        return JSON.stringify(plan) === JSON.stringify(['15m', '1h']);
+      })());
+    ok('le scan publie les unités réellement parcourues',
+      /tfs: \[\.\.\.unitesVues\]/.test(fs.readFileSync(path.join(__dirname, 'delivery', 'scan.js'), 'utf8')));
+
+    // ── Scan par stratégie : N stratégies, une seule lecture des bougies ──
+    // Le scan automatique n'évaluait AUCUNE stratégie (moteur générique) et le
+    // scan manuel une seule. Les deux acceptent désormais N profils.
+    {
+      const bougieS = i => ({
+        t: Date.now() - (39 - i) * 900000, o: 100, h: 101, l: 99, c: 100.5, v: 10, closed: true
+      });
+      const marcheFaux = () => {
+        let telechargements = 0;
+        return {
+          TF_MS: { '15m': 900000 },
+          listSymbols: () => [{ symbol: 'AAA' }, { symbol: 'BBB' }],
+          getCandles: async () => {
+            telechargements++;
+            return { candles: Array.from({ length: 40 }, (_, i) => bougieS(i)) };
+          },
+          compte: () => telechargements
+        };
+      };
+      const signauxFaux = { detect: () => ({ direction: 'BUY', status: 'confirme', force: 0.5 }) };
+      const profil = n => ({ id: 's' + n, titre: 'Stratégie ' + n, regles: ['R1'], seuilForce: 0.3, seuilRegles: 1 });
+
+      const m3 = marcheFaux();
+      const r3 = await Scan.scanComplet({
+        market: m3, signals: signauxFaux, tf: '15m', strategies: [profil(1), profil(2), profil(3)]
+      });
+      ok('chaque stratégie est évaluée (3 stratégies × 2 marchés)',
+        r3.resultats.length === 6, `${r3.resultats.length} ligne(s)`);
+      ok('les lignes nomment la stratégie qui les a produites',
+        [...new Set(r3.resultats.map(x => x.strategie))].length === 3,
+        JSON.stringify([...new Set(r3.resultats.map(x => x.strategie))]));
+      ok('les bougies ne sont lues qu’UNE fois par marché, pas par stratégie',
+        m3.compte() === 2, `${m3.compte()} téléchargement(s) pour 3 stratégies`);
+
+      const m8 = marcheFaux();
+      const trop = Array.from({ length: 10 }, (_, i) => profil(i + 1));
+      const r8 = await Scan.scanComplet({ market: m8, signals: signauxFaux, tf: '15m', strategies: trop });
+      ok('le plafond de stratégies est appliqué et annoncé',
+        r8.resultats.length === 16 && (r8.erreurs || []).some(e => /au maximum/.test(e)),
+        `${r8.resultats.length} ligne(s), erreurs : ${(r8.erreurs || []).length}`);
+    }
+
+    // ── Étage DATA QUALITY : le MÊME contrôle pour tous les parcours ──────
+    // Il existait déjà (`data-engine/quality`) et était branché sur la
+    // surveillance uniquement. Le scan et le direct analysaient donc des séries
+    // que la surveillance refusait : un même jeu de données, deux jugements.
+    const Qd = require('./data-engine/quality');
+    ok('le contrôle de qualité reste une seule implémentation',
+      typeof Qd.analyser === 'function' && typeof Qd.synchroniser === 'function');
+    ok('le scan passe par le contrôle de qualité',
+      /require\('\.\.\/data-engine\/quality'\)/.test(fs.readFileSync(path.join(__dirname, 'delivery', 'scan.js'), 'utf8'))
+      && /data non fiables|données non fiables/.test(fs.readFileSync(path.join(__dirname, 'delivery', 'scan.js'), 'utf8')));
+    ok('le direct passe par le MÊME contrôle, avant d\'analyser',
+      (() => {
+        const src = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+        const iQual = src.indexOf('Qualite.analyser(candles');
+        return iQual > 0 && /if \(!qualite\.ok\)/.test(src);
+      })());
+    ok('une série critique n\'est jamais analysée en silence',
+      (() => {
+        const serieCourte = Array.from({ length: 5 }, (_, i) => ({ t: 1700000000000 + i * 900000, o: 1, h: 1, l: 1, c: 1, v: 1, closed: true }));
+        const q = Qd.analyser(serieCourte, { timeframe: '15m' });
+        return q.ok === false && q.problemes.some(p => p.gravite === 'critique');
+      })());
+
+    // ── Étage Market Intelligence : le régime conditionne la confirmation ──
+    // Écrit, testé, et appelé par personne : mesuré sur 36 séries réelles, 24
+    // verdicts directionnels étaient confirmés dans un régime `ranging`.
+    const Reg = require('./market-intelligence/regime-detector');
+    const oscillante = Array.from({ length: 120 }, (_, i) => {
+      const c = 100 + Math.sin(i / 2) * 2;             // allers-retours, aucune pente
+      return { t: 1700000000000 + i * 900000, o: c, h: c + 0.6, l: c - 0.6, c, v: 10, closed: true };
+    });
+    const tendancielle = Array.from({ length: 120 }, (_, i) => {
+      const c = 100 + i * 0.8;
+      return { t: 1700000000000 + i * 900000, o: c, h: c + 0.6, l: c - 0.6, c, v: 10, closed: true };
+    });
+    ok('le détecteur de régime distingue un range d\'une tendance',
+      (() => {
+        const a = Reg.detecter(oscillante, {}).regime;
+        const b = Reg.detecter(tendancielle, {}).regime;
+        return a === 'ranging' && b === 'trending';
+      })());
+    ok('aucun signal n\'est CONFIRMÉ dans un régime de range',
+      (() => {
+        const out = Multi.detecterTout(oscillante, { symbol: 'TEST', timeframe: '15m' }, {});
+        return out.regime && out.regime.regime === 'ranging'
+          && out.signaux.every(s => s.status !== 'confirme');
+      })());
+    ok('le régime mesuré est publié avec le résultat',
+      (() => {
+        const out = Multi.detecterTout(tendancielle, { symbol: 'TEST', timeframe: '15m' }, {});
+        return !!out.regime && out.regime.regime === 'trending' && typeof out.regime.confiance === 'number';
+      })());
     // Et sur un backtest réel, plus aucun gagnant à R négatif.
     const Bk = require('./engine/backtest');
     const T0b = 1700000000000, MINb = 60000;
@@ -3286,17 +3837,21 @@ function tinyPng(W = 64, H = 40) {
       !/mot de passe: \$\{password\}/.test(rSrc) && /voile/.test(rSrc));
   }
 
-  // ── Secours IA gratuit : quand DeepSeek tombe, l'analyse continue ──
-  // Constat réel : solde DeepSeek épuisé (402) = plus aucune analyse, alors
-  // qu'un modèle gratuit répondait correctement. Le secours NVIDIA NIM rejoue
-  // la MÊME requête et ne doit JAMAIS peser sur le budget.
+  // ── Analyse IA : NVIDIA NIM en cascade, plus aucun appel payant ──
+  // Décision produit : DeepSeek retiré. Les modèles gratuits de build.nvidia.com
+  // sont essayés dans l'ordre, ce qui rend l'analyse résiliente à la panne d'un
+  // seul modèle — et le budget IA ne peut plus être consommé par du texte.
   {
     const sSrc = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
-    ok('un secours IA gratuit existe',
+    ok('une chaîne IA gratuite existe',
       /integrate\.api\.nvidia\.com/.test(sSrc) && /NVIDIA_MODELS/.test(sSrc));
-    ok('le secours prend le relais quand DeepSeek échoue',
-      /appelDeepSeek\(messages/.test(sSrc) &&
+    ok('la chaîne prend le relais, modèle après modèle',
       /for \(const modele of NVIDIA_MODELS\)[\s\S]{0,200}?appelNvidia\(modele, messages/.test(sSrc));
+    ok('plus aucun fournisseur payant dans le chemin d\'analyse',
+      !/appelDeepSeek/.test(sSrc) && !/DEEPSEEK_API_KEY/.test(sSrc),
+      /DEEPSEEK/.test(sSrc) ? 'référence DeepSeek restante' : 'aucune');
+    ok('un modèle en échec n\'interrompt pas la cascade',
+      /for \(const modele of NVIDIA_MODELS\) \{[\s\S]{0,1400}?catch \(e\) \{[\s\S]{0,260}?raisons\.push/.test(sSrc));
     ok('les appels de secours sont marqués gratuits', /gratuit: true/.test(sSrc));
     ok('la sonde du secours est fermée par défaut', /IA_SELFTEST === '1'/.test(sSrc));
 
@@ -3307,8 +3862,8 @@ function tinyPng(W = 64, H = 40) {
     const C = require('./core/couts');
     C.enregistrer({ route: 'selftest', modele: 'nim:x', entree: 1000000, sortie: 1000000, gratuit: true });
     ok('un million de tokens offerts restent à 0 $', C.bilan().depense === 0, `${C.bilan().depense} $`);
-    C.enregistrer({ route: 'selftest', modele: 'deepseek-chat', entree: 1000000, sortie: 1000000 });
-    ok('le même volume chez DeepSeek est bien facturé', C.bilan().depense > 0, `${C.bilan().depense} $`);
+    C.enregistrer({ route: 'selftest', modele: 'modele-payant-x', entree: 1000000, sortie: 1000000 });
+    ok('un appel non gratuit reste bien facturé', C.bilan().depense > 0, `${C.bilan().depense} $`);
     delete require.cache[require.resolve('./core/couts.js')];
     delete process.env.COUTS_FICHIER;
     try { fs.unlinkSync(tmpCouts); } catch { /* deja absent */ }
@@ -3319,6 +3874,22 @@ function tinyPng(W = 64, H = 40) {
     ok('un bloc de code ```json est déballé', extraireJSON('Voici:\n```json\n{"a":1}\n```\nVoila.') === '{"a":1}');
     ok('une phrase autour du JSON ne casse pas le parse', extraireJSON('Analyse: {"a":1} (fin)') === '{"a":1}');
     ok('un tableau JSON est reconnu', extraireJSON('[1,2]') === '[1,2]');
+
+    // Réparation : un modèle « reasoning » rend parfois un JSON TRONQUÉ (budget
+    // mangé par le raisonnement) ou une chaîne contenant un vrai retour à la
+    // ligne. Vécu : « Unterminated string in JSON at position 29 », et l'écran
+    // annonçait « Combinaison indisponible » sur un plan à moitié utilisable.
+    const relu = txt => { try { return JSON.parse(extraireJSON(txt)); } catch { return null; } };
+    ok('une chaîne tronquée est refermée et redevient lisible',
+      (relu('{"plan":"R_75","resume":"le prix vient de balay') || {}).resume === 'le prix vient de balay');
+    ok('un retour à la ligne littéral dans une chaîne est échappé',
+      (relu('{"a":"ligne1\nligne2"}') || {}).a === 'ligne1\nligne2');
+    ok('une virgule finale est retirée',
+      JSON.stringify(relu('{"a":1,"b":2,}')) === '{"a":1,"b":2}');
+    ok('une structure imbriquée non fermée est refermée',
+      JSON.stringify(relu('{"a":{"b":[1,2')) === '{"a":{"b":[1,2]}}');
+    ok('un document irrécupérable n\'est jamais rendu pire qu\'à l\'entrée',
+      extraireJSON('pas de json ici') === 'pas de json ici');
   }
 
   // ── Contrat de déploiement (Northflank / tout PaaS à conteneur) ──
@@ -3400,7 +3971,7 @@ function tinyPng(W = 64, H = 40) {
     }
     ok('le modèle de variables couvre les clés critiques',
       // DATA_DIR est facultatif : il figure commenté pour montrer la valeur par défaut.
-      ['DATABASE_URL', 'NVIDIA_API_KEY', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY', 'DATA_DIR']
+      ['DATABASE_URL', 'NVIDIA_API_KEY', 'GEMINI_API_KEY', 'DATA_DIR']
         .every(k => new RegExp(`^#?\\s*${k}=`, 'm').test(modele)),
       'modele .env.deploy.example');
     ok('un Procfile existe pour les plateformes sans Docker',
@@ -4753,7 +5324,15 @@ function tinyPng(W = 64, H = 40) {
       getCandles: async (sym) => {
         if (sym === 'DDD') return { candles: [{ closed: true }] };        // trop court
         if (sym === 'CCC') throw new Error('source muette');
-        return { candles: Array.from({ length: 40 }, () => ({ closed: true })) };
+        // Bougies RÉALISTES et FRAÎCHES : une bougie sans prix, ou vieille de
+        // deux ans, n'est pas une donnée de marché — l'étage de qualité la
+        // refuse, et c'est précisément son rôle.
+        const fin = Date.now();
+        return {
+          candles: Array.from({ length: 40 }, (_, i) => ({
+            t: fin - (39 - i) * 900000, o: 100, h: 101, l: 99, c: 100.5, v: 10, closed: true
+          }))
+        };
       }
     };
     const signals = {
@@ -4782,7 +5361,7 @@ function tinyPng(W = 64, H = 40) {
     };
     const fiche = { id: 's1', titre: 'S1 cassure', regles: ['R1', 'R2'], obligatoires: ['R1'],
       seuilForce: 0.6, seuilRegles: 2, parametres: {} };
-    const r2 = await Scan.scanComplet({ market, signals: signals2, tf: '15m', strategie: fiche });
+    const r2 = await Scan.scanComplet({ market, signals: signals2, tf: '15m', strategies: [fiche] });
     ok('le scan transmet les règles de la stratégie au moteur',
       recus.length > 0 && recus.every(o => Array.isArray(o.regles) && o.regles.length === 2 && o.obligatoires[0] === 'R1'),
       JSON.stringify(recus[0] && { regles: recus[0].regles, obligatoires: recus[0].obligatoires }));
@@ -4790,6 +5369,75 @@ function tinyPng(W = 64, H = 40) {
       r2.resultats.length > 0 && r2.resultats.every(x => x.strategie === 'S1 cassure'));
     ok('le scan sans stratégie reste en moteur générique (aucune règle imposée)',
       r.resultats.every(x => x.strategie === null));
+
+    // ── ORDRE DES FILTRES : le journal écrit en DERNIER ───────────────────
+    // Question mesurée : le filtre économique, le RR, le désaccord et le MTF
+    // interviennent-ils avant ou après l'enregistrement d'une position ? Dans le
+    // chemin de repli, le journal écrivait AVANT eux : une position jamais
+    // annoncée restait ouverte, consommait un slot de `maxSimultanes` et faussait
+    // l'état du compte du cycle suivant. L'ordre est désormais vérifié ici.
+    ok('le journal n\'enregistre qu\'après tous les filtres',
+      (() => {
+        const a = fs.readFileSync(path.join(__dirname, 'delivery', 'alerts.js'), 'utf8');
+        const iJournal = a.indexOf('deps.journal.enregistrer(');
+        const avant = [
+          ['filtre économique', 'deps.filtreNews(m.symbol)'],
+          ['désaccord', 'c.refuserDesaccord && v.contradiction'],
+          ['alignement MTF', 'if (c.exigerAlignement)'],
+          ['RR', 'rr < c.rrMin']
+        ];
+        const fautifs = avant.filter(([, marqueur]) => {
+          const i = a.indexOf(marqueur);
+          return i < 0 || i > iJournal;
+        }).map(([nom]) => nom);
+        return iJournal > 0 && fautifs.length === 0;
+      })());
+    ok('le journal enregistre ce qui vient d\'être retenu, dans les deux chemins',
+      (() => {
+        const a = fs.readFileSync(path.join(__dirname, 'delivery', 'alerts.js'), 'utf8');
+        return /multi \? multi\.signaux : \(decision && decision\.signaux\)/.test(a);
+      })());
+
+    // ── N stratégies : SÉPARÉES à l'évaluation, FUSIONNÉES si même trade ──
+    // Question mesurée : trois stratégies cochées produisent-elles trois
+    // évaluations ? Oui dans le moteur et la trace. Au journal, deux règles
+    // coexistent et il faut les distinguer : la clé d'identité contient la fiche
+    // (donc deux fiches = deux lignes), mais la règle de corrélation fusionne
+    // ce qui est LITTÉRALEMENT le même trade (mêmes entrée, stop, sens, bougie).
+    {
+      const tmpJ = path.join(os.tmpdir(), 'journal-test-' + Date.now() + '.json');
+      const ancienJ = process.env.JOURNAL_SIGNAUX_FICHIER;
+      process.env.JOURNAL_SIGNAUX_FICHIER = tmpJ;
+      delete require.cache[require.resolve('./engine/journal-signaux.js')];
+      const J = require('./engine/journal-signaux');
+      const bougie = Date.now();
+      const sig = (id, titre, entree, stop) => ({
+        id: 'strat:' + id, nom: titre, source: 'strategie', sens: 'long',
+        status: 'confirme', force: 0.7, at: bougie, confirmations: 3,
+        levels: { entry: entree, stop: stop, target1: entree + 30 },
+        entree: entree, stop: stop, objectifs: [entree + 30]
+      });
+      const metaJ = { symbol: 'T', timeframe: '15m', at: bougie };
+      J.enregistrer([sig('a', 'A', 100, 95), sig('b', 'B', 100, 95)], metaJ, { ignorerRisque: true });
+      const casA = J.charger().signaux;
+      ok(
+        'meme trade detecte par deux strategies : UNE ligne, concepts traces',
+        casA.length === 1 && (casA[0].concepts || []).length === 2,
+        casA.length + ' ligne(s) / concepts ' + JSON.stringify(casA[0] && casA[0].concepts)
+      );
+      J.sauver({ signaux: [], reinitialiseLe: null });
+      J.enregistrer([sig('a', 'A', 100, 95), sig('b', 'B', 101, 94)], metaJ, { ignorerRisque: true });
+      const casB = J.charger().signaux;
+      ok(
+        'deux strategies aux niveaux differents : DEUX lignes',
+        casB.length === 2,
+        casB.length + ' ligne(s)'
+      );
+      try { fs.unlinkSync(tmpJ); } catch (e) { /* deja absent */ }
+      delete require.cache[require.resolve('./engine/journal-signaux.js')];
+      if (ancienJ === undefined) delete process.env.JOURNAL_SIGNAUX_FICHIER;
+      else process.env.JOURNAL_SIGNAUX_FICHIER = ancienJ;
+    }
 
     // Plusieurs stratégies cochées = plusieurs évaluations réelles. Avant, seule
     // la première tournait, et la clé d'anti-doublon ne distinguait pas les fiches :
@@ -4801,7 +5449,9 @@ function tinyPng(W = 64, H = 40) {
     ok('l\'anti-doublon distingue les stratégies entre elles',
       /\|\$\{v\.at\}`\s*\n?\s*\+ \(profil \? `\|\$\{profil\.id\}`/.test(srcAlerts));
     ok('le verdict d\'envoi nomme la stratégie qui a déclenché',
-      /ALERTE ENVOYÉE', force: v\.strength, strategie: profil\.titre/.test(srcAlerts));
+      // Le nom vient de la fiche ; en mode générique (aucune stratégie cochée)
+      // il vaut null — c'est ce que vérifie l'assertion « scan sans stratégie ».
+      /ALERTE ENVOYÉE', force: v\.strength, strategie: profil \?/.test(srcAlerts));
 
     // L'ordre de démarrage compte : load() lit le fichier, hydrater() met la base
     // par-dessus. Inversé, la config de la base était écrasée par la graine du

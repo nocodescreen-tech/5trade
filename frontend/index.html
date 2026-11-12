@@ -111,7 +111,7 @@
     --accent:#2563eb; --accent2:#3b82f6; --ok:#10b981; --warn:#f59e0b; --bad:#ef4444;
     --radius:12px; --radius-sm:8px; --shadow:0 4px 18px -6px rgba(0,0,0,.55);
     --shadow-lg:0 12px 36px -10px rgba(0,0,0,.65);
-    --focus:ring:0 0 0 3px rgba(37,99,235,.22);
+    --focus-ring:0 0 0 3px rgba(37,99,235,.22);
     --transition:.18s cubic-bezier(.2,.8,.2,1);
   }
   /* Thème clair — bascule via [data-theme="light"] sur <html> */
@@ -124,7 +124,7 @@
     --accent:#2563eb; --accent2:#3b82f6; --ok:#059669; --warn:#d97706; --bad:#dc2626;
     --shadow:0 4px 18px -6px rgba(15,23,42,.12);
     --shadow-lg:0 12px 36px -10px rgba(15,23,42,.18);
-    --focus:ring:0 0 0 3px rgba(37,99,235,.28);
+    --focus-ring:0 0 0 3px rgba(37,99,235,.28);
   }
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{height:100%}
@@ -172,7 +172,7 @@
     transition:border-color var(--transition), box-shadow var(--transition);
   }
   .fld::placeholder{color:var(--dim)}
-  .fld:focus{outline:none; border-color:var(--accent); box-shadow:var(--focus:ring)}
+  .fld:focus{outline:none; border-color:var(--accent); box-shadow:var(--focus-ring)}
   textarea.fld{resize:vertical; line-height:1.55}
   label.lbl{display:block; font-size:11.5px; font-weight:600; color:var(--muted);
     letter-spacing:.04em; text-transform:uppercase; margin:12px 0 6px}
@@ -213,7 +213,13 @@
 
   /* Nav principale : une seule rangée, jamais de retour à la ligne.
      Les onglets se partagent la largeur ; sur écran étroit, défilement horizontal. */
-  .nav{display:flex; gap:4px; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none}
+  /* `.nav` sert à deux groupes d'onglets HORIZONTAUX (méthodes d'ajout de
+     stratégie, navigation du tableau de bord). Sans rail, l'onglet actif
+     ressemblait à un bouton isolé posé à côté des autres. Même langage que
+     `.seg` : un seul contrôle, deux états. */
+  .nav{display:flex; gap:4px; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none;
+    padding:4px; background:var(--bg); border:1px solid var(--border);
+    border-radius:calc(var(--radius-sm) + 4px)}
   .nav::-webkit-scrollbar{display:none}
   .nav-item{flex:1 0 auto; justify-content:center; white-space:nowrap;
     display:inline-flex; align-items:center; gap:8px;
@@ -221,8 +227,47 @@
     color:var(--muted); background:transparent; border:none; cursor:pointer;
     font-family:inherit; transition:color var(--transition), background var(--transition)}
   .nav-item:hover{color:var(--txt)}
-  .nav-item.on{color:var(--txt); background:rgba(37,99,235,.12)}
+  .nav-item.on{color:var(--txt); background:var(--panel2); box-shadow:inset 0 0 0 1px var(--border)}
   .nav-pill{display:none} /* plus de pilule animée */
+
+  /* ── Contrôle segmenté (connexion / inscription) ──────────────────────
+     `.nav-item` vient de la barre latérale verticale : réutilisé ici, il
+     produisait une pilule décalée et un libellé qui flottait sans groupe.
+     Deux choix exclusifs doivent former UN contrôle, avec un rail commun. */
+  .seg{
+    display:flex; gap:4px; padding:4px; background:var(--bg);
+    border:1px solid var(--border); border-radius:calc(var(--radius-sm) + 4px);
+  }
+  .seg-item{
+    flex:1; display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    padding:9px 12px; border:none; border-radius:var(--radius-sm); background:transparent;
+    color:var(--muted); font-family:inherit; font-size:13.5px; font-weight:600;
+    cursor:pointer; transition:background var(--transition), color var(--transition);
+  }
+  .seg-item:hover{color:var(--txt)}
+  .seg-item.on{
+    background:var(--panel2); color:var(--txt);
+    box-shadow:inset 0 0 0 1px var(--border);
+  }
+
+  /* ── Focus clavier visible ────────────────────────────────────────────
+     Il n'existait pas : la variable s'appelait `--focus:ring`, un nom
+     impossible, donc le `box-shadow` était invalide et rien ne s'affichait.
+     Sans anneau, la navigation au clavier est aveugle. */
+  :where(button, a, input, select, textarea, [tabindex]):focus-visible{
+    outline:2px solid var(--accent2); outline-offset:2px;
+  }
+  .fld:focus-visible{outline:none; border-color:var(--accent); box-shadow:var(--focus-ring)}
+
+  /* ── Chiffres tabulaires ──────────────────────────────────────────────
+     Dans un terminal de trading, les prix et les R doivent s'aligner en
+     colonne. Sans ça, chaque ligne danse. */
+  table, .num, .badge, .mono{font-variant-numeric:tabular-nums}
+
+  /* Mascotte : le SVG porte width/height en dur (152x163) et occupait la
+     première place de la hiérarchie sur un écran de connexion. */
+  .mascot-wrap{max-width:92px; margin:0 auto 12px}
+  .mascot-wrap svg{width:100%; height:auto; display:block}
 
   /* Mobile nav — 5 cibles, 44px min, safe-area */
   .mobile-nav{display:none}
@@ -268,7 +313,7 @@
     background:var(--bg); border:1.5px solid var(--border); border-radius:var(--radius-sm);
     color:var(--txt); transition:border-color var(--transition), box-shadow var(--transition),
     transform var(--transition); font-family:inherit}
-  .otp-box:focus{outline:none; border-color:var(--accent); box-shadow:var(--focus:ring); transform:translateY(-2px)}
+  .otp-box:focus{outline:none; border-color:var(--accent); box-shadow:var(--focus-ring); transform:translateY(-2px)}
   .otp-box.filled{border-color:var(--ok)}
 
   /* ── Animations fluides (login / inscription / validation) ── */
@@ -324,12 +369,12 @@
   .cube-wrap{perspective:300px; display:inline-block}
   .cube{width:100%; height:100%; position:relative; transform-style:preserve-3d; animation:cubeSpin 2.4s linear infinite}
   .cube b{position:absolute; inset:0; border:1.5px solid var(--accent); border-radius:3px; background:var(--accent-bg, rgba(37,99,235,.12))}
-  .cube b:nth-child(1){transform:translateZ(var(--d))}
-  .cube b:nth-child(2){transform:rotateY(180deg) translateZ(var(--d))}
-  .cube b:nth-child(3){transform:rotateY(90deg) translateZ(var(--d))}
-  .cube b:nth-child(4){transform:rotateY(-90deg) translateZ(var(--d))}
-  .cube b:nth-child(5){transform:rotateX(90deg) translateZ(var(--d))}
-  .cube b:nth-child(6){transform:rotateX(-90deg) translateZ(var(--d))}
+  .cube b:nth-child(1){transform:translateZ(var(--dim))}
+  .cube b:nth-child(2){transform:rotateY(180deg) translateZ(var(--dim))}
+  .cube b:nth-child(3){transform:rotateY(90deg) translateZ(var(--dim))}
+  .cube b:nth-child(4){transform:rotateY(-90deg) translateZ(var(--dim))}
+  .cube b:nth-child(5){transform:rotateX(90deg) translateZ(var(--dim))}
+  .cube b:nth-child(6){transform:rotateX(-90deg) translateZ(var(--dim))}
   @keyframes cubeSpin{from{transform:rotateX(-20deg) rotateY(0)} to{transform:rotateX(-20deg) rotateY(360deg)}}
   .glow-ring{box-shadow:0 0 0 1px var(--border2, var(--border))}
 
@@ -855,7 +900,7 @@ function Auth({ onLogin }) {
         <Reveal>
           <Tilt max={6} scale={1}>
             <SpotlightCard className="panel glow-ring" spotlightColor="rgba(37,99,235,.25)">
-              <div className="auth-card" style={{ padding:'30px 28px 26px', position:'relative', overflow:'hidden' }}>
+              <div className="auth-card" style={{ position:'relative', overflow:'hidden' }}>
                 {ok && (
                   <div className="modal-veil" style={{ position:'absolute', inset:0, zIndex:9, display:'flex',
                     alignItems:'center', justifyContent:'center', background:'rgba(7,10,17,.9)',
@@ -866,24 +911,27 @@ function Auth({ onLogin }) {
                   </div>
                 )}
 
-                <div style={{ textAlign:'center', marginBottom:24 }}>
-                  <div className="auth-title" style={{ fontSize:38, fontWeight:800, letterSpacing:'-1px', color:'var(--txt)' }}>
+                <div style={{ textAlign:'center', marginBottom:18 }}>
+                  <div className="auth-title" style={{ fontSize:26, fontWeight:800, letterSpacing:'-.6px',
+                    color:'var(--txt)', lineHeight:1.15 }}>
                     5trade
                   </div>
-                  <div style={{ marginTop:9, fontSize:12.5, color:'var(--txt-muted)' }}>
+                  <div style={{ marginTop:6, fontSize:12.5, color:'var(--muted)', lineHeight:1.45 }}>
                     Plateforme d'analyse de trading assistée par IA
                   </div>
                 </div>
 
-                {step === 'creds' && <AuthMascot mode={mode} focus={focus} />}
+                {step === 'creds' && (
+                  <div className="mascot-wrap"><AuthMascot mode={mode} focus={focus} /></div>
+                )}
 
                 {step === 'creds' && (<div className="authpane" key={mode}>
-                  <div className="nav" style={{ marginBottom:18 }}>
+                  <div className="seg" role="tablist" aria-label="Connexion ou inscription" style={{ marginBottom:16 }}>
                     {['login','signup'].map(m => (
-                      <button key={m} className={`nav-item ${mode===m?'on':''}`} type="button"
-                        style={{ flex:1, justifyContent:'center' }}
+                      <button key={m} className={`seg-item ${mode===m?'on':''}`} type="button"
+                        role="tab" aria-selected={mode===m}
                         onClick={()=>{setMode(m);setErr('');setInfo('')}}>
-                        <i className={`fas ${m==='login'?'fa-right-to-bracket':'fa-user-plus'}`}></i>
+                        <i className={`fas ${m==='login'?'fa-right-to-bracket':'fa-user-plus'}`} aria-hidden="true"></i>
                         {m==='login' ? 'Connexion' : 'Inscription'}
                       </button>
                     ))}
@@ -1404,7 +1452,7 @@ function AddKnowledge({ refresh }) {
       <SpotlightCard className="panel" spotlightColor="rgba(124,58,237,.2)">
         <div style={{ padding:'22px' }}>
           <h2 style={{ fontSize:18, fontWeight:800, marginBottom:14, display:'flex', alignItems:'center', gap:10 }}>
-            <i className="fas fa-brain" style={{ color:'var(--ai-purple)' }}></i>Ajouter à la base de connaissance
+            <i className="fas fa-brain" style={{ color:'var(--accent2)' }}></i>Ajouter à la base de connaissance
           </h2>
 
           <div className="nav" style={{ marginBottom:20 }}>
@@ -1577,8 +1625,8 @@ function AddKnowledge({ refresh }) {
           {busy && (
             <div style={{ marginTop:18, display:'flex', alignItems:'center', gap:12 }}>
               {LatticeLoader
-                ? <LatticeLoader label="Traitement" status="working" color="var(--ai-purple)" fontSize={12} />
-                : <><Spinner size={18} color="var(--ai-purple)" /><span style={{color:'var(--muted)',fontSize:13}}>Traitement…</span></>}
+                ? <LatticeLoader label="Traitement" status="working" color="var(--accent2)" fontSize={12} />
+                : <><Spinner size={18} color="var(--accent2)" /><span style={{color:'var(--muted)',fontSize:13}}>Traitement…</span></>}
             </div>
           )}
 
@@ -2060,6 +2108,9 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
       }
       api.current.lastTime = t;
     }
+    // Prix de référence pour hiérarchiser les niveaux : le dernier close connu.
+    const dernierClose = candles[candles.length - 1];
+    if (dernierClose && Number.isFinite(dernierClose.c)) api.current.lastClose = dernierClose.c;
     } catch (e) {
       // On repart d'un rechargement complet au prochain rendu.
       api.current.full = true;
@@ -2075,7 +2126,33 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
     const { series } = api.current;
     if (!series) return;
     api.current.lines.forEach(l => { try { series.removePriceLine(l); } catch (e) {} });
-    api.current.lines = (levels || []).filter(l => Number.isFinite(l.price)).map(l => {
+    // L'axe ne supporte pas vingt-cinq étiquettes : elles se chevauchaient, se
+    // superposaient au prix et rendaient le graphique illisible. On garde les
+    // niveaux qui décident — les plus proches du prix — plus le support et la
+    // résistance les plus proches, et on ANNONCE les autres au lieu de les
+    // faire disparaître en silence.
+    const tous = (levels || []).filter(l => Number.isFinite(l.price));
+    const MAX_NIVEAUX = 6;
+    const ref = Number.isFinite(api.current.lastClose) ? api.current.lastClose
+      : (tous.length ? tous.map(l => l.price).sort((a, b) => a - b)[Math.floor(tous.length / 2)] : null);
+
+    let gardes = tous;
+    if (ref !== null && tous.length > MAX_NIVEAUX) {
+      const choisis = [...tous]
+        .sort((a, b) => Math.abs(a.price - ref) - Math.abs(b.price - ref))
+        .slice(0, MAX_NIVEAUX);
+      const plusBas = tous.filter(l => l.price <= ref).sort((a, b) => b.price - a.price)[0];
+      const plusHaut = tous.filter(l => l.price >= ref).sort((a, b) => a.price - b.price)[0];
+      for (const l of [plusBas, plusHaut]) {
+        if (!l || choisis.includes(l)) continue;
+        const loin = choisis.reduce((p, c) => Math.abs(c.price - ref) > Math.abs(p.price - ref) ? c : p, choisis[0]);
+        choisis.splice(choisis.indexOf(loin), 1, l);
+      }
+      gardes = choisis;
+    }
+    api.current.niveauxMasques = Math.max(0, tous.length - gardes.length);
+
+    api.current.lines = gardes.map(l => {
       const color = l.side === 'support' ? 'rgba(34,211,138,.8)'
         : l.side === 'resistance' ? 'rgba(242,84,91,.8)'
         : l.side === 'liquidité' ? 'rgba(245,158,11,.75)' : 'rgba(96,165,250,.75)';
@@ -2092,9 +2169,10 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
     try {
       series.setMarkers([{ time: Math.floor(signal.at / 1000),
         position: buy ? 'belowBar' : 'aboveBar',
-        color: signal.status === 'confirme' ? (buy ? '#22d38a' : '#f2545b') : '#64748b',
+        color: signal.status === 'confirme' && signal.levels ? (buy ? '#22d38a' : '#f2545b') : '#64748b',
         shape: buy ? 'arrowUp' : 'arrowDown',
-        text: buy ? 'ACHAT' : 'VENTE' }]);
+        // Gris = règles d'accord SANS niveaux publiés, donc rien à exécuter.
+        text: (signal.status === 'confirme' && signal.levels ? '' : 'règles ') + (buy ? 'ACHAT' : 'VENTE') }]);
     } catch (e) {}
   }, [signal]);
 
@@ -2120,7 +2198,13 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
       ctx.clearRect(0, 0, w, h);
       const rep = api.current.report;
       if (!rep) return;
-      const compte = { ob: 0, fvg: 0, liq: 0, sweep: 0 };
+      const compte = { ob: 0, fvg: 0, liq: 0, sweep: 0, labels: 0 };
+      // Budget de TEXTE : toutes les zones restent tracées, mais seules quelques
+      // unes portent un libellé. Vingt-cinq étiquettes au même x se
+      // chevauchaient et rendaient le graphique illisible ; les tracés, eux,
+      // restent lisibles.
+      const BUDGET_LABELS = 6;
+      const peutEtiqueter = () => compte.labels < BUDGET_LABELS;
 
       // Conversion temps → pixel, prix → pixel. null si hors de la vue.
       const X = t => { try { const v = chart.timeScale().timeToCoordinate(t); return Number.isFinite(v) ? v : null; } catch (e) { return null; } };
@@ -2137,10 +2221,11 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
         const lg = Math.max(2, d - g), hh = Math.max(1.5, bs - ht);
         ctx.fillStyle = fond; ctx.fillRect(g, ht, lg, hh);
         if (bord) { ctx.strokeStyle = bord; ctx.lineWidth = 1; ctx.strokeRect(g + .5, ht + .5, lg - 1, hh - 1); }
-        if (etiquette && hh > 11) {
+        if (etiquette && hh > 11 && peutEtiqueter()) {
           ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
           ctx.fillStyle = bord || 'rgba(226,232,240,.75)';
           ctx.fillText(etiquette, g + 4, ht + 10);
+          compte.labels++;
         }
       };
 
@@ -2155,10 +2240,11 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
           ctx.beginPath(); ctx.moveTo(0, ht + .5); ctx.lineTo(w, ht + .5);
           ctx.moveTo(0, bs - .5); ctx.lineTo(w, bs - .5); ctx.stroke(); ctx.setLineDash([]);
         }
-        if (etiquette && bs - ht > 12) {
+        if (etiquette && bs - ht > 12 && peutEtiqueter()) {
           ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
           ctx.fillStyle = bord || 'rgba(226,232,240,.7)';
           ctx.fillText(etiquette, 6, ht + 11);
+          compte.labels++;
         }
       };
 
@@ -2203,8 +2289,11 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
         ctx.beginPath(); ctx.moveTo(0, y + .5); ctx.lineTo(w, y + .5); ctx.stroke();
         ctx.setLineDash([]);
         compte.liq++;
-        ctx.fillStyle = 'rgba(245,158,11,.9)';
-        ctx.fillText((l.type || 'liquidite') + (l.touches ? ' (' + l.touches + ')' : ''), 6, y - 3);
+        if (peutEtiqueter()) {
+          ctx.fillStyle = 'rgba(245,158,11,.9)';
+          ctx.fillText((l.type || 'liquidite') + (l.touches ? ' (' + l.touches + ')' : ''), 6, y - 3);
+          compte.labels++;
+        }
       }
       // Balayages : l'extrême atteint est entouré.
       for (const s of (rep.sweeps || [])) {
@@ -2286,123 +2375,874 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
   );
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   TERMINAL 5TRADE — écran Direct
+   3 niveaux, dans cet ordre : MARKET INTELLIGENCE → STRATEGY INTELLIGENCE
+   → DECISION ENGINE. L'utilisateur lit d'abord la DÉCISION, puis les
+   stratégies, puis les raisons.
+
+   Règle absolue : aucun chiffre inventé. Tout vient du moteur (DecisionEngine,
+   Signals, Playbooks, Preuves) ou est marqué « indisponible ».
+   ══════════════════════════════════════════════════════════════════════════ */
+
+// Palette sémantique unique du terminal (vert achat, rouge vente, ambre
+// attente, gris inactif, bleu information). Aucune autre couleur.
+const TT = {
+  ok: '#10b981', bad: '#ef4444', warn: '#f59e0b', neu: '#94a3b8', info: '#3b82f6',
+  okBg: 'rgba(16,185,129,.12)', badBg: 'rgba(239,68,68,.12)',
+  warnBg: 'rgba(245,158,11,.12)', neuBg: 'rgba(148,163,184,.10)',
+  infoBg: 'rgba(59,130,246,.12)', line: 'rgba(27,36,51,.85)'
+};
+
+const TT_TONE = {
+  ok: { c: TT.ok, bg: TT.okBg }, bad: { c: TT.bad, bg: TT.badBg },
+  warn: { c: TT.warn, bg: TT.warnBg }, neu: { c: TT.neu, bg: TT.neuBg },
+  info: { c: TT.info, bg: TT.infoBg }
+};
+
+/** Prix : 5 décimales sous 1000 (FX), 2 au-dessus (indices, crypto). */
+const ttFmt = p => {
+  const n = Number(p);
+  if (p === null || p === undefined || !Number.isFinite(n)) return '—';
+  return n >= 1000
+    ? n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : n.toFixed(5);
+};
+
+const ttHeure = t => {
+  if (!t) return '—';
+  try { return new Date(t).toLocaleTimeString('fr-FR'); } catch { return '—'; }
+};
+
+const ttAge = ms => {
+  if (ms === null || ms === undefined) return '—';
+  if (ms < 60000) return Math.round(ms / 1000) + ' s';
+  if (ms < 3600000) return Math.round(ms / 60000) + ' min';
+  return Math.round(ms / 3600000) + ' h';
+};
+
+function TtLabel({ children, style }) {
+  return (
+    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.09em',
+      textTransform: 'uppercase', color: 'var(--dim)', ...style }}>{children}</div>
+  );
+}
+
+function TtPill({ tone = 'neu', children, title, style }) {
+  const t = TT_TONE[tone] || TT_TONE.neu;
+  return (
+    <span title={title} style={{ display: 'inline-flex', alignItems: 'center', gap: 5,
+      fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em', padding: '3px 9px',
+      borderRadius: 6, background: t.bg, color: t.c, whiteSpace: 'nowrap', ...style }}>
+      {children}
+    </span>
+  );
+}
+
+// ── Indicateur de synchronisation ─────────────────────────────────────────
+function LiveStatusIndicator({ live, offline, ticks, lastUpdate, onRefresh, busy }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <TtPill tone={live ? 'ok' : 'warn'}>
+        <span className="dot-live" style={{ width: 6, height: 6 }}></span>
+        {live ? 'EN DIRECT' : 'CONNEXION…'}
+      </TtPill>
+      {offline && <TtPill tone="warn" title="Réseau absent : bougies servies du cache local.">CACHE</TtPill>}
+      {lastUpdate && (
+        <span style={{ fontSize: 11, color: 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>
+          {ticks} maj · {ttHeure(lastUpdate)}
+        </span>
+      )}
+      <button className="btn ghost sm" onClick={onRefresh} disabled={busy}
+        title="Recharger les données du marché" style={{ padding: '5px 9px' }}>
+        <i className={`fas ${busy ? 'fa-spinner fa-spin' : 'fa-rotate'}`}></i>
+      </button>
+    </div>
+  );
+}
+
+// ── NIVEAU 03 : Live Decision Center — l'état global, en un coup d'œil ────
+function LiveDecisionCenter({ decision, sse, price, at, symbol, tf, providerLabel, confluence }) {
+  // Le verdict vient du DecisionEngine (/api/decision) ; le flux SSE sert de
+  // repli immédiat. Les deux sortent du MÊME moteur — jamais deux calculs.
+  const src = decision || sse || null;
+  // « confirmé » a DEUX sens dans ce dépôt et il ne faut pas les confondre :
+  //   • le verdict du direct dit « les règles R1–R8 sont d'accord » ;
+  //   • la décision dit « ce signal est exécutable après tous les filtres ».
+  // Seule la seconde autorise le mot CONFIRMÉ. Mesuré au banc de divergence :
+  // 4 séries sur 16 affichaient « confirmé » sans rien d'exécutable derrière.
+  const vientDUneDecision = !!(src && src.decision);
+  const refusRisque = !!(src && src.risque && src.risque.consulte && src.risque.ok === false);
+  const etatBrut = (vientDUneDecision && refusRisque && src.decision === 'ATTENTE') ? 'ATTENTE_RISQUE'
+    : vientDUneDecision ? src.decision
+      : (src && src.status === 'confirme'
+        ? (src.direction === 'BUY' ? 'ACHAT_REGLES' : 'VENTE_REGLES') : null);
+
+  const ETATS = {
+    ACHAT:    { label: 'ACHAT CONFIRMÉ', tone: 'ok',   ico: 'fa-arrow-trend-up',
+      sous: 'Signal d\'achat validé par toutes les règles obligatoires.' },
+    VENTE:    { label: 'VENTE CONFIRMÉE', tone: 'bad', ico: 'fa-arrow-trend-down',
+      sous: 'Signal de vente validé par toutes les règles obligatoires.' },
+    // Accord des règles SEUL : ce n'est pas une entrée, et le dire autrement est
+    // la faute la plus coûteuse qu'un terminal puisse commettre.
+    ACHAT_REGLES: { label: 'RÈGLES ALIGNÉES — ACHAT', tone: 'warn', ico: 'fa-circle-check',
+      sous: 'Les règles d\'achat sont d\'accord. Ce n\'est pas une entrée exécutable : l\'arbitrage n\'a pas conclu.' },
+    VENTE_REGLES: { label: 'RÈGLES ALIGNÉES — VENTE', tone: 'warn', ico: 'fa-circle-check',
+      sous: 'Les règles de vente sont d\'accord. Ce n\'est pas une entrée exécutable : l\'arbitrage n\'a pas conclu.' },
+    ATTENTE:  { label: 'ATTENTE', tone: 'warn', ico: 'fa-hourglass-half',
+      sous: 'Signaux contradictoires : le moteur n\'arbitre pas à ta place.' },
+    // Le setup est bon, le COMPTE ne suit pas. Ce n'est pas la même chose qu'une
+    // attente technique, et les confondre ferait chercher la cause au mauvais endroit.
+    ATTENTE_RISQUE: { label: 'ATTENTE — RISQUE REFUSÉ', tone: 'bad', ico: 'fa-shield-halved',
+      sous: 'Le setup est valide, mais les plafonds du compte interdisent cette prise.' },
+    NO_TRADE: { label: 'NO TRADE', tone: 'neu', ico: 'fa-ban',
+      sous: 'Aucun signal exécutable après tous les filtres.' }
+  };
+  const etat = ETATS[etatBrut] || { label: 'ANALYSE…', tone: 'info', ico: 'fa-satellite-dish',
+    sous: 'Le moteur évalue le marché…' };
+  const tone = TT_TONE[etat.tone];
+
+  // Métriques — uniquement quand le moteur les fournit réellement.
+  const conf = confluence && confluence.confluence ? confluence.confluence : null;
+  const trace = src && src.trace ? src.trace : null;
+  const nbUnites = conf && Array.isArray(conf.detail) ? conf.detail.length : null;
+  const biais = (src && src.biais) || (trace && trace.arbitrage && trace.arbitrage.biais) || null;
+  const validation = trace && trace.validation ? trace.validation : null;
+  const detection = trace && trace.detection ? trace.detection : null;
+  const execution = trace && trace.execution ? trace.execution : null;
+
+  // Aucun « undefined » à l'écran : on lit le compteur du moteur s'il existe,
+  // sinon on recompte `details`, sinon on affiche « — ».
+  const nb = x => (Number.isFinite(x) ? x : null);
+  const compte = (niveau, champ, total) => {
+    const n = nb(niveau && niveau[champ]);
+    const t = nb(niveau && niveau.total) ?? nb(total);
+    return (n === null || t === null) ? '—' : `${n} / ${t}`;
+  };
+  const metres = [
+    { k: 'Biais directionnel', v: biais
+        ? biais.toUpperCase()
+        : '—',
+      tone: biais === 'haussier' ? 'ok' : biais === 'baissier' ? 'bad'
+        : biais === 'partagé' ? 'warn' : 'neu' },
+    { k: 'Confirmation MTF',
+      v: conf ? `${conf.nbAlignes} / ${nbUnites || '—'} unités`
+        : compte(trace && trace.confirmation, 'confirmes', detection ? (detection.details || []).length : null),
+      tone: conf ? (conf.aligne ? 'ok' : 'warn') : 'neu' },
+    { k: 'Conditions validées',
+      v: compte(validation, 'valides', detection ? (detection.details || []).length : null),
+      tone: validation && validation.bloques > 0 ? 'warn' : validation ? 'ok' : 'neu' },
+    { k: 'Entrée exécutable',
+      v: execution ? (execution.executables > 0 ? 'OUI' : 'NON') : '—',
+      tone: execution ? (execution.executables > 0 ? 'ok' : 'neu') : 'neu' }
+  ];
+
+  return (
+    <div className="panel" style={{ padding: 0, marginBottom: 12, overflow: 'hidden',
+      borderColor: tone.c + '66' }}>
+      {/* Bandeau d'état */}
+      <div style={{ padding: '16px 18px', background: tone.bg,
+        borderBottom: `1px solid ${tone.c}33` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <TtLabel style={{ color: tone.c, margin: 0 }}>Décision du moteur</TtLabel>
+          <span style={{ flex: '1 1 auto' }}></span>
+          <span style={{ fontSize: 11, color: 'var(--dim)' }}>
+            {providerLabel || symbol} · {tf}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 6, flexWrap: 'wrap' }}>
+          <i className={`fas ${etat.ico}`} style={{ fontSize: 30, color: tone.c }}></i>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 26, fontWeight: 900, letterSpacing: '-.02em',
+              color: tone.c, lineHeight: 1.1 }}>{etat.label}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5 }}>
+              {(src && src.raison) || etat.sous}
+            </div>
+            {/* État du garde-fou de compte, TOUJOURS dit : « non vérifié » n'est pas
+                « validé ». C'est la différence entre un terminal et un guichet. */}
+            {src && src.risque && (
+              <div style={{ fontSize: 11.5, marginTop: 5, lineHeight: 1.45,
+                color: src.risque.ok === false ? '#fca5a5' : src.risque.consulte ? '#6ee7b7' : 'var(--dim)' }}>
+                <i className={`fas ${src.risque.ok === false ? 'fa-shield-halved'
+                  : src.risque.consulte ? 'fa-check-double' : 'fa-circle-question'}`}
+                  style={{ marginRight: 6 }}></i>
+                {src.risque.ok === false
+                  ? <>Risque : refusé — {(src.risque.refus || []).join(' · ')}</>
+                  : src.risque.consulte
+                    ? <>Risque : plafonds du compte respectés pour cette prise</>
+                    : <>Risque : <b>non vérifié</b> — aucun état de compte n'a été fourni à la décision</>}
+              </div>
+            )}
+          </div>
+          <span style={{ flex: '1 1 auto' }}></span>
+          <div style={{ textAlign: 'right' }}>
+            <TtLabel>Prix actuel</TtLabel>
+            <div style={{ fontSize: 28, fontWeight: 800, fontVariantNumeric: 'tabular-nums',
+              letterSpacing: '-.02em', color: '#fff' }}>{ttFmt(price)}</div>
+            {at && <div style={{ fontSize: 10.5, color: 'var(--dim)' }}>{ttHeure(at)}</div>}
+          </div>
+        </div>
+      </div>
+
+      {/* Métriques */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(135px,1fr))' }}>
+        {metres.map((m, i) => {
+          const t = TT_TONE[m.tone] || TT_TONE.neu;
+          return (
+            <div key={m.k} style={{ padding: '11px 14px',
+              borderTop: '1px solid ' + TT.line,
+              borderRight: i < metres.length - 1 ? '1px solid ' + TT.line : 'none' }}>
+              <TtLabel>{m.k}</TtLabel>
+              <div style={{ fontSize: 16, fontWeight: 800, marginTop: 3, color: t.c,
+                fontVariantNumeric: 'tabular-nums' }}>{m.v}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Trade Setup — seulement quand les niveaux sont réellement calculables ──
+function TradeSetupCard({ signal, sens, onToJournal, symbol, tf, provider, providerLabel }) {
+  const lv = signal && signal.levels ? signal.levels : null;
+  const ok = lv && Number.isFinite(Number(lv.entry)) && Number.isFinite(Number(lv.stop));
+  if (!ok) {
+    // Deux situations différentes, deux messages différents : « le moteur
+    // cherche encore » n'est pas « le moteur a conclu qu'il n'y a rien ».
+    // Les confondre affichait un verdict pendant l'analyse.
+    const enCours = !signal;
+    return (
+      <div className="panel" style={{ padding: '11px 14px', marginBottom: 12,
+        borderColor: 'rgba(148,163,184,.3)' }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+          <i className={`fas ${enCours ? 'fa-spinner fa-spin' : 'fa-circle-info'}`}
+            style={{ marginRight: 7, color: TT.neu }}></i>
+          {enCours
+            ? "Analyse du marché en cours : les niveaux ne sont pas encore calculés."
+            : "Aucun setup exécutable : entrée et invalidation ne sont pas calculables sur ce graphique. Le moteur ne publie pas de trade qu'il ne peut pas chiffrer."}
+        </div>
+      </div>
+    );
+  }
+  const achat = (signal.sens === 'long') || sens === 'BUY';
+  const col = achat ? TT.ok : TT.bad;
+  const risque = Math.abs(Number(lv.entry) - Number(lv.stop));
+  const rr = Number.isFinite(Number(signal.rr)) && Number(signal.rr) > 0
+    ? Number(signal.rr)
+    : (Number.isFinite(Number(lv.target1)) && risque > 0
+      ? Math.abs(Number(lv.target1) - Number(lv.entry)) / risque : null);
+
+  const ligne = (k, v, c) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10,
+      padding: '5px 0', borderBottom: '1px solid ' + TT.line }}>
+      <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{k}</span>
+      <b style={{ fontSize: 12.5, color: c || '#e2e8f0', fontVariantNumeric: 'tabular-nums' }}>{v}</b>
+    </div>
+  );
+
+  return (
+    <div className="panel" style={{ padding: '13px 15px', marginBottom: 12, borderColor: col + '55' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <i className="fas fa-crosshairs" style={{ color: col }}></i>
+        <b style={{ fontSize: 13 }}>Setup de trade</b>
+        <TtPill tone={achat ? 'ok' : 'bad'}>{achat ? 'ACHAT' : 'VENTE'}</TtPill>
+        {signal.nom && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{signal.nom}</span>}
+        <span style={{ flex: '1 1 auto' }}></span>
+        {onToJournal && (
+          <button className="btn ghost sm" style={{ padding: '5px 9px' }}
+            onClick={() => onToJournal({
+              pair: symbol, direction: achat ? 'BUY' : 'SELL',
+              entry: Number(lv.entry), sl: Number(lv.stop),
+              tp: Number.isFinite(Number(lv.target1)) ? Number(lv.target1) : null,
+              timeframe: tf, provider, providerLabel,
+              signalStatus: 'confirme', signalStrength: signal.force,
+              notes: `Setup ${achat ? 'achat' : 'vente'} — ${signal.nom || 'moteur'}`
+            })}
+            title="Ouvrir le journal avec ce setup pré-rempli">
+            <i className="fas fa-floppy-disk"></i>Journal
+          </button>
+        )}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '0 18px' }}>
+        <div>
+          {ligne('Entrée', ttFmt(lv.entry))}
+          {ligne('Invalidation', ttFmt(lv.stop), TT.bad)}
+        </div>
+        <div>
+          {ligne('Objectif 1', ttFmt(lv.target1), TT.ok)}
+          {ligne('Objectif 2', ttFmt(lv.target2), TT.ok)}
+        </div>
+        <div>
+          {ligne('Risque / Rendement', rr ? rr.toFixed(2) : '—', rr ? '#e2e8f0' : 'var(--dim)')}
+          {ligne('R attendu (modèle)',
+            signal.modele && Number.isFinite(signal.modele.rAttendu)
+              ? `${signal.modele.rAttendu > 0 ? '+' : ''}${signal.modele.rAttendu} R`
+              : 'non couvert',
+            signal.modele && Number.isFinite(signal.modele.rAttendu) && signal.modele.rAttendu > 0 ? TT.ok : 'var(--dim)')}
+        </div>
+      </div>
+      <p style={{ margin: '8px 0 0', fontSize: 10.5, color: 'var(--dim)' }}>
+        Obj 3 non affiché : le moteur ne le calcule pas. Aucun niveau n'est estimé.
+      </p>
+    </div>
+  );
+}
+
+// ── Condition Tracker : ✓ REMPLIE / ◷ EN ATTENTE / ✕ MANQUANTE ────────────
+function ConditionChecklist({ items }) {
+  if (!items || !items.length) {
+    return <div style={{ fontSize: 11.5, color: 'var(--dim)' }}>
+      Aucune condition détaillée disponible pour cette stratégie.
+    </div>;
+  }
+  const etat = it => {
+    if (it.ok === true) return { ico: 'fa-check', tone: 'ok', label: 'REMPLIE' };
+    if (it.ok === false) return { ico: 'fa-xmark', tone: 'bad', label: 'MANQUANTE' };
+    return { ico: 'fa-clock', tone: 'warn', label: 'EN ATTENTE' };
+  };
+  return (
+    <div style={{ display: 'grid', gap: 5 }}>
+      {items.map((it, i) => {
+        const e = etat(it);
+        const t = TT_TONE[e.tone];
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8,
+            padding: '5px 8px', borderRadius: 6, background: 'rgba(148,163,184,.045)' }}>
+            <i className={`fas ${e.ico}`} style={{ color: t.c, fontSize: 10, marginTop: 3, width: 10 }}></i>
+            <span style={{ flex: 1, fontSize: 12, color: '#dbe4f0' }}>
+              {it.nom}
+              {it.valeur !== undefined && it.valeur !== null && String(it.valeur) !== '' && (
+                <span style={{ color: 'var(--muted)' }}> = {String(it.valeur)}</span>
+              )}
+              {it.seuil ? <span style={{ color: 'var(--dim)' }}> (seuil {String(it.seuil)})</span> : null}
+              {it.detail && <span style={{ color: 'var(--dim)' }}> — {it.detail}</span>}
+            </span>
+            <span style={{ fontSize: 9.5, fontWeight: 700, color: t.c, whiteSpace: 'nowrap' }}>{e.label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Strategy Card : une stratégie = un état lisible + conditions repliables ─
+function StrategyCard({ nom, categorie, etat, direction, conditionsOk, conditionsTotal,
+  etape, prochaine, at, conditions, defautOuvert }) {
+  const ETATS = {
+    VALIDEE:  { label: 'VALIDÉE', tone: 'ok', ico: 'fa-circle-check' },
+    ACTIVE:   { label: 'ACTIVE', tone: 'info', ico: 'fa-satellite-dish' },
+    ATTENTE:  { label: 'EN ATTENTE', tone: 'warn', ico: 'fa-clock' },
+    BLOQUEE:  { label: 'BLOQUÉE', tone: 'bad', ico: 'fa-circle-xmark' },
+    INACTIVE: { label: 'INACTIVE', tone: 'neu', ico: 'fa-circle-minus' },
+    EXPIREE:  { label: 'EXPIRÉE', tone: 'neu', ico: 'fa-hourglass-end' }
+  };
+  const e = ETATS[etat] || ETATS.INACTIVE;
+  const t = TT_TONE[e.tone];
+  const sensCol = direction === 'BUY' || direction === 'long' ? TT.ok
+    : direction === 'SELL' || direction === 'short' ? TT.bad : TT.neu;
+  const sensLab = direction === 'BUY' || direction === 'long' ? 'ACHAT'
+    : direction === 'SELL' || direction === 'short' ? 'VENTE' : 'NEUTRE';
+
+  return (
+    <details open={!!defautOuvert} style={{ border: `1px solid ${t.c}33`, borderRadius: 10,
+      background: 'rgba(148,163,184,.03)', overflow: 'hidden' }}>
+      <summary style={{ cursor: 'pointer', padding: '9px 11px', listStyle: 'none',
+        display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <i className={`fas ${e.ico}`} style={{ color: t.c, fontSize: 12 }}></i>
+        <b style={{ fontSize: 12.5, color: '#e8eef7' }}>{nom}</b>
+        <TtPill tone={e.tone}>{e.label}</TtPill>
+        <span style={{ fontSize: 10.5, fontWeight: 700, color: sensCol }}>{sensLab}</span>
+        {conditionsTotal > 0 && (
+          <span style={{ fontSize: 11, color: 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>
+            {conditionsOk}/{conditionsTotal} conditions
+          </span>
+        )}
+        {categorie && <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>· {categorie}</span>}
+        <span style={{ flex: '1 1 auto' }}></span>
+        {at && <span style={{ fontSize: 10, color: 'var(--dim)' }}>{ttAge(at)}</span>}
+      </summary>
+      <div style={{ padding: '0 11px 11px' }}>
+        {etape && (
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>
+            <i className="fas fa-route" style={{ marginRight: 6, color: TT.info, fontSize: 10 }}></i>
+            {etape}
+          </div>
+        )}
+        {prochaine && (
+          <div style={{ fontSize: 11.5, color: TT.warn, marginBottom: 7 }}>
+            <i className="fas fa-arrow-right" style={{ marginRight: 6, fontSize: 9 }}></i>
+            Pour avancer : {prochaine}
+          </div>
+        )}
+        <ConditionChecklist items={conditions} />
+      </div>
+    </details>
+  );
+}
+
+// ── NIVEAU 02 : Strategy Monitor ─────────────────────────────────────────
+function StrategyMonitor({ playbooks, signaux, statuts, filtre, setFiltre, typeTrade, setTypeTrade }) {
+  const FILTRES = [
+    ['all', 'Toutes'], ['BUY', 'Achat'], ['SELL', 'Vente'],
+    ['validated', 'Validées'], ['waiting', 'En attente'], ['blocked', 'Bloquées'],
+    ['scalping', 'Scalping'], ['intraday', 'Intraday'], ['swing', 'Swing']
+  ];
+
+  // 1. Types de trade (playbooks) — la lecture « métier » de l'avancement.
+  const pbs = (playbooks || []).map(pb => {
+    const etat = pb.pret ? 'VALIDEE'
+      : (pb.prerequisOk < pb.prerequisTotal ? 'BLOQUEE' : 'ATTENTE');
+    const conditions = [
+      ...(pb.prerequis || []).map(p => ({ nom: p.label, ok: p.ok === true, detail: p.detail })),
+      ...(pb.etapes || []).map(e => ({
+        nom: `Étape ${e.numero} — ${e.label}`,
+        ok: e.ok === null || e.ok === undefined ? null : e.ok === true,
+        detail: e.detail
+      }))
+    ];
+    return {
+      cle: 'pb:' + pb.type, nom: pb.nom, categorie: 'Type de trade', type: pb.type,
+      etat, direction: null,
+      conditionsOk: conditions.filter(c => c.ok === true).length,
+      conditionsTotal: conditions.length,
+      etape: `${pb.avancement} · ${pb.duree} · ${(pb.timeframes || []).join('/')}`,
+      prochaine: pb.pret ? null : (pb.blocage || null),
+      conditions, at: null, defautOuvert: pb.pret
+    };
+  });
+
+  // 2. Signaux par stratégie/motif du moteur (arbitrage réel).
+  const sigs = (signaux || []).map((s, i) => ({
+    cle: 'sig:' + (s.id || i), nom: s.nom || s.id || 'Signal',
+    categorie: s.source === 'strategie' ? 'Stratégie' : s.source === 'structure' ? 'Structure' : 'Motif',
+    etat: s.status === 'confirme' ? 'VALIDEE' : s.status === 'surveiller' ? 'ATTENTE' : 'BLOQUEE',
+    direction: s.sens, conditionsOk: (s.conditions || []).filter(c => c.ok).length,
+    conditionsTotal: (s.conditions || []).length,
+    etape: `force ${Number(s.force || 0).toFixed(2)}/1`,
+    prochaine: s.raison || null,
+    conditions: (s.conditions || []).map(c => ({ nom: c.nom, valeur: c.valeur, seuil: c.seuil, ok: c.ok })),
+    at: null, defautOuvert: false
+  }));
+
+  // 3. Évaluations persistées (toutes les stratégies suivies).
+  const evals = (statuts || []).map((s, i) => ({
+    cle: 'ev:' + i, nom: s.strategie + (s.version ? ` v${s.version}` : ''),
+    categorie: `${s.symbole || ''} ${s.timeframe || ''}`.trim(),
+    etat: s.statut === 'VALID' ? 'VALIDEE' : s.statut === 'WAITING' ? 'ATTENTE'
+      : s.statut === 'INVALID' ? 'BLOQUEE' : 'INACTIVE',
+    direction: s.direction,
+    conditionsOk: s.conditionRemplies, conditionsTotal: s.conditionTotal,
+    etape: s.score !== null && s.score !== undefined ? `score ${Number(s.score).toFixed(2)}` : null,
+    prochaine: (s.obligatoiresManquantes || []).length
+      ? `manque : ${s.obligatoiresManquantes.join(', ')}` : null,
+    conditions: (s.obligatoiresManquantes || []).map(nom => ({ nom, ok: false })),
+    at: s.ageMs, defautOuvert: false
+  }));
+
+  let tous = [...pbs, ...sigs, ...evals];
+
+  // Filtres
+  if (filtre === 'validated') tous = tous.filter(x => x.etat === 'VALIDEE');
+  else if (filtre === 'waiting') tous = tous.filter(x => x.etat === 'ATTENTE');
+  else if (filtre === 'blocked') tous = tous.filter(x => x.etat === 'BLOQUEE');
+  else if (filtre === 'BUY') tous = tous.filter(x => x.direction === 'BUY' || x.direction === 'long');
+  else if (filtre === 'SELL') tous = tous.filter(x => x.direction === 'SELL' || x.direction === 'short');
+  else if (['scalping', 'intraday', 'swing'].includes(filtre)) {
+    tous = tous.filter(x => x.type === filtre || (x.cle.startsWith('pb:') && x.type === filtre));
+  }
+  if (typeTrade !== 'auto') tous = tous.filter(x => x.type === typeTrade);
+
+  // Compteurs réels
+  const compte = etat => tous.filter(x => x.etat === etat).length;
+  const nbValides = compte('VALIDEE'), nbAttente = compte('ATTENTE'), nbBloquees = compte('BLOQUEE');
+  const nbStrategies = new Set((statuts || []).map(s => s.strategie)).size;
+
+  return (
+    <div className="panel" style={{ padding: '13px 15px', marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap', marginBottom: 10 }}>
+        <i className="fas fa-layer-group" style={{ color: TT.info }}></i>
+        <b style={{ fontSize: 13 }}>État des stratégies</b>
+        <TtPill tone="ok">{nbValides} validée{nbValides > 1 ? 's' : ''}</TtPill>
+        <TtPill tone="warn">{nbAttente} en attente</TtPill>
+        <TtPill tone="bad">{nbBloquees} bloquée{nbBloquees > 1 ? 's' : ''}</TtPill>
+        {nbStrategies > 0 && (
+          <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>
+            {nbStrategies} stratégie(s) évaluée(s)
+          </span>
+        )}
+        <span style={{ flex: '1 1 auto' }}></span>
+        <select className="fld" aria-label="Filtrer les stratégies"
+          style={{ width: 'auto', margin: 0, padding: '4px 8px', fontSize: 11.5 }}
+          value={typeTrade} onChange={e => setTypeTrade(e.target.value)}>
+          <option value="auto">Tous les types</option>
+          {(playbooks || []).map(pb => <option key={pb.type} value={pb.type}>{pb.nom}</option>)}
+        </select>
+      </div>
+
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 10 }}>
+        {FILTRES.map(([k, lab]) => (
+          <button key={k} onClick={() => setFiltre(k)}
+            style={{ fontSize: 11, fontWeight: 600, padding: '4px 9px', borderRadius: 999,
+              cursor: 'pointer', fontFamily: 'inherit',
+              border: `1px solid ${filtre === k ? TT.info + '88' : 'var(--border)'}`,
+              background: filtre === k ? TT.infoBg : 'transparent',
+              color: filtre === k ? '#93c5fd' : 'var(--muted)' }}>{lab}</button>
+        ))}
+      </div>
+
+      <TtLabel style={{ marginBottom: 6 }}>Cheminement du signal & stratégies en cours</TtLabel>
+      {tous.length === 0 ? (
+        <div style={{ fontSize: 12, color: 'var(--muted)', padding: '8px 10px',
+          borderRadius: 8, background: 'rgba(148,163,184,.05)' }}>
+          <i className="fas fa-circle-minus" style={{ marginRight: 7 }}></i>
+          Aucune stratégie ne correspond à ce filtre. Le moteur n'en invente pas.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 7 }}>
+          {tous.map(x => (
+            <StrategyCard key={x.cle} nom={x.nom} categorie={x.categorie} etat={x.etat}
+              direction={x.direction} conditionsOk={x.conditionsOk} conditionsTotal={x.conditionsTotal}
+              etape={x.etape} prochaine={x.prochaine} at={x.at} conditions={x.conditions}
+              defautOuvert={x.defautOuvert} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Matrice multi-timeframes ─────────────────────────────────────────────
+function MultiTimeframeMatrix({ confluence }) {
+  if (!confluence || !confluence.confluence) {
+    return (
+      <div className="panel" style={{ padding: '11px 14px', marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+          <i className="fas fa-crosshairs" style={{ marginRight: 7, color: TT.neu }}></i>
+          Alignement multi-timeframes indisponible (historique insuffisant sur les unités supérieures).
+        </div>
+      </div>
+    );
+  }
+  const c = confluence.confluence;
+  const detail = (c.detail || []);
+  const parTF = new Map((confluence.parTimeframe || []).map(x => [x.tf, x]));
+  const tendCol = t => t === 'bullish' ? TT.ok : t === 'bearish' ? TT.bad : TT.warn;
+  const tendLab = t => t === 'bullish' ? 'HAUSSIER' : t === 'bearish' ? 'BAISSIER' : 'RANGE';
+
+  return (
+    <div className="panel" style={{ padding: '13px 15px', marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap', marginBottom: 9 }}>
+        <i className="fas fa-crosshairs" style={{ color: TT.warn }}></i>
+        <b style={{ fontSize: 13 }}>Alignement multi-timeframes</b>
+        <TtPill tone={c.aligne ? 'ok' : 'warn'}>
+          {c.aligne ? 'ALIGNÉ' : 'NON ALIGNÉ'} · {c.nbAlignes}/{detail.length}
+        </TtPill>
+        <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>
+          seuil {c.seuilAlignes} unité(s)
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 4 }}>
+        {detail.map(t => {
+          const info = parTF.get(t.tf) || {};
+          const col = tendCol(t.tendance);
+          return (
+            <div key={t.tf} style={{ minWidth: 74, flex: '1 0 auto', textAlign: 'center',
+              padding: '7px 6px', borderRadius: 8,
+              border: `1px solid ${t.confirme ? col + '77' : 'var(--border)'}`,
+              background: t.confirme ? col + '14' : 'rgba(148,163,184,.04)' }}>
+              <div style={{ fontSize: 11.5, fontWeight: 800, color: '#e8eef7' }}>{t.tf}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: col, marginTop: 2 }}>
+                {tendLab(t.tendance)}
+              </div>
+              <div style={{ fontSize: 9.5, color: 'var(--dim)', marginTop: 1 }}>
+                {info.direction && info.direction !== 'NEUTRE' ? info.direction : '—'}
+              </div>
+              <i className={`fas ${t.confirme ? 'fa-circle-check' : 'fa-circle-minus'}`}
+                style={{ fontSize: 9, color: t.confirme ? TT.ok : TT.neu, marginTop: 3 }}></i>
+            </div>
+          );
+        })}
+      </div>
+      {c.motif && <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--dim)' }}>{c.motif}</p>}
+      {c.contreTendance && (
+        <p style={{ margin: '4px 0 0', fontSize: 11, color: TT.bad }}>
+          <i className="fas fa-triangle-exclamation" style={{ marginRight: 5 }}></i>
+          Contre-tendance détectée : le signal va contre une unité supérieure.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Signal Explanation — les 4 couches, séparées ─────────────────────────
+function SignalExplanation({ trace, decision, signal }) {
+  if (!trace && !signal) {
+    return (
+      <div className="panel" style={{ padding: '11px 14px', marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+          Explication indisponible : le moteur n'a pas encore arbitré ce marché.
+        </div>
+      </div>
+    );
+  }
+  const couches = trace ? [
+    { n: '1', k: 'Biais du marché', v: trace.arbitrage ? trace.arbitrage.biais : null, o: trace.detection },
+    { n: '2', k: 'Validation stratégie', v: trace.validation && trace.validation.resume, o: trace.validation },
+    { n: '3', k: 'Confirmation d\'entrée', v: trace.confirmation && trace.confirmation.resume, o: trace.confirmation },
+    { n: '4', k: 'Éligibilité d\'exécution', v: trace.execution && trace.execution.resume, o: trace.execution }
+  ] : [];
+  // Premier blocage réel, tous niveaux confondus.
+  let blocage = null;
+  if (trace) {
+    for (const niveau of ['validation', 'confirmation', 'execution']) {
+      const t = trace[niveau];
+      if (!t || !Array.isArray(t.details)) continue;
+      const d = t.details.find(x => x.ok === false && x.blocages && x.blocages.length);
+      if (d) { blocage = `${d.nom} — ${d.blocages[0]}`; break; }
+    }
+  }
+
+  return (
+    <div className="panel" style={{ padding: '13px 15px', marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 9 }}>
+        <i className="fas fa-circle-question" style={{ color: TT.info }}></i>
+        <b style={{ fontSize: 13 }}>Pourquoi cette décision</b>
+      </div>
+      <div style={{ display: 'grid', gap: 6 }}>
+        {couches.map(c => {
+          const ok = c.o && c.o.ok === true;
+          const tone = !c.o ? 'neu' : ok ? 'ok' : 'warn';
+          const t = TT_TONE[tone];
+          return (
+            <div key={c.k} style={{ display: 'flex', gap: 9, alignItems: 'baseline',
+              fontSize: 12, padding: '5px 8px', borderRadius: 6, background: t.bg }}>
+              <span style={{ fontSize: 9.5, fontWeight: 800, color: t.c, minWidth: 12 }}>{c.n}</span>
+              <b style={{ color: t.c, minWidth: 150 }}>{c.k}</b>
+              <span style={{ flex: 1, color: 'var(--muted)' }}>
+                {c.v || (c.o ? c.o.resume : 'non évalué')}
+              </span>
+              <i className={`fas ${ok ? 'fa-check' : c.o ? 'fa-xmark' : 'fa-minus'}`}
+                style={{ color: t.c, fontSize: 10 }}></i>
+            </div>
+          );
+        })}
+      </div>
+      {blocage && (
+        <div style={{ marginTop: 8, padding: '7px 10px', borderRadius: 7,
+          background: TT.badBg, border: '1px solid ' + TT.bad + '44', fontSize: 11.5, color: '#fca5a5' }}>
+          <i className="fas fa-lock" style={{ marginRight: 7 }}></i>
+          Ce qui bloque : {blocage}
+        </div>
+      )}
+      {decision && decision.raison && (
+        <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--dim)' }}>
+          Arbitrage : {decision.raison}
+        </p>
+      )}
+      {signal && (
+        <div style={{ marginTop: 9, paddingTop: 8, borderTop: '1px solid ' + TT.line,
+          fontSize: 11.5, color: 'var(--muted)', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 600, color: '#dbe4f0' }}>Détail du verdict</span>
+          <span>
+            {signal.confirmations}/{(signal.reglesEvaluees || signal.reglesActives || []).length || signal.confirmations} règle(s) d'accord
+          </span>
+          <span title={signal.forceDetail ? signal.forceDetail.lecture
+            : 'Score interne du moteur — ce n\'est pas un taux de réussite.'}>
+            {' · '}force {signal.forceNiveau || '—'}
+            {' '}<span style={{ color: 'var(--dim)' }}>({Number(signal.strength || 0).toFixed(2)}/1)</span>
+          </span>
+          {signal.trend ? <span>{' · '}tendance {signal.trend}</span> : null}
+          {(signal.reglesSansAvis || []).length > 0 && (
+            <span title={(signal.reglesLecture || '') +
+              ' — une règle sans avis n\'est ni d\'accord ni contre : elle n\'a rien trouvé sur ce graphique.'}
+              style={{ color: 'var(--dim)' }}>
+              {' · '}{signal.reglesSansAvis.length} sans avis ({signal.reglesSansAvis.join(', ')})
+            </span>
+          )}
+          {(signal.reglesOpposees || []).length > 0 && (
+            <span style={{ color: TT.bad }}>
+              {' · '}{signal.reglesOpposees.length} contre ({signal.reglesOpposees.join(', ')})
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── NIVEAU 01 : Market Intelligence (structure du marché) ────────────────
+function MarketStructurePanel({ carte, report }) {
+  if (!carte) return null;
+  const tendCol = carte.tendance === 'bullish' ? TT.ok
+    : carte.tendance === 'bearish' ? TT.bad : TT.warn;
+  const tendLab = carte.tendance === 'bullish' ? 'HAUSSIÈRE'
+    : carte.tendance === 'bearish' ? 'BAISSIÈRE' : 'RANGE';
+  const liq = (carte.liquidite || []).slice()
+    .sort((a, b) => (a.distanceAtr ?? 99) - (b.distanceAtr ?? 99))[0];
+  const z = carte.zoneLaPlusProche;
+  const ev = carte.evenement;
+  const pos = carte.position;
+
+  const cell = (label, valeur, couleur) => (
+    <div style={{ minWidth: 118 }}>
+      <TtLabel>{label}</TtLabel>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: couleur || '#e2e8f0', marginTop: 2 }}>
+        {valeur}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="panel" style={{ padding: '13px 15px', marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap', marginBottom: 10 }}>
+        <span style={{ fontSize: 9.5, fontWeight: 800, color: TT.info, letterSpacing: '.08em' }}>01</span>
+        <i className="fas fa-sitemap" style={{ color: TT.info }}></i>
+        <b style={{ fontSize: 13 }}>Intelligence de marché</b>
+        {carte.session && carte.session.killZone && carte.session.killZone !== 'aucune en ce moment' && (
+          <TtPill tone="warn">kill zone {carte.session.killZone}</TtPill>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+        {cell('Tendance', tendLab, tendCol)}
+        {ev ? cell('Dernière cassure', `${ev.type} @ ${ttFmt(ev.niveau)}`,
+          ev.sens === 'long' ? TT.ok : TT.bad)
+          : cell('Dernière cassure', 'aucune (range)', 'var(--muted)')}
+        {pos ? cell('Position', `${pos.zone}`, pos.zone === 'premium' ? TT.bad : TT.ok) : null}
+        {z ? cell('Zone la plus proche', `${z.type} · ${z.distanceAtr} ATR`, '#93c5fd') : null}
+        {liq ? cell('Liquidité', `${liq.type} ${ttFmt(liq.prix)}`, TT.warn) : null}
+        {Number.isFinite(carte.atr) ? cell('ATR', ttFmt(carte.atr), 'var(--muted)') : null}
+        {carte.session ? cell('Session', carte.session.courante || '—', 'var(--muted)') : null}
+      </div>
+
+      {report && (
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 11.5, color: 'var(--muted)' }}>
+            Détail technique (Fibonacci, niveaux, inventaire)
+          </summary>
+          <div style={{ display: 'grid', gap: 8, marginTop: 8, fontSize: 11.5 }}>
+            {report.structure && (
+              <div style={{ color: 'var(--muted)' }}>
+                Structure : tendance <b style={{ color: '#e2e8f0' }}>{report.structure.trend}</b>
+                {report.structure.recent && report.structure.recent.length > 0 && (
+                  <> · {(report.structure.recent || []).map(r => `${r.label} ${ttFmt(r.price)}`).join(' · ')}</>
+                )}
+              </div>
+            )}
+            {report.fibLevels && (
+              <div style={{ color: 'var(--muted)' }}>
+                Fibonacci ({report.fibLevels.sens}) :&nbsp;
+                {Object.entries(report.fibLevels.levels).map(([k, v]) => `${k}=${ttFmt(v)}`).join(' · ')}
+              </div>
+            )}
+            {Array.isArray(report.levels) && report.levels.length > 0 && (
+              <div tabIndex={0} role="region" aria-label="Niveaux calculés"
+                style={{ maxHeight: 160, overflowY: 'auto' }}>
+                {report.levels.slice(0, 40).map((l, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between',
+                    gap: 10, padding: '3px 0', borderBottom: '1px solid ' + TT.line }}>
+                    <span style={{ color: 'var(--muted)' }}>{l.kind}</span>
+                    <b style={{ fontVariantNumeric: 'tabular-nums' }}>{ttFmt(l.price)}</b>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+// ── Historique des signaux (confirmés / rejetés / expirés) ───────────────
+function SignalHistory({ journal }) {
+  const RES = {
+    tp1: { l: 'OBJ 1', tone: 'ok' }, tp2: { l: 'OBJ 2', tone: 'ok' },
+    sl: { l: 'STOP', tone: 'bad' }, be: { l: 'BE', tone: 'neu' },
+    expire: { l: 'EXPIRÉ', tone: 'neu' }, ouvert: { l: 'OUVERT', tone: 'info' }
+  };
+  const liste = (journal || []).slice(0, 20);
+  return (
+    <details className="panel" style={{ padding: '13px 15px', marginBottom: 12 }}>
+      <summary style={{ cursor: 'pointer', fontSize: 12.5, fontWeight: 700 }}>
+        <i className="fas fa-clock-rotate-left" style={{ marginRight: 8, color: TT.info }}></i>
+        Historique des signaux ({liste.length})
+      </summary>
+      <div style={{ marginTop: 9 }}>
+        {liste.length === 0 ? (
+          <div style={{ fontSize: 11.5, color: 'var(--dim)' }}>
+            Aucun signal enregistré. Le journal se remplit à chaque signal confirmé ou à surveiller.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 4 }}>
+            {liste.map((s, i) => {
+              const r = RES[s.resultat] || RES.ouvert;
+              const achat = s.sens === 'long';
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8,
+                  fontSize: 11.5, padding: '4px 0', borderBottom: '1px solid ' + TT.line }}>
+                  <b style={{ color: achat ? TT.ok : TT.bad, minWidth: 46 }}>
+                    {achat ? 'ACHAT' : 'VENTE'}
+                  </b>
+                  <span style={{ color: '#dbe4f0', minWidth: 76 }}>{s.symbol || '—'}</span>
+                  <span style={{ color: 'var(--muted)', flex: 1, overflow: 'hidden',
+                    textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.nom || s.id || ''}</span>
+                  <span style={{ color: 'var(--dim)', fontVariantNumeric: 'tabular-nums' }}>
+                    {s.entree !== undefined ? ttFmt(s.entree) : ''}
+                  </span>
+                  <TtPill tone={r.tone}>{r.l}</TtPill>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
+/* ══════════════════════════ ÉCRAN DIRECT ══════════════════════════ */
+
 function LiveMarket({ onToJournal }) {
   const [meta, setMeta] = useState({ symbols: [], timeframes: ['1m', '5m', '15m', '1h'] });
-  // Le direct s'ouvre sur la configuration MESURÉE comme la meilleure : R_75 en
-  // 1h. En 5m le coût mangeait l'avantage (0,12 R de coût par trade) et le
-  // modèle cessait de trier au-delà du seuil ; en 1h le coût tombe à 0,002 R et
-  // l'écart entre un bon et un mauvais signal redevient lisible. L'utilisateur
-  // peut changer — le défaut, lui, ne doit pas être le pire des cas.
   const [symbol, setSymbol] = useState('R_75');
-  // R_75 est un synthétique Deriv : le fournisseur doit suivre le symbole, sinon
-  // le direct demande R_75 à Binance et n'affiche rien.
   const [provider, setProvider] = useState('deriv');
-  const [tf, setTf] = useState('1h');
-  const [candles, setCandles] = useState([]);
-  const [status, setStatus] = useState(null);
-  const [report, setReport] = useState(null);
-  // Vocabulaire évalué : chaque terme SMC avec ce que CE graphique montre.
-  // Le moteur nomme ce qu'il mesure avant de conclure.
-  const [vocabulaire, setVocabulaire] = useState(null);
-  // Avancement des types de trade : prérequis remplis, étapes franchies, et le
-  // point exact qui bloque. Un scalp, une chasse à la liquidité, un intraday et
-  // un swing n'ont ni les mêmes prérequis ni les mêmes étapes.
-  const [playbooks, setPlaybooks] = useState(null);
-  const [typeTrade, setTypeTrade] = useState('auto');
-  const [result, setResult] = useState(null);
-  const [live, setLive] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const [ticks, setTicks] = useState(0);          // preuve visible que ça bouge
-  const [lastUpdate, setLastUpdate] = useState(null);
-  const [signal, setSignal] = useState(null);      // verdict en direct
-  // Liste des signaux : par défaut on n'affiche QUE ceux qui ont un sens
-  // exploitable. Un graphique produit une quinzaine de concepts évalués, dont la
-  // plupart sont vides — les montrer tous noierait les deux qui comptent.
-  const [voirToutSignaux, setVoirToutSignaux] = useState(false);
-  // Mode d'analyse : 'auto' (l'app combine toutes les règles) ou 'manuel'
-  // (uniquement les règles d'une stratégie choisie dans la base).
-  const [mode, setMode] = useState('auto');
-  // Profondeur d'historique affichée. 1000 est le plafond réel des sources
-  // (vérifié : Binance et Deriv R_75 en fournissent 1000, soit 83 h en 5 min).
+  const [tf, setTf] = useState('5m');
   const [profondeur, setProfondeur] = useState(300);
-  // Vue du graphique : 'app' (nos niveaux calculés) ou 'tradingview' (widget officiel).
-  const [vue, setVue] = useState('app');
-  // Une ou PLUSIEURS stratégies choisies : leurs règles se cumulent.
+  const [mode, setMode] = useState('auto');
   const [strategiesChoisies, setStrategiesChoisies] = useState([]);
   const [choixOuvert, setChoixOuvert] = useState(false);
   const [filtreProfil, setFiltreProfil] = useState('');
   const [profils, setProfils] = useState([]);
+  const [reglages, setReglages] = useState(false);   // panneau de réglages replié
 
-  // Alignement multi-timeframes : le verdict n'est confirmé que si les unités
-  // de temps racontent la même histoire. C'est la vue « sniper ».
+  const [candles, setCandles] = useState([]);
+  const [report, setReport] = useState(null);
+  const [vocabulaire, setVocabulaire] = useState(null);
+  const [playbooks, setPlaybooks] = useState(null);
+  const [decision, setDecision] = useState(null);        // DecisionEngine complet
+  const [verdict, setVerdict] = useState(null);           // verdict détaillé (règles, force)
+  const [sse, setSse] = useState(null);                   // flux temps réel (repli)
   const [confluence, setConfluence] = useState(null);
+  const [statuts, setStatuts] = useState([]);
+  const [journal, setJournal] = useState([]);
 
-  // Profils : quelles règles chaque stratégie de la base active. Sert au mode
-  // manuel (on choisit sa stratégie) et affiche le détail des seuils.
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await api('/strategies/profiles');
-        const d = await r.json();
-        if (d.success) setProfils(d.profils || []);
-      } catch (e) {}
-    })();
-  }, []);
+  const [tick, setTick] = useState(null);
+  const [tickRate, setTickRate] = useState(0);
+  const tickPrec = useRef(null);
+  const [live, setLive] = useState(false);
+  const [ticks, setTicks] = useState(0);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [offline, setOffline] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [result, setResult] = useState(null);
+  const [big, setBig] = useState(false);
+  const [vue, setVue] = useState('app');
+  const [filtre, setFiltre] = useState('all');
+  const [typeTrade, setTypeTrade] = useState('auto');
 
-  // Alignement multi-timeframes : interrogé au chargement, au changement de
-  // marché ou de stratégie, puis rafraîchi régulièrement. Le nombre d'unités
-  // examinées vient de la stratégie choisie quand il y en a une.
-  useEffect(() => {
-    if (!symbol) return;
-    let vivant = true;
-    const charger = async () => {
-      try {
-        const params = `symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}&mode=${mode}`
-          + (mode === 'manuel' && strategiesChoisies.length
-            ? '&strategies=' + encodeURIComponent(strategiesChoisies.join(',')) : '');
-        const r = await api(`/signals/confluence?${params}`);
-        const d = await r.json();
-        if (vivant && d.success) setConfluence(d);
-      } catch (e) { /* l'absence d'alignement ne doit jamais casser la page */ }
-    };
-    setConfluence(null);
-    charger();
-    const it = setInterval(charger, 60000);
-    return () => { vivant = false; clearInterval(it); };
-  }, [symbol, tf, provider, mode, strategiesChoisies.join(',')]);
-
-  // Les bougies ET les zones se rafraîchissent toutes seules. Deux raisons :
-  //   1. le flux temps réel peut mourir (le serveur redémarre, le réseau saute)
-  //      et un flux mort ne se relève pas toujours — le graphique restait alors
-  //      figé alors que le prix, lui, continuait de bouger sur les ticks ;
-  //   2. les zones (OB, FVG, liquidité) doivent suivre le prix : sinon les
-  //      rectangles restent aux niveaux du chargement et le graphique ment.
-  useEffect(() => {
-    if (!symbol) return;
-    let vivant = true;
-    const recharger = async () => {
-      try {
-        const [cb, st] = await Promise.all([
-          api(`/market/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&count=${profondeur}&provider=${provider}`)
-            .then(r => r.json()).catch(() => null),
-          api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`)
-            .then(r => r.json()).catch(() => null)
-        ]);
-        if (!vivant) return;
-        if (cb && cb.success && Array.isArray(cb.candles) && cb.candles.length) setCandles(cb.candles);
-        if (st && st.success && st.report) {
-          setReport(st.report);
-          if (st.vocabulaire) setVocabulaire(st.vocabulaire);
-          if (st.playbooks) setPlaybooks(st.playbooks);
-        }
-      } catch (e) { /* réseau absent : on garde l'état précédent */ }
-    };
-    const it = setInterval(recharger, 5000);
-    return () => { vivant = false; clearInterval(it); };
-  }, [symbol, tf, provider, profondeur]);
-
-  // Un graphique de 430 px de haut mange la moitie d'un telephone : on adapte.
   const [etroi, setEtroit] = useState(() => typeof window !== 'undefined' && window.innerWidth < 820);
   useEffect(() => {
     const maj = () => setEtroit(window.innerWidth < 820);
@@ -2410,62 +3250,118 @@ function LiveMarket({ onToJournal }) {
     return () => window.removeEventListener('resize', maj);
   }, []);
 
-  const [tick, setTick] = useState(null);          // dernier tick BRUT (prix réel)
-  const [tickRate, setTickRate] = useState(0);     // ticks par seconde
-  const tickPrec = useRef(null);                   // pour la couleur (hausse/baisse)
-  const [alerts, setAlerts] = useState([]);        // derniers signaux reçus
-  const [big, setBig] = useState(false);           // graphique agrandi
-  const [offline, setOffline] = useState(false);   // données servies du cache
+  // Profils (stratégies de la base) pour le mode « Ma stratégie ».
+  useEffect(() => {
+    (async () => {
+      try {
+        const d = await (await api('/strategies/profiles')).json();
+        if (d.success) setProfils(d.profils || []);
+      } catch (e) { /* la sélection reste vide, le direct fonctionne en auto */ }
+    })();
+  }, []);
 
+  // Marchés disponibles.
   useEffect(() => {
     (async () => {
       try {
         const m = await (await api('/market/symbols')).json();
-        if (m.success) {
-          setMeta({ symbols: m.symbols, timeframes: m.timeframes });
-          if (m.symbols[0]) setSymbol(prev => prev || m.symbols[0].symbol);
-        }
-        const s = await (await api('/market/status')).json();
-        if (s.success) setStatus(s);
-      } catch {}
+        if (m.success) setMeta({ symbols: m.symbols || [], timeframes: m.timeframes || meta.timeframes });
+      } catch (e) { /* hors ligne : on garde les valeurs par défaut */ }
     })();
   }, []);
 
-  // Changement de marché : on VIDE la série immédiatement.
-  // Sans ça, le graphique recevait les bougies du symbole PRÉCÉDENT avec la
-  // nouvelle étiquette (BTC à 84 200 affiché sous « Or / USD »), puis un simple
-  // update() au lieu d'un rechargement complet — le graphique semblait donc
-  // « ne pas bouger » alors qu'il montrait l'ancien marché.
+  const paramsCommuns = useCallback(() => {
+    const p = `symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}&mode=${mode}`;
+    return mode === 'manuel' && strategiesChoisies.length
+      ? p + '&strategies=' + encodeURIComponent(strategiesChoisies.join(','))
+      : p;
+  }, [symbol, tf, provider, mode, strategiesChoisies.join(',')]);
+
+  // Changement de marché : on vide tout de suite (jamais l'ancien marché étiqueté).
   useEffect(() => {
-    setCandles([]);
-    setReport(null); setVocabulaire(null);
-    setSignal(null);
-    setTicks(0);
+    setCandles([]); setReport(null); setVocabulaire(null);
+    setDecision(null); setSse(null); setConfluence(null); setTicks(0);
   }, [symbol, tf, provider]);
 
+  // Bougies + structure (playbooks, vocabulaire) — rafraîchi régulièrement.
   const load = useCallback(async () => {
     setErr('');
     try {
-      const r = await (await api(`/market/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&count=${profondeur}&provider=${provider}`)).json();
-      if (!r.success) throw new Error(r.error || 'chargement impossible');
-      setCandles(r.candles);
-      setOffline(!!r.offline);
-      const st = await (await api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`)).json();
-      if (st.success) { setReport(st.report); setVocabulaire(st.vocabulaire || null); setPlaybooks(st.playbooks || null); }
-      if (st.offline) setOffline(true);
-    } catch (e) {
-      const m = String(e.message || e);
-      // « Pas assez de bougies » = presque toujours un marché fermé (week-end,
-      // hors séance). Un message technique ne sert à rien : on explique quoi faire.
-      setErr(/Pas assez de bougies/i.test(m)
-        ? `${m} — ce marché est probablement FERMÉ (week-end ou hors séance). Les indices synthétiques (Volatility) et les cryptos cotent 24 h/24 : essayez-en un.`
-        : m);
-    }
-  }, [symbol, tf, provider, mode, strategiesChoisies.join(','), profondeur]);
+      const [cb, st] = await Promise.all([
+        api(`/market/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&count=${profondeur}&provider=${provider}`)
+          .then(r => r.json()).catch(() => null),
+        api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`)
+          .then(r => r.json()).catch(() => null)
+      ]);
+      if (cb && cb.success && Array.isArray(cb.candles) && cb.candles.length) setCandles(cb.candles);
+      if (cb && cb.offline) setOffline(true);
+      if (st && st.success && st.report) {
+        setReport(st.report);
+        if (st.vocabulaire) setVocabulaire(st.vocabulaire);
+        if (st.playbooks) setPlaybooks(st.playbooks);
+      }
+      if (!cb || !cb.success) {
+        setErr((cb && cb.error) || 'chargement des bougies impossible');
+      }
+    } catch (e) { setErr(String(e.message || e)); }
+  }, [symbol, tf, provider, profondeur]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    let vivant = true;
+    const recharger = () => { if (vivant) load(); };
+    recharger();
+    const it = setInterval(recharger, 5000);
+    return () => { vivant = false; clearInterval(it); };
+  }, [load]);
 
-  // Suivi en direct (SSE) : la bougie en cours est mise à jour en continu
+  // Décision complète du moteur (arbitrage 5 niveaux) — et alignement MTF.
+  useEffect(() => {
+    let vivant = true;
+    const chargerDecision = async () => {
+      try {
+        const d = await (await api(`/decision?${paramsCommuns()}`)).json();
+        if (vivant && d.success && d.decision) { setDecision(d.decision); }
+      } catch (e) { /* repli : le flux SSE garde le dernier verdict */ }
+    };
+    const chargerVerdict = async () => {
+      try {
+        const d = await (await api(`/signals?${paramsCommuns()}`)).json();
+        if (vivant && d.success && d.verdict) setVerdict(d.verdict);
+      } catch (e) { /* verdict détaillé absent : on n'affiche rien plutôt qu'un faux */ }
+    };
+    const chargerConfluence = async () => {
+      try {
+        const d = await (await api(`/signals/confluence?${paramsCommuns()}`)).json();
+        if (vivant && d.success) setConfluence(d);
+      } catch (e) { /* pas d'alignement : on n'affiche rien plutôt qu'un faux */ }
+    };
+    const chargerStatuts = async () => {
+      try {
+        const d = await (await api('/live/statuts')).json();
+        if (vivant && d.success) setStatuts(Array.isArray(d.statuts) ? d.statuts : []);
+      } catch (e) { /* table absente : liste vide, jamais inventée */ }
+    };
+    const chargerJournal = async () => {
+      try {
+        const d = await (await api('/journal-signaux?limite=40')).json();
+        if (vivant && d.success) setJournal(Array.isArray(d.signaux) ? d.signaux : []);
+      } catch (e) { /* journal absent : section vide */ }
+    };
+    setDecision(null); setConfluence(null); setVerdict(null);
+    chargerDecision(); chargerVerdict(); chargerConfluence(); chargerStatuts(); chargerJournal();
+    const iDec = setInterval(() => { if (vivant) chargerDecision(); }, 15000);
+    const iVer = setInterval(() => { if (vivant) chargerVerdict(); }, 15000);
+    const iConf = setInterval(() => { if (vivant) chargerConfluence(); }, 60000);
+    const iStat = setInterval(() => { if (vivant) chargerStatuts(); }, 30000);
+    const iJour = setInterval(() => { if (vivant) chargerJournal(); }, 60000);
+    return () => {
+      vivant = false;
+      clearInterval(iDec); clearInterval(iVer); clearInterval(iConf);
+      clearInterval(iStat); clearInterval(iJour);
+    };
+  }, [paramsCommuns]);
+
+  // Bougies en direct (SSE).
   useEffect(() => {
     setLive(false);
     const es = new EventSource(`/api/market/stream?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`);
@@ -2480,19 +3376,15 @@ function LiveMarket({ onToJournal }) {
           if (c.t > last.t) return [...prev, c].slice(-400);
           return prev;
         });
-        setTicks(t => t + 1);
+        setTicks(n => n + 1);
         setLastUpdate(Date.now());
-      } catch {}
+      } catch (e) { /* trame illisible : ignorée */ }
     });
     es.addEventListener('error', () => setLive(false));
     return () => es.close();
-    // Le mode et les stratégies choisies font partie des dépendances : sans eux,
-    // le flux continuait en mode auto alors que l'écran affichait « Ma
-    // stratégie ». Le direct ne suivait donc pas le choix de l'utilisateur.
-  }, [symbol, tf, provider, mode, strategiesChoisies.join(',')]);
+  }, [symbol, tf, provider]);
 
-  // Flux de TICKS bruts : le prix réel, transaction par transaction. Le flux de
-  // bougies ne dit qu'un OHLC en cours ; ici on voit le marché battre.
+  // Ticks bruts (prix réel).
   useEffect(() => {
     if (!symbol) return;
     setTick(null); setTickRate(0); tickPrec.current = null;
@@ -2501,40 +3393,25 @@ function LiveMarket({ onToJournal }) {
     es.addEventListener('tick', ev => {
       try {
         const t = JSON.parse(ev.data);
-        // On fige le prix précédent DANS le tick : comparer avec une référence
-        // déjà écrasée donnait une couleur toujours neutre.
         setTick({ ...t, prec: tickPrec.current });
         tickPrec.current = t.prix;
         recus++;
-      } catch (e) {}
+      } catch (e) { /* tick illisible */ }
     });
-    // Toute source n'a pas de flux de ticks (COMEX par exemple) : on n'affiche rien.
     es.addEventListener('error', () => {});
     const compteur = setInterval(() => { setTickRate(recus); recus = 0; }, 1000);
     return () => { clearInterval(compteur); es.close(); };
   }, [symbol, provider]);
 
-  // Signaux en direct : le serveur n'émet que sur CHANGEMENT de verdict,
-  // donc un signal reçu = un vrai changement, pas du bruit.
+  // Verdict en direct (SSE) : repli immédiat du Decision Center.
   useEffect(() => {
-    setSignal(null);
-    const es = new EventSource(`/api/signals/stream?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`
-      + `&mode=${mode}${mode === 'manuel' && strategiesChoisies.length ? '&strategies=' + encodeURIComponent(strategiesChoisies.join(',')) : ''}`);
+    setSse(null);
+    const es = new EventSource(`/api/signals/stream?${paramsCommuns()}`);
     es.addEventListener('signal', ev => {
-      try {
-        const v = JSON.parse(ev.data);
-        setSignal(v);
-        if (v.status === 'confirme') {
-          // Alerte sonore légère impossible sans interaction : on marque visuellement.
-          setAlerts(prev => [{ ...v, receivedAt: Date.now() }, ...prev].slice(0, 8));
-        }
-      } catch {}
+      try { setSse(JSON.parse(ev.data)); } catch (e) { /* trame illisible */ }
     });
     return () => es.close();
-    // `mode` et les stratégies SONT dans les dépendances : sans eux, choisir
-    // cinq stratégies ne rouvrait pas le flux et l'écran continuait d'afficher
-    // le verdict du mode précédent. La sélection semblait sans effet.
-  }, [symbol, tf, provider, mode, strategiesChoisies.join(',')]);
+  }, [paramsCommuns]);
 
   const analyser = async () => {
     setBusy(true); setErr('');
@@ -2545,1149 +3422,266 @@ function LiveMarket({ onToJournal }) {
       })).json();
       if (!r.success) throw new Error(r.error || 'analyse impossible');
       setResult(r);
-      if (r.analysis && r.analysis.levels) {
-        setReport(prev => ({ ...(prev || {}), levels: r.analysis.levels, summary: r.analysis.summary }));
-      }
-    } catch (e) { setErr(e.message); }
+    } catch (e) { setErr(String(e.message || e)); }
     finally { setBusy(false); }
   };
 
   const last = candles.length ? candles[candles.length - 1] : null;
-  const prev = candles.length > 1 ? candles[candles.length - 2] : null;
-  const change = last && prev && prev.c ? ((last.c - prev.c) / prev.c) * 100 : null;
-  const fmt = p => (p === null || p === undefined ? '—' : p >= 1000 ? p.toFixed(2) : p.toFixed(5));
+  const prix = tick ? tick.prix : (last ? last.c : null);
+  const cur = meta.symbols.find(s => s.symbol === symbol && s.provider === provider);
+  const providerLabel = cur ? (cur.tv || cur.providerLabel) : provider;
+  const sensAffiche = (decision && decision.signal && decision.signal.sens)
+    || (sse && sse.direction) || null;
+  // Verdict du flux : porte le mode et la stratégie réellement appliquée
+  // (mode manuel). Sert aussi à nommer la stratégie à l'écran.
+  const signal = sse;
+  // Setup chiffré : le meilleur signal de l'arbitrage. S'il vient d'un motif,
+  // ses niveaux vivent dans entree/stop/objectifs — on les remonte pour ne pas
+  // perdre un setup pourtant validé par le moteur.
+  const meilleurSetup = (() => {
+    if (!decision || !decision.signal) return null;
+    const s = decision.signal;
+    if (s.levels) return s;
+    const plein = (decision.signaux || []).find(x => x.id === s.id);
+    return plein ? { ...s, levels: {
+      entry: plein.entree, stop: plein.stop,
+      target1: (plein.objectifs || [])[0], target2: (plein.objectifs || [])[1]
+    } } : s;
+  })();
 
   return (
     <>
-      <div className="panel" style={{ padding:'14px 16px', marginBottom:16, display:'flex',
-        gap:10, alignItems:'center', flexWrap:'wrap' }}>
-        <select className="fld" aria-label="Marché analysé" style={{ width:250 }} value={`${provider}|${symbol}`}
-          onChange={e=>{ const [pv, sy] = e.target.value.split('|'); setProvider(pv); setSymbol(sy); }}>
-          {Object.entries(meta.symbols.reduce((acc, s) => {
-            const k = s.providerLabel || 'Marchés';
-            (acc[k] = acc[k] || []).push(s);
-            return acc;
-          }, {})).map(([label, list]) => (
-            <optgroup key={label} label={label}>
-              {list.map(s => (
-                <option key={`${s.provider}|${s.symbol}`} value={`${s.provider}|${s.symbol}`}>
-                  {s.tv ? `${s.tv} — ${s.label}` : s.label}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-        <select className="fld" aria-label="Unité de temps" style={{ width:100 }} value={tf} onChange={e=>setTf(e.target.value)}>
-          {meta.timeframes.map(t => <option key={t} value={t}>{t}</option>)}
-        </select>
-        <select className="fld" aria-label="Nombre de bougies demandées" style={{ width:118 }} value={profondeur}
-          onChange={e=>setProfondeur(Number(e.target.value))}
-          title="Nombre de bougies chargées. 1000 est le maximum que les sources fournissent (83 h en 5 min).">
-          {[150, 300, 500, 1000].map(n => <option key={n} value={n}>{n} bougies</option>)}
-        </select>
-        <select className="fld" aria-label="Mode d'analyse" style={{ width:150 }} value={mode} onChange={e=>setMode(e.target.value)}
-          title="Auto : l'app combine toutes les règles. Manuel : uniquement les règles d'une stratégie de ta base.">
-          <option value="auto">Analyse auto</option>
-          <option value="manuel">Ma stratégie</option>
-        </select>
-        {mode === 'manuel' && (
-          <div style={{ position:'relative' }}>
-            <button className="btn ghost sm" onClick={() => setChoixOuvert(o => !o)}
-              title="Choisir une ou plusieurs stratégies : leurs règles se cumulent.">
-              <i className="fas fa-list-check"></i>
-              {strategiesChoisies.length
-                ? `Stratégies à combiner : ${strategiesChoisies.length}`
-                : 'Choisir mes stratégies'}
-            </button>
-            {choixOuvert && (
-              <div className="panel" style={{ position:'absolute', zIndex:60, top:'115%', left:0, width:360,
-                maxHeight:340, overflowY:'auto', padding:12, boxShadow:'0 12px 30px rgba(0,0,0,.5)' }}>
-                <input className="fld" placeholder="Filtrer…" value={filtreProfil}
-                  onChange={e => setFiltreProfil(e.target.value)}
-                  style={{ width:'100%', marginBottom:8 }} />
-                <div style={{ display:'flex', gap:6, marginBottom:8 }}>
-                  <button className="btn ghost sm" onClick={() => setStrategiesChoisies(profils.map(p => p.id))}>
-                    Tout
-                  </button>
-                  <button className="btn ghost sm" onClick={() => setStrategiesChoisies([])}>Aucune</button>
-                  <span style={{ marginLeft:'auto', fontSize:11.5, color:'var(--dim)', alignSelf:'center' }}>
-                    {profils.length} disponible(s)
-                  </span>
-                </div>
-                {profils
-                  .filter(p => !filtreProfil || String(p.titre || '').toLowerCase().includes(filtreProfil.toLowerCase()))
-                  .map(p => (
-                    <label key={p.id} style={{ display:'flex', gap:8, alignItems:'center',
-                      padding:'5px 2px', fontSize:12.5, cursor:'pointer' }}>
-                      <input type="checkbox" checked={strategiesChoisies.includes(p.id)}
-                        onChange={() => setStrategiesChoisies(l =>
-                          l.includes(p.id) ? l.filter(x => x !== p.id) : [...l, p.id])} />
-                      <span style={{ flex:1 }}>{p.titre}</span>
-                      <span className="tag" style={{ fontSize:10.5 }} title={p.motif}>
-                        {p.regles.join('+')}
-                      </span>
-                    </label>
-                  ))}
-                {!profils.length && (
-                  <div style={{ fontSize:12, color:'var(--dim)' }}>Aucune stratégie dans la base.</div>
-                )}
-              </div>
+      {/* ── En-tête instrument (collant) ── */}
+      <div className="panel" style={{ padding: '11px 14px', marginBottom: 12,
+        position: 'sticky', top: 0, zIndex: 40, background: 'var(--panel)',
+        boxShadow: '0 6px 18px -12px rgba(0,0,0,.9)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: '.1em',
+              color: 'var(--dim)', textTransform: 'uppercase' }}>5trade terminal</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+              <b style={{ fontSize: 16 }}>{providerLabel}</b>
+              <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+                {(cur && cur.label) || symbol} · {tf}
+              </span>
+              {signal && signal.mode === 'manuel' && signal.strategieAppliquee && (
+                <TtPill tone="info"
+                  title={`Verdict limité aux règles de : ${(signal.strategieAppliquee.regles || []).join(', ')}`}>
+                  <i className="fas fa-book" style={{ fontSize: 9 }}></i>
+                  {signal.strategieAppliquee.titre}
+                </TtPill>
+              )}
+            </div>
+          </div>
+          <span style={{ flex: '1 1 auto' }}></span>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 20, fontWeight: 800, fontVariantNumeric: 'tabular-nums',
+              letterSpacing: '-.02em',
+              color: tick && tick.prec !== null && tick.prec !== undefined
+                ? (tick.prix > tick.prec ? TT.ok : tick.prix < tick.prec ? TT.bad : '#fff')
+                : '#fff' }}>{ttFmt(prix)}</div>
+            {tickRate > 0 && (
+              <div style={{ fontSize: 9.5, color: 'var(--dim)' }}>{tickRate} tick/s</div>
             )}
           </div>
-        )}
-
-        {/* Les stratégies combinées, nommées : un compteur ne dit pas LESQUELLES. */}
-        {mode === 'manuel' && strategiesChoisies.length > 0 && (
-          <div style={{ display:'flex', gap:5, flexWrap:'wrap', alignItems:'center', maxWidth:460 }}>
-            {strategiesChoisies.map(id => {
-              const p = profils.find(x => x.id === id);
-              const tf = p && p.timeframes && p.timeframes.length ? ` · ${p.timeframes.join('/')}` : '';
-              return (
-                <span key={id} className="tag"
-                  style={{ fontSize:10.5, background:'rgba(96,165,250,.12)', color:'#93c5fd', cursor:'pointer' }}
-                  title="Cliquer pour retirer cette stratégie"
-                  onClick={() => setStrategiesChoisies(l => l.filter(x => x !== id))}>
-                  {(p ? p.titre : id).slice(0, 34)}{tf}
-                  <i className="fas fa-xmark" style={{ marginLeft:5 }}></i>
-                </span>
-              );
-            })}
-          </div>
-        )}
-        <span className="badge" style={{ background: live ? 'rgba(16,185,129,.13)' : 'rgba(245,158,11,.13)',
-          color: live ? '#34d399' : '#f59e0b' }}>
-          <span className="dot-live"></span>{live ? 'direct' : 'connexion…'}
-        </span>
-        {lastUpdate && (
-          <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--muted)' }}>
-            <i className="fas fa-arrows-rotate" style={{ marginRight:5 }}></i>
-            {ticks} maj · {new Date(lastUpdate).toLocaleTimeString('fr-FR')}
-          </span>
-        )}
-        {/* Source du symbole AFFICHÉ, pas du fournisseur par défaut */}
-        {(() => {
-          const cur = meta.symbols.find(s => s.symbol === symbol && s.provider === provider);
-          return cur ? (
-            <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--muted)' }}
-              title={cur.tv ? `Identique a ${cur.tv} sur TradingView` : cur.providerLabel}>
-              <i className="fas fa-server"></i>{cur.tv || cur.providerLabel}
-            </span>
-          ) : null;
-        })()}
-        {offline && (
-          <span className="badge" style={{ background:'rgba(245,158,11,.15)', color:'#fbbf24' }}
-            title="Réseau indisponible : les bougies proviennent du cache local. L'analyse reste utilisable.">
-            <i className="fas fa-plug-circle-xmark" style={{ marginRight:5 }}></i>hors ligne (cache)
-          </span>
-        )}
-        <span style={{ flex:'1 1 auto' }}></span>
-        {(() => {
-          const cur = meta.symbols.find(s => s.symbol === symbol && s.provider === provider);
-          if (!cur || !cur.tv) return null;
-          return (
-            <>
-              <button className="btn ghost sm" onClick={() => setVue(v => v === 'app' ? 'tradingview' : 'app')}
-                title={vue === 'app'
-                  ? `Afficher ${cur.tv} avec le graphique TradingView officiel`
-                  : 'Revenir au graphique de l\'app (niveaux calculés et signal)'}>
-                <i className={`fas ${vue === 'app' ? 'fa-tv' : 'fa-chart-line'}`}></i>
-                {vue === 'app' ? 'Vue TradingView' : 'Vue app'}
-              </button>
-              <a className="btn ghost sm" target="_blank" rel="noopener noreferrer"
-                href={`https://fr.tradingview.com/chart/?symbol=${encodeURIComponent(cur.tv)}`}
-                title={`Ouvrir ${cur.tv} sur le site TradingView`}>
-                <i className="fas fa-arrow-up-right-from-square"></i>Site
-              </a>
-            </>
-          );
-        })()}
-        <button className="btn ghost sm" onClick={()=>setBig(b => !b)}
-          title={big ? 'Réduire le graphique' : 'Agrandir le graphique'}>
-          <i className={`fas ${big ? 'fa-compress' : 'fa-expand'}`}></i>{big ? 'Réduire' : 'Agrandir'}
-        </button>
-        <button className="btn ghost sm" onClick={load} title="Recharger l'historique">
-          <i className="fas fa-rotate"></i>
-        </button>
-        {signal && signal.status !== 'neutre' && (
-          <button className="btn ghost sm" onClick={() => onToJournal && onToJournal({
-            pair: symbol,
-            direction: signal.direction === 'BUY' ? 'BUY' : 'SELL',
-            entry: signal.levels && signal.levels.entry !== null ? signal.levels.entry
-              : (tick ? tick.prix : null),
-            sl: signal.levels ? signal.levels.stop : null,
-            tp: signal.levels ? signal.levels.target1 : null,
-            timeframe: tf,
-            provider,
-            providerLabel: (meta.symbols.find(s => s.symbol === symbol && s.provider === provider) || {}).providerLabel || provider,
-            signalStatus: signal.status,
-            signalStrength: signal.strength,
-            strategyIds: (signal.strategies || []).map(s => s.id).filter(Boolean),
-            notes: `Signal ${signal.status} ${signal.direction} — ${signal.summary}`
-          })}
-            title="Ouvrir le journal avec ce signal déjà rempli : marché, entrée, invalidation, objectif, stratégies">
-            <i className="fas fa-floppy-disk"></i>Enregistrer ce signal
+          <LiveStatusIndicator live={live} offline={offline} ticks={ticks}
+            lastUpdate={lastUpdate} onRefresh={load} busy={busy} />
+          <button className="btn ghost sm" style={{ padding: '5px 9px' }}
+            onClick={() => setReglages(r => !r)}
+            title="Marché, unité de temps, stratégie">
+            <i className={`fas ${reglages ? 'fa-xmark' : 'fa-sliders'}`}></i>
           </button>
-        )}
-        <button className="btn" onClick={analyser} disabled={busy}>
-          {busy ? <Spinner/> : <><i className="fas fa-bolt"></i>Analyser maintenant</>}
-        </button>
-      </div>
-
-      {/* ── Signal en direct : quelle stratégie s'applique, achat ou vente ── */}
-      <div className="panel" style={{
-        padding:'14px 18px', marginBottom:16,
-        borderColor: signal && signal.status === 'confirme'
-          ? (signal.direction === 'BUY' ? 'rgba(34,211,138,.55)' : 'rgba(242,84,91,.55)') : undefined,
-        animation: signal && signal.status === 'confirme' ? 'signalPulse 1.6s ease-out 2' : undefined
-      }}>
-        <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-          <i className="fas fa-bolt" style={{ color:'#f59e0b' }}></i>
-          <b style={{ fontSize:14, color:'#fff' }}>Signal en direct</b>
-          {signal && signal.mode === 'manuel' && signal.strategieAppliquee && (
-            <span className="badge" style={{ background:'rgba(167,139,250,.14)', color:'#c4b5fd' }}
-              title={`Verdict limité aux règles de cette stratégie : ${signal.strategieAppliquee.regles.join(', ')}`}>
-              <i className="fas fa-book"></i>{signal.strategieAppliquee.titre}
-            </span>
-          )}
-          {signal && signal.mode === 'auto' && (
-            <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--muted)' }}
-              title={`Analyse automatique : toutes les règles (${(signal.reglesActives || []).join(', ')})`}>
-              <i className="fas fa-wand-magic-sparkles"></i>auto
-            </span>
-          )}
-          {!signal && <span style={{ fontSize:13, color:'var(--muted)' }}>en attente du premier verdict…</span>}
-          {signal && (<>
-            <span className="badge" style={{
-              background: signal.status === 'confirme'
-                ? (signal.direction === 'BUY' ? 'rgba(34,211,138,.18)' : 'rgba(242,84,91,.18)')
-                : 'rgba(148,163,184,.12)',
-              color: signal.status === 'confirme'
-                ? (signal.direction === 'BUY' ? '#34d399' : '#f87171') : 'var(--muted)'
-            }}>
-              {signal.direction === 'BUY' ? 'ACHAT' : signal.direction === 'SELL' ? 'VENTE' : 'NEUTRE'}
-              {signal.status === 'confirme' ? ' CONFIRMÉ' : signal.status === 'surveiller' ? ' à surveiller' : ''}
-            </span>
-            <span style={{ fontSize:12.5, color:'var(--muted)' }}>
-              {/* « d'accord SUR N interrogées » : sans le dénominateur, on ne sait
-                  pas si les autres manquaient, s'opposaient, ou n'avaient rien à
-                  dire. Le dénominateur venait de `reglesEvaluees`, absent du
-                  verdict — l'écran retombait donc sur `confirmations` et affichait
-                  « 2/2 » en toutes circonstances. */}
-              {signal.confirmations}/{(signal.reglesEvaluees || signal.reglesActives || []).length || signal.confirmations} règle(s) d'accord
-              {' · '}
-              <span title={signal.forceDetail ? signal.forceDetail.lecture
-                : 'Score interne de solidité, PAS une probabilité de réussite.'}>
-                {/* Le mot et le score nu, jamais un « % » : « force 82 % » se lit
-                    « 82 chances sur 100 de gagner », un chiffre que le moteur ne peut
-                    pas produire (aucun backtest). Le signe % transformait une opinion
-                    en statistique. */}
-                force {signal.forceNiveau || '—'} <span style={{ color:'var(--dim)' }}>({Number(signal.strength || 0).toFixed(2)}/1)</span>
-                <i className="fas fa-circle-info" style={{ fontSize:10, opacity:.6, marginLeft:4 }}></i>
-              </span>
-              {signal.trend ? ` · tendance ${signal.trend}` : ''}
-              {/* LES RÈGLES SANS AVIS, NOMMÉES. Elles étaient calculées par le
-                  moteur puis jetées, et l'écran lisait un champ inexistant : une
-                  règle interrogée qui ne trouvait rien disparaissait sans trace,
-                  donnant l'impression d'un manque au lieu d'une abstention. */}
-              {(signal.reglesSansAvis || []).length > 0 && (
-                <span title={(signal.reglesLecture || '') +
-                  ' — une règle sans avis n\'est ni d\'accord ni contre : elle n\'a rien trouvé sur ce graphique.'}
-                  style={{ color:'var(--dim)' }}>
-                  {' · '}<i className="fas fa-minus" style={{ fontSize:9 }}></i>{' '}
-                  {signal.reglesSansAvis.length} sans avis ({signal.reglesSansAvis.join(', ')})
-                </span>
-              )}
-              {(signal.reglesOpposees || []).length > 0 && (
-                <span style={{ color:'#f87171' }}>
-                  {' · '}{signal.reglesOpposees.length} contre ({signal.reglesOpposees.join(', ')})
-                </span>
-              )}
-              {/* UNE RÈGLE DEMANDÉE MAIS INEXISTANTE (typiquement « R5 »). Le
-                  moteur la retire ; sans cette ligne, la stratégie semblait
-                  l'appliquer. Le sens de la structure est un FILTRE, pas une
-                  règle — on le dit au lieu de le taire. */}
-              {((signal.strategieAppliquee && signal.strategieAppliquee.reglesEcartees) || []).length > 0 && (
-                <span title={'Ces identifiants ne correspondent à aucune règle du moteur : ils ont été écartés. ' +
-                  'Le sens de la structure est un filtre de contexte (case « structure »), pas une règle qui vote.'}
-                  style={{ color:'#fbbf24' }}>
-                  {' · '}<i className="fas fa-triangle-exclamation" style={{ fontSize:10 }}></i>{' '}
-                  écartée(s) : {(signal.strategieAppliquee.reglesEcartees || []).join(', ')}
-                </span>
-              )}
-            </span>
-            <span style={{ flex:'1 1 auto' }}></span>
-            <span style={{ fontSize:11.5, color:'var(--dim)' }}>
-              bougie clôturée {signal.at ? new Date(signal.at).toLocaleTimeString('fr-FR') : ''}
-            </span>
-          </>)}
         </div>
 
-        {signal && signal.rules && signal.rules.length > 0 && (
-          <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginTop:10 }}>
-            {signal.rules.map((r, i) => (
-              <span key={i} className="tag" title={r.detail} style={{
-                background: r.direction === 'BUY' ? 'rgba(34,211,138,.12)' : 'rgba(242,84,91,.12)',
-                borderColor: r.direction === 'BUY' ? 'rgba(34,211,138,.4)' : 'rgba(242,84,91,.4)',
-                color: r.direction === 'BUY' ? '#6ee7b7' : '#fca5a5'
-              }}>
-                {r.rule} · {r.name}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Désaccord entre règles : le montrer franchement plutôt que choisir un
-            camp en silence. Deux règles opposées ne sont pas une confirmation. */}
-        {signal && signal.contradiction && signal.contradiction.active && (
-          <div style={{ marginTop:10, padding:'9px 12px', borderRadius:8,
-            background: signal.contradiction.franche ? 'rgba(242,84,91,.10)' : 'rgba(245,158,11,.09)',
-            border: `1px solid ${signal.contradiction.franche ? 'rgba(242,84,91,.4)' : 'rgba(245,158,11,.35)'}` }}>
-            <div style={{ fontSize:12.5, fontWeight:600,
-              color: signal.contradiction.franche ? '#fca5a5' : '#fbbf24' }}>
-              <i className="fas fa-scale-unbalanced" style={{ marginRight:7 }}></i>
-              {signal.contradiction.franche ? 'Règles en désaccord' : 'Désaccord partiel'}
-            </div>
-            <div style={{ fontSize:12, color:'var(--muted)', marginTop:5 }}>
-              {signal.contradiction.lecture}
-            </div>
-            <div style={{ display:'grid', gap:3, marginTop:7, fontSize:12 }}>
-              {signal.contradiction.pour.map((r, i) => (
-                <div key={'p' + i} style={{ color:'#34d399' }}>
-                  <i className="fas fa-check" style={{ marginRight:6, fontSize:10 }}></i>
-                  {r.rule} · {r.name} → {r.direction} (force {Number(r.strength || 0).toFixed(2)}/1)
-                </div>
+        {/* Réglages repliés — la décision reste visible */}
+        {reglages && (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid ' + TT.line,
+            display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <select className="fld" aria-label="Marché analysé" style={{ width: 220 }}
+              value={`${provider}|${symbol}`}
+              onChange={e => { const [pv, sy] = e.target.value.split('|'); setProvider(pv); setSymbol(sy); }}>
+              {Object.entries((meta.symbols || []).reduce((acc, s) => {
+                const k = s.providerLabel || 'Marchés';
+                (acc[k] = acc[k] || []).push(s);
+                return acc;
+              }, {})).map(([label, list]) => (
+                <optgroup key={label} label={label}>
+                  {list.map(s => (
+                    <option key={`${s.provider}|${s.symbol}`} value={`${s.provider}|${s.symbol}`}>
+                      {s.tv ? `${s.tv} — ${s.label}` : s.label}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
-              {signal.contradiction.contre.map((r, i) => (
-                <div key={'c' + i} style={{ color:'#f87171' }}>
-                  <i className="fas fa-xmark" style={{ marginRight:6, fontSize:10 }}></i>
-                  {r.rule} · {r.name} → {r.direction} (force {Number(r.strength || 0).toFixed(2)}/1)
-                </div>
-              ))}
-            </div>
-            <div style={{ fontSize:11.5, color:'var(--dim)', marginTop:7 }}>
-              {signal.contradiction.franche
-                ? 'Aucune confirmation ne peut être donnée : attends que les règles se rejoignent, ou choisis toi-même le camp qui a le contexte pour lui.'
-                : 'La direction retenue subit une pénalité de force pour tenir compte de la contradiction.'}
-            </div>
-          </div>
-        )}
+            </select>
+            <select className="fld" aria-label="Unité de temps" style={{ width: 92 }}
+              value={tf} onChange={e => setTf(e.target.value)}>
+              {(meta.timeframes || []).map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <select className="fld" aria-label="Mode d'analyse" style={{ width: 148 }}
+              value={mode} onChange={e => setMode(e.target.value)}
+              title="Auto : l'app combine toutes les règles. Manuel : uniquement les règles d'une stratégie de ta base.">
+              <option value="auto">Analyse auto</option>
+              <option value="manuel">Ma stratégie</option>
+            </select>
+            <select className="fld" aria-label="Profondeur d'historique" style={{ width: 112 }}
+              value={profondeur} onChange={e => setProfondeur(Number(e.target.value))}>
+              {[150, 300, 500, 1000].map(n => <option key={n} value={n}>{n} bougies</option>)}
+            </select>
 
-        {/* Détails du signal : niveaux, scénarios des deux sens, conditions.
-            Rien n'est masqué sous prétexte que le verdict n'est pas encore
-            confirmé — c'est justement là qu'on a besoin du plan. */}
-        {signal && (
-          <div style={{ marginTop:12, display:'grid', gap:10 }}>
-            {signal.levels && Number.isFinite(signal.levels.entry) && (
-              <div style={{ display:'flex', gap:18, flexWrap:'wrap', fontSize:13 }}>
-                <span><span style={{ color:'var(--muted)' }}>Entrée </span><b>{fmt(signal.levels.entry)}</b></span>
-                <span><span style={{ color:'var(--muted)' }}>Invalidation </span>
-                  <b style={{ color:'#f87171' }}>{fmt(signal.levels.stop)}</b></span>
-                <span><span style={{ color:'var(--muted)' }}>Objectif 1 </span>
-                  <b style={{ color:'#34d399' }}>{fmt(signal.levels.target1)}</b></span>
-                <span><span style={{ color:'var(--muted)' }}>Objectif 2 </span>
-                  <b style={{ color:'#34d399' }}>{fmt(signal.levels.target2)}</b></span>
-              </div>
-            )}
-
-            {/* Statut NEUTRE : pas de direction, donc pas d'entrée unique — mais
-                les DEUX plans restent calculés et consultables. Les masquer
-                contredisait le commentaire juste au-dessus. Chaque scénario dit
-                son déclencheur : c'est le chiffre qui manquait pour agir. */}
-            {!signal.levels && signal.levelsRaison && (
-              <div style={{ fontSize:12.5, color:'var(--muted)', lineHeight:1.6 }}>
-                <i className="fas fa-compass" style={{ marginRight:6, color:'#60a5fa' }}></i>
-                {signal.levelsRaison}
-                <div style={{ marginTop:6, display:'grid', gap:4 }}>
-                  {[['achat', signal.scenarios && signal.scenarios.bullish],
-                    ['vente', signal.scenarios && signal.scenarios.bearish]]
-                    .filter(([, sc]) => sc && (sc.entry != null || sc.trigger))
-                    .map(([nom, sc]) => (
-                      <div key={nom} style={{ display:'flex', gap:14, flexWrap:'wrap' }}>
-                        <span style={{ color:'#cbd5e1', minWidth:44 }}>{nom}</span>
-                        <span><span style={{ color:'var(--muted)' }}>si </span>{sc.trigger || '—'}</span>
-                        {sc.entry != null && (
-                          <span><span style={{ color:'var(--muted)' }}>entrée </span><b>{fmt(sc.entry)}</b></span>
-                        )}
-                        {sc.stop != null && (
-                          <span><span style={{ color:'var(--muted)' }}>inval. </span>
-                            <b style={{ color:'#f87171' }}>{fmt(sc.stop)}</b></span>
-                        )}
-                        {sc.target1 != null && (
-                          <span><span style={{ color:'var(--muted)' }}>obj </span>
-                            <b style={{ color:'#34d399' }}>{fmt(sc.target1)}</b></span>
-                        )}
-                        {sc.target2 != null && (
-                          <span><b style={{ color:'#34d399' }}>{fmt(sc.target2)}</b></span>
-                        )}
-                      </div>
-                    ))}
-                </div>
-              </div>
-            )}
-
-            {signal.missing && signal.missing.length > 0 && (
-              <div style={{ fontSize:12.5, color:'#fbbf24' }}>
-                <i className="fas fa-circle-info" style={{ marginRight:6 }}></i>
-                Pour confirmer : {signal.missing.join(' · ')}
-              </div>
-            )}
-
-            {signal.biais && (
-              <div style={{ fontSize:12.5, color:'var(--muted)' }}>
-                <i className="fas fa-compass" style={{ marginRight:6,
-                  color: signal.biais === 'haussier' ? '#34d399' : signal.biais === 'baissier' ? '#f87171' : 'var(--dim)' }}></i>
-                Biais <b style={{ color: signal.biais === 'haussier' ? '#34d399'
-                  : signal.biais === 'baissier' ? '#f87171' : '#e2e8f0' }}>{signal.biais}</b> — {signal.raisonBiais}
-              </div>
-            )}
-
-            {signal.scenarios && (
-              <div style={{ display:'grid', gap:8, gridTemplateColumns:'repeat(auto-fit,minmax(270px,1fr))' }}>
-                {[['bullish', 'ACHAT', '#34d399', 'fa-arrow-trend-up'],
-                  ['bearish', 'VENTE', '#f87171', 'fa-arrow-trend-down']].map(([k, lab, col, ico]) => {
-                  const s = signal.scenarios[k];
-                  if (!s) return null;
-                  const privilegie = s.priorite === 'principale';
-                  // La hiérarchie visuelle se fait par la bordure et le fond, PAS
-                  // par l'opacité du texte : `opacity:.75` faisait tomber le
-                  // contraste sous le minimum AA (6 éléments signalés par axe-core).
-                  return (
-                    <div key={k} style={{ border: privilegie ? `1px solid ${col}55` : '1px solid rgba(27,36,51,.7)',
-                      background: privilegie ? `${col}0d` : 'transparent',
-                      borderRadius:8, padding:'10px 12px' }}>
-                      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                        fontSize:12.5, color:col, fontWeight:600, marginBottom:6 }}>
-                        <span><i className={`fas ${ico}`} style={{ marginRight:6 }}></i>Scénario {lab}</span>
-                        <span className="tag" style={{ fontSize:10.5,
-                          background: privilegie ? `${col}22` : 'rgba(148,163,184,.1)',
-                          color: privilegie ? col : 'var(--dim)',
-                          borderColor: privilegie ? `${col}55` : 'rgba(148,163,184,.25)' }}>
-                          {privilegie ? 'privilégié' : 'alternatif'}
-                        </span>
-                      </div>
-                      <div style={{ fontSize:12, color:'var(--muted)', lineHeight:1.6 }}>
-                        <div><b style={{ color:'#cbd5e1' }}>Déclencheur</b> : {s.trigger}</div>
-                        <div><b style={{ color:'#cbd5e1' }}>Contexte</b> : {s.context}</div>
-                        <div style={{ marginTop:6 }}>
-                          entrée <b style={{ color:'#e2e8f0' }}>{fmt(s.entry)}</b>
-                          {' · '}invalidation <b style={{ color:'#f87171' }}>{fmt(s.stop)}</b>
-                          {' · '}objectifs <b style={{ color:'#34d399' }}>{fmt(s.target1)}</b> / {fmt(s.target2)}
-                        </div>
-                        {s.objectifProche && (
-                          <div style={{ marginTop:5, color:'#fbbf24', fontSize:11.5 }}>
-                            <i className="fas fa-bullseye" style={{ marginRight:5 }}></i>
-                            cible la plus proche : {s.objectifProche}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {signal.checklist && (
-              <div style={{ display:'flex', gap:8, flexWrap:'wrap', fontSize:12 }}>
-                {signal.checklist.map(c => (
-                  <span key={c.key} className="tag" title={c.detail}
-                    style={{ background: c.ok ? 'rgba(34,211,138,.1)' : 'rgba(148,163,184,.08)',
-                      borderColor: c.ok ? 'rgba(34,211,138,.35)' : 'rgba(148,163,184,.25)',
-                      color: c.ok ? '#6ee7b7' : 'var(--muted)' }}>
-                    <i className={`fas ${c.ok ? 'fa-circle-check' : 'fa-circle-minus'}`} style={{ marginRight:5 }}></i>
-                    {c.label}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── STRUCTURE DU MARCHÉ ─────────────────────────────────────────
-            Avant de lister des signaux, il faut savoir OÙ est le marché :
-            tendance, dernière cassure de structure, position dans le range,
-            zone la plus proche, liquidité, session. Sans ce cadre, un marteau
-            est une forme ; avec ce cadre, c'est une décision. */}
-        {signal && signal.carte && (() => {
-          const k = signal.carte;
-          const tend = k.tendance === 'bullish' ? 'haussière' : k.tendance === 'bearish' ? 'baissière' : 'range';
-          const col = k.tendance === 'bullish' ? '#34d399' : k.tendance === 'bearish' ? '#f87171' : '#94a3b8';
-          const ev = k.evenement;
-          const pos = k.position;
-          const z = k.zoneLaPlusProche;
-          const liq = (k.liquidite || []).slice().sort((a, b) => (a.distanceAtr ?? 99) - (b.distanceAtr ?? 99))[0];
-          const item = (label, valeur, couleur) => (
-            <div style={{ display:'flex', flexDirection:'column', gap:2, minWidth:120 }}>
-              <span style={{ fontSize:10.5, color:'var(--dim)', textTransform:'uppercase', letterSpacing:'.3px' }}>{label}</span>
-              <span style={{ fontSize:12.5, color:couleur || '#e2e8f0', fontWeight:600 }}>{valeur}</span>
-            </div>
-          );
-          return (
-            <div className="panel" style={{ padding:'12px 16px', marginBottom:14 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:9, marginBottom:10, flexWrap:'wrap' }}>
-                <i className="fas fa-sitemap" style={{ color:'#60a5fa' }}></i>
-                <b style={{ fontSize:13, color:'#fff' }}>Structure du marché</b>
-                {signal.synthese && signal.synthese.biais && (
-                  <span className="badge" style={{ fontSize:10, background:'rgba(96,165,250,.13)', color:'#93c5fd' }}
-                    title="Comptage des signaux retenus par sens">
-                    biais {signal.synthese.biais}
-                  </span>
-                )}
-                {k.session && k.session.killZone && k.session.killZone !== 'aucune en ce moment' && (
-                  <span className="badge" style={{ fontSize:10, background:'rgba(245,158,11,.14)', color:'#fbbf24' }}
-                    title={`Session : ${k.session.courante}`}>
-                    kill zone {k.session.killZone}
-                  </span>
-                )}
-              </div>
-              <div style={{ display:'flex', gap:22, flexWrap:'wrap' }}>
-                {item('Tendance', tend, col)}
-                {ev ? item('Dernière cassure', `${ev.type} ${ev.sens === 'long' ? 'haussier' : 'baissier'} @ ${fmt(ev.niveau)}`,
-                  ev.sens === 'long' ? '#34d399' : '#f87171')
-                  : item('Dernière cassure', 'aucune (range)', 'var(--muted)')}
-                {pos ? item('Position', `${pos.zone} · équilibre ${fmt(pos.equilibre)}`, pos.zone === 'premium' ? '#fca5a5' : '#6ee7b7') : null}
-                {z ? item('Zone la plus proche', `${z.type} à ${z.distanceAtr} ATR${z.dansLaZone ? ' (dedans)' : ''}`,
-                  z.sens === 'long' ? '#34d399' : '#f87171') : null}
-                {liq ? item('Liquidité', `${liq.type} ${fmt(liq.prix)} (${liq.distanceAtr} ATR)`, '#fbbf24') : null}
-                {Number.isFinite(k.atr) ? item('ATR', fmt(k.atr), 'var(--muted)') : null}
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* ── SIGNAUX DÉTECTÉS ────────────────────────────────────────────
-            Le signal n'est pas UN : chaque stratégie sélectionnée rend son
-            propre verdict, et chaque motif de bougie (doji, marteau, double
-            bottom, trendline…) est un signal à part entière, avec SON sens et
-            SES conditions. Les fondre en un seul verdict effaçait le travail de
-            l'utilisateur : il choisissait cinq stratégies et n'en voyait aucune. */}
-        {signal && Array.isArray(signal.signaux) && signal.signaux.length > 0 && (() => {
-          const tous = signal.signaux;
-          const rang = s => (s.status === 'confirme' ? 0 : s.status === 'surveiller' ? 1 : 2);
-          const tries = [...tous].sort((a, b) =>
-            rang(a) - rang(b) || (Number(b.force) || 0) - (Number(a.force) || 0));
-          const actifs = tries.filter(s => rang(s) < 2);
-          const montres = voirToutSignaux ? tries : actifs;
-          const nbAchat = actifs.filter(s => s.sens === 'long').length;
-          const nbVente = actifs.filter(s => s.sens === 'short').length;
-          const nbStrat = tous.filter(s => s.source === 'strategie').length;
-          const nbMotif = tous.length - nbStrat;
-          const teinte = s => s.sens === 'long' ? '#34d399' : s.sens === 'short' ? '#f87171' : '#94a3b8';
-          const fond = s => s.status === 'confirme'
-            ? (s.sens === 'long' ? 'rgba(34,211,138,.07)' : s.sens === 'short' ? 'rgba(242,84,91,.07)' : 'rgba(148,163,184,.05)')
-            : 'rgba(148,163,184,.035)';
-          const bord = s => s.status === 'confirme'
-            ? (s.sens === 'long' ? 'rgba(34,211,138,.34)' : s.sens === 'short' ? 'rgba(242,84,91,.34)' : 'rgba(148,163,184,.2)')
-            : 'rgba(148,163,184,.12)';
-          return (
-            <div style={{ marginTop:16 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:9, flexWrap:'wrap', marginBottom:9 }}>
-                <i className="fas fa-layer-group" style={{ color:'#60a5fa' }}></i>
-                <b style={{ fontSize:13, color:'#fff' }}>Signaux détectés ({tous.length})</b>
-                <span className="badge" style={{ fontSize:10, background:'rgba(167,139,250,.13)', color:'#c4b5fd' }}
-                  title="Une entrée par stratégie que tu as sélectionnée.">
-                  {nbStrat} stratégie(s)
-                </span>
-                <span className="badge" style={{ fontSize:10, background:'rgba(96,165,250,.13)', color:'#93c5fd' }}
-                  title="Doji, marteau, avalement, double top/bottom, trendline, support/résistance, compression…">
-                  {nbMotif} motif(s)
-                </span>
-                {nbAchat > 0 && <span className="badge" style={{ fontSize:10, border:'1px solid rgba(34,211,138,.45)', background:'transparent', color:'#34d399' }}>{nbAchat} achat</span>}
-                {nbVente > 0 && <span className="badge" style={{ fontSize:10, border:'1px solid rgba(242,84,91,.45)', background:'transparent', color:'#f87171' }}>{nbVente} vente</span>}
-                {/* Ce que le moteur a REFUSÉ doit se voir : un signal qui disparaît
-                    en silence laisse croire qu'il n'a jamais existé. */}
-                {signal.synthese && signal.synthese.ecartesFrais > 0 && (
-                  <span className="badge" style={{ fontSize:10, background:'rgba(245,158,11,.14)', color:'#fbbf24' }}
-                    title="Configurations refusées : le spread dépasse une part trop grande du risque.">
-                    {signal.synthese.ecartesFrais} écarté(s) par les frais
-                  </span>
-                )}
-                {signal.synthese && signal.synthese.ecartesModele > 0 && (
-                  <span className="badge" style={{ fontSize:10, background:'rgba(167,139,250,.14)', color:'#c4b5fd' }}
-                    title="Configurations refusées : le modèle leur attribue une espérance négative (ou sous le seuil).">
-                    {signal.synthese.ecartesModele} écarté(s) par le modèle
-                  </span>
-                )}
-                {signal.synthese && signal.synthese.ecartesRR > 0 && (
-                  <span className="badge" style={{ fontSize:10, background:'rgba(56,189,248,.14)', color:'#7dd3fc' }}
-                    title="Configurations refusées : objectif inutilisable, ou rapport risque/rendement sous le seuil demandé.">
-                    {signal.synthese.ecartesRR} objectif(s) inutilisable(s)
-                  </span>
-                )}
-                {signal.synthese && signal.synthese.modele && signal.synthese.modele.disponible && (
-                  <span className="badge" style={{ fontSize:10, background:'rgba(34,211,138,.12)', color:'#34d399' }}
-                    title={`Modèle v${signal.synthese.modele.version} · marchés ${(signal.synthese.modele.marches || []).join(', ')}`}>
-                    modèle actif
-                  </span>
-                )}
-                <span style={{ flex:'1 1 auto' }}></span>
-                {tous.length > actifs.length && (
-                  <button className="btn-ghost" onClick={() => setVoirToutSignaux(v => !v)}
-                    style={{ fontSize:11.5, whiteSpace:'nowrap' }}>
-                    {voirToutSignaux ? 'masquer les non-remplis' : `voir les ${tous.length - actifs.length} non-remplis`}
-                  </button>
-                )}
-              </div>
-
-              {montres.length === 0 && (
-                <div style={{ fontSize:12.5, color:'var(--muted)', padding:'8px 10px', borderRadius:8, background:'rgba(148,163,184,.05)' }}>
-                  <i className="fas fa-circle-minus" style={{ marginRight:7 }}></i>
-                  Aucun signal exploitable sur cette bougie : {tous.length} concept(s) évalué(s), conditions non remplies.
-                  C'est une information — le moteur ne force pas un signal quand le marché n'en donne pas.
-                </div>
-              )}
-
-              <div style={{ display:'grid', gap:6 }}>
-                {(() => {
-                  // UNE configuration = une décision. Quinze concepts peuvent
-                  // décrire le MÊME trade (même sens, même entrée, même stop) :
-                  // les afficher quinze fois fait croire à quinze opportunités.
-                  // On garde le premier (la liste est déjà triée par espérance) et
-                  // on compte les autres — rien n'est caché, tout est replié.
-                  const parCle = new Map();
-                  for (const s of montres) {
-                    const aDesNiveaux = Number.isFinite(s.entree) && Number.isFinite(s.stop);
-                    const cle = aDesNiveaux ? `${s.sens}|${s.entree}|${s.stop}` : `id:${s.id}`;
-                    if (!parCle.has(cle)) parCle.set(cle, { ...s, _memes: [] });
-                    else parCle.get(cle)._memes.push(s.nom || s.id);
-                  }
-                  return [...parCle.values()];
-                })().map(s => {
-                  const ok = (s.conditions || []).filter(c => c.ok).length;
-                  const tot = (s.conditions || []).length;
-                  return (
-                    <div key={s.id} style={{ padding:'8px 10px', borderRadius:8, background:fond(s), border:`1px solid ${bord(s)}` }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
-                        <span className="badge" style={{ fontSize:9.5,
-                          background: s.source === 'strategie' ? 'rgba(167,139,250,.15)' : s.source === 'structure' ? 'rgba(245,158,11,.15)' : 'rgba(96,165,250,.15)',
-                          color: s.source === 'strategie' ? '#c4b5fd' : s.source === 'structure' ? '#fbbf24' : '#93c5fd' }}>
-                          {s.source === 'strategie' ? 'STRATÉGIE' : s.source === 'structure' ? 'STRUCTURE' : 'MOTIF'}
-                        </span>
-                        <b style={{ fontSize:12.5, color:'#e2e8f0' }}>{s.nom}</b>
-                        {s._memes && s._memes.length > 0 && (
-                          <span className="badge" style={{ fontSize:9, background:'rgba(148,163,184,.12)', color:'var(--muted)' }}
-                            title={`Même sens, même entrée, même stop : ${s._memes.join(' · ')}`}>
-                            +{s._memes.length} concept(s) sur cette configuration
-                          </span>
-                        )}
-                        <span className="badge" style={{ fontSize:9.5, background:'transparent', border:`1px solid ${teinte(s)}`, color:teinte(s) }}>
-                          {s.sens === 'long' ? 'ACHAT' : s.sens === 'short' ? 'VENTE' : 'NEUTRE'}
-                        </span>
-                        <span style={{ fontSize:11, color: s.status === 'confirme' ? '#34d399' : s.status === 'surveiller' ? '#fbbf24' : 'var(--dim)' }}>
-                          {s.status === 'confirme' ? 'confirmé' : s.status === 'surveiller' ? 'à surveiller' : 'non rempli'}
-                        </span>
-                        {tot > 0 && (
-                          <span style={{ fontSize:11, color:'var(--dim)', title:'Conditions remplies sur conditions évaluées' }}>
-                            {ok}/{tot} condition(s)
-                          </span>
-                        )}
-                        <span style={{ flex:'1 1 auto' }}></span>
-                        {/* Le R attendu du modèle, à côté de la force : c'est le
-                            chiffre qui dit si le trade vaut le risque. Absent si
-                            le marché n'est pas couvert par le modèle. */}
-                        {s.modele && Number.isFinite(s.modele.rAttendu) && (
-                          <span className="badge" style={{ fontSize:10,
-                            background: s.modele.rAttendu > 0 ? 'rgba(34,211,138,.12)' : 'rgba(242,84,91,.12)',
-                            color: s.modele.rAttendu > 0 ? '#34d399' : '#f87171' }}
-                            title={`R attendu d'après le modèle v${s.modele.version} (${s.modele.marche}) — ce n'est pas une probabilité.`}>
-                            {s.modele.rAttendu > 0 ? '+' : ''}{s.modele.rAttendu} R attendu
-                          </span>
-                        )}
-                        {s.ecarteModele && (
-                          <span className="badge" style={{ fontSize:10, background:'rgba(242,84,91,.14)', color:'#f87171' }}
-                            title={s.raison || 'espérance négative selon le modèle'}>
-                            écarté par le modèle
-                          </span>
-                        )}
-                        {s.ecarteFrais && (
-                          <span className="badge" style={{ fontSize:10, background:'rgba(245,158,11,.14)', color:'#fbbf24' }}
-                            title={s.raison || 'coût trop élevé face au risque'}>
-                            écarté par les frais
-                          </span>
-                        )}
-                        {/* Marché absent du modèle : il faut le DIRE, sinon l'absence
-                            de R attendu se lit comme une panne du modèle. */}
-                        {s.modele && s.modele.horsPerimetre && (
-                          <span className="badge" style={{ fontSize:10, background:'rgba(148,163,184,.12)', color:'#94a3b8' }}
-                            title="Le modèle n'a pas été entraîné sur ce marché : aucune note, et aucun filtrage par le modèle.">
-                            modèle : marché non couvert
-                          </span>
-                        )}
-                        <span style={{ fontSize:11, color:'var(--muted)' }} title="Score interne de solidité, PAS une probabilité de réussite.">
-                          force {Number(s.force || 0).toFixed(2)}
-                        </span>
-                      </div>
-
-                      {tot > 0 && (
-                        <div style={{ display:'flex', gap:'4px 14px', flexWrap:'wrap', marginTop:5, fontSize:11 }}>
-                          {(s.conditions || []).map((c, i) => (
-                            <span key={i} style={{ color: c.ok ? '#6ee7b7' : '#94a3b8' }}>
-                              <i className={`fas ${c.ok ? 'fa-check' : 'fa-xmark'}`} style={{ fontSize:9, marginRight:4 }}></i>
-                              {c.nom} = {String(c.valeur)}{c.seuil ? ` (seuil ${c.seuil})` : ''}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      {s.entree != null && (
-                        <div style={{ marginTop:4, fontSize:11, color:'var(--muted)' }}>
-                          entrée {fmt(s.entree)} · invalidation <span style={{ color:'#f87171' }}>{fmt(s.stop)}</span>
-                          {(s.objectifs || []).length > 0 && <> · objectifs <span style={{ color:'#34d399' }}>{(s.objectifs || []).map(fmt).join(' / ')}</span></>}
-                          {Number.isFinite(s.rr) && s.rr > 0 ? ` · G/R ${s.rr.toFixed(2)}` : ''}
-                        </div>
-                      )}
-
-                      {s.structureContexte && (
-                        <div style={{ marginTop:3, fontSize:10.5,
-                          color: s.structureContexte.ajustement >= 0 ? '#6ee7b7' : '#fca5a5' }}
-                          title={`Force ${s.forceDetail ? s.forceDetail.avant : '—'} ajustée de ${s.structureContexte.ajustement} par la structure`}>
-                          <i className="fas fa-sitemap" style={{ fontSize:9, marginRight:5 }}></i>
-                          {s.structureContexte.lecture}
-                        </div>
-                      )}
-
-                      {s.status !== 'confirme' && s.raison && (
-                        <div style={{ marginTop:3, fontSize:10.5, color:'var(--dim)' }}>{s.raison}</div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })()}
-
-        {signal && signal.strategies && signal.strategies.length > 0 && (
-          <div style={{ marginTop:12 }}>
-            <div style={{ fontSize:12, color:'var(--muted)', marginBottom:6 }}>
-              <i className="fas fa-book" style={{ marginRight:6 }}></i>Stratégies de ta base qui s'appliquent
-            </div>
-            <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-              {signal.strategies.map(s => (
-                <span key={s.id} className="tag" title={`${s.type} · pertinence ${s.relevanceScore}`}>
-                  {s.title.slice(0, 46)}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Alignement multi-timeframes : le signal n'est confirmé que si les
-            unités de temps racontent la même histoire. C'est la vue « sniper ». */}
-        {confluence && confluence.confluence && (
-          <div className="panel" style={{ padding:'12px 14px', marginTop:12 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8, flexWrap:'wrap' }}>
-              <b style={{ fontSize:13 }}>
-                <i className="fas fa-crosshairs" style={{ marginRight:6, color:'#fbbf24' }}></i>
-                Alignement des unités de temps
-              </b>
-              <span className="badge" style={{
-                background: confluence.confluence.aligne ? 'rgba(16,185,129,.14)' : 'rgba(245,158,11,.14)',
-                color: confluence.confluence.aligne ? '#34d399' : '#fbbf24' }}>
-                {confluence.confluence.aligne ? 'ALIGNÉ' : 'NON ALIGNÉ'}
-                {' · '}{confluence.confluence.nbAlignes}/{confluence.confluence.detail.length}
-                {' · seuil '}{confluence.confluence.seuilAlignes}
-              </span>
-              {confluence.strategieAppliquee && (
-                <span className="badge" style={{ background:'rgba(96,165,250,.1)', color:'#93c5fd' }}
-                  title={confluence.strategieAppliquee.titre}>
-                  {(confluence.strategieAppliquee.nombre || 1)} stratégie(s)
-                  {confluence.strategieAppliquee.style ? ` · ${confluence.strategieAppliquee.style}` : ''}
-                </span>
-              )}
-            </div>
-            <div style={{ display:'grid', gap:6 }}>
-              {confluence.confluence.detail.map(t => (
-                <div key={t.tf} style={{ display:'flex', alignItems:'center', gap:10, fontSize:12.5 }}>
-                  <b style={{ width:46 }}>{t.tf}</b>
-                  <span style={{ width:70, color: t.tendance === 'bullish' ? '#34d399'
-                    : t.tendance === 'bearish' ? '#f87171' : '#f59e0b' }}>{t.tendance}</span>
-                  <span style={{ flex:1, color:'var(--muted)' }}>
-                    {t.status}{t.direction && t.direction !== 'NEUTRE' ? ' · ' + t.direction : ''}
-                    {t.regles && t.regles.length ? ' · ' + t.regles.join('+') : ''}
-                  </span>
-                  <i className={`fas ${t.confirme ? 'fa-circle-check' : 'fa-circle-minus'}`}
-                    style={{ color: t.confirme ? '#34d399' : 'var(--muted)' }}></i>
-                </div>
-              ))}
-            </div>
-            <p style={{ margin:'8px 0 0', fontSize:11.5, color:'var(--dim)' }}>
-              {confluence.confluence.motif} — le signal n'est confirmé que si ce seuil est atteint.
-            </p>
-          </div>
-        )}
-
-        {/* Cheminement par type de trade : prérequis, étapes, point de blocage.
-            Un scalp, une chasse à la liquidité, un intraday et un swing n'ont ni
-            les mêmes prérequis ni les mêmes étapes : les mélanger produit des
-            signaux contradictoires. */}
-        {playbooks && playbooks.length > 0 && (() => {
-          const liste = typeTrade === 'auto' ? playbooks : playbooks.filter(p => p.type === typeTrade);
-          if (!liste.length) return null;
-          return (
-            <div className="panel" style={{ padding:'12px 14px', marginTop:12 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:9, flexWrap:'wrap' }}>
-                <b style={{ fontSize:13 }}>
-                  <i className="fas fa-route" style={{ marginRight:6, color:'var(--ai-purple)' }}></i>
-                  Cheminement du signal
-                </b>
-                <select className="fld" aria-label="Filtre des signaux affichés" style={{ width:'auto', margin:0, padding:'3px 8px', fontSize:12 }}
-                  value={typeTrade} onChange={e=>setTypeTrade(e.target.value)}>
-                  <option value="auto">Tous les types</option>
-                  {playbooks.map(p => <option key={p.type} value={p.type}>{p.nom}</option>)}
-                </select>
-              </div>
-              <div style={{ display:'grid', gap:10 }}>
-                {liste.map(pb => (
-                  <div key={pb.type} className="panel"
-                    style={{ padding:'10px 12px', background:'rgba(7,10,17,.45)' }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:6 }}>
-                      <b style={{ fontSize:12.5 }}>{pb.nom}</b>
-                      <span className="badge" style={{
-                        background: pb.pret ? 'rgba(16,185,129,.14)' : 'rgba(245,158,11,.12)',
-                        color: pb.pret ? '#34d399' : '#fbbf24' }}>
-                        {pb.pret ? 'signal valable' : pb.avancement}
-                      </span>
-                      <span style={{ fontSize:11.5, color:'var(--dim)' }}>
-                        prérequis {pb.prerequisOk}/{pb.prerequisTotal}
-                        {/* Le dénominateur est le nombre d'étapes OBLIGATOIRES, pas le
-                            total : « étapes 4/5 » alors que les cinq sont franchies
-                            (dont une facultative, non évaluable sur ce graphique) se
-                            lisait comme un manque. Les facultatives sont nommées à part. */}
-                        {' · '}étapes {pb.etapesOk}/{pb.etapesObligatoires ?? pb.etapesTotal}
-                        {Array.isArray(pb.etapesFacultatives) && pb.etapesFacultatives.length > 0
-                          ? ` · ${pb.etapesFacultatives.length} facultative(s)` : ''}
-                      </span>
-                      <span style={{ fontSize:11.5, color:'var(--dim)', marginLeft:'auto' }}>
-                        {pb.duree} · {pb.timeframes.join('/')}
+            {mode === 'manuel' && (
+              <div style={{ position: 'relative' }}>
+                <button className="btn ghost sm" onClick={() => setChoixOuvert(o => !o)}>
+                  <i className="fas fa-list-check"></i>
+                  {strategiesChoisies.length ? `${strategiesChoisies.length} stratégie(s)` : 'Choisir'}
+                </button>
+                {choixOuvert && (
+                  <div className="panel" style={{ position: 'absolute', zIndex: 60, top: '115%',
+                    left: 0, width: 340, maxHeight: 320, overflowY: 'auto', padding: 12 }}>
+                    <input className="fld" placeholder="Filtrer…" value={filtreProfil}
+                      onChange={e => setFiltreProfil(e.target.value)} style={{ width: '100%', marginBottom: 8 }} />
+                    <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                      <button className="btn ghost sm" onClick={() => setStrategiesChoisies(profils.map(p => p.id))}>Tout</button>
+                      <button className="btn ghost sm" onClick={() => setStrategiesChoisies([])}>Aucune</button>
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--dim)', alignSelf: 'center' }}>
+                        {profils.length} disponible(s)
                       </span>
                     </div>
-                    <div style={{ display:'grid', gap:3, fontSize:12 }}>
-                      {pb.prerequis.map((p, i) => (
-                        <div key={'p'+i} style={{ color: p.ok ? 'var(--muted)' : 'var(--dim)' }}>
-                          <i className={`fas ${p.ok ? 'fa-circle-check' : 'fa-circle-xmark'}`}
-                            style={{ marginRight:6, fontSize:10, color: p.ok ? '#34d399' : '#f87171' }}></i>
-                          {p.label}{p.detail ? ` — ${p.detail}` : ''}
-                        </div>
+                    {profils
+                      .filter(p => !filtreProfil || String(p.titre || '').toLowerCase().includes(filtreProfil.toLowerCase()))
+                      .map(p => (
+                        <label key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center',
+                          padding: '5px 2px', fontSize: 12.5, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={strategiesChoisies.includes(p.id)}
+                            onChange={() => setStrategiesChoisies(l =>
+                              l.includes(p.id) ? l.filter(x => x !== p.id) : [...l, p.id])} />
+                          <span style={{ flex: 1 }}>{p.titre}</span>
+                          <span className="tag" style={{ fontSize: 10 }}>{(p.regles || []).join('+')}</span>
+                        </label>
                       ))}
-                      {pb.etapes.map(e => (
-                        <div key={'e'+e.numero}
-                          style={{ marginLeft:6, color: e.ok ? 'var(--muted)' : 'var(--dim)' }}>
-                          <i className={`fas ${e.ok === null ? 'fa-ellipsis' : (e.ok ? 'fa-check' : 'fa-xmark')}`}
-                            style={{ marginRight:6, fontSize:10,
-                              color: e.ok === null ? '#64748b' : (e.ok ? '#34d399' : '#f87171') }}></i>
-                          {e.numero}. {e.label}{e.detail ? ` — ${e.detail}` : ''}
-                        </div>
-                      ))}
-                    </div>
-                    {!pb.pret && pb.blocage && (
-                      <div style={{ fontSize:11.5, color:'#fbbf24', marginTop:7 }}>
-                        <i className="fas fa-arrow-right" style={{ marginRight:6 }}></i>
-                        Pour avancer : {pb.blocage}{pb.detailBlocage ? ` (${pb.detailBlocage})` : ''}
-                      </div>
-                    )}
-                    {pb.pret && (
-                      <div style={{ fontSize:11.5, color:'#34d399', marginTop:7 }}>
-                        <i className="fas fa-circle-check" style={{ marginRight:6 }}></i>
-                        Tous les prérequis remplis et toutes les étapes franchies.
-                      </div>
-                    )}
+                    {!profils.length && <div style={{ fontSize: 12, color: 'var(--dim)' }}>Aucune stratégie dans la base.</div>}
                   </div>
-                ))}
+                )}
               </div>
-              <p style={{ margin:'9px 0 0', fontSize:11.5, color:'var(--dim)' }}>
-                Chaque étape est mesurée sur CE graphique. Un type n'est « valable » que si ses
-                prérequis sont remplis et ses étapes franchies : c'est ce qui empêche un scalp
-                et un swing de donner des signaux contradictoires.
-              </p>
-            </div>
-          );
-        })()}
+            )}
 
-        {/* Termes évalués : chaque terme vérifié sur CE graphique avec sa valeur.
-            Le moteur expose son raisonnement au lieu de l'affirmer. */}
-        {vocabulaire && vocabulaire.length > 0 && (
-          <details className="panel" style={{ padding:'12px 14px', marginTop:12 }}>
-            <summary style={{ cursor:'pointer', fontSize:13, fontWeight:600 }}>
-              <i className="fas fa-list-check" style={{ marginRight:8, color:'#60a5fa' }}></i>
-              Termes vérifiés sur ce graphique
-              {' · '}{vocabulaire.filter(t => t.present).length}/{vocabulaire.length}
-              <span style={{ marginLeft:8, fontWeight:400, fontSize:11.5, color:'var(--dim)' }}>
-                l'analyse s'appuie sur ces mesures
-              </span>
-            </summary>
-            <div style={{ display:'grid', gap:4, marginTop:10 }}>
-              {vocabulaire.map(t => (
-                <div key={t.sigle} style={{ display:'flex', gap:10, alignItems:'baseline',
-                  fontSize:12.5, opacity: t.present ? 1 : 0.4 }}>
-                  <i className={`fas ${t.present ? 'fa-circle-check' : 'fa-circle-minus'}`}
-                    style={{ width:12, color: t.present ? '#34d399' : 'var(--muted)', fontSize:11 }}></i>
-                  <b style={{ width:108, color: t.present ? '#93c5fd' : 'var(--muted)' }}>{t.sigle}</b>
-                  <span style={{ flex:1, color: t.present ? 'var(--muted)' : 'var(--dim)' }}>
-                    {t.valeur || t.lecture}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <p style={{ margin:'10px 0 0', fontSize:11.5, color:'var(--dim)' }}>
-              Un terme grisé est absent de ce graphique : il ne pèse donc pas dans le verdict.
-              Le détail de chacun est dans l'onglet Termes.
-            </p>
-          </details>
-        )}
+            {mode === 'manuel' && strategiesChoisies.length > 0 && (
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
+                {strategiesChoisies.map(id => {
+                  const p = profils.find(x => x.id === id);
+                  return (
+                    <span key={id} className="tag" style={{ fontSize: 10.5, cursor: 'pointer' }}
+                      title="Cliquer pour retirer" onClick={() => setStrategiesChoisies(l => l.filter(x => x !== id))}>
+                      {(p ? p.titre : id).slice(0, 28)}
+                      <i className="fas fa-xmark" style={{ marginLeft: 5 }}></i>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
 
-        {alerts.length > 0 && (
-          <details style={{ marginTop:12 }}>
-            <summary style={{ fontSize:12, color:'var(--muted)', cursor:'pointer' }}>
-              Signaux confirmés reçus depuis l'ouverture ({alerts.length})
-            </summary>
-            <div style={{ marginTop:8, display:'grid', gap:6 }}>
-              {alerts.map((a, i) => (
-                <div key={i} style={{ display:'flex', justifyContent:'space-between', gap:10, fontSize:12.5 }}>
-                  <span style={{ color: a.direction === 'BUY' ? '#6ee7b7' : '#fca5a5' }}>
-                    {a.direction === 'BUY' ? 'ACHAT' : 'VENTE'} · force {a.forceNiveau || '—'} ({Number(a.strength || 0).toFixed(2)}/1)
-                    · {(a.rules || []).map(r => r.name).join(' + ')}
-                  </span>
-                  <span style={{ color:'var(--dim)' }}>
-                    {new Date(a.receivedAt).toLocaleTimeString('fr-FR')}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </details>
+            <span style={{ flex: '1 1 auto' }}></span>
+            <button className="btn ghost sm" onClick={() => setBig(b => !b)}
+              title={big ? 'Réduire le graphique' : 'Agrandir le graphique'}>
+              <i className={`fas ${big ? 'fa-compress' : 'fa-expand'}`}></i>
+            </button>
+            <button className="btn ghost sm" onClick={() => setVue(v => v === 'app' ? 'tradingview' : 'app')}>
+              <i className={`fas ${vue === 'app' ? 'fa-tv' : 'fa-chart-line'}`}></i>
+              {vue === 'app' ? 'TradingView' : 'Vue app'}
+            </button>
+            <button className="btn" onClick={analyser} disabled={busy}>
+              {busy ? <Spinner /> : <><i className="fas fa-bolt"></i>Analyser</>}
+            </button>
+          </div>
         )}
       </div>
 
       {err && (
-        <div className="panel" style={{ padding:'12px 16px', marginBottom:16,
-          borderColor:'rgba(239,68,68,.45)', color:'#fca5a5', fontSize:13 }}>
-          <i className="fas fa-triangle-exclamation" style={{ marginRight:8 }}></i>{err}
+        <div className="panel" style={{ padding: '10px 14px', marginBottom: 12,
+          borderColor: 'rgba(239,68,68,.45)', color: '#fca5a5', fontSize: 12.5 }}>
+          <i className="fas fa-triangle-exclamation" style={{ marginRight: 8 }}></i>
+          {/Pas assez de bougies/i.test(err)
+            ? `${err} — marché probablement fermé. Les indices synthétiques (Volatility) et les cryptos cotent 24 h/24.`
+            : err}
         </div>
       )}
 
-      <div className="panel" style={{ padding:18, marginBottom:16 }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline',
-          flexWrap:'wrap', gap:10, marginBottom:10 }}>
-          <div style={{ display:'flex', alignItems:'baseline', gap:12 }}>
-            <b style={{ fontSize:20, color:'#fff' }}>{fmt(last && last.c)}</b>
-            {change !== null && (
-              <span style={{ fontSize:13, color: change >= 0 ? '#34d399' : '#f87171' }}>
-                <i className={`fas ${change >= 0 ? 'fa-caret-up' : 'fa-caret-down'}`} style={{marginRight:4}}></i>
-                {change >= 0 ? '+' : ''}{change.toFixed(3)} %
+      {/* 03 — LA DÉCISION, TOUT EN HAUT */}
+      <LiveDecisionCenter decision={decision} sse={sse} price={prix}
+        at={(decision && decision.at) || (last && last.t)} symbol={symbol} tf={tf}
+        providerLabel={providerLabel} confluence={confluence} />
+
+      {/* Setup chiffré, seulement s'il existe */}
+      <TradeSetupCard signal={meilleurSetup}
+        sens={sensAffiche} onToJournal={onToJournal} symbol={symbol} tf={tf}
+        provider={provider} providerLabel={providerLabel} />
+
+      {/* Graphique : accessible tôt, sans écraser la décision */}
+      <div className="panel" style={{ padding: 14, marginBottom: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+          flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+            <TtLabel>Graphique</TtLabel>
+            {last && (
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                O {ttFmt(last.o)} · H {ttFmt(last.h)} · L {ttFmt(last.l)} · C {ttFmt(last.c)}
               </span>
             )}
-            {last && <span style={{ fontSize:12, color:'var(--muted)' }}>
-              O {fmt(last.o)} · H {fmt(last.h)} · L {fmt(last.l)}
-            </span>}
           </div>
-          <span style={{ fontSize:12, color:'var(--muted)' }}>
+          <span style={{ fontSize: 11, color: 'var(--dim)' }}>
             {report ? `${report.candles} bougies · ATR ${report.atr14}` : ''}
           </span>
         </div>
-        {tick && (
-          <div style={{ display:'flex', alignItems:'baseline', gap:12, margin:'4px 0 10px', flexWrap:'wrap' }}>
-            <span style={{ fontSize:24, fontWeight:800, letterSpacing:'-0.5px',
-              fontVariantNumeric:'tabular-nums',
-              color: tick.prec === null || tick.prec === undefined ? '#e2e8f0'
-                : tick.prix > tick.prec ? '#34d399'
-                : tick.prix < tick.prec ? '#f87171' : '#e2e8f0' }}>
-              {fmt(tick.prix)}
-            </span>
-            <span className="badge" style={{ background:'rgba(16,185,129,.12)', color:'#34d399' }}
-              title="Ticks bruts reçus de la source, par seconde. C'est le marché qui bat, pas une bougie reconstruite.">
-              <span className="dot-live"></span>{tickRate} tick/s
-            </span>
-            <span style={{ fontSize:11.5, color:'var(--dim)' }}>
-              tick réel · {new Date(tick.t).toLocaleTimeString('fr-FR')} · source {tick.source}
-            </span>
-          </div>
-        )}
-
-        {vue === 'app' ? (
-          <PriceChart candles={candles} report={report} levels={report ? report.levels : []} signal={signal}
-            height={big ? (etroi ? 460 : 620) : (etroi ? 300 : 430)} symbol={symbol} tf={tf} />
-        ) : (
-          <TradingViewChart
-            symbole={(meta.symbols.find(s => s.symbol === symbol && s.provider === provider) || {}).tv}
-            tf={tf} height={big ? (etroi ? 460 : 620) : (etroi ? 300 : 430)} />
-        )}
-        <p style={{ margin:'8px 0 0', fontSize:11.5, color:'var(--dim)' }}>
-          {vue === 'app'
-            ? <>Vue app — molette = zoom, glisser = déplacer, double-clic = revenir au prix. Bougies en UTC.
-                Zones vertes = support/OB/FVG haussier, rouges = baissier, orange = liquidité.
-                Les niveaux tracés sont calculés par l'app.</>
-            : <>Vue TradingView officielle — tous leurs outils (dessin, indicateurs, fuseaux, comparaison).
-                Le signal et les niveaux de l'app restent affichés au-dessus.</>}
-        </p>
-      </div>
-
-      {report && (
-        <div style={{ display:'grid', gap:14, gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))', marginBottom:16 }}>
-          <div className="panel" style={{ padding:18 }}>
-            <h3 style={{ margin:'0 0 10px', fontSize:14 }}>
-              <i className="fas fa-sitemap" style={{ color:'#60a5fa', marginRight:8 }}></i>Structure calculée
-            </h3>
-            <div style={{ fontSize:13, display:'grid', gap:7 }}>
-              <div style={{ display:'flex', justifyContent:'space-between' }}>
-                <span style={{ color:'var(--muted)' }}>Tendance</span>
-                <b style={{ color: report.structure.trend === 'bullish' ? '#34d399'
-                  : report.structure.trend === 'bearish' ? '#f87171' : '#f59e0b' }}>{report.structure.trend}</b>
-              </div>
-              {report.structure.event && (
-                <div style={{ display:'flex', justifyContent:'space-between' }}>
-                  <span style={{ color:'var(--muted)' }}>{report.structure.event.type}</span>
-                  <b>{fmt(report.structure.event.level)} <span style={{color:'var(--dim)'}}>({report.structure.event.direction})</span></b>
-                </div>
-              )}
-              {report.premiumDiscount && (<>
-                <div style={{ display:'flex', justifyContent:'space-between' }}>
-                  <span style={{ color:'var(--muted)' }}>Range</span>
-                  <b>{fmt(report.premiumDiscount.low)} – {fmt(report.premiumDiscount.high)}</b>
-                </div>
-                <div style={{ display:'flex', justifyContent:'space-between' }}>
-                  <span style={{ color:'var(--muted)' }}>Position</span>
-                  <b style={{ color: report.premiumDiscount.position === 'premium' ? '#f87171' : '#34d399' }}>
-                    {report.premiumDiscount.position}</b>
-                </div>
-              </>)}
-              {report.sessions && (<>
-                <div style={{ display:'flex', justifyContent:'space-between' }}>
-                  <span style={{ color:'var(--muted)' }}>Session</span>
-                  <b>{report.sessions.sessionCourante}</b>
-                </div>
-                <div style={{ display:'flex', justifyContent:'space-between' }}>
-                  <span style={{ color:'var(--muted)' }}>Kill zone</span>
-                  <b style={{ color: report.sessions.killZone === 'aucune en ce moment' ? 'var(--muted)' : '#fbbf24' }}>
-                    {report.sessions.killZone}</b>
-                </div>
-              </>)}
-              <div style={{ display:'flex', justifyContent:'space-between' }}>
-                <span style={{ color:'var(--muted)' }}>Récent</span>
-                <span style={{ fontSize:12 }}>
-                  {(report.structure.recent || []).map(r => `${r.label} ${fmt(r.price)}`).join(' · ') || '—'}
-                </span>
-              </div>
-              {(report.displacements || []).length > 0 && (
-                <div style={{ display:'flex', justifyContent:'space-between' }}>
-                  <span style={{ color:'var(--muted)' }}>Déplacements</span>
-                  <span style={{ fontSize:12 }}>
-                    {report.displacements.slice(-3).map(d => `${d.direction} ${d.multiple}×`).join(' · ')}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="panel" style={{ padding:18 }}>
-            <h3 style={{ margin:'0 0 10px', fontSize:14 }}>
-              <i className="fas fa-wave-square" style={{ color:'#f472b6', marginRight:8 }}></i>
-              Fibonacci &amp; périodes de référence
-            </h3>
-            <div style={{ fontSize:12.5, display:'grid', gap:6 }}>
-              {report.fibLevels ? (
-                <>
-                  <div style={{ color:'var(--muted)', fontSize:12, marginBottom:2 }}>
-                    dernier swing {report.fibLevels.sens}
-                  </div>
-                  {Object.entries(report.fibLevels.levels).map(([k, v]) => (
-                    <div key={k} style={{ display:'flex', justifyContent:'space-between' }}>
-                      <span style={{ color:'var(--muted)' }}>Retracement {k}</span>
-                      <b>{fmt(v)}</b>
-                    </div>
-                  ))}
-                </>
-              ) : <span style={{ color:'var(--dim)' }}>Swing insuffisant</span>}
-              {report.previousLevels && Object.entries(report.previousLevels).map(([k, v]) => (
-                <div key={k} style={{ display:'flex', justifyContent:'space-between' }}>
-                  <span style={{ color:'var(--muted)' }}>{k}</span><b>{fmt(v)}</b>
-                </div>
-              ))}
-              {(report.breakers || []).length > 0 && (
-                <div style={{ marginTop:6 }}>
-                  <div style={{ color:'var(--muted)', fontSize:12, marginBottom:3 }}>Breakers (zones retournées)</div>
-                  {report.breakers.slice(-3).map((b, i) => (
-                    <div key={i} style={{ display:'flex', justifyContent:'space-between' }}>
-                      <span style={{ color:'var(--muted)' }}>{b.type}</span>
-                      <b>{fmt(b.low)}–{fmt(b.high)}</b>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {(report.sweeps || []).length > 0 && (
-                <div style={{ marginTop:6 }}>
-                  <div style={{ color:'var(--muted)', fontSize:12, marginBottom:3 }}>Balayages de liquidité</div>
-                  {report.sweeps.slice(-3).map((s, i) => (
-                    <div key={i} style={{ display:'flex', justifyContent:'space-between' }}>
-                      <span style={{ color:'var(--muted)' }}>{s.type} ({s.depth} %)</span>
-                      <b>{fmt(s.level)}</b>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="panel" style={{ padding:18 }}>
-            <h3 style={{ margin:'0 0 10px', fontSize:14 }}>
-              <i className="fas fa-ruler-combined" style={{ color:'var(--ai-purple)', marginRight:8 }}></i>
-              {report.levels.length} niveaux exploitables
-            </h3>
-            {/* Zone défilante : sans tabIndex, elle est inatteignable au clavier
-                (violation axe « scrollable-region-focusable »). */}
-            <div tabIndex={0} role="region" aria-label="Liste des éléments du marché"
-              style={{ maxHeight:210, overflowY:'auto', display:'grid', gap:6 }}>
-              {report.levels.map((l, i) => (
-                <div key={i} style={{ display:'flex', justifyContent:'space-between', gap:10, fontSize:12.5,
-                  paddingBottom:5, borderBottom:'1px solid rgba(27,36,51,.5)' }}>
-                  <span style={{ color:'var(--muted)' }}>{l.kind}</span>
-                  <span>
-                    <b>{fmt(l.price)}</b>
-                    {l.zone && <span style={{ color:'var(--dim)', marginLeft:6 }}>{fmt(l.zone[0])}–{fmt(l.zone[1])}</span>}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {report.inventory && (
-            <div className="panel" style={{ padding:18, gridColumn:'1 / -1' }}>
-              <h3 style={{ margin:'0 0 10px', fontSize:14 }}>
-                <i className="fas fa-list-check" style={{ color:'#34d399', marginRight:8 }}></i>
-                {report.inventory.total} éléments identifiés sur le graphique
-              </h3>
-              <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:12 }}>
-                {Object.entries(report.inventory.parFamille).map(([k, v]) => (
-                  <span key={k} className="tag" style={{ background:'rgba(96,165,250,.1)',
-                    borderColor:'rgba(96,165,250,.3)', color:'#93c5fd' }}>
-                    {k} · {v}
-                  </span>
-                ))}
-              </div>
-              <div tabIndex={0} role="region" aria-label="Inventaire par famille"
-                style={{ display:'grid', gap:16, gridTemplateColumns:'repeat(auto-fit,minmax(250px,1fr))',
-                  maxHeight:340, overflowY:'auto' }}>
-                {Object.entries(report.inventory.items.reduce((acc, it) => {
-                  (acc[it.famille] = acc[it.famille] || []).push(it); return acc;
-                }, {})).map(([fam, list]) => (
-                  <div key={fam}>
-                    <div style={{ fontSize:12, color:'#93c5fd', fontWeight:600, marginBottom:6 }}>{fam}</div>
-                    {list.map((it, i) => (
-                      <div key={i} title={it.etat}
-                        style={{ display:'flex', justifyContent:'space-between', gap:8, fontSize:12,
-                          paddingBottom:4, borderBottom:'1px solid rgba(27,36,51,.4)' }}>
-                        <span style={{ color:'var(--muted)' }}>{it.label}</span>
-                        <span><b>{it.prix !== null ? fmt(it.prix) : '—'}</b></span>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-              <p style={{ margin:'10px 0 0', fontSize:11.5, color:'var(--dim)' }}>
-                Chaque ligne est calculée depuis les bougies réelles. Survolez pour voir l'état
-                (ouvert, valide, cassé, balayé…). Aucun élément deviné.
-              </p>
-            </div>
+        <div className="chart-mobile">
+          {vue === 'app' ? (
+            <PriceChart candles={candles} report={report}
+              levels={report ? report.levels : []} signal={decision && decision.signal}
+              height={big ? (etroi ? 460 : 620) : (etroi ? 300 : 430)} symbol={symbol} tf={tf} />
+          ) : (
+            <TradingViewChart symbole={cur && cur.tv} tf={tf}
+              height={big ? (etroi ? 460 : 620) : (etroi ? 300 : 430)} />
           )}
         </div>
+      </div>
+
+      {/* 02 — Stratégies */}
+      <StrategyMonitor playbooks={playbooks}
+        signaux={(decision && decision.signaux) || []}
+        statuts={statuts} filtre={filtre} setFiltre={setFiltre}
+        typeTrade={typeTrade} setTypeTrade={setTypeTrade} />
+
+      {/* Alignement MTF */}
+      <MultiTimeframeMatrix confluence={confluence} />
+
+      {/* Pourquoi cette décision */}
+      <SignalExplanation trace={(decision && decision.trace) || (sse && sse.trace)}
+        decision={decision} signal={verdict} />
+
+      {/* 01 — Intelligence de marché */}
+      <MarketStructurePanel carte={decision && decision.carte} report={report} />
+
+      {/* Historique */}
+      <SignalHistory journal={journal} />
+
+      {vocabulaire && vocabulaire.length > 0 && (
+        <details className="panel" style={{ padding: '12px 15px', marginBottom: 12 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 12.5, fontWeight: 700 }}>
+            <i className="fas fa-list-check" style={{ marginRight: 8, color: TT.info }}></i>
+            Termes vérifiés sur ce graphique
+            {' · '}{vocabulaire.filter(t => t.present).length}/{vocabulaire.length}
+          </summary>
+          <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>
+            {vocabulaire.map(t => (
+              <div key={t.sigle} style={{ display: 'flex', gap: 10, alignItems: 'baseline',
+                fontSize: 12, opacity: t.present ? 1 : 0.45 }}>
+                <i className={`fas ${t.present ? 'fa-circle-check' : 'fa-circle-minus'}`}
+                  style={{ width: 12, color: t.present ? TT.ok : TT.neu, fontSize: 10 }}></i>
+                <b style={{ width: 104, color: t.present ? '#93c5fd' : 'var(--muted)' }}>{t.sigle}</b>
+                <span style={{ flex: 1, color: 'var(--muted)' }}>{t.valeur || t.lecture}</span>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
 
       {result && <Result result={result} />}
@@ -3880,8 +3874,12 @@ function JournalSignauxPanel() {
               </span>
             )}
             {st.rTotal !== 0 && (
-              <span className="badge" style={{ fontSize:10, background:'transparent', border:'1px solid rgba(148,163,184,.3)', color: st.rTotal >= 0 ? '#34d399' : '#f87171' }}>
-                {st.rTotal >= 0 ? '+' : ''}{st.rTotal} R cumulés
+              <span className="badge"
+                title={st.fraisMoyenR > 0
+                  ? 'Frais déduits de chaque prise.'
+                  : 'Aucun frais configuré : total AVANT frais. Au-delà de ' + st.coutCritique + ' R de frais par prise, cet avantage disparaît.'}
+                style={{ fontSize:10, background:'transparent', border:'1px solid rgba(148,163,184,.3)', color: st.rTotal >= 0 ? '#34d399' : '#f87171' }}>
+                {st.rTotal >= 0 ? '+' : ''}{st.rTotal} R cumulés{st.fraisMoyenR > 0 ? '' : ' (brut)'}
               </span>
             )}
           </>
@@ -4110,6 +4108,8 @@ function BacktestPanel() {
   const [res, setRes] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // Un seul endroit qui décide si les chiffres affichés sont nets ou bruts.
+  const fraisActifs = !!(res && res.fraisMoyenR > 0);
 
   useEffect(() => {
     (async () => {
@@ -4244,17 +4244,34 @@ function BacktestPanel() {
               <b style={{ color: (res.tauxReussite ?? 0) >= 50 ? '#34d399' : '#fbbf24' }}>
                 {res.tauxReussite === null ? '—' : res.tauxReussite + ' %'}
               </b></span>
-            <span title="Gain/perte moyen par prise, en multiples du risque initial.">
-              <span style={{ color:'var(--muted)' }}>Espérance </span>
+            <span title={fraisActifs
+              ? 'Gain/perte moyen par prise, frais déduits.'
+              : 'Gain/perte moyen par prise AVANT frais : aucun frais n’est configuré.'}>
+              <span style={{ color:'var(--muted)' }}>{fraisActifs ? 'Espérance nette ' : 'Espérance BRUTE '}</span>
               <b style={{ color: res.esperance >= 0 ? '#34d399' : '#f87171' }}>
                 {res.esperance >= 0 ? '+' : ''}{r2(res.esperance)} R
               </b>
             </span>
-            <span><span style={{ color:'var(--muted)' }}>Total </span>
+            <span><span style={{ color:'var(--muted)' }}>{fraisActifs ? 'Total ' : 'Total brut '}</span>
               <b style={{ color: res.rTotal >= 0 ? '#34d399' : '#f87171' }}>
                 {res.rTotal >= 0 ? '+' : ''}{r2(res.rTotal)} R
               </b></span>
-            <span style={{ color:'var(--dim)' }}>{res.enCours} encore en cours (exclues)</span>
+            <span style={{ color: 'var(--dim)' }}>{res.enCours} encore en cours (exclues)</span>
+          </div>
+
+          {/* Frais : sans eux, un R positif est BRUT. On l'écrit, au lieu de le
+              laisser passer pour un résultat net. `coutCritique` est le coût par
+              prise qui annulerait l'avantage — c'est le seul chiffre qui permette
+              de juger si les frais du courtier laissent quelque chose. */}
+          <div style={{ marginTop: 9, fontSize: 12, lineHeight: 1.5,
+            color: fraisActifs ? 'var(--muted)' : '#fbbf24' }}>
+            <i className={`fas ${fraisActifs ? 'fa-receipt' : 'fa-triangle-exclamation'}`}
+              style={{ marginRight: 6 }}></i>
+            {fraisActifs
+              ? <>Frais appliqués : <b>{r2(res.fraisMoyenR)} R</b> par prise. Les chiffres ci-dessus sont nets.</>
+              : <>Aucun frais n’est configuré : les chiffres ci-dessus sont <b>BRUTS</b>.
+                  Cet avantage survit tant que le coût réel reste sous{' '}
+                  <b>{r2(res.coutCritique)} R</b> par prise — au-delà, il disparaît.</>}
           </div>
 
           {/* Sur un indice synthétique, un résultat positif ne prouve rien.
@@ -4344,6 +4361,37 @@ function NewsPage() {
   const [impact, setImpact] = useState(0);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // Impact directionnel par dépêche (ACHAT / VENTE / NEUTRE), indexé par titre
+  // normalisé. Vient du cache serveur : aucune dépêche n'est réanalysée.
+  const [impacts, setImpacts] = useState({});
+  const [busyImpact, setBusyImpact] = useState(false);
+
+  const chargerImpactCache = async () => {
+    try {
+      const d = await (await api('/news/impact')).json();
+      if (d.success && d.parTitre) setImpacts(d.parTitre);
+    } catch (e) { /* sans cache, les badges restent absents — rien d'inventé */ }
+  };
+  useEffect(() => { chargerImpactCache(); }, []);
+
+  const normTitre = t => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const impactDe = a => impacts[normTitre(a.titre)] || null;
+
+  const interpreterImpact = async () => {
+    const liste = ((data && data.articles) || []).slice(0, 12)
+      .map(a => ({ titre: a.titre, resume: a.resume, source: a.source, sourceId: a.sourceId, actifs: a.actifs }));
+    if (!liste.length) return;
+    setBusyImpact(true); setErr('');
+    try {
+      const d = await (await api('/news/impact', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ articles: liste })
+      })).json();
+      if (!d.success) throw new Error(d.error || 'interprétation impossible');
+      if (d.parTitre) setImpacts(d.parTitre);
+    } catch (e) { setErr(e.message); }
+    finally { setBusyImpact(false); }
+  };
 
   const charger = async (force = false) => {
     setBusy(true); setErr('');
@@ -4403,6 +4451,12 @@ function NewsPage() {
             </span>
           )}
           <span style={{ flex:'1 1 auto' }}></span>
+          <button className="btn ghost sm" onClick={interpreterImpact}
+            disabled={busyImpact || !articles.length}
+            title="Chaque dépêche reçoit un sens exploitable (ACHAT / VENTE / NEUTRE) et sa raison. Calculé une seule fois puis mémorisé.">
+            {busyImpact ? <Spinner /> : <i className="fas fa-wand-magic-sparkles"></i>}
+            {busyImpact ? 'Interprétation…' : 'Interpréter l\'impact'}
+          </button>
           <button className="btn ghost sm" onClick={() => charger(true)} disabled={busy}>
             {busy ? <Spinner /> : <i className="fas fa-rotate"></i>} Actualiser
           </button>
@@ -4482,6 +4536,19 @@ function NewsPage() {
                   {(a.actifs || []).map(x => (
                     <span key={x} className="tag" style={{ fontSize:9 }}>{x}</span>
                   ))}
+                  {(() => {
+                    const im = impactDe(a);
+                    if (!im) return null;
+                    const col = im.sens === 'ACHAT' ? '#34d399' : im.sens === 'VENTE' ? '#f87171' : '#94a3b8';
+                    const bg = im.sens === 'ACHAT' ? 'rgba(34,211,138,.16)' : im.sens === 'VENTE' ? 'rgba(242,84,91,.16)' : 'rgba(148,163,184,.14)';
+                    const ico = im.sens === 'ACHAT' ? 'fa-arrow-trend-up' : im.sens === 'VENTE' ? 'fa-arrow-trend-down' : 'fa-minus';
+                    return (
+                      <span className="badge" style={{ fontSize:9.5, background:bg, color:col }}
+                        title={`${im.raison || 'impact estimé'}${im.force != null ? ` · force ${im.force}/1` : ''}`}>
+                        <i className={`fas ${ico}`} style={{ fontSize:8 }}></i>{im.sens}
+                      </span>
+                    );
+                  })()}
                 </div>
                 <div style={{ fontSize:12.5, color:'#e2e8f0', lineHeight:1.45 }}>{a.titre}</div>
               </a>
@@ -4678,7 +4745,7 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
         <StatTile icon="fa-receipt" label="Trades enregistrés" value={stats?.total || 0} color="#60a5fa" delay={0} />
         <StatTile icon="fa-bullseye" label="Taux de réussite" value={stats?.winRate ?? 0} decimals={1} suffix=" %" color="#34d399" delay={70} />
         <StatTile icon="fa-scale-balanced" label="PnL cumulé" value={stats?.pnlTotal ?? 0} decimals={2} color="#f59e0b" delay={140} />
-        <StatTile icon="fa-wave-square" label="RR moyen" value={stats?.rrAvg ?? 0} decimals={2} color="var(--ai-purple)" delay={210} />
+        <StatTile icon="fa-wave-square" label="RR moyen" value={stats?.rrAvg ?? 0} decimals={2} color="var(--accent2)" delay={210} />
       </div>
 
       {stats && (stats.wins > 0 || stats.losses > 0) && (
@@ -5039,6 +5106,10 @@ function PanneauScan() {
   const [info, setInfo] = useState('');
   const [choix, setChoix] = useState('');
   const [strategies, setStrategies] = useState([]);
+  // Combien de stratégies le dernier scan a réellement évaluées. Le champ est un
+  // TABLEAU : vide = moteur générique, simple repérage.
+  const nbStrategies = (etat && etat.dernier && Array.isArray(etat.dernier.strategies))
+    ? etat.dernier.strategies.length : 0;
 
   const lire = async () => {
     try { const r = await api('/scan'); const d = await r.json(); setEtat(d); }
@@ -5092,8 +5163,11 @@ function PanneauScan() {
         <i className="fas fa-radar" style={{ color: '#38bdf8', marginRight: 9 }}></i>Scan du marché
       </h2>
       <p style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--muted)' }}>
-        Tous les marchés disponibles, toutes les 15 minutes, <b>sans aucune notification</b>.
-        C'est le repérage ; la surveillance au-dessus reste seule à prévenir.
+        Tous les marchés disponibles, <b>sans aucune notification</b>. C'est le repérage ;
+        la surveillance reste seule à prévenir.
+        {' '}<b>Ce panneau n'évalue pas tes stratégies</b> : sans stratégie choisie, il
+        utilise le moteur générique (toutes les règles réunies), qui ne valide aucune
+        fiche en particulier et ne parcourt qu'UNE unité de temps à la fois.
       </p>
       <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
         <select className="fld" aria-label="Unité du scan" style={{ margin: 0, width: 'auto' }}
@@ -5110,11 +5184,33 @@ function PanneauScan() {
         </button>
         {dernier && (
           <span style={{ fontSize: 12, color: 'var(--dim)' }}>
-            {new Date(dernier.at).toLocaleString('fr-FR')} · {dernier.tf} · {dernier.marches} marché(s)
-            · {dernier.signaux} signal/signaux · {dernier.strategie || 'moteur générique'}
+            {new Date(dernier.at).toLocaleString('fr-FR')} · {(dernier.tfs || [dernier.tf]).join(' + ')} · {dernier.marches} marché(s)
+            · {dernier.signaux} signal/signaux · {nbStrategies === 0 ? 'aucune stratégie (générique)' : nbStrategies + ' stratégie(s)'}
           </span>
         )}
       </div>
+      {/* État PERMANENT du dernier scan : le mode employé reste visible même
+          après la disparition du message de confirmation. Un scan générique ne
+          doit jamais pouvoir être lu comme une validation de stratégie. */}
+      {dernier && (
+        <div style={{ marginBottom: 10, padding: '8px 11px', borderRadius: 8, fontSize: 12,
+          background: nbStrategies ? 'rgba(52,211,153,.08)' : 'rgba(245,158,11,.09)',
+          border: `1px solid ${nbStrategies ? 'rgba(52,211,153,.3)' : 'rgba(245,158,11,.3)'}`,
+          color: nbStrategies ? '#6ee7b7' : '#fbbf24' }}>
+          <i className={`fas ${nbStrategies ? 'fa-book' : 'fa-triangle-exclamation'}`}
+            style={{ marginRight: 7 }}></i>
+          {nbStrategies
+            ? <>Scan avec <b>{nbStrategies} stratégie{nbStrategies > 1 ? 's' : ''}</b> —
+                leurs règles et leurs seuils. Chaque ligne est un signal DE la stratégie nommée.</>
+            : <><b>Moteur générique</b> — aucune stratégie n'a été évaluée. Ce résultat est un
+                repérage, pas une validation. Unités : {(dernier.tfs || [dernier.tf]).join(', ')}.</>}
+            {nbStrategies > 0 && (
+              <span style={{ color: 'var(--dim)' }}>
+                {' '}Évaluées : <b>{dernier.strategies.join(', ')}</b>.
+              </span>
+            )}
+        </div>
+      )}
       {info && <div style={{ fontSize: 12.5, color: '#93c5fd', marginBottom: 10 }}>{info}</div>}
       {!lignes.length && (
         <div style={{ fontSize: 12.5, color: 'var(--dim)' }}>
@@ -5133,7 +5229,15 @@ function PanneauScan() {
               </span>
               <span style={{ color: 'var(--muted)' }}>
                 force {Number(x.force || 0).toFixed(2)} · {x.status || '—'} · {x.confirmations || 0} règle(s)
-                {x.strategie ? ` · ${x.strategie}` : ''}
+                {' '}
+                {x.strategie
+                  ? <span className="badge" style={{ fontSize: 9.5, background: 'rgba(52,211,153,.14)', color: '#6ee7b7' }}>
+                      <i className="fas fa-book" style={{ fontSize: 8 }}></i>{x.strategie}
+                    </span>
+                  : <span className="badge" style={{ fontSize: 9.5, background: 'rgba(245,158,11,.14)', color: '#fbbf24' }}
+                      title="Repéré par le moteur générique : aucune fiche de stratégie n'a été appliquée.">
+                      générique
+                    </span>}
               </span>
               <button className="btn ghost sm" onClick={() => ajouterAuSuivi(x)}
                 title="Ajouter à la liste de surveillance">
@@ -6493,6 +6597,49 @@ function Outils() {
           </div>
         )}
 
+        {/* Score ML : le seul chiffre publiable est HORS échantillon. Un modèle
+            entraîné sur 1 trade n'est pas un modèle, et une accuracy mesurée sur
+            ses propres données ne mesure que sa mémoire. */}
+        {data && data.statut && (
+          <div className="panel" style={{ marginTop:12, padding:16 }}>
+            <h3 style={{ margin:'0 0 8px', fontSize:14 }}>
+              <i className="fas fa-brain" style={{ marginRight:8, color:'#a78bfa' }}></i>
+              Scoring ML — {data.statut === 'entraîné' ? 'modèle entraîné' : 'aucun modèle entraîné'}
+            </h3>
+            <div style={{ display:'grid', gap:6, fontSize:12.5 }}>
+              <div style={{ color:'var(--muted)' }}>
+                Trades clôturés : <b style={{ color:'#fff' }}>{data.tradesClotures}</b>
+                {' '}· minimum requis : <b style={{ color:'#fff' }}>{data.minimumRequis}</b>
+                {' '}(5 trades par paramètre × 6)
+              </div>
+              {data.avertissement && (
+                <div style={{ color:'#fbbf24', padding:'7px 10px', borderRadius:7,
+                  background:'rgba(245,158,11,.09)', border:'1px solid rgba(245,158,11,.3)' }}>
+                  <i className="fas fa-triangle-exclamation" style={{ marginRight:7 }}></i>
+                  {data.avertissement}
+                </div>
+              )}
+              <div style={{ color:'var(--muted)' }}>
+                Mesure hors échantillon :{' '}
+                {data.horsEchantillon && data.horsEchantillon.valide
+                  ? <b style={{ color:'#6ee7b7' }}>
+                      {Math.round(data.horsEchantillon.metrics.accuracy * 100)} % d'exactitude
+                      sur {data.horsEchantillon.test} trades jamais vus
+                      {' '}(F1 {data.horsEchantillon.metrics.f1})
+                    </b>
+                  : <span style={{ color:'var(--dim)' }}>
+                      non calculable — {data.horsEchantillon ? data.horsEchantillon.raison : 'données insuffisantes'}
+                    </span>}
+              </div>
+              {data.appliqueAuxDecisions === false && (
+                <div style={{ color:'var(--dim)', fontSize:11.5 }}>
+                  Ce score ne pondère encore aucune décision : il est mesuré, pas appliqué.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Les autres modules rendent encore du JSON : c'est leur nature. */}
         {data && !Array.isArray(data.lignes) && (
           <pre style={{ marginTop:12, maxHeight:420, overflow:'auto' }}>{JSON.stringify(data, null, 2)}</pre>
@@ -6510,7 +6657,7 @@ function Outils() {
         {presets.length === 0 && <div style={{ color:'var(--muted)', fontSize:13 }}>Chargement…</div>}
         <div style={{ display:'grid', gap:10, gridTemplateColumns:'repeat(auto-fit, minmax(250px, 1fr))' }}>
           {presets.map(p => (
-            <div key={p.nom} style={{ border:'1px solid var(--line)', borderRadius:10, padding:12 }}>
+            <div key={p.nom} style={{ border:'1px solid var(--border)', borderRadius:10, padding:12 }}>
               <div style={{ fontWeight:600, fontSize:13, marginBottom:4 }}>{p.titre}</div>
               <div style={{ color:'var(--dim)', fontSize:12, marginBottom:8 }}>{p.mesure}</div>
               <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center', marginBottom:8 }}>
@@ -6732,7 +6879,7 @@ function Dashboard({ user, onLogout }) {
             <div className="stat-grid" style={{ marginBottom:18 }}>
               <StatTile icon="fa-database" label="Stratégies" value={stats?.total || 0} color="#60a5fa" delay={0} />
               <StatTile icon="fa-globe" label="Scrapées du web" value={(stats?.bySource?.search||0)+(stats?.bySource?.scrape||0)}
-                color="var(--ai-purple)" delay={70} />
+                color="var(--accent2)" delay={70} />
               <StatTile icon="fa-clock-rotate-left" label="Analyses" value={history.length} color="#34d399" delay={140} />
             </div>
             <Analyzer onDone={setResult} />

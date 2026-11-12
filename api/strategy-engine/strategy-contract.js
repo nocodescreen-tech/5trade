@@ -144,4 +144,40 @@ function compatibilite(fiche, profil) {
   return { compatible: bloquants.length === 0, bloquants, avertissements };
 }
 
-module.exports = { valider, compatibilite, CLASSES_CONNUES, REGIMES_CONNUS, TF_VALIDES };
+
+/**
+ * Filtre de compatibilité marché : confronte des fiches à la CLASSE réelle d'un
+ * instrument. Une fiche qui ne déclare aucun marché n'est pas « compatible » :
+ * elle est NON ÉVALUABLE. C'est la distinction qui empêche un mot-clé de faire
+ * office de preuve.
+ */
+function filtrerParClasse(matched, symbole, meta = {}) {
+  const { classifier } = require('../market-intelligence/instrument-classifier');
+  const instrument = classifier(symbole, meta);
+
+  const marchesDeclares = fiche => {
+    const s = fiche && fiche.structured ? fiche.structured : {};
+    const brut = (fiche && (fiche.marches || fiche.supportedMarkets))
+      || s.marches || s.supportedMarkets || (s.rules && s.rules.marches) || null;
+    if (!brut) return null;
+    const liste = (Array.isArray(brut) ? brut : [brut])
+      .map(x => String(x).toLowerCase().trim()).filter(Boolean);
+    return liste.length ? liste : null;
+  };
+
+  const compatibles = [], refusees = [], nonDeclarees = [];
+  for (const f of (matched || [])) {
+    const declarees = marchesDeclares(f);
+    if (!declarees) { nonDeclarees.push(f); continue; }
+    if (declarees.includes(instrument.classe)) compatibles.push(f);
+    else {
+      refusees.push({
+        ...f,
+        raison: `marché « ${instrument.classe} » hors de ceux déclarés (${declarees.join(', ')})`
+      });
+    }
+  }
+  return { instrument, compatibles, refusees, nonDeclarees };
+}
+
+module.exports = { valider, compatibilite, filtrerParClasse, CLASSES_CONNUES, REGIMES_CONNUS, TF_VALIDES };

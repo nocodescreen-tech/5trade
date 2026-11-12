@@ -17,6 +17,9 @@
  * Fonctions pures : entrée = bougies, sortie = données chiffrées.
  */
 const S = require('./structure');
+// Même garde-fou que le moteur multi-signaux : un stop du mauvais côté, un stop
+// à moins de 0,5 ATR, ou un premier objectif déjà franchi ne doivent pas sortir.
+const { assainirNiveaux } = require('./niveaux');
 const { pairesCorrelees, positionSizing } = require('../delivery/trades');
 const { rsi, macd } = require('./indicators');
 
@@ -671,6 +674,45 @@ const CLES_FILTRES = ['volatilite', 'session', 'range', 'structure'];
 const TF_VALIDES = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
 
 /**
+ * Notation → unité du moteur.
+ *
+ * Les fiches (écrites à la main, scrapées, ou produites par l'IA) écrivent
+ * « M15 », « H1 », « Daily », alors que le moteur ne connaît que « 15m », « 1h »,
+ * « 1d ». Le filtre se contentait d'écarter l'inconnu : mesuré, 13 fiches sur 14
+ * perdaient AINSI TOUTES leurs unités, sans un mot — elles étaient ensuite
+ * évaluées sur l'unité de travail de l'écran, pas sur la leur.
+ *
+ * Rien n'est deviné : une notation sans équivalent (`Weekly`, `M3`) renvoie null
+ * et sera remontée comme refusée, au lieu d'être rapprochée d'une unité voisine.
+ */
+const TF_ALIAS = {
+  m1: '1m', m5: '5m', m15: '15m', m30: '30m',
+  h1: '1h', h4: '4h', d1: '1d',
+  daily: '1d', daily1: '1d'
+};
+
+function normaliserTF(x) {
+  const k = String(x || '').trim().toLowerCase();
+  if (TF_VALIDES.includes(k)) return k;
+  return TF_ALIAS[k] || null;
+}
+
+/** Unités écrites par une fiche, quelle que soit la forme : ['5m'] ou {rôle: ['5m']}. */
+const tfsBrutes = t => Array.isArray(t) ? t
+  : (t && typeof t === 'object'
+    ? ['execution', 'confirmation', 'context'].flatMap(r => (Array.isArray(t[r]) ? t[r] : []))
+    : []);
+
+/** Sépare ce que le moteur comprend de ce qu'il refuse (jamais de rapprochement deviné). */
+function tfsLues(t) {
+  const b = tfsBrutes(t);
+  return {
+    ok: [...new Set(b.map(normaliserTF).filter(Boolean))].slice(0, 5),
+    refusees: [...new Set(b.filter(x => x && !normaliserTF(x)).map(String))]
+  };
+}
+
+/**
  * Profils de style : chaque façon de trader regarde des unités de temps
  * différentes. Un scalpeur travaille en 1m/5m, un suiveur de tendance en
  * 1h/4h. C'est la stratégie qui décide, pas l'application.
@@ -721,18 +763,10 @@ function normaliserMoteur(m = {}) {
   // L'ordre est celui du travail : exécution d'abord (c'est l'unité sur laquelle on
   // agirait), puis confirmation, puis contexte. Une stratégie peut en déclarer 1,
   // 2, 3, 4… : le seuil suit SON nombre d'unités, sans plafond imposé par la maison.
-  const declarees = (() => {
-    const t = m.timeframes;
-    if (Array.isArray(t)) return t.filter(x => TF_VALIDES.includes(x));
-    if (t && typeof t === 'object') {
-      return ['execution', 'confirmation', 'context']
-        .flatMap(role => (Array.isArray(t[role]) ? t[role] : []))
-        .filter(x => TF_VALIDES.includes(x));
-    }
-    return [];
-  })();
-  const explicites = [...new Set(declarees)].slice(0, 5);
-  let tf = explicites.length ? explicites : [];
+  const lues = tfsLues(m.timeframes);
+  const explicites = lues.ok;
+  const refusees = lues.refusees;
+  let tf = explicites.length ? [...explicites] : [];
   if (!tf.length && dStyle) tf = [...dStyle.timeframes];
   tf = [...new Set(tf)].slice(0, 5);
 
@@ -772,6 +806,9 @@ function normaliserMoteur(m = {}) {
       ? [...new Set(m.filtres.filter(f => CLES_FILTRES.includes(f)))].slice(0, 5) : [],
     style,
     timeframes: tf.length ? tf : null,
+    // Notations sans équivalent moteur (Weekly, M3…) : remontées pour être
+    // affichées, jamais rapprochées en silence d'une unité voisine.
+    timeframesRefusees: refusees.length ? refusees : null,
     seuilAlignes,
     swingsWindow: Math.round(borner(m.swingsWindow, 1, 5, MOTEUR_DEFAUT.swingsWindow)),
     toleranceLiquidite: borner(m.toleranceLiquidite, 0.0001, 0.01, MOTEUR_DEFAUT.toleranceLiquidite),
@@ -853,6 +890,17 @@ function profilDepuisStrategie(doc) {
       : /intraday|journee|day ?trading|\bh1\b|1 ?h/.test(texte) ? 'intraday' : null;
   const dStyle = style ? STYLES[style] : null;
 
+  // Unités DÉCLARÉES par la fiche : elles priment sur le style supposé.
+  // Sans cette lecture, le champ `timeframes` de la fiche n'était JAMAIS
+  // consommé hors bloc `moteur` : mesuré, 13 fiches sur 14 annonçaient H1/H4/D1
+  // et se faisaient évaluer en 5m/15m/1h (le style déduit du texte). Le trader
+  // configurait un cadre, l'app en utilisait un autre.
+  // Où les fiches écrivent réellement leurs unités : `timeframes` à la racine
+  // pour les fiches manuelles, `structured.rules.timeframes` pour celles
+  // produites par l'IA / le scraping. Les deux formes sont lues.
+  const { ok: declareesFiche, refusees: refuseesFiche } = tfsLues(
+    doc.timeframes || (doc.structured && doc.structured.rules && doc.structured.rules.timeframes));
+
   return {
     id: doc.id || null,
     titre: doc.title || null,
@@ -860,8 +908,12 @@ function profilDepuisStrategie(doc) {
     seuilRegles: regles.length >= 2 ? 2 : 1,
     seuilForce: regles.length >= 2 ? 0.35 : 0.6,
     style,
-    timeframes: dStyle ? dStyle.timeframes : null,
-    seuilAlignes: dStyle ? dStyle.seuilAlignes : null,
+    // La fiche fait foi ; le style n'est qu'un repli quand elle ne dit rien.
+    timeframes: declareesFiche.length ? declareesFiche : (dStyle ? dStyle.timeframes : null),
+    timeframesRefusees: refuseesFiche.length ? refuseesFiche : null,
+    // Une stratégie qui ÉCRIT ses unités exige qu'elles s'alignent toutes.
+    seuilAlignes: declareesFiche.length ? declareesFiche.length
+      : (dStyle ? dStyle.seuilAlignes : null),
     // Un style suppose aussi des exigences : un scalpeur a besoin de volatilité
     // et d'une session active, un suivi de tendance non.
     filtres: style === 'scalping' ? ['volatilite', 'session']
@@ -1125,16 +1177,44 @@ function detect(candles, meta = {}, options = {}) {
   // Un signal refusé n'a pas de niveaux à publier : en afficher reviendrait à
   // proposer une entrée que le moteur vient d'interdire.
   const sansNiveaux = status === 'neutre' || status === 'refuse';
-  const levels = sansNiveaux
+  // Le verdict du direct publiait ses niveaux SANS la garde appliquée aux motifs
+  // et aux stratégies : mesuré, 9 verdicts sur 28 sortaient avec un stop à moins
+  // de 0,5 ATR. La garde élargit le stop (elle ne le supprime pas) ; elle renvoie
+  // null seulement si la géométrie est cassée (stop ou cible du mauvais côté).
+  let levels = sansNiveaux
     ? null
     : levelsFor(report, direction, options.parametres && options.parametres.atrStop);
+  let levelsGarde = null;
+  if (levels && Number.isFinite(levels.entry)) {
+    const garde = assainirNiveaux({
+      entree: levels.entry,
+      stop: levels.stop,
+      objectifs: [levels.target1, levels.target2].filter(Number.isFinite),
+      base: levels.base
+    }, direction === 'BUY' ? 'long' : 'short', Number.isFinite(report.atr14) ? report.atr14 : 0);
+    if (garde) {
+      levels = {
+        ...levels,
+        entry: garde.entree,
+        stop: garde.stop,
+        target1: garde.objectifs[0] ?? null,
+        target2: garde.objectifs[1] ?? null,
+        stopElargi: !!garde.stopElargi,
+        base: garde.base || levels.base
+      };
+      if (garde.stopElargi) levelsGarde = garde.base || 'stop élargi au plancher de risque';
+    } else {
+      levels = null;
+      levelsGarde = 'niveaux refusés : stop ou premier objectif du mauvais côté de l\'entrée';
+    }
+  }
   const levelsRaison = sansNiveaux
     ? (status === 'refuse'
       ? 'signal refusé : condition obligatoire non remplie, aucun niveau n\'est publié'
       : 'statut neutre : aucune direction activée, donc pas d\'entrée unique à annoncer. '
         + `Les deux jeux complets sont dans scenarios — achat si ${sc.bullish.trigger}, `
         + `vente si ${sc.bearish.trigger}`)
-    : null;
+    : (levelsGarde || null);
   const fmt = v => (v === null || v === undefined ? '—' : v);
 
   const entete = options.strategie && options.strategie.titre

@@ -29,7 +29,7 @@ trading-platform/
 
 ### 2. Analyse d'images TradingView
 - Upload de captures d'écran TradingView
-- Analyse IA avec DeepSeek API
+- Analyse IA avec NVIDIA NIM (gratuit, chaîne de modèles en cascade)
 - Reconnaissance de patterns et tendances
 - Génération de recommandations de trading
 
@@ -77,7 +77,7 @@ Ouvrir `frontend/index.html` dans le navigateur
 
 ### Variables d'environnement (.env)
 ```env
-DEEPSEEK_API_KEY=your_deepseek_api_key_here
+NVIDIA_API_KEY=nvapi-votre_cle_ici
 PORT=3001
 NODE_ENV=development
 ```
@@ -93,7 +93,7 @@ NODE_ENV=development
 - Node.js + Express
 - Multer pour les uploads
 - PDF-parse pour l'extraction PDF
-- DeepSeek API pour l'analyse IA
+- NVIDIA NIM (build.nvidia.com) pour l'analyse IA — gratuit
 
 ### Frontend
 - React (via CDN)
@@ -125,7 +125,7 @@ open frontend/index.html
 
 ### Intégrer d'autres IA
 1. Créer une nouvelle fonction d'analyse (ex: `analyzeWithOpenAI`)
-2. Modifier la fonction `analyzeWithDeepSeek` pour choisir le provider
+2. Modifier `NVIDIA_MODELS` (.env) pour choisir l'ordre des modèles
 
 ### Ajouter de nouvelles sources de stratégies
 1. Créer une nouvelle fonction d'import (ex: `importFromWeb`)

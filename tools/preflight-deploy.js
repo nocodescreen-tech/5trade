@@ -53,13 +53,12 @@ if (!present('DATABASE_URL')) {
   ok.push(`DATABASE_URL distante : ${val('DATABASE_URL').replace(/:\/\/[^@]*@/, '://***@').slice(0, 48)}…`);
 }
 
-// ─── 2. IA : au moins une voie, idéalement les deux ───
-if (!present('DEEPSEEK_API_KEY') && !present('NVIDIA_API_KEY')) {
-  bloque.push('Aucune clé IA : ni DEEPSEEK_API_KEY (payant) ni NVIDIA_API_KEY (secours gratuit). Les analyses échoueront.');
-} else if (!present('NVIDIA_API_KEY')) {
-  avertit.push('Pas de NVIDIA_API_KEY : plus aucun secours gratuit si le solde DeepSeek tombe à zéro.');
+// ─── 2. IA : NVIDIA NIM est la source unique des analyses texte ───
+if (!present('NVIDIA_API_KEY')) {
+  bloque.push('NVIDIA_API_KEY absente : sans elle, AUCUNE analyse texte ne peut tourner (DeepSeek a été retiré).');
 } else {
-  ok.push(`Secours gratuit armé : ${(val('NVIDIA_MODELS') || 'défaut').split(',').length} modèle(s) NVIDIA NIM`);
+  const liste = (val('NVIDIA_MODELS') || '').split(',').map(s => s.trim()).filter(Boolean);
+  ok.push(`Analyse texte armée : ${liste.length || 'liste par défaut'} modèle(s) NVIDIA NIM en cascade`);
 }
 
 // ─── 3. Comptes : OTP par e-mail ───

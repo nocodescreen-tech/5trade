@@ -34,16 +34,17 @@ const Patterns = require('./patterns');
 const Frais = require('../core/frais');
 // Modèle exporté (R attendu) : pondère les signaux sans remplacer les règles.
 const Modele = require('./modele');
+// Garde-fou des niveaux : implémentation UNIQUE, partagée avec le verdict du
+// direct (`signals.js`). Deux copies d'une même règle finissent par diverger.
+const { assainirNiveaux, arrondiPrix } = require('./niveaux');
+// Contrat de sortie commun aux deux moteurs (forme + validation).
+const Contrat = require('./contrat');
+// Étage Market Intelligence : le régime de marché conditionne ce qui peut être
+// confirmé. Il était écrit, testé, et appelé par personne.
+const Regime = require('../market-intelligence/regime-detector');
 
 const r2 = x => (Number.isFinite(x) ? +x.toFixed(2) : null);
-// Précision ADAPTATIVE pour les PRIX. `r2` (2 décimales) est correct pour un
-// multiple d'ATR ou un ratio, mais faux pour un prix : sur EUR/USD à 1,1234,
-// l'entrée et le stop arrondis valaient TOUS DEUX 1,12 — mesuré, 61 risques sur
-// 62 à zéro sur cet actif, et le stop « élargi » retombait sur la même valeur.
-// Un prix se lit donc avec assez de décimales pour que le risque existe.
-const arrondiPrix = x => (Number.isFinite(x)
-  ? +x.toFixed(Math.abs(x) >= 100 ? 2 : Math.abs(x) >= 1 ? 4 : 6)
-  : null);
+// `arrondiPrix` vit désormais dans `engine/niveaux.js` (partagé avec le direct).
 
 /** BUY/SELL (vocabulaire du moteur) → long/short (vocabulaire du trader). */
 const sensDe = dir => (dir === 'BUY' ? 'long' : dir === 'SELL' ? 'short' : 'neutre');
@@ -52,7 +53,7 @@ const sensDe = dir => (dir === 'BUY' ? 'long' : dir === 'SELL' ? 'short' : 'neut
 function statutDe(status) {
   if (status === 'confirme') return 'confirme';
   if (status === 'surveiller') return 'surveiller';
-  return 'non-rempli';
+  return 'rejete';
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -67,66 +68,6 @@ function statutDe(status) {
  *   • support/résistance → le niveau lui-même ;
  *   • compression/doji/inside → aucune direction : pas de niveaux, et on le dit.
  */
-/**
- * Assainit des niveaux avant de les publier.
- *
- * Deux défauts mesurés sur le journal réel (276 signaux) :
- *  1. **Stop trop près.** 11 % des stops étaient à moins de 0,5 ATR de l'entrée,
- *     les pires à 0,09 ATR. Un tel stop n'est pas une invalidation, c'est du
- *     bruit : il se fait balayer par la mèche suivante, et il gonfle ensuite le
- *     R des gains (un risque de 0,1 ATR transforme +1 ATR en +10 R).
- *     Cause précise : pour Support/Résistance le stop était calculé depuis le
- *     NIVEAU (`niveau ∓ 0,5 ATR`) et non depuis l'entrée — quand le prix était
- *     collé au niveau, le risque tombait à presque rien.
- *  2. **Stop du mauvais côté.** Un achat avec un stop AU-DESSUS de l'entrée
- *     n'est pas un trade : c'est une géométrie cassée. On refuse.
- *
- * @param {{entree:number, stop:number, objectifs:number[]}} niv
- * @param {'long'|'short'} sens
- * @param {number} atr
- * @param {number} [risqueMini] plancher en multiples d'ATR (0,5 par défaut)
- */
-function assainirNiveaux(niv, sens, atr, risqueMini = 0.5) {
-  if (!niv || !Number.isFinite(niv.entree) || !Number.isFinite(niv.stop)) return niv;
-  const long = sens === 'long';
-
-  // Stop du mauvais côté : la configuration est incohérente, on ne la publie pas.
-  if (long ? niv.stop >= niv.entree : niv.stop <= niv.entree) return null;
-
-  // ── Objectifs du mauvais côté ────────────────────────────────────────────
-  // Trouvé sur données réelles : des « Double top » vendaient à 4109,97 avec un
-  // premier objectif à 4114,32 — AU-DESSUS de l'entrée. Le prix l'atteint donc
-  // immédiatement (il est déjà passé), le trade est compté « objectif atteint »
-  // et le R calculé sort NÉGATIF. Résultat à l'écran : « 40 gagnés, 2 perdus,
-  // 95 % de réussite, −4,47 R ». Un gagnant ne peut pas retirer du R.
-  //
-  // Un objectif situé du mauvais côté n'est pas un objectif : c'est un niveau
-  // déjà franchi. On refuse la configuration si la cible PROCHE est invalide, et
-  // on tronque les suivantes — jamais l'inverse, sinon `objectifs[0]` et
-  // `objectifs[1]` se décalent et le suivi TP1/TP2 devient faux.
-  const cote = o => Number.isFinite(o) && (long ? o > niv.entree : o < niv.entree);
-  const brut = Array.isArray(niv.objectifs) ? niv.objectifs : [];
-  if (!brut.length || !cote(brut[0])) return null;
-  const valides = brut.filter(cote);
-  const ecartes = brut.length - valides.length;
-
-  if (!(atr > 0)) return ecartes ? { ...niv, objectifs: valides } : niv;
-  const ecart = Math.abs(niv.entree - niv.stop);
-  const mini = atr * risqueMini;
-  if (ecart >= mini) return ecartes ? { ...niv, objectifs: valides } : niv;
-
-  const stop = long ? niv.entree - mini : niv.entree + mini;
-  return {
-    ...niv,
-    objectifs: valides,
-    stop: arrondiPrix(stop),
-    stopElargi: true,
-    base: [niv.base, `stop élargi à ${risqueMini}× ATR (le niveau était à ${arrondiPrix(ecart)} du prix)`,
-      ecartes ? `${ecartes} objectif(s) écarté(s) : du mauvais côté de l'entrée` : null]
-      .filter(Boolean).join(' · ')
-  };
-}
-
 function niveauxMotif(motif, candles, atr) {
   const brut = niveauxMotifBrut(motif, candles, atr);
   return assainirNiveaux(brut, motif.sens, atr);
@@ -323,6 +264,10 @@ function signalStrategie(candles, meta, profil) {
     seuilRegles: profil.seuilRegles,
     filtres: profil.filtres,
     parametres: profil.parametres,
+    // Les conditions OBLIGATOIRES doivent traverser : sans elles, le moteur
+    // interne ne peut jamais rendre 'refuse' et seul le calcul local (plus bas)
+    // protège. Une règle écrite deux fois finit toujours par diverger.
+    obligatoires: profil.obligatoires || [],
     strategie: { id: profil.id, titre: profil.titre }
   };
 
@@ -482,7 +427,7 @@ function signauxMotifs(candles, meta, analyseMotifs) {
       sens: m.sens,
       // Un motif « rempli » n'est pas un signal confirmé : il décrit une figure.
       // Le seuil de fiabilité est explicite (0,6) et affiché.
-      status: m.ok ? (m.force >= 0.6 ? 'confirme' : 'surveiller') : 'non-rempli',
+      status: m.ok ? (m.force >= 0.6 ? 'confirme' : 'surveiller') : 'rejete',
       force: m.force,
       conditions: conditionsMotif(m),
       preuves: m.preuves || [],
@@ -967,6 +912,42 @@ function detecterTout(candles, meta = {}, options = {}) {
     }
   }
 
+  // 4 bis. RÉGIME DE MARCHÉ — l'étage `market-intelligence` existait mais aucun
+  // parcours de production ne l'appelait. Mesuré sur 36 séries réelles : 24
+  // verdicts directionnels émis dans un régime `ranging` (confiance 0,66–0,93),
+  // dont plusieurs « confirmé ». Un range n'a pas de direction : aucun signal
+  // directionnel n'y est confirmé. Le signal reste VISIBLE, il redescend à
+  // « à surveiller » avec sa raison — il n'est jamais supprimé.
+  let regime = null;
+  try {
+    regime = Regime.detecter(candles, { classe: options.classe || 'inconnu' });
+  } catch { /* un régime indisponible ne doit pas bloquer l'analyse */ }
+  // Une seule passe : le régime soit RETIRE la confirmation (range), soit la
+  // laisse passer en le disant (UNKNOWN). Deux boucles jumelles pour la même
+  // intention finissent par diverger.
+  const retireConfirmation = !!regime && regime.regime === 'ranging' && (regime.confiance || 0) >= 0.5;
+  const noteRegime = retireConfirmation
+    ? `régime de range (confiance ${regime.confiance}) : pas de direction confirmée`
+    : (regime && regime.regime === 'UNKNOWN'
+      ? 'régime indéterminé : signal non filtré par le régime' : null);
+  if (noteRegime) {
+    for (const s of signaux) {
+      if (s.status !== 'confirme') continue;
+      if (retireConfirmation) s.status = 'surveiller';
+      s.raison = [s.raison, noteRegime].filter(Boolean).join(' — ');
+      s.regime = regime.regime;
+    }
+  }
+
+  // 4 ter. ALIGNEMENT MULTI-UNITÉS — le moteur ne peut pas l'inventer : il ne
+  // reçoit qu'UNE série. L'appelant qui l'a calculé (sinon à quoi bon « exiger
+  // l'alignement ») le transmet ici, et chaque signal le porte. Sans cette
+  // transmission, `s.confluence` restait toujours null : le test d'alignement de
+  // DecisionEngine ne s'exécutait JAMAIS, alors que l'écran affichait « 2/3 ».
+  if (options.confluence) {
+    for (const s of signaux) s.confluence = options.confluence;
+  }
+
   // 5. PLAFOND DE COÛT — un risque plus petit que les frais n'est pas un trade.
   //    Un seul point d'application, comme pour la confluence : tous les émetteurs
   //    de niveaux (motifs, structure, stratégies) passent ici.
@@ -1054,7 +1035,7 @@ function detecterTout(candles, meta = {}, options = {}) {
   // le R ATTENDU décroissant (ce qui vaut le plus passe en tête), puis la force.
   // Trier par force seule mettait en avant un signal « solide » que le modèle
   // juge perdant : c'est l'espérance qui décide de l'ordre de lecture.
-  const ordre = { confirme: 0, surveiller: 1, 'non-rempli': 2, erreur: 3 };
+  const ordre = { confirme: 0, surveiller: 1, 'rejete': 2, erreur: 3 };
   // Sentinelle finie : `-Infinity - -Infinity` vaut NaN et un comparateur NaN
   // laisse l'ordre indéterminé.
   const rAtt = s => (s.modele && Number.isFinite(s.modele.rAttendu) ? s.modele.rAttendu : -999);
@@ -1063,12 +1044,24 @@ function detecterTout(candles, meta = {}, options = {}) {
     || rAtt(b) - rAtt(a)
     || (b.force || 0) - (a.force || 0));
 
+  // 7. CONTRAT DE SORTIE — les trois émetteurs (stratégie, motif, structure) sont
+  //    ramenés à la même forme et VALIDÉS avant publication. Un signal hors
+  //    contrat reste visible (le faire disparaître laisserait croire que le
+  //    marché n'a rien dit) mais il porte `contrat.ok = false` + la raison, et
+  //    DecisionEngine refuse de l'exécuter.
+  const horsContrat = [];
+  for (const s of signaux) {
+    const v = Contrat.validerSignal(s);
+    s.contrat = v;
+    if (!v.ok) horsContrat.push({ id: s.id, nom: s.nom, source: s.source, manquants: v.manquants, invalides: v.invalides });
+  }
+
   const retenus = signaux.filter(s => s.status === 'confirme' || s.status === 'surveiller');
   const synthese = {
     total: signaux.length,
     confirmes: signaux.filter(s => s.status === 'confirme').length,
     aSurveiller: signaux.filter(s => s.status === 'surveiller').length,
-    nonRemplis: signaux.filter(s => s.status === 'non-rempli').length,
+    rejetes: signaux.filter(s => s.status === 'rejete').length,
     erreurs: signaux.filter(s => s.status === 'erreur').length,
     long: retenus.filter(s => s.sens === 'long').length,
     short: retenus.filter(s => s.sens === 'short').length,
@@ -1090,6 +1083,13 @@ function detecterTout(candles, meta = {}, options = {}) {
     // Combien de configurations refusées parce que l'objectif ne valait pas le
     // risque : c'est un refus de construction, pas de marché.
     ecartesRR: ecartesRR.length,
+    // Contrat de sortie : combien de signaux respectent la forme commune.
+    contrat: {
+      version: Contrat.CONTRAT.version,
+      valides: signaux.length - horsContrat.length,
+      invalides: horsContrat.length,
+      details: horsContrat.slice(0, 10)
+    },
     rrMin: Number.isFinite(Number(options.rrMin)) ? Number(options.rrMin) : 0,
     rrMaxStrategie: Number.isFinite(Number(options.rrMaxStrategie))
       ? Number(options.rrMaxStrategie) : 2,
@@ -1111,6 +1111,9 @@ function detecterTout(candles, meta = {}, options = {}) {
     at: candles && candles.length ? candles[candles.length - 1].t : null,
     symbol: meta.symbol || null,
     timeframe: meta.timeframe || null,
+    // Régime mesuré (trending / ranging / volatil / UNKNOWN) : l'écran doit
+    // pouvoir dire POURQUOI un signal confirmé est redescendu à surveiller.
+    regime: regime || null,
     price: candles && candles.length ? candles[candles.length - 1].c : null,
     atr: analyseMotifs ? analyseMotifs.atr : (vStructure ? vStructure.atr : null),
     signaux,
