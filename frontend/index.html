@@ -2573,7 +2573,7 @@ function LiveDecisionCenter({ decision, sse, price, at, symbol, tf, providerLabe
                   ? <>Risque : refusé — {(src.risque.refus || []).join(' · ')}</>
                   : src.risque.consulte
                     ? <>Risque : plafonds du compte respectés pour cette prise</>
-                    : <>Risque : <b>non vérifié</b> — aucun état de compte n'a été fourni à la décision</>}
+                    : <>Risque : <b>non vérifié</b> — {src.risque.motif || "aucun état de compte n'a été fourni à la décision"}</>}
               </div>
             )}
           </div>
@@ -2607,14 +2607,36 @@ function LiveDecisionCenter({ decision, sse, price, at, symbol, tf, providerLabe
 }
 
 // ── Trade Setup — seulement quand les niveaux sont réellement calculables ──
-function TradeSetupCard({ signal, sens, onToJournal, symbol, tf, provider, providerLabel }) {
+/* Compteur d'attente : une analyse prend 6 à 20 s (alignement multi-unités +
+   décision). Un spinner muet laisse croire à un blocage ; un compteur montre
+   que ça avance. */
+function TempsAnalyse({ depuis }) {
+  const [s, setS] = React.useState(0);
+  React.useEffect(() => {
+    const t = setInterval(() => setS(Math.round((Date.now() - (depuis || Date.now())) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [depuis]);
+  return <span style={{ fontVariantNumeric: 'tabular-nums' }}> ({s} s)</span>;
+}
+
+function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provider, providerLabel }) {
   const lv = signal && signal.levels ? signal.levels : null;
   const ok = lv && Number.isFinite(Number(lv.entry)) && Number.isFinite(Number(lv.stop));
   if (!ok) {
     // Deux situations différentes, deux messages différents : « le moteur
     // cherche encore » n'est pas « le moteur a conclu qu'il n'y a rien ».
     // Les confondre affichait un verdict pendant l'analyse.
-    const enCours = !signal;
+    // « En cours » veut dire : le moteur n'a pas encore répondu. Si le moteur a
+    // répondu NO_TRADE, ce n'est PAS en cours — c'est une conclusion, et elle a
+    // une raison. Annoncer « analyse en cours » dans ce cas laissait l'écran
+    // tourner indéfiniment sur une analyse terminée.
+    // Le repli SSE porte la même information : sans lui, la bande affichait
+    // NO TRADE (via le flux) pendant que cette carte affichait « analyse en
+    // cours » (via la requête REST pas encore revenue).
+    const enCours = !decision;
+    const motifMoteur = decision
+      ? (signal && signal.levels ? null : (decision.raison || decision.decision || 'aucun setup exécutable'))
+      : null;
     return (
       <div className="panel" style={{ padding: '11px 14px', marginBottom: 12,
         borderColor: 'rgba(148,163,184,.3)' }}>
@@ -2622,8 +2644,11 @@ function TradeSetupCard({ signal, sens, onToJournal, symbol, tf, provider, provi
           <i className={`fas ${enCours ? 'fa-spinner fa-spin' : 'fa-circle-info'}`}
             style={{ marginRight: 7, color: TT.neu }}></i>
           {enCours
-            ? "Analyse du marché en cours : les niveaux ne sont pas encore calculés."
-            : "Aucun setup exécutable : entrée et invalidation ne sont pas calculables sur ce graphique. Le moteur ne publie pas de trade qu'il ne peut pas chiffrer."}
+            ? <React.Fragment>
+                Analyse du marché en cours : les niveaux ne sont pas encore calculés.
+                <TempsAnalyse depuis={window.__debutAnalyse} />
+              </React.Fragment>
+            : <>Aucun setup exécutable — {motifMoteur}. Le moteur ne publie pas de trade qu'il ne peut pas chiffrer.</>}
         </div>
       </div>
     );
@@ -3305,6 +3330,7 @@ function LiveMarket({ onToJournal }) {
   useEffect(() => {
     setCandles([]); setReport(null); setVocabulaire(null);
     setDecision(null); setSse(null); setConfluence(null); setTicks(0);
+    window.__debutAnalyse = Date.now();   // point de départ du compteur d'attente
   }, [symbol, tf, provider]);
 
   // Bougies + structure (playbooks, vocabulaire) — rafraîchi régulièrement.
@@ -3636,7 +3662,7 @@ function LiveMarket({ onToJournal }) {
         providerLabel={providerLabel} confluence={confluence} />
 
       {/* Setup chiffré, seulement s'il existe */}
-      <TradeSetupCard signal={meilleurSetup}
+      <TradeSetupCard signal={meilleurSetup} decision={decision || (sse && sse.decision ? sse : null)}
         sens={sensAffiche} onToJournal={onToJournal} symbol={symbol} tf={tf}
         provider={provider} providerLabel={providerLabel} />
 

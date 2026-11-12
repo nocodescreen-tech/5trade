@@ -254,8 +254,13 @@ function niveauConfirmation(signaux, options = {}) {
       statusFinal = 'confirme';
     } else if (s.status === 'surveiller') {
       surveiller++;
+      // Sans ce motif, un signal restait non confirmé avec une liste de
+      // blocages VIDE : l'écran ne pouvait pas dire pourquoi. Trois signaux sur
+      // quinze tombaient dans ce trou lors de la mesure sur R_75.
+      blocages.push("statut « à surveiller » : la source ne le donne pas comme confirmé");
     } else {
       nonConfirmes++;
+      blocages.push(`statut « ${s.status} » : signal non confirmé`);
     }
 
     details.push({
@@ -573,7 +578,13 @@ function niveauArbitrage(signaux, meta, options = {}) {
  */
 function niveauRisque(arbitrage, options = {}) {
   const etat = { consulte: false, ok: null, refus: [] };
-  if (arbitrage.decision !== 'ACHAT' && arbitrage.decision !== 'VENTE') return { etat, decision: null };
+  if (arbitrage.decision !== 'ACHAT' && arbitrage.decision !== 'VENTE') {
+    // Pas de trade à soumettre ≠ pas d'état de compte. L'écran affichait
+    // « aucun état de compte fourni » alors que le compte était fourni : il n'y
+    // avait simplement rien à contrôler. On nomme la vraie raison.
+    return { etat: { ...etat, motif: `aucun trade à soumettre au risque (décision ${arbitrage.decision})` },
+      decision: null };
+  }
 
   if (typeof options.verificateurRisque !== 'function') {
     return { etat: { ...etat, motif: 'aucun vérificateur de risque fourni' }, decision: null };

@@ -335,6 +335,21 @@ function providerById(id) {
  * absence de données. On ne le déduit pas d'une liste qu'on suppose complète :
  * on le prouve quand le symbole figure chez un AUTRE fournisseur.
  */
+/**
+ * Fournisseur à utiliser quand l'appelant n'en impose pas : celui qui liste
+ * réellement le symbole. On ne remplace jamais un instrument par un autre — on
+ * évite de le demander à une source qui ne le connaît pas.
+ */
+function fournisseurPour(symbol) {
+  const actif = activeProvider();
+  const sert = p => Array.isArray(p.symbols)
+    && p.symbols.some(s => String(s.symbol || s).toUpperCase() === String(symbol).toUpperCase());
+  if (sert(actif)) return actif;
+  const autre = Object.values(PROVIDERS).find(sert);
+  if (autre) return autre;
+  throw new Error(`Symbole « ${symbol} » absent de tous les fournisseurs configurés`);
+}
+
 function verifierSymbole(p, symbol) {
   const nom = s => String((s && s.symbol) || s || '').toUpperCase();
   const cible = nom(symbol);
@@ -473,7 +488,11 @@ function assainirBougies(liste, tf) {
 
 async function getCandles(symbol, tf, count = 300, providerId) {
   if (!TF_MS[tf]) throw new Error(`Timeframe inconnu : ${tf} (attendu ${TIMEFRAMES.join(', ')})`);
-  const p = providerId ? providerById(providerId) : activeProvider();
+  // Sans fournisseur explicite, on choisit celui qui SERT réellement le symbole.
+  // Avant, on prenait le fournisseur actif puis on vérifiait : R_75 demandé sans
+  // fournisseur levait « servi par deriv, pas par binance », donc aucune bougie,
+  // donc aucun signal — l'écran restait sur « analyse en cours » indéfiniment.
+  const p = providerId ? providerById(providerId) : fournisseurPour(symbol);
   verifierSymbole(p, symbol);
   const k = keyOf(p.id, symbol, tf);
   const buf = buffers.get(k);

@@ -3940,6 +3940,24 @@ function tinyPng(W = 64, H = 40) {
           moteur: { regles: ['R2'], seuilRegles: 1 }
         }).executable === true);
 
+      // Régression du blocage d'écran : getCandles sans fournisseur levait pour
+      // tout symbole non servi par le fournisseur actif, donc aucune bougie,
+      // donc aucun signal, donc « analyse en cours » indéfiniment.
+      const srcMk = fs.readFileSync(path.join(__dirname, 'sources', 'market.js'), 'utf8');
+      ok('sans fournisseur, les bougies vont à celui qui sert le symbole',
+        /fournisseurPour\(symbol\)/.test(srcMk) && /function fournisseurPour/.test(srcMk));
+      ok('un symbole inconnu de tous les fournisseurs est refusé',
+        /absent de tous les fournisseurs configurés/.test(srcMk));
+
+      // Régression : un signal « à surveiller » était rejeté sans motif.
+      ok('aucun rejet de confirmation sans motif',
+        /statut « à surveiller » : la source ne le donne pas comme confirmé/.test(srcDE)
+        && /statut « \$\{s\.status\} » : signal non confirmé/.test(srcDE));
+
+      // Régression : « risque non vérifié » affiché alors que le compte existait.
+      ok('le risque distingue « rien à contrôler » de « compte absent »',
+        /aucun trade à soumettre au risque/.test(srcDE));
+
       ok('les quatre directions sont rendues distinctement',
         /'BUY ↗'/.test(ui) && /'SELL ↘'/.test(ui) && /'NEUTRAL ·'/.test(ui) && /'UNKNOWN \?'/.test(ui));
     }

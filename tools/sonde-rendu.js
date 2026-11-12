@@ -16,7 +16,11 @@ const http = require('http');
 // fonctionne depuis n'importe quel répertoire courant.
 const WebSocket = require(path.join(__dirname, '..', 'api', 'node_modules', 'ws'));
 
-const [, , url, larg, haut, sortie, cookie] = process.argv;   // cookie optionnel : nom=valeur
+const [, , url, larg, haut, sortie, cookie, attenteArg] = process.argv;   // cookie puis attente en ms
+// L'analyse du terminal prend plusieurs secondes (mesure : 5,6 s sur /api/decision).
+// Sans attente, la capture montrait toujours l'état « analyse en cours » et
+// faisait conclure à tort que l'écran était bloqué.
+const attenteFinale = Math.max(0, Number(attenteArg) || 0);
 const W = Number(larg || 390), H = Number(haut || 844);
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PORT = 9331;
@@ -103,6 +107,7 @@ let ws;
   }
   if (!charge) console.warn('ATTENTION : squelettes encore présents après 30 s');
   await attendre(800);    // laisse les animations d'entrée se poser
+  if (attenteFinale) await attendre(attenteFinale);   // attendre le résultat de l'analyse
 
   // Mesure réelle : le document déborde-t-il ?
   const mesure = await cdp('Runtime.evaluate', {
