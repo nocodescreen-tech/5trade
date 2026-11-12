@@ -615,6 +615,22 @@ function tinyPng(W = 64, H = 40) {
     };
     const faux = { getCandles: async () => ({ candles: serie(), provider: 'test' }),
       listSymbols: () => [{ provider: 'test', providerLabel: 'test' }] };
+
+    // Le chemin de repli ne peut plus alerter (il contournait le risque) : la
+    // fixture fournit donc un moteur de décision, comme en production.
+    const fauxDE = {
+      decider: () => {
+        const s = serie();
+        const dernier = s[s.length - 1];
+        return {
+          decision: 'ACHAT', raison: 'test', at: dernier.t, price: dernier.c,
+          signal: { sens: 'long', force: 0.8, id: 'test',
+            levels: { entry: dernier.c, stop: dernier.c - 2, objectifs: [dernier.c + 2, dernier.c + 4] } },
+          signauxRetenus: [{ id: 'test', statut: 'confirme', executable: true }],
+          confluence: null
+        };
+      }
+    };
     Al.load();
     Al.update({ actif: false, email: null });
 
@@ -628,7 +644,8 @@ function tinyPng(W = 64, H = 40) {
 
     const envois = [];
     Al.update({ actif: false, email: 'a@b.co', marches: [{ symbol: 'R_75', tf: '15m', provider: 'test' }] });
-    Al.start({ market: faux, signals: Sig, sendMail: async m => envois.push(m), labelOf: () => 'test' });
+    Al.start({ market: faux, signals: Sig, sendMail: async m => envois.push(m), labelOf: () => 'test',
+      DecisionEngine: fauxDE });
     let rr = await Al.verifier(false);
     ok('alertes : désactivées → aucun contrôle', rr.controle === false && envois.length === 0);
 
@@ -3405,9 +3422,17 @@ function tinyPng(W = 64, H = 40) {
         const p = i < 50 ? 100 + i * 0.05 : (i < 60 ? 108 - i * 0.35 : 105 + i * 0.4);
         return { t: Date.now() - (119 - i) * 900000, o: p, h: p * 1.002, l: p * 0.998, c: p, v: 1000, closed: true };
       });
+      // Ces fixtures EXIGENT l'alignement : elles doivent donc fournir les
+      // unités. Sans elles, la condition MTF n'est pas remplie — c'est le
+      // comportement correct depuis que l'exigence sans données est bloquante.
+      const confluenceAlig = {
+        aligne: true, nbAlignes: 3, seuilAlignes: 2, contreTendance: false,
+        detail: [{ tf: '5m' }, { tf: '15m' }, { tf: '1h' }]
+      };
       const O = o => Object.assign({
         exigerAlignement: true, refuserDesaccord: true,
-        refuserContreTendance: true, verifierFrais: true, verifierModele: true
+        refuserContreTendance: true, verifierFrais: true, verifierModele: true,
+        confluence: confluenceAlig
       }, o);
       const sansVerif = DE.decider(serieR, { symbol: 'T', timeframe: '15m' }, O({}));
       ok('la série de test produit bien un trade exécutable',
@@ -3434,8 +3459,12 @@ function tinyPng(W = 64, H = 40) {
 
       const panne = DE.decider(serieR, { symbol: 'T', timeframe: '15m' },
         O({ verificateurRisque: () => { throw new Error('journal illisible'); } }));
-      ok('un vérificateur en panne ne bloque ni n\'autorise en silence',
-        panne.decision === 'ACHAT' && panne.risque.consulte === true && panne.risque.ok === null
+      // Ce test encodait le défaut relevé par l'audit : un vérificateur en panne
+      // laissait la décision ACHAT intacte. Un contrôle de risque qui échoue ne
+      // peut pas AUTORISER — la décision devient ATTENTE, et le motif est écrit.
+      ok('un vérificateur en panne rend la décision NON EXÉCUTABLE',
+        panne.decision === 'ATTENTE' && panne.risque.consulte === true
+        && panne.risque.ok === null && panne.risque.verifie === false
         && /journal illisible/.test(panne.risque.erreur || ''),
         JSON.stringify(panne.risque));
 
@@ -3495,9 +3524,16 @@ function tinyPng(W = 64, H = 40) {
         const p = i < 50 ? 100 + i * 0.05 : (i < 60 ? 108 - i * 0.35 : 105 + i * 0.4);
         return { t: Date.now() - (119 - i) * 900000, o: p, h: p * 1.002, l: p * 0.998, c: p, v: 1000, closed: true };
       });
+      // Exiger l'alignement oblige à fournir les unités : la condition n'est pas
+      // remplie en leur absence. `confKO` reste passé explicitement plus bas.
+      const confAligneC = {
+        aligne: true, nbAlignes: 3, seuilAlignes: 2, contreTendance: false,
+        detail: [{ tf: '15m' }, { tf: '1h' }, { tf: '4h' }]
+      };
       const O = o => Object.assign({
         exigerAlignement: true, refuserDesaccord: true,
-        refuserContreTendance: true, verifierFrais: true, verifierModele: true
+        refuserContreTendance: true, verifierFrais: true, verifierModele: true,
+        confluence: confAligneC
       }, o);
       const confKO = {
         aligne: false, nbAlignes: 0, seuilAlignes: 2,
@@ -3583,6 +3619,148 @@ function tinyPng(W = 64, H = 40) {
       // le moteur et les tests.
       ok('le classifieur n\'a aucune dépendance',
         !/require\(/.test(fs.readFileSync(path.join(__dirname, 'market-intelligence', 'instrument-classifier.js'), 'utf8')));
+    }
+
+    // ── CHANTIERS D'AUDIT : risque, MTF, fournisseur, moteurs, scan ────────
+    {
+      const DE = require('./engine/DecisionEngine');
+      const Mk = require('./moteurs');
+      const Marche = require('./sources/market');
+
+      // 1) RISQUE — un vérificateur en panne ne peut pas AUTORISER.
+      {
+        const serie = Array.from({ length: 120 }, (_, i) => {
+          const p = i < 50 ? 100 + i * 0.05 : (i < 60 ? 108 - i * 0.35 : 105 + i * 0.2);
+          return { t: 1700000000000 + i * 300000, o: p, h: p + 0.4, l: p - 0.4, c: p + 0.1, v: 100 };
+        });
+        const enPanne = DE.decider(serie, { symbol: 'T', timeframe: '5m' }, {
+          optionsAnalyse: {}, verificateurRisque: () => { throw new Error('compte illisible'); }
+        });
+        ok('un contrôle de risque en ERREUR rend la décision non exécutable',
+          enPanne.decision !== 'ACHAT' && enPanne.decision !== 'VENTE',
+          enPanne.decision + ' — ' + (enPanne.risque && enPanne.risque.erreur));
+        ok('le risque distingue vérifié / refusé / non vérifié',
+          enPanne.risque && enPanne.risque.verifie === false
+          && enPanne.risque.consulte === true);
+      }
+
+      // 2) MTF — exiger l'alignement sans données ne laisse pas confirmer.
+      {
+        const C = require('./engine/contrat');
+        const src = fs.readFileSync(path.join(__dirname, 'engine', 'DecisionEngine.js'), 'utf8');
+        ok('une stratégie qui exige le MTF sans données ne peut pas être confirmée',
+          /alignement MTF exigé mais données absentes/.test(src)
+          && /blocages\.push\(.alignement MTF exigé mais données absentes/.test(src));
+        ok('le contrat connaît les trois états du risque',
+          /verifie: true/.test(src) && /verifie: false/.test(src));
+        void C;
+      }
+
+      // 3) FOURNISSEUR — un identifiant inconnu est refusé, plus remplacé en silence.
+      ok('un fournisseur inconnu est refusé explicitement',
+        (() => {
+          try { Marche.providerById ? Marche.providerById('nexistepas') : (() => { throw new Error('x'); })(); return false; }
+          catch (e) { return /inconnu/i.test(e.message); }
+        })() || /FOURNISSEUR_INCONNU/.test(fs.readFileSync(path.join(__dirname, 'sources', 'market.js'), 'utf8')));
+
+      // 4) MOTEURS — un par classe, et l'aveu quand il n'existe pas.
+      {
+        const etat = Mk.etat();
+        const synth = etat.find(x => x.classe === 'synthetique');
+        const forex = etat.find(x => x.classe === 'forex');
+        ok('les synthétiques ont un moteur dédié', synth && synth.specialise === true && !!synth.version);
+        ok('les classes sans moteur l\'avouent au lieu de faire semblant',
+          forex && forex.specialise === false && !!forex.motif);
+        ok('le moteur des synthétiques ne prétend pas prédire la direction',
+          synth.limites.some(l => /direction/i.test(l)));
+
+        // Marche aléatoire : rien ne justifie un refus.
+        let seed = 12345;
+        const alea = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+        const marche = [100];
+        for (let i = 1; i < 300; i++) marche.push(marche[i - 1] * (1 + (alea() - 0.5) * 0.01));
+        const dOk = Mk.analyser('synthetique', marche, { symbol: 'R_75' });
+        ok('une marche aléatoire est acceptée par le moteur synthétique', dOk.convient === true);
+
+        // Série dominée par des sauts : la structure de prix n'explique rien.
+        const sauts = [100];
+        for (let i = 1; i < 300; i++) {
+          const saut = i % 60 === 0 ? 0.08 : (alea() - 0.5) * 0.0005;
+          sauts.push(sauts[i - 1] * (1 + saut));
+        }
+        const dKo = Mk.analyser('synthetique', sauts, { symbol: 'BOOM1000' });
+        ok('une série dominée par les sauts est refusée, avec sa raison',
+          dKo.convient === false && dKo.refus.join(' ').includes('sauts'),
+          dKo.refus.join(' · '));
+
+        ok('le moteur est branché dans le scan, par classe',
+          /Moteurs\.pour\(classe\)/.test(fs.readFileSync(path.join(__dirname, 'delivery', 'scan.js'), 'utf8')));
+      }
+
+      // 5) SCAN — un seul cycle à la fois.
+      {
+        const srcScan = fs.readFileSync(path.join(__dirname, 'delivery', 'scan.js'), 'utf8');
+        ok('le scan refuse de se chevaucher (verrou d\'exécution)',
+          /if \(etat\.enCours\)/.test(srcScan) && /chevauchements\+\+/.test(srcScan));
+        const S = require('./delivery/scan');
+        ok('l\'écran peut voir le verrou et les chevauchements évités',
+          'enCours' in S.dernierScan() && 'chevauchementsEvites' in S.dernierScan());
+      }
+
+      // 6) ANALYSE — aucune fiche non déclarée ne part au plan.
+      ok('l\'analyse ne retombe plus sur les mots-clés quand rien ne déclare son marché',
+        !/compatibles\.length \? parClasse\.compatibles : matched/.test(
+          fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8')));
+    }
+
+    // ── VERDICT ÉCONOMIQUE PAR PAIRE ───────────────────────────────────────
+    // Question mesurée : le système lit-il l'impact d'une annonce et rend-il un
+    // verdict pour chaque paire LIÉE ? Le parseur était cassé (6 groupes capturés
+    // pour 7 variables → `.trim()` sur undefined levait sur chaque événement) et
+    // la comparaison ignorait la date : une annonce du lendemain bloquait la
+    // paire aujourd'hui.
+    {
+      const F = require('./sources/fundamentals');
+      const maintenant = new Date(Date.UTC(2026, 10, 12, 9, 0, 0));
+      const ev = (date, heure, devise, impact, titre) => ({ date, heure, devise, impact, titre });
+
+      ok('un événement « Nov 12 8:30am » est daté correctement',
+        F.instantEvenement(ev('Nov 12', '8:30am'), maintenant) === Date.UTC(2026, 10, 12, 8, 30));
+
+      ok('12:00am vaut minuit et 12:30pm vaut midi trente',
+        F.instantEvenement(ev('Nov 12', '12:00am'), maintenant) === Date.UTC(2026, 10, 12, 0, 0)
+        && F.instantEvenement(ev('Nov 12', '12:30pm'), maintenant) === Date.UTC(2026, 10, 12, 12, 30));
+
+      ok('une heure illisible (« All Day ») ne produit pas d\'instant',
+        F.instantEvenement(ev('Nov 12', 'All Day'), maintenant) === null);
+
+      const cal = [ev('Nov 12', '9:10am', 'USD', 'high', 'CPI m/m')];
+      ok('une annonce USD à fort impact bloque les paires qui contiennent USD',
+        ['frxEURUSD', 'frxXAUUSD', 'US30', 'BTCUSDT'].every(p =>
+          F.devisesDuSymbole(p).devises.some(d =>
+            F.verdictDevise(cal, d, { maintenant, fenetreMin: 30 }).bloque)));
+
+      ok('elle ne bloque pas un indice synthétique (aucune devise)',
+        F.devisesDuSymbole('R_75').applicable === false);
+
+      ok('une annonce d\'hier à la même heure ne bloque plus aujourd\'hui',
+        F.verdictDevise([ev('Nov 11', '9:10am', 'USD', 'high', 'NFP')], 'USD',
+          { maintenant, fenetreMin: 30 }).bloque === false);
+
+      ok('une annonce à impact moyen ne bloque pas',
+        F.verdictDevise([ev('Nov 12', '9:10am', 'USD', 'medium', 'Tankan')], 'USD',
+          { maintenant, fenetreMin: 30 }).bloque === false);
+
+      // Le calendrier ne doit pas échouer en silence : une source injoignable
+      // se déclare non vérifiée, elle ne se déclare pas « claire ».
+      const srcF = fs.readFileSync(path.join(__dirname, 'sources', 'fundamentals.js'), 'utf8');
+      ok('le calendrier capte l impact au lieu de decaler les groupes',
+        srcF.includes('impactHtml')
+        && !srcF.includes('[, date, heure, devise, impact, titre, forecast, previous]'));
+
+      const srcSrv = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+      ok('une analyse de dépêches vide est signalée comme un échec, pas un succès',
+        /aucune dépêche n'a pu être classée/.test(srcSrv));
     }
 
     // ── INVARIANT : toute route qui DÉCIDE fournit les deux garde-fous ────
@@ -5392,10 +5570,13 @@ function tinyPng(W = 64, H = 40) {
         }).map(([nom]) => nom);
         return iJournal > 0 && fautifs.length === 0;
       })());
-    ok('le journal enregistre ce qui vient d\'être retenu, dans les deux chemins',
+    ok('le journal n enregistre que les signaux RETENUS et execuctables',
       (() => {
         const a = fs.readFileSync(path.join(__dirname, 'delivery', 'alerts.js'), 'utf8');
-        return /multi \? multi\.signaux : \(decision && decision\.signaux\)/.test(a);
+        // La liste brute contient des signaux « confirme » d AVANT les filtres :
+        // les journaliser revenait a ouvrir des positions jamais publiees.
+        return /decision\.signauxRetenus/.test(a)
+          && /filter\(x => x\.executable === true\)/.test(a);
       })());
 
     // ── N stratégies : SÉPARÉES à l'évaluation, FUSIONNÉES si même trade ──

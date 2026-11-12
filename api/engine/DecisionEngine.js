@@ -93,7 +93,12 @@ function niveauValidation(signaux, options = {}) {
       const filtres = s.filtres || [];
       for (const cle of s.filtresExiges) {
         const f = filtres.find(x => x.cle === cle);
-        if (f && !f.ok) {
+        if (!f) {
+          // Absent ≠ satisfait. Avant, un filtre obligatoire jamais évalué
+          // passait pour rempli : la condition la plus importante d'une
+          // stratégie pouvait être ignorée en silence.
+          blocages.push(`filtre obligatoire « ${cle} » NON ÉVALUÉ : condition non vérifiable, donc non remplie`);
+        } else if (!f.ok) {
           blocages.push(`filtre « ${f.label} » non rempli : ${f.detail}`);
         }
       }
@@ -121,12 +126,16 @@ function niveauValidation(signaux, options = {}) {
     // Les conditions de structure font partie du contexte de marché (comme le filtre 'structure' qui est optionnel).
     // Si la stratégie EXIGE le filtre 'structure', c'est géré plus haut via filtresExiges.
     // Ici on ne fait que remonter l'info, sans bloquer.
-    if (source === 'structure' && s.structureContexte?.conditions) {
-      // Ne rien faire : les conditions de structure sont du contexte, pas des filtres bloquants
-      // const nonRemplies = s.structureContexte.conditions.filter(c => c.ok === false);
-      // if (nonRemplies.length) {
-      //   blocages.push(`${nonRemplies.length} condition(s) de structure non remplie(s)`);
-      // }
+    // Conditions STRUCTURELLES : le contexte reste informatif, mais une
+    // condition que le setup lui-même déclare OBLIGATOIRE ne peut pas échouer
+    // sans bloquer. Un balayage pouvait être « confirmé » alors que le niveau
+    // n'avait pas été repris : la définition du setup contredisait son statut.
+    if (source === 'structure') {
+      const conds = (s.structureContexte && s.structureContexte.conditions) || s.conditions || [];
+      const exigees = conds.filter(c => c && c.obligatoire === true && c.ok === false);
+      if (exigees.length) {
+        blocages.push(`condition obligatoire non remplie : ${exigees.map(c => c.nom).join(', ')}`);
+      }
     }
 
     if (blocages.length) {
@@ -161,6 +170,11 @@ function niveauConfirmation(signaux, options = {}) {
   let nonConfirmes = 0;
 
   const exigerAlignement = options.exigerAlignement !== false;
+  // « Exigé » et « exigé EXPLICITEMENT » ne sont pas la même chose : un appelant
+  // qui demande l'alignement doit fournir les unités, sinon sa condition n'est
+  // pas remplie. Un appelant qui ne le demande pas (backtest, tests isolés) ne
+  // doit pas se retrouver bloqué faute de données qu'il n'a jamais demandées.
+  const alignementImpose = options.exigerAlignement === true;
   const refuserDesaccord = options.refuserDesaccord !== false;
   const refuserContreTendance = options.refuserContreTendance !== false;
   const seuilAlignes = options.seuilAlignes || 2;
@@ -169,6 +183,10 @@ function niveauConfirmation(signaux, options = {}) {
     const nom = s.nom || s.id;
     const source = s.source || 'inconnu';
     const blocages = [];
+    // Chaînage : un signal que la validation a rejeté ne peut pas être confirmé.
+    if (s.valide === false) {
+      blocages.push('validation non acquise : signal non valide, confirmation impossible');
+    }
     let statusFinal = s.status;
     let alignementMTF = s.confluence ? (s.confluence.aligne ? 'aligné' : 'insuffisant') : null;
 
@@ -209,11 +227,16 @@ function niveauConfirmation(signaux, options = {}) {
         blocages.push(`contre-tendance détectée : ${conf.motif}`);
       }
     }
-    // Alignement exigé mais non fourni : on ne bloque pas (le moteur ne peut pas
-    // inventer les autres unités), mais on l'ÉCRIT. Sans cette trace, le niveau
-    // affichait « confirmé » alors que la vérification n'avait pas eu lieu.
+    // Alignement exigé mais données absentes : on ne peut pas inventer les
+    // autres unités — donc la condition n'est PAS remplie. Laisser passer en
+    // écrivant seulement « non vérifié » revenait à exiger pour la forme : un
+    // signal confirmé restait exécutable sans qu'aucune vérification ait eu lieu.
     if (exigerAlignement && !s.confluence) {
       alignementMTF = 'non vérifié';
+      // Bloquant seulement si l'appelant a RÉELLEMENT exigé l'alignement.
+      if (alignementImpose) {
+        blocages.push('alignement MTF exigé mais données absentes : condition non vérifiable, donc non remplie');
+      }
     }
     // Pour 'structure' et 'motif' : pas de seuils additionnels, leur status vient de leur propre logique
 
@@ -353,6 +376,14 @@ function niveauExecution(signaux, meta, options = {}) {
         blocages.push(`coût trop élevé : ${verdictFrais.raison} (part ${(verdictFrais.part * 100).toFixed(1)}% > ${(verdictFrais.partMax * 100).toFixed(1)}%)`);
         s.ecarteFrais = verdictFrais;
       }
+      // Coût JAMAIS renseigné : ce n'est pas « gratuit ». En mode strict, on
+      // refuse d'exécuter ce qu'on ne sait pas chiffrer ; sinon on l'écrit.
+      if (verdictFrais && verdictFrais.statut === 'COUT_INCONNU') {
+        s.fraisNonVerifies = true;
+        if (options.verifierFrais === 'strict') {
+          blocages.push(`frais NON VÉRIFIÉS : ${verdictFrais.raison} — exécution refusée en mode strict`);
+        }
+      }
     }
 
     // 4. Modèle (R attendu)
@@ -392,7 +423,11 @@ function niveauExecution(signaux, meta, options = {}) {
  *   NO_TRADE   — aucun exécutable, ou bloqué par garde-fous
  */
 function niveauArbitrage(signaux, meta, options = {}) {
-  const executables = signaux.filter(s => s.executable === true);
+  // Ce n'est pas redondant : le niveau d'exécution peut un jour être appelé
+  // seul. L'arbitrage ne retient un signal que si les TROIS verdicts sont
+  // acquis — validé, confirmé, exécutable.
+  const executables = signaux.filter(s => s.executable === true
+    && s.confirme !== false && s.valide !== false);
   const longs = executables.filter(s => s.sens === 'long' || s.direction === 'BUY');
   const shorts = executables.filter(s => s.sens === 'short' || s.direction === 'SELL');
 
@@ -467,6 +502,17 @@ function niveauArbitrage(signaux, meta, options = {}) {
       source: meilleurSignal.source,
       sens: meilleurSignal.sens,
       force: meilleurSignal.force,
+      // Le MARCHÉ doit suivre le signal jusqu'au contrôle de risque.
+      // `Risque.verifierPrise` lit `trade.symbol` pour appliquer le plafond
+      // d'exposition de l'instrument : sans lui, il retombait sur « ? » et le
+      // plafond propre au marché (R_75, BTCUSDT, XAUUSD) n'était jamais vérifié.
+      symbol: meta && meta.symbol ? meta.symbol : meilleurSignal.symbol,
+      provider: meta && meta.provider ? meta.provider : meilleurSignal.provider,
+      timeframe: meta && meta.timeframe ? meta.timeframe : meilleurSignal.timeframe,
+      classe: meilleurSignal.classe || (meta && meta.classe) || null,
+      // Publié : le statut APRÈS tous les filtres. La liste brute, elle, garde
+      // le statut d'avant — c'est la source des divergences écran/journal.
+      status: meilleurSignal.statusFinal || meilleurSignal.status,
       // Les niveaux existent sous DEUX formes dans le dépôt (levels.entry pour les
       // stratégies, entree/objectifs pour motifs et structure). On transporte les
       // deux : le garde-fou de risque et l'écran ne doivent pas dépendre du dialecte.
@@ -513,18 +559,33 @@ function niveauRisque(arbitrage, options = {}) {
     ? Contrat.normaliser(arbitrage.meilleurSignal, { source: 'verdict' }) : null;
   try {
     const v = options.verificateurRisque(c || {});
-    if (v && v.ok === false) {
+    if (!v || typeof v !== 'object') {
+      // Réponse inexploitable : ce n'est pas une autorisation.
+      return {
+        etat: { consulte: true, ok: null, verifie: false, refus: [], erreur: 'réponse vide' },
+        decision: 'ATTENTE',
+        raison: "Risque NON vérifié : le vérificateur n'a rien renvoyé — aucune exécution autorisée"
+      };
+    }
+    if (v.ok === false) {
       const refus = v.refus || [v.raison].filter(Boolean);
       return {
-        etat: { consulte: true, ok: false, refus },
+        etat: { consulte: true, ok: false, verifie: true, refus },
         decision: 'ATTENTE',
         raison: 'Risque refusé : ' + (refus.join(' · ') || 'plafond atteint')
       };
     }
-    return { etat: { consulte: true, ok: true, refus: [] }, decision: null };
+    return { etat: { consulte: true, ok: true, verifie: true, refus: [] }, decision: null };
   } catch (e) {
-    // Un vérificateur en panne ne doit ni bloquer ni autoriser en silence.
-    return { etat: { consulte: true, ok: null, refus: [], erreur: e.message }, decision: null };
+    // Un vérificateur en panne ne peut pas AUTORISER. Avant, il renvoyait
+    // `decision: null` : la décision ACHAT/VENTE survivait à un contrôle de
+    // risque qui avait échoué. Trois états distincts désormais : validé,
+    // refusé, NON VÉRIFIÉ — et seul le premier laisse exécuter.
+    return {
+      etat: { consulte: true, ok: null, verifie: false, refus: [], erreur: e.message },
+      decision: 'ATTENTE',
+      raison: 'Risque NON vérifié (' + e.message + ') — aucune exécution autorisée'
+    };
   }
 }
 
@@ -562,7 +623,12 @@ function decider(candles, meta, options = {}) {
   // Pipeline des 5 niveaux
   const detection = niveauDetection(signauxEnrichis);
   const validation = niveauValidation(signauxEnrichis, options);
-  const confirmation = niveauConfirmation(signauxEnrichis, options);
+  // Le niveau 3 reçoit le verdict du niveau 2. Sans cette transmission, une
+  // validation pouvait déclarer un signal non valide sans que la confirmation
+  // en tienne compte : la chaîne détection → validation → confirmation était
+  // rompue, et seul l'arbitrage décidait, sur `executable` seul.
+  const confirmation = niveauConfirmation(
+    signauxEnrichis.map((s, i) => ({ ...s, valide: validation.details[i]?.ok })), options);
   // Le niveau 4 reçoit le verdict du niveau 3 : sans cette transmission, il
   // jugeait des signaux que la confirmation venait de rejeter.
   const execution = niveauExecution(
@@ -596,8 +662,15 @@ function decider(candles, meta, options = {}) {
     // Meilleur signal pour exécution
     signal: arbitrage.meilleurSignal,
 
-    // Tous les signaux classés (pour l'affichage liste)
+    // Tous les signaux classés (pour l'affichage liste — y compris les rejetés,
+    // avec leur motif dans la trace).
     signaux: multi.signaux,
+
+    // Ceux qui ont passé les SIX niveaux, avec leur statut final. C'est cette
+    // liste, et elle seule, que le journal et le flux doivent consommer : la
+    // liste brute contient des signaux « confirme » d'avant les filtres.
+    signauxRetenus: (arbitrage.signauxRetenus || []).map(x => ({ ...x, statusFinal: x.status })),
+    idsRetenus: (arbitrage.signauxRetenus || []).map(x => x.id || x.nom),
     synthese: multi.synthese,
 
     // Contexte de marché (carte)

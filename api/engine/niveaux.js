@@ -59,7 +59,17 @@ function assainirNiveaux(niv, sens, atr, risqueMini = 0.5) {
   const cote = o => Number.isFinite(o) && (long ? o > niv.entree : o < niv.entree);
   const brut = Array.isArray(niv.objectifs) ? niv.objectifs : [];
   if (!brut.length || !cote(brut[0])) return null;
+
+  // ORDRE DES OBJECTIFS. `journal-signaux` suppose objectifs[0] = TP1 et
+  // objectifs[1] = TP2. Deux cibles du bon côté mais INVERSÉES (90 puis 95 pour
+  // une vente à 100) passaient le contrôle : le suivi enregistrait alors TP1
+  // atteint après TP2, et la progression du trade devenait fausse.
+  // On ne réinterprète pas : on refuse un tableau mal ordonné.
   const valides = brut.filter(cote);
+  // L'ordre se juge sur les cibles RETENUES : une cible du mauvais côté est
+  // écartée (comme avant) et ne doit pas invalider l'ordre des autres.
+  const ordonnes = valides.every((o, i) => i === 0 || (long ? o > valides[i - 1] : o < valides[i - 1]));
+  if (!ordonnes) return null;
   const ecartes = brut.length - valides.length;
 
   if (!(atr > 0)) return ecartes ? { ...niv, objectifs: valides } : niv;

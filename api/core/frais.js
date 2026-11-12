@@ -295,9 +295,20 @@ function plafondCout(entree, stop, symbol, partMax = null) {
   if (!(risque > 0)) return null;            // pas de risque : déjà refusé ailleurs
   const seuil = Number.isFinite(partMax) && partMax > 0 && partMax < 1
     ? partMax : configuration().partMax;
-  const cout = fraisPour(symbol, e).total;
+  const fr = fraisPour(symbol, e);
+  const cout = fr.total;
   if (!(cout > 0)) {
-    return { ok: true, cout: 0, risque: +risque.toFixed(6), enR: 0, part: 0, partMax: seuil, exigence: 0, raison: null };
+    // ZÉRO PAR CONSTRUCTION ≠ ZÉRO VÉRIFIÉ. `fraisPour` distingue déjà un coût
+    // saisi d'un coût jamais configuré ; ce zéro-ci ne doit pas être lu comme
+    // « gratuit ». On publie l'état au lieu de le confondre, et l'appelant
+    // décide : avertissement par défaut, refus si `verifierFrais === 'strict'`.
+    const inconnu = !(fr.connu || fr.applique);
+    return {
+      ok: true, cout: 0, risque: +risque.toFixed(6), enR: 0, part: 0, partMax: seuil, exigence: 0,
+      raison: inconnu ? `coût inconnu pour « ${symbol} » : ni spread ni commission configurés` : null,
+      verifie: !inconnu,
+      statut: inconnu ? 'COUT_INCONNU' : 'COUT_NUL'
+    };
   }
   const enR = +(cout / risque).toFixed(4);
   const exigence = +(cout / seuil).toFixed(6);

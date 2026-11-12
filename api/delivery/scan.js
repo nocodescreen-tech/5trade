@@ -3,6 +3,7 @@
 // Étage DATA QUALITY : une série trouée ou figée ne produit pas un signal, elle
 // produit une illusion de signal. C'est le MÊME module que la surveillance.
 const Qualite = require('../data-engine/quality');
+const Moteurs = require('../moteurs');
 // SIGNAL NORMALIZER : une ligne de scan est rendue aussi dans la forme commune.
 const Contrat = require('../engine/contrat');
 
@@ -104,6 +105,26 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
           erreurs.push(`${symbole} ${unite} : ${closes.length} bougie(s)`);
           continue;
         }
+        // ── MOTEUR DE LA CLASSE ─────────────────────────────────────────
+        // Le scan appliquait la même grille à tous les instruments. Ici, la
+        // classe de l'instrument choisit son moteur. Quand la classe a un
+        // moteur dédié, il peut REFUSER la lecture (produit à sauts, série
+        // autocorrélée…) : dans ce cas aucun signal n'est publié, et la raison
+        // est écrite. Quand elle n'en a pas, la ligne le dit au lieu de laisser
+        // croire à une analyse spécialisée.
+        const { classifier } = require('../market-intelligence/instrument-classifier');
+        const classe = classifier(symbole, { provider }).classe;
+        const moteur = Moteurs.pour(classe);
+        let diagnostic = null;
+        if (moteur.analyser) {
+          diagnostic = Moteurs.analyser(classe, closes.map(c => c.c), { symbol: symbole, classe, timeframe: unite });
+          if (diagnostic && diagnostic.convient === false) {
+            erreurs.push(`${symbole} ${unite} : lecture refusée par le moteur ${moteur.id} — `
+              + (diagnostic.refus || []).join(' · '));
+            continue;
+          }
+        }
+
         // Pour CHAQUE profil : ses règles, ses conditions obligatoires et ses
         // seuils — sinon le scan annoncerait des signaux que la stratégie refuse.
         // Les bougies, elles, ont été chargées une seule fois.
@@ -129,7 +150,17 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
             strategie: passe.profil ? (passe.profil.titre || passe.profil.id) : null,
             raison: v.raison || null,
             // Qualité de la série qui a produit ce signal : 100 = rien à signaler.
-            qualite: q.score
+            qualite: q.score,
+            // D'où vient la lecture : classe, moteur, et s'il est réellement dédié.
+            classe,
+            moteur: moteur.id,
+            moteurSpecialise: !!moteur.specialise,
+            moteurVersion: moteur.version || null,
+            // Le diagnostic du moteur quand il en produit un (synthétiques).
+            diagnostic: diagnostic ? {
+              famille: diagnostic.famille, regime: diagnostic.regime,
+              faits: diagnostic.faits, statistiques: diagnostic.statistiques
+            } : null
           };
           ligne.contrat = Contrat.normaliser(ligne, { source: 'scan' });
           signaux.push(ligne);
@@ -164,11 +195,23 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
 function start(deps) {
   if (etat.demarre) return etat;
   etat.demarre = true;
+  etat.chevauchements = 0;
+
+  // VERROU D'EXÉCUTION. Avant, `setInterval` relançait `scanComplet` sans se
+  // soucier du précédent : un cycle long (téléchargements lents, fournisseur
+  // muet) en voyait un second démarrer par-dessus, les deux écrivant le même
+  // `etat.dernier` et martelant les mêmes instruments. Un seul cycle à la fois.
   const lancer = () => {
-    scanComplet(deps).catch(e => {
-      etat.erreurs = [e.message];
-    });
+    if (etat.enCours) {
+      etat.chevauchements++;
+      return;
+    }
+    etat.enCours = true;
+    scanComplet(deps)
+      .catch(e => { etat.erreurs = [e.message]; })
+      .finally(() => { etat.enCours = false; });
   };
+
   lancer();
   etat.timer = setInterval(lancer, (deps.intervalleMin || INTERVALLE_MIN) * 60_000);
   if (etat.timer.unref) etat.timer.unref();
@@ -188,7 +231,10 @@ function dernierScan() {
     actif: etat.demarre,
     intervalleMin: INTERVALLE_MIN,
     dernier: etat.dernier,
-    erreurs: etat.erreurs
+    erreurs: etat.erreurs,
+    // Visible : un cycle en cours et le nombre de déclenchements évités.
+    enCours: !!etat.enCours,
+    chevauchementsEvites: etat.chevauchements || 0
   };
 }
 

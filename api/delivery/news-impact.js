@@ -70,10 +70,30 @@ Définitions strictes :
 - NEUTRE : aucun effet directionnel défendable, ou news purement informative.
 N'invente pas : dans le doute, réponds NEUTRE.
 
+ACTIFS : nomme TOUS ceux que la dépêche concerne réellement, avec ce vocabulaire
+(et seulement celui-là) :
+- devises : USD, EUR, GBP, JPY, CHF, AUD, NZD, CAD
+- métaux : XAU (or), XAG (argent)
+- indices : US30, NAS100, SPX500, GER40, UK100, JP225
+- crypto : BTC, ETH
+- énergie : WTI, BRENT
+RÈGLE 1 : nomme en premier la devise de l'institution qui agit (Fed→USD, BCE→EUR,
+BoE→GBP, BoJ→JPY, SNB→CHF).
+
+RÈGLE 2 — SENS OPPOSÉS. Une dépêche fait souvent monter un actif et baisser un
+autre : une baisse de taux affaiblit l'USD et soutient l'or. Ne force pas un sens
+commun : mets dans "actifs" ceux qui vont dans le sens annoncé, et dans "opposes"
+ceux qui vont CONTRE. Ne cite un actif que si son sens est défendable.
+Si tu n'es pas sûr du sens d'un actif, ne le cite pas. Une donnée d'inflation américaine concerne USD, et par contagion XAU
+et les indices. Ne te limite pas au bitcoin : il n'est concerné que par les
+dépêches crypto, de liquidité globale ou de risque extrême.
+
 Réponds EXCLUSIVEMENT par un objet JSON de la forme :
-{"impacts":[{"i":0,"sens":"ACHAT","actifs":["BTC"],"raison":"court texte (max 120 caractères)","force":0.6}]}
+{"impacts":[{"i":0,"sens":"VENTE","actifs":["USD"],"opposes":[{"actif":"XAU","sens":"ACHAT"}],"raison":"court texte (max 120 caractères)","force":0.6}]}
 - "i" reprend l'indice fourni.
-- "force" entre 0 et 1 = solidité de la lecture, PAS une probabilité de gain.`;
+- "force" entre 0 et 1 = solidité de la lecture, PAS une probabilité de gain.
+Exemple crypto : dépêche sur l'approbation d'un ETF bitcoin → {"i":1,"sens":"ACHAT","actifs":["BTC","ETH"],"force":0.9}.
+Exemple macro : hausse de taux surprise de la BCE → {"i":4,"sens":"ACHAT","actifs":["EUR"],"opposes":[{"actif":"XAU","sens":"VENTE"}],"force":0.7}.`;
 
 function promptPour(lot) {
   const lignes = lot.map((a, i) =>
@@ -96,7 +116,16 @@ function normaliser(entree, article) {
       ? entree.actifs.map(x => String(x).slice(0, 12)).slice(0, 4)
       : (article.actifs || []).slice(0, 4),
     raison: String(entree.raison || '').replace(/\s+/g, ' ').slice(0, 140) || null,
-    force: Number.isFinite(force) ? Math.max(0, Math.min(1, +force.toFixed(2))) : null
+    force: Number.isFinite(force) ? Math.max(0, Math.min(1, +force.toFixed(2))) : null,
+    // Actifs qui vont CONTRE le sens principal. Sans ce champ, une baisse de
+    // taux devait choisir entre « USD baisse » et « or monte » : l'un des deux
+    // était nécessairement faux. On transporte les deux vérités.
+    opposes: Array.isArray(entree.opposes)
+      ? entree.opposes
+        .filter(o => o && SENS.has(String(o.sens || '').toUpperCase()) && o.actif)
+        .map(o => ({ actif: String(o.actif).slice(0, 12), sens: String(o.sens).toUpperCase() }))
+        .slice(0, 4)
+      : []
   };
 }
 
@@ -118,7 +147,7 @@ async function analyser(articles, ia) {
   let brut;
   try {
     brut = await ia([{ role: 'user', content: promptPour(aFaire) }],
-      { maxTokens: 900, json: true, route: 'news-impact' });
+      { maxTokens: 1600, json: true, route: 'news-impact' });
   } catch (e) {
     // Panne IA : on rend le cache existant. La page reste utilisable.
     return sortie;

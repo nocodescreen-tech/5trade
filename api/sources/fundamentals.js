@@ -62,22 +62,29 @@ async function scrapeForexFactory() {
 
   // Parsing simplifié du HTML de Forex Factory
   const events = [];
-  const regex = /calendar__event[^>]*>[\s\S]*?calendar__date[^>]*>([^<]+)[\s\S]*?calendar__time[^>]*>([^<]+)[\s\S]*?calendar__currency[^>]*>([^<]+)[\s\S]*?calendar__impact[^>]*>[\s\S]*?calendar__title[^>]*>([^<]+)[\s\S]*?calendar__forecast[^>]*>([^<]*)[\s\S]*?calendar__previous[^>]*>([^<]*)/g;
+  // SEPT groupes pour sept variables. La version précédente n'en capturait que
+  // SIX (l'impact n'était pas capturé) alors que la destructuration en attendait
+  // sept : tout était décalé d'un cran, `impact` recevait le TITRE, et
+  // `previous` valait `undefined` — donc `.trim()` levait à chaque événement et
+  // le calendrier ne renvoyait jamais rien. Un filtre économique qui échoue en
+  // silence est pire qu'aucun filtre : on croit être protégé.
+  const regex = /calendar__date[^>]*>([^<]+)[\s\S]*?calendar__time[^>]*>([^<]+)[\s\S]*?calendar__currency[^>]*>([^<]+)[\s\S]*?calendar__impact[^>]*>([\s\S]*?)<\/td>[\s\S]*?calendar__title[^>]*>([^<]+)[\s\S]*?calendar__forecast[^>]*>([^<]*)[\s\S]*?calendar__previous[^>]*>([^<]*)/g;
 
   let match;
   while ((match = regex.exec(html)) !== null) {
-    const [, date, heure, devise, impact, titre, forecast, previous] = match;
-    const impactLevel = impact.includes('high') ? 'high'
-      : impact.includes('medium') ? 'medium' : 'low';
+    const [, date, heure, devise, impactHtml, titre, forecast, previous] = match;
+    const brut = String(impactHtml || '');
+    const impactLevel = /high|ff-impact-red|icon--ff-impact-red/i.test(brut) ? 'high'
+      : /medium|ff-impact-ora|orange|icon--ff-impact-ora/i.test(brut) ? 'medium' : 'low';
 
     events.push({
-      date: date.trim(),
-      heure: heure.trim(),
-      devise: devise.trim().toUpperCase(),
+      date: String(date || '').trim(),
+      heure: String(heure || '').trim(),
+      devise: String(devise || '').trim().toUpperCase(),
       impact: impactLevel,
-      titre: titre.trim(),
-      precedent: previous.trim(),
-      consigne: forecast.trim()
+      titre: String(titre || '').trim(),
+      precedent: String(previous || '').trim(),
+      consigne: String(forecast || '').trim()
     });
   }
 
@@ -139,36 +146,80 @@ function devisesDuSymbole(symbol) {
  *
  * @returns {{ bloque: boolean, raison: string, news: object|null, verifie: boolean }}
  */
+const MOIS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+
+/**
+ * Instant UTC d'un événement, à partir de sa date (« Nov 12 ») et de son heure
+ * (« 8:30am »). Renvoie null si l'un des deux est illisible — « All Day »,
+ * « Tentative » — au lieu de deviner.
+ *
+ * Pourquoi c'est nécessaire : la version précédente ne comparait QUE l'heure.
+ * Un événement du lendemain à 8:30 bloquait donc la paire aujourd'hui à 8:30,
+ * et un événement d'hier bloquait encore. Près de minuit, le filtre bloquait
+ * au hasard.
+ */
+function instantEvenement(ev, reference = new Date()) {
+  const d = String((ev && ev.date) || '').trim().toLowerCase();
+  const h = String((ev && ev.heure) || '').trim().toLowerCase();
+  const md = d.match(/^([a-z]{3})[a-z]*\s+(\d{1,2})$/);
+  const mh = h.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/);
+  if (!md || !mh) return null;
+  const mois = MOIS[md[1]];
+  if (mois === undefined) return null;
+
+  let heures = Number(mh[1]);
+  const minutes = Number(mh[2]);
+  const suffixe = mh[3];
+  if (suffixe === 'pm' && heures < 12) heures += 12;
+  if (suffixe === 'am' && heures === 12) heures = 0;
+  if (heures > 23 || minutes > 59) return null;
+
+  const annee = reference.getUTCFullYear();
+  let t = Date.UTC(annee, mois, Number(md[2]), heures, minutes);
+  // Passage d'année : un événement de décembre lu en janvier appartient à
+  // l'année précédente, et inversement.
+  const ecart = t - reference.getTime();
+  if (ecart < -180 * 86400000) t = Date.UTC(annee + 1, mois, Number(md[2]), heures, minutes);
+  else if (ecart > 180 * 86400000) t = Date.UTC(annee - 1, mois, Number(md[2]), heures, minutes);
+  return t;
+}
+
+/**
+ * Verdict économique POUR UNE DEVISE : fonction pure, donc testable sans réseau.
+ * @returns {{bloque:boolean, raison?:string, news?:object, verifie:boolean}}
+ */
+function verdictDevise(events, devise, { maintenant = new Date(), fenetreMin = 30 } = {}) {
+  const code = String(devise || '').toUpperCase();
+  if (!code) return { bloque: false, verifie: true, raison: 'devise inconnue' };
+  const now = maintenant.getTime();
+
+  for (const ev of events || []) {
+    if (ev.impact !== 'high') continue;
+    const concernes = String(ev.devise || '').toUpperCase().split(/[^A-Z]+/).filter(Boolean);
+    if (!concernes.includes(code)) continue;
+
+    const t = instantEvenement(ev, maintenant);
+    if (t === null) continue;            // heure inconnue : on ne conclut pas
+
+    const diff = Math.round((t - now) / 60000);
+    if (diff >= -5 && diff <= fenetreMin) {
+      return {
+        bloque: true, verifie: true, news: ev,
+        raison: diff >= 0
+          ? `News à fort impact dans ${diff} min : ${ev.titre}`
+          : `News à fort impact publiée il y a ${-diff} min : ${ev.titre}`
+      };
+    }
+  }
+  return { bloque: false, verifie: true, raison: 'aucune annonce à fort impact dans la fenêtre' };
+}
+
 async function newsImminente(devise, fenetreMin = 30) {
   const { events, sourceDisponible } = await getCalendarAvecEtat();
   if (!sourceDisponible) {
     return { bloque: false, raison: 'calendrier indisponible : filtre non vérifié', news: null, verifie: false };
   }
-  const now = new Date();
-  const nowMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-  const code = String(devise || '').toUpperCase();
-
-  for (const ev of events) {
-    if (ev.impact !== 'high') continue;
-    // Égalité sur les codes : « includes » rapprochait des devises distinctes.
-    const concernes = String(ev.devise || '').toUpperCase().split(/[^A-Z]+/).filter(Boolean);
-    if (!concernes.includes(code)) continue;
-
-    const [h, m] = String(ev.heure || '').split(':').map(Number);
-    if (isNaN(h) || isNaN(m)) continue;          // « All Day » : heure inconnue
-
-    const diff = (h * 60 + m) - nowMinutes;
-    if (diff >= -5 && diff <= fenetreMin) {
-      return {
-        bloque: true,
-        raison: diff >= 0
-          ? `News à fort impact dans ${diff} min : ${ev.titre}`
-          : `News à fort impact publiée il y a ${-diff} min : ${ev.titre}`,
-        news: ev,
-        verifie: true
-      };
-    }
-  }
+  return verdictDevise(events, devise, { maintenant: new Date(), fenetreMin });
 
   return { bloque: false, raison: '', news: null, verifie: true };
 }
@@ -224,4 +275,5 @@ function viderCache() {
   cacheTime = 0;
 }
 
-module.exports = { getCalendar, getCalendarAvecEtat, newsImminente, filtreCalendrier, devisesDuSymbole, viderCache };
+module.exports = {
+  verdictDevise, instantEvenement, getCalendar, getCalendarAvecEtat, newsImminente, filtreCalendrier, devisesDuSymbole, viderCache };

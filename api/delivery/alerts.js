@@ -590,7 +590,11 @@ async function verifierBrut(force = false) {
       if (deps.DecisionEngine && typeof deps.DecisionEngine.decider === 'function') {
         try {
           decision = deps.DecisionEngine.decider(closes, { symbol: m.symbol, timeframe: m.tf }, {
-            profils,
+            // UNE stratégie par passage. Avant, la boucle parcourait les fiches
+            // mais transmettait la liste COMPLÈTE : avec trois stratégies, trois
+            // passages réévaluaient les trois, et le signal retenu pouvait
+            // appartenir à une autre fiche que celle qui signait l'alerte.
+            profils: profil ? [profil] : undefined,
             rrMin: c.rrMin,
             exigerAlignement: c.exigerAlignement,
             refuserDesaccord: c.refuserDesaccord,
@@ -615,7 +619,12 @@ async function verifierBrut(force = false) {
         // restait ouverte au journal, consommait un slot de `maxSimultanes` et
         // faussait l'état du compte pour les prises suivantes.
 
-        if (v.status !== 'confirme') { dire({ verdict: v.status }); continue; }
+        // Le repli ne passe pas par le niveau de risque : il ne peut donc pas
+        // produire d'alerte exécutable. Avant, un signal refusé par le journal
+        // (plafonds du compte) partait quand même par ce chemin.
+        dire({ verdict: `moteur de décision indisponible — repli informatif : ${v.status}`,
+               secours: true });
+        continue;
       } else {
         // Decision Engine a produit un verdict : on l'utilise pour l'alerte
         if (decision.decision !== 'ACHAT' && decision.decision !== 'VENTE') {
@@ -624,10 +633,18 @@ async function verifierBrut(force = false) {
         }
         // Meilleur signal retenu par l'arbitrage = celui qu'on alerte
         const s = decision.signal;
-        if (!s || !s.levels || !Number.isFinite(s.levels.entry) || !Number.isFinite(s.levels.stop)) {
-          dire({ verdict: 'décision sans niveaux exploitables' });
+        // Un motif publie `entree/stop/objectifs`, une fiche publie
+        // `levels.entry/stop`. Exiger la seconde forme faisait refuser toute
+        // alerte gagnée par un motif — alors que ses niveaux existaient.
+        const lvS = (s && s.levels) || {};
+        const entreeS = Number(lvS.entry !== undefined ? lvS.entry : s && s.entree);
+        const stopS = Number(lvS.stop !== undefined ? lvS.stop : s && s.stop);
+        if (!s || !Number.isFinite(entreeS) || !Number.isFinite(stopS)) {
+          dire({ verdict: 'décision sans niveaux exploitables : ni levels.entry/stop, ni entree/stop' });
           continue;
         }
+        s.levels = { ...lvS, entry: entreeS, stop: stopS,
+          objectifs: lvS.objectifs || (s && s.objectifs) || [] };
         // On utilise ce signal pour le reste de la logique (filtres, RR, envoi)
         // On adapte les variables attendues par le code existant
         v.direction = s.sens === 'long' ? 'BUY' : 'SELL';
@@ -647,11 +664,21 @@ async function verifierBrut(force = false) {
         try {
           fondamental = await deps.filtreNews(m.symbol);
         } catch (e) {
-          fondamental = { ok: true, verifie: false,
-            lecture: `filtre économique en erreur (${e.message}) : non vérifié` };
+          // Trois états distincts : BLOQUÉ, CLAIR, INCONNU. Un calendrier
+          // injoignable n'est pas un calendrier vérifié — avant, l'erreur
+          // ressortait avec `ok: true` et seule la clé `bloque` était testée,
+          // donc l'alerte partait sans vérification économique.
+          fondamental = { ok: false, verifie: false, statut: 'NEWS_UNKNOWN',
+            lecture: `calendrier indisponible (${e.message}) : vérification économique impossible` };
         }
         if (fondamental && fondamental.bloque) {
           dire({ verdict: `signal bloqué — ${fondamental.lecture}`, fondamental });
+          continue;
+        }
+        // Par défaut, une vérification impossible BLOQUE : on ne prend pas une
+        // position sur un marché macro sans savoir ce qui est publié.
+        if (fondamental && fondamental.statut === 'NEWS_UNKNOWN' && c.accepterNewsNonVerifiee !== true) {
+          dire({ verdict: `signal bloqué — ${fondamental.lecture} (accepterNewsNonVerifiee pour passer outre)`, fondamental });
           continue;
         }
       }
@@ -799,8 +826,14 @@ async function verifierBrut(force = false) {
       // une position jamais annoncée restait ouverte au journal, consommait un
       // slot de `maxSimultanes` et faussait `Risque.verifierPrise` au cycle suivant.
       if (deps.journal && typeof deps.journal.enregistrer === 'function') {
-        const retenus = ((multi ? multi.signaux : (decision && decision.signaux)) || [])
-          .filter(x => x.status === 'confirme' || x.status === 'surveiller');
+        // On enregistre les signaux RETENUS par l'arbitrage, pas ceux qui
+        // portaient « confirme » avant les filtres. Un signal rejeté à la
+        // confirmation ou par les frais pouvait entrer au journal comme
+        // position ouverte, consommer un slot et fausser le risque suivant.
+        // Ceux en observation (surveiller) restent hors des positions ouvertes.
+        const retenus = decision && Array.isArray(decision.signauxRetenus)
+          ? decision.signauxRetenus.filter(x => x.executable === true)
+          : ((multi ? multi.signaux : []) || []).filter(x => x.status === 'confirme');
         if (retenus.length) {
           try {
             deps.journal.enregistrer(retenus, {

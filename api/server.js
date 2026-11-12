@@ -184,7 +184,10 @@ if (process.env.IA_SELFTEST === '1') {
   });
 }
 
-app.use('/uploads', express.static(UPLOADS_DIR));
+// UPLOADS PRIVÉS. Cette route statique était publique : toute capture laissée
+// dans le dossier était lisible par URL si son nom filtrait (les noms sont
+// horodatés, donc devinables). Elle exige maintenant une session.
+app.use('/uploads', requireAuth, express.static(UPLOADS_DIR));
 // Frontend servi sur la même origine (évite les soucis de CORS)
 // Les fichiers statiques. La page HTML ne doit JAMAIS être mise en cache : le
 // navigateur gardait l'ancienne version et l'utilisateur ne voyait pas les
@@ -1429,17 +1432,79 @@ app.post('/api/knowledge', requireAuth, async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 // 3) SCRAPING d'URL + extraction IA
 // ─────────────────────────────────────────────────────────────
+/**
+ * Garde SSRF : une URL fournie par un client authentifié ne doit pas permettre
+ * d'atteindre le réseau interne. Sans ce filtre, `/api/scrape-strategies`
+ * pouvait viser `localhost`, une IP privée ou le service de métadonnées cloud
+ * (169.254.169.254), et le serveur répondait en relais.
+ */
+function urlAutorisee(url) {
+  let u;
+  try { u = new URL(String(url)); } catch { return { ok: false, raison: 'URL illisible' }; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+    return { ok: false, raison: `protocole « ${u.protocol} » refusé (http/https seulement)` };
+  }
+  const hote = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (hote === 'localhost' || hote.endsWith('.localhost') || hote.endsWith('.internal')) {
+    return { ok: false, raison: 'hôte local refusé' };
+  }
+  // IPv4 littérale
+  const v4 = hote.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const [a1, b1] = [Number(v4[1]), Number(v4[2])];
+    const prive = a1 === 10 || a1 === 127 || a1 === 0
+      || (a1 === 169 && b1 === 254)            // link-local + métadonnées cloud
+      || (a1 === 172 && b1 >= 16 && b1 <= 31)
+      || (a1 === 192 && b1 === 168)
+      || (a1 === 100 && b1 >= 64 && b1 <= 127); // CGNAT
+    if (prive) return { ok: false, raison: `adresse privée ${hote} refusée` };
+  }
+  // IPv6 locale / loopback
+  if (hote === '::1' || hote.startsWith('fc') || hote.startsWith('fd') || hote.startsWith('fe80')) {
+    return { ok: false, raison: `adresse IPv6 locale ${hote} refusée` };
+  }
+  return { ok: true };
+}
+
 async function fetchPageText(url) {
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) 5trade/1.0',
-      'Accept': 'text/html,application/xhtml+xml'
-    },
-    redirect: 'follow',
-    signal: AbortSignal.timeout(20000) // 20s max
-  });
+  const garde = urlAutorisee(url);
+  if (!garde.ok) throw new Error(`URL refusée : ${garde.raison}`);
+
+  // Redirections suivies À LA MAIN : `redirect: 'follow'` laissait un site
+  // public rediriger vers 127.0.0.1, ce qui contournait le filtre ci-dessus.
+  let cible = String(url);
+  let res = null;
+  for (let saut = 0; saut < 4; saut++) {
+    const g = urlAutorisee(cible);
+    if (!g.ok) throw new Error(`URL refusée en redirection : ${g.raison}`);
+    res = await fetch(cible, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) 5trade/1.0',
+        'Accept': 'text/html,application/xhtml+xml'
+      },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(20000) // 20s max
+    });
+    if (res.status >= 300 && res.status < 400) {
+      const suite = res.headers.get('location');
+      if (!suite) throw new Error('redirection sans destination');
+      cible = new URL(suite, cible).toString();
+      continue;
+    }
+    break;
+  }
+  if (!res) throw new Error('aucune réponse');
+  if (res.status >= 300 && res.status < 400) throw new Error('trop de redirections');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const html = await res.text();
+
+  // Plafond de taille : une réponse de plusieurs centaines de Mo saturerait la
+  // mémoire du serveur pour un simple texte de stratégie.
+  const MAX_OCTETS = 2 * 1024 * 1024;
+  const annonce = Number(res.headers.get('content-length') || 0);
+  if (annonce > MAX_OCTETS) throw new Error(`réponse trop volumineuse (${Math.round(annonce / 1024)} Ko)`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > MAX_OCTETS) throw new Error(`réponse trop volumineuse (${Math.round(buf.length / 1024)} Ko)`);
+  const html = buf.toString('utf8');
 
   let cheerio;
   try { cheerio = require('cheerio'); } catch { cheerio = null; }
@@ -1727,7 +1792,14 @@ app.get('/api/documents', requireAuth, async (req, res) => {
 
 app.delete('/api/documents/:filename', requireAuth, async (req, res) => {
   try {
-    await fs.unlink(path.join(DOCUMENTS_DIR, req.params.filename));
+    // Le nom vient du client : « ../../.env » supprimait n'importe quoi.
+    // On résout le chemin et on refuse tout ce qui sort du dossier autorisé.
+    const cible = path.resolve(DOCUMENTS_DIR, req.params.filename);
+    const racine = path.resolve(DOCUMENTS_DIR) + path.sep;
+    if (!cible.startsWith(racine)) {
+      return res.status(400).json({ error: 'Nom de fichier invalide.' });
+    }
+    await fs.unlink(cible);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1827,11 +1899,16 @@ Réponds en texte structuré, dense et exploitable.`;
     const all = await loadAllStrategies();
     const matched = searchKnowledgeBase(all, { pair, timeframes, visionAnalysis });
     // Les mots-clés ne prouvent pas la compatibilité : on confronte les fiches à
-    // la classe réelle de l'instrument. Faute de fiche déclarant son marché, on
-    // retombe sur les mots-clés MAIS en le disant (verifiee: false).
+    // la classe réelle de l'instrument.
+    //
+    // PAS DE REPLI sur `matched`. Une fiche qui ne déclare pas son marché reste
+    // NON ÉVALUABLE : on ne peut ni l'accepter ni la refuser, donc elle ne part
+    // pas dans le plan. Un mot-clé commun — « session », « imbalance » — servait
+    // de preuve et faisait entrer dans le plan une stratégie Forex sur un indice
+    // synthétique. Une connaissance explique un concept ; elle n'autorise pas
+    // une exécution.
     const parClasse = require('./strategy-engine/strategy-contract').filtrerParClasse(matched, pair);
-    const retenues = parClasse.compatibles.length ? parClasse.compatibles : matched;
-    const top = retenues.slice(0, maxStrategies);
+    const top = parClasse.compatibles.slice(0, maxStrategies);
 
     // 3. Combinaison des stratégies + plan d'action (NVIDIA NIM)
     let plan;
@@ -3698,8 +3775,18 @@ app.post('/api/news/impact', requireAuth, async (req, res) => {
     const articles = Array.isArray(req.body && req.body.articles) ? req.body.articles.slice(0, 25) : [];
     if (!articles.length) return res.status(400).json({ success: false, error: 'Aucune dépêche fournie' });
     await NewsImpact.analyser(articles, analyserIA);
+    const parTitre = NewsImpact.parTitre();
+    // Un succès VIDE est un échec déguisé : si aucune dépêche n'a reçu de
+    // verdict, l'appelant doit le savoir au lieu de croire l'analyse faite.
+    if (!Object.keys(parTitre).length) {
+      return res.status(502).json({
+        success: false,
+        error: "aucune dépêche n'a pu être classée — chaîne IA indisponible ou réponse illisible",
+        parTitre
+      });
+    }
     // On renvoie l'index lisible : l'interface n'a pas à recalculer d'empreinte.
-    res.json({ success: true, parTitre: NewsImpact.parTitre() });
+    res.json({ success: true, parTitre });
   } catch (e) {
     res.status(e.status || 500).json({ success: false, error: e.message, parTitre: NewsImpact.parTitre() });
   }

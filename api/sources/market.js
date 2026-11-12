@@ -310,7 +310,44 @@ const providerStatus = () => {
   };
 };
 
-const providerById = id => PROVIDERS[id] || activeProvider();
+/**
+ * Résolution STRICTE du fournisseur.
+ *
+ * Avant : `PROVIDERS[id] || activeProvider()`. Un identifiant inconnu — faute de
+ * frappe, ancien nom, symbole d'une autre source — était silencieusement servi
+ * par le fournisseur actif. On interrogeait donc une source qui ne connaissait
+ * pas l'instrument, et le vide ressemblait à « pas de données » au lieu d'être
+ * une erreur. Une panne silencieuse coûte plus cher qu'un refus explicite.
+ */
+function providerById(id) {
+  const cle = String(id || '').toLowerCase().trim();
+  const p = PROVIDERS[cle];
+  if (!p) {
+    const err = new Error(`Fournisseur inconnu : « ${id} » — disponibles : ${Object.keys(PROVIDERS).join(', ')}`);
+    err.code = 'FOURNISSEUR_INCONNU';
+    throw err;
+  }
+  return p;
+}
+
+/**
+ * Un symbole demandé à un fournisseur qui ne le sert pas est une erreur, pas une
+ * absence de données. On ne le déduit pas d'une liste qu'on suppose complète :
+ * on le prouve quand le symbole figure chez un AUTRE fournisseur.
+ */
+function verifierSymbole(p, symbol) {
+  const nom = s => String((s && s.symbol) || s || '').toUpperCase();
+  const cible = nom(symbol);
+  const chez = Object.entries(PROVIDERS)
+    .filter(([k, v]) => k !== p.id && Array.isArray(v.symbols) && v.symbols.some(s => nom(s) === cible))
+    .map(([k]) => k);
+  if (chez.length && !(Array.isArray(p.symbols) && p.symbols.some(s => nom(s) === cible))) {
+    const err = new Error(`Symbole « ${symbol} » servi par ${chez.join(', ')}, pas par « ${p.id} »`);
+    err.code = 'SYMBOLE_HORS_FOURNISSEUR';
+    throw err;
+  }
+  return true;
+}
 
 /**
  * Tous les symboles de TOUS les fournisseurs, chacun étiqueté de sa source :
@@ -437,6 +474,7 @@ function assainirBougies(liste, tf) {
 async function getCandles(symbol, tf, count = 300, providerId) {
   if (!TF_MS[tf]) throw new Error(`Timeframe inconnu : ${tf} (attendu ${TIMEFRAMES.join(', ')})`);
   const p = providerId ? providerById(providerId) : activeProvider();
+  verifierSymbole(p, symbol);
   const k = keyOf(p.id, symbol, tf);
   const buf = buffers.get(k);
 

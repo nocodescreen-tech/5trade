@@ -681,12 +681,16 @@ function signauxStructure(carte, candles) {
       nom: `Balayage de liquidité ${long ? 'haussier' : 'baissier'}`,
       strategie: null, concept: 'Liquidité',
       tf: carte.timeframe || null, sens,
-      status: 'confirme', force: 0.68,
+      status: (b.reclaimed ? 'confirme' : 'surveiller'), force: 0.68,
+      // Les conditions qui DÉFINISSENT un balayage sont marquées obligatoires :
+      // sans elles ce n'est pas un balayage, c'est une mèche. Le statut
+      // « confirme » pouvait être posé alors que « niveau repris » était faux —
+      // la définition du setup contredisait son propre statut.
       conditions: [
-        { nom: 'niveau balayé', valeur: r2(b.level), seuil: 'dépassé en mèche', ok: true },
-        { nom: 'extrême atteint', valeur: r2(b.extreme), seuil: '—', ok: true },
-        { nom: 'niveau repris', valeur: b.reclaimed ? 'oui' : 'non', seuil: 'clôture revenue du bon côté', ok: !!b.reclaimed },
-        { nom: 'profondeur', valeur: `${b.depth} %`, seuil: '> 0', ok: b.depth > 0 }
+        { nom: 'niveau balayé', valeur: r2(b.level), seuil: 'dépassé en mèche', ok: true, obligatoire: true },
+        { nom: 'extrême atteint', valeur: r2(b.extreme), seuil: '—', ok: true, obligatoire: true },
+        { nom: 'niveau repris', valeur: b.reclaimed ? 'oui' : 'non', seuil: 'clôture revenue du bon côté', ok: !!b.reclaimed, obligatoire: true },
+        { nom: 'profondeur', valeur: `${b.depth} %`, seuil: '> 0', ok: b.depth > 0, obligatoire: false }
       ],
       preuves: [`${b.type} à ${r2(b.level)} (extrême ${r2(b.extreme)}, ${b.depth} %)`],
       ...n, base: null,
