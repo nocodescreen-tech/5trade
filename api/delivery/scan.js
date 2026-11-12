@@ -115,6 +115,11 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
         const { classifier } = require('../market-intelligence/instrument-classifier');
         const classe = classifier(symbole, { provider }).classe;
         const moteur = Moteurs.pour(classe);
+        // Paramètres réellement appliqués : instrument, famille ou classe. Un
+        // signal issu d'un simple profil de classe ne doit pas se lire comme
+        // une analyse calibrée sur cet instrument.
+        const Calibration = require('../market-intelligence/calibration');
+        const calib = Calibration.pour(symbole, { timeframe: unite, classe });
         let diagnostic = null;
         if (moteur.analyser) {
           diagnostic = Moteurs.analyser(classe, closes.map(c => c.c), { symbol: symbole, classe, timeframe: unite });
@@ -156,6 +161,9 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
             moteur: moteur.id,
             moteurSpecialise: !!moteur.specialise,
             moteurVersion: moteur.version || null,
+            // D'où viennent les paramètres : instrument calibré, famille, ou classe.
+            calibration: { source: calib.source, famille: calib.famille,
+              calibre: calib.calibre, note: calib.note },
             // Le diagnostic du moteur quand il en produit un (synthétiques).
             diagnostic: diagnostic ? {
               famille: diagnostic.famille, regime: diagnostic.regime,

@@ -687,6 +687,9 @@ async function probe(id) {
 module.exports = {
   TIMEFRAMES, TF_MS,
   listSymbols, getCandles, watch, watchTicks, probe, providerStatus,
+  // Exposés pour les tests et pour l'écran : la résolution d'un fournisseur et
+  // la vérification d'appartenance d'un symbole doivent être vérifiables.
+  providerById, verifierSymbole,
   activeProvider: () => activeProvider().id,
   closeStream,
   loadCache, cacheInfo,

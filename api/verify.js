@@ -3763,6 +3763,108 @@ function tinyPng(W = 64, H = 40) {
         /aucune dépêche n'a pu être classée/.test(srcSrv));
     }
 
+    // ── IDENTIFICATION DES INSTRUMENTS ET ROUTAGE ──────────────────────────
+    // Les huit cas exigés par l'audit, plus les contradictions. Mesure avant
+    // correction : EURUSDT était classé Forex (proxy crypto pris pour la paire
+    // réelle), EURUSDX était accepté comme EUR/USD, et un fournisseur inconnu
+    // retombait en silence sur le fournisseur actif.
+    {
+      const C = require('./market-intelligence/instrument-classifier');
+      const M = require('./sources/market');
+
+      const cas = [
+        ['frxEURUSD', 'forex', 'EUR', 'USD'],
+        ['frxGBPJPY', 'forex', 'GBP', 'JPY'],
+        ['frxUSDJPY', 'forex', 'USD', 'JPY'],
+        ['BTCUSDT', 'crypto', null, null],
+        ['R_75', 'synthetique', null, null],
+        ['frxXAUUSD', 'metaux', null, null]
+      ];
+      for (const [sym, classe, base, quote] of cas) {
+        const c = C.classifier(sym);
+        ok(`classement de ${sym} : ${classe}`,
+          c.classe === classe && c.reconnu === true
+          && (base === null || (c.deviseBase === base && c.deviseCote === quote)),
+          `${c.classe} ${c.deviseBase || ''}/${c.deviseCote || ''}`);
+      }
+
+      ok('un proxy d exchange n est pas la paire Forex réelle',
+        (() => {
+          const c = C.classifier('EURUSDT');
+          return c.proxy === true && c.proxyDe === 'EURUSD' && c.classe !== 'forex';
+        })());
+
+      ok('un symbole inconnu est refusé, pas deviné',
+        C.classifier('ZZZINCONNU').reconnu === false);
+
+      ok('une paire avec un caractère en trop n est pas acceptée',
+        C.classifier('EURUSDX').reconnu === false && C.classifier('EURXUSD').reconnu === false,
+        C.classifier('EURUSDX').classe);
+
+      ok('base et cotation identiques refusées',
+        C.classifier('EUREUR').reconnu === false);
+
+      ok('des métadonnées qui contredisent le nom du contrat produisent une incertitude',
+        (() => {
+          const c = C.classifier('R_75', { type: 'forex' });
+          return c.reconnu === false && c.raisons.join(' ').includes('contradiction');
+        })());
+
+      ok('les métadonnées d une paire sont exploitées quand elles concordent',
+        (() => {
+          const c = C.classifier('EURUSD', { base: 'EUR', quote: 'USD' });
+          return c.classe === 'forex' && c.deviseBase === 'EUR';
+        })());
+
+      ok('un fournisseur inconnu est refusé',
+        (() => { try { M.providerById('nexistepas'); return false; }
+          catch (e) { return /inconnu/i.test(e.message); } })());
+
+      ok('un symbole demandé au mauvais fournisseur est refusé',
+        (() => {
+          // R_75 est servi par Deriv : le demander à Binance doit lever.
+          try { M.verifierSymbole(M.providerById('binance'), 'R_75'); return false; }
+          catch (e) { return /servi par deriv/i.test(e.message); }
+        })(),
+        (() => { try { M.verifierSymbole(M.providerById('binance'), 'R_75'); return 'accepté'; }
+          catch (e) { return e.message; } })());
+
+      ok('le bon fournisseur accepte son propre symbole',
+        M.verifierSymbole(M.providerById('deriv'), 'R_75') === true);
+    }
+
+    // ── CALIBRATION : instrument > famille > classe ────────────────────────
+    // `profils-classes` donne des paramètres au Forex en général. EURUSD et
+    // GBPJPY n'ont ni la même volatilité ni les mêmes coûts. Ce résolveur ne
+    // fabrique aucune valeur : il dit lequel des trois niveaux a répondu, et
+    // avoue quand rien n'est calibré.
+    {
+      const K = require('./market-intelligence/calibration');
+
+      ok('R_75 est rattaché à la famille volatility, sans calibration propre',
+        (() => {
+          const r = K.pour('R_75', { timeframe: '15m' });
+          return r.famille === 'volatility' && r.calibre === false && r.source === 'famille';
+        })());
+
+      ok('BOOM1000 est rattaché à boom-crash, pas à volatility',
+        K.pour('BOOM1000', { timeframe: '5m' }).famille === 'boom-crash');
+
+      ok('1HZ75V est rattaché à la haute fréquence',
+        K.pour('1HZ75V', { timeframe: '5m' }).famille === '1hz');
+
+      ok('EURUSD est une majeure, GBPJPY une croisée',
+        K.famille('frxEURUSD', 'forex') === 'majeures'
+        && K.famille('frxGBPJPY', 'forex') === 'croisees');
+
+      ok('aucune calibration n est inventée : le registre est vide et le dit',
+        K.etat().instrumentsCalibres.length === 0 && !!K.etat().note);
+
+      ok('le scan publie la provenance des paramètres',
+        /calibration: \{ source: calib\.source/.test(
+          fs.readFileSync(path.join(__dirname, 'delivery', 'scan.js'), 'utf8')));
+    }
+
     // ── INVARIANT : toute route qui DÉCIDE fournit les deux garde-fous ────
     // Cartographie mesurée : 108 routes, 2 seulement appellent le Decision
     // Engine. Le flux temps réel en manquait — un signal refusé par le risque

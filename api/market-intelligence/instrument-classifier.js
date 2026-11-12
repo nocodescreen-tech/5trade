@@ -63,7 +63,37 @@ function classifier(symbol, meta = {}) {
 
   if (!brut) return fin('inconnu', { raisons: ['symbole vide'], source: 'aucune' });
 
-  // 1. Métadonnées du fournisseur : elles priment, elles décrivent un contrat.
+  // 1. IDENTITÉ DU CONTRAT AVANT TOUT. Un indice synthétique Deriv accompagné
+  // de métadonnées génériques « index » était classé « indice réel » : les
+  // métadonnées primaient sur le nom du contrat. Le nom d'un produit synthétique
+  // (R_75, BOOM1000, 1HZ…) est une identité, pas une indication.
+  if (SYNTHETIQUE.test(brut)) {
+    const typeMeta0 = net(meta.type);
+    if (typeMeta0 && !/^(INDEX|INDICES|SYNTHETIC|SYNTHETIQUE)$/.test(typeMeta0)) {
+      return fin('inconnu', { raisons: [
+        `contradiction : nom de synthétique (${brut}) mais type fournisseur « ${meta.type} »`,
+        'aucune classification fiable : on ne tranche pas'
+      ], source: 'contradiction' });
+    }
+    raisons.push("nom d'indice synthétique Deriv (prix généré par le courtier)");
+    return fin('synthetique');
+  }
+
+  // 2. PROXYS : un exchange cote EURUSDT, pas EURUSD. Ce n'est pas le contrat
+  // Forex — le confondre fait analyser une autre série avec les règles du Forex.
+  const PROXYS = {
+    EURUSDT: { classe: 'crypto', de: 'EURUSD', contrat: 'USDT' },
+    GBPUSDT: { classe: 'crypto', de: 'GBPUSD', contrat: 'USDT' },
+    PAXGUSDT: { classe: 'metaux', de: 'XAUUSD', contrat: 'PAXG tokenisé' },
+    XAUTUSDT: { classe: 'metaux', de: 'XAUUSD', contrat: 'XAUT tokenisé' }
+  };
+  if (PROXYS[brut]) {
+    const px = PROXYS[brut];
+    raisons.push(`proxy de ${px.de} (${px.contrat}) : série différente, non interchangeable`);
+    return fin(px.classe, { source: 'proxy', champs: { proxy: true, proxyDe: px.de } });
+  }
+
+  // 3. Métadonnées du fournisseur (après l'identité du contrat).
   const typeMeta = net(meta.type);
   if (/^(CRYPTO|CRYPTOCURRENCY)$/.test(typeMeta)) {
     raisons.push('type fournisseur : crypto');
@@ -125,9 +155,33 @@ function classifier(symbol, meta = {}) {
     paires.push(code);
     reste = reste.slice(code.length);
   }
-  if (paires.length >= 2) {
+  // Correspondance EXACTE : deux codes et RIEN d'autre. Avant, `EURUSDX`
+  // était accepté comme EUR/USD (le X résiduel était ignoré) et `EURUSDT`
+  // aussi — deux façons d'analyser un instrument qui n'existe pas chez le
+  // fournisseur avec les règles d'un autre.
+  if (paires.length === 2 && reste === '') {
+    if (paires[0] === paires[1]) {
+      return fin('inconnu', { raisons: [`devise de base et de cotation identiques (${paires[0]})`], source: 'incoherence' });
+    }
     raisons.push(`paire de devises ${paires[0]}/${paires[1]}`);
     return fin('forex', { champs: { deviseBase: paires[0], deviseCote: paires[1] } });
+  }
+  if (paires.length >= 2 && reste !== '') {
+    return fin('inconnu', { raisons: [
+      `symbole « ${brut} » : deux devises puis « ${reste} » — paire non exacte, classification refusée`
+    ], source: 'incoherence' });
+  }
+
+  // Métadonnées de paire : si le fournisseur les donne, elles doivent concorder.
+  const baseMeta = net(meta.base), quoteMeta = net(meta.quote);
+  if (baseMeta && quoteMeta) {
+    if (paires.length === 2 && (paires[0] !== baseMeta || paires[1] !== quoteMeta)) {
+      return fin('inconnu', { raisons: [
+        `contradiction : symbole ${paires[0]}/${paires[1]} mais métadonnées ${baseMeta}/${quoteMeta}`
+      ], source: 'contradiction' });
+    }
+    raisons.push(`métadonnées de paire ${baseMeta}/${quoteMeta}`);
+    return fin('forex', { champs: { deviseBase: baseMeta, deviseCote: quoteMeta } });
   }
 
   // 7. Rien de prouvable : on le dit, on ne devine pas.
