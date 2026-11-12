@@ -12,11 +12,10 @@
  * Les sessions créées ici portent `test: true` : la révocation ne touche donc
  * que celles-là, jamais celle de l'utilisateur.
  */
-const chemin = require('path');
+const path = require('path');
 // dotenv vit dans api/node_modules : résolution par chemin, pas par module.
-require(chemin.join(__dirname, '..', 'api', 'node_modules', 'dotenv'))
-  .config({ path: chemin.join(__dirname, '..', '.env') });
-const path = chemin;
+require(path.join(__dirname, '..', 'api', 'node_modules', 'dotenv'))
+  .config({ path: path.join(__dirname, '..', '.env') });
 const crypto = require('crypto');
 const DB = require(path.join(__dirname, '..', 'api', 'core', 'db'));
 
