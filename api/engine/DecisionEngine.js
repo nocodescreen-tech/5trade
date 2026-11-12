@@ -305,6 +305,12 @@ function niveauExecution(signaux, meta, options = {}) {
     const nom = s.nom || s.id;
     const source = s.source || 'inconnu';
     const blocages = [];
+    // DIRECTION INCONNUE : la stratégie n'a pas dit ce qu'elle voit. Ce n'est
+    // pas « neutre » (un avis sans biais), c'est une absence d'avis — et une
+    // absence d'avis ne s'exécute pas.
+    if (s.sens === 'inconnu' || s.direction === 'UNKNOWN') {
+      blocages.push("direction inconnue : la stratégie n'a pas déterminé de sens, aucun trade possible");
+    }
     let executable = false;
 
     // 0 bis. CHAÎNAGE DES NIVEAUX — l'exécution ne juge pas un signal que la
@@ -435,6 +441,8 @@ function niveauArbitrage(signaux, meta, options = {}) {
   let raison = 'aucun signal exécutable';
   let signauxRetenus = [];
   let biais = 'neutre';
+  /** Renseigné seulement quand achats ET ventes sont exécutables. */
+  let conflit = null;
 
   if (longs.length > 0 && shorts.length === 0) {
     // Au moins un achat, aucune vente
@@ -456,6 +464,13 @@ function niveauArbitrage(signaux, meta, options = {}) {
     const forceShorts = shorts.reduce((a, b) => a + (b.force || 0), 0) / shorts.length;
     const diff = Math.abs(forceLongs - forceShorts);
 
+    // Le conflit est PUBLIÉ même quand l'arbitrage tranche : l'écran et les
+    // alertes doivent pouvoir dire que deux stratégies se contredisaient.
+    conflit = {
+      achats: longs.length, ventes: shorts.length,
+      forceAchats: +forceLongs.toFixed(2), forceVentes: +forceShorts.toFixed(2),
+      ecart: +diff.toFixed(2), tranche: diff >= 0.15
+    };
     if (diff < 0.15) {
       decision = 'ATTENTE';
       raison = `conflit : ${longs.length} achat(s) (force moy. ${forceLongs.toFixed(2)}) vs ${shorts.length} vente(s) (force moy. ${forceShorts.toFixed(2)}) — écart ${diff.toFixed(2)} < 0.15`;
@@ -495,12 +510,21 @@ function niveauArbitrage(signaux, meta, options = {}) {
     decision,
     raison,
     biais,
-    signauxRetenus: signauxRetenus.map(s => ({ id: s.id, nom: s.nom, source: s.source, sens: s.sens, force: s.force, rr: s.rr })),
+    // null quand un seul côté était exécutable. Sinon : qui disait quoi.
+    conflit,
+    signauxRetenus: signauxRetenus.map(s => ({
+      id: s.id, nom: s.nom, source: s.source, sens: s.sens,
+      direction: s.direction || (s.sens === 'long' ? 'BUY' : s.sens === 'short' ? 'SELL'
+        : s.sens === 'neutre' ? 'NEUTRAL' : 'UNKNOWN'),
+      force: s.force, rr: s.rr
+    })),
     meilleurSignal: meilleurSignal ? {
       id: meilleurSignal.id,
       nom: meilleurSignal.nom,
       source: meilleurSignal.source,
       sens: meilleurSignal.sens,
+      direction: meilleurSignal.direction || (meilleurSignal.sens === 'long' ? 'BUY'
+        : meilleurSignal.sens === 'short' ? 'SELL' : meilleurSignal.sens === 'neutre' ? 'NEUTRAL' : 'UNKNOWN'),
       force: meilleurSignal.force,
       // Le MARCHÉ doit suivre le signal jusqu'au contrôle de risque.
       // `Risque.verifierPrise` lit `trade.symbol` pour appliquer le plafond
@@ -658,6 +682,12 @@ function decider(candles, meta, options = {}) {
     // jamais « risque validé ». L'écran doit pouvoir le dire.
     risque,
     biais: arbitrage.biais,
+    // Deux informations distinctes pour l'affichage : la direction vient des
+    // signaux, la décision vient de la chaîne de validation.
+    direction: arbitrage.decision === 'ACHAT' ? 'BUY'
+      : arbitrage.decision === 'VENTE' ? 'SELL'
+      : arbitrage.decision === 'NO_TRADE' ? 'NEUTRAL' : 'NEUTRAL',
+    conflit: arbitrage.conflit || null,
 
     // Meilleur signal pour exécution
     signal: arbitrage.meilleurSignal,
@@ -701,7 +731,8 @@ function decider(candles, meta, options = {}) {
         executables: execution.executables, nonExecutables: execution.nonExecutables,
         total: (execution.details || []).length
       },
-      arbitrage: { decision: arbitrage.decision, raison: arbitrage.raison, biais: arbitrage.biais, comptes: arbitrage.comptes },
+      arbitrage: { decision: arbitrage.decision, raison: arbitrage.raison, biais: arbitrage.biais,
+        conflit: arbitrage.conflit || null, comptes: arbitrage.comptes },
       risque: { consulte: risque.consulte, ok: risque.ok, refus: risque.refus, motif: risque.motif || null }
     },
 

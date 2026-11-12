@@ -23,7 +23,11 @@ const CONTRAT = {
   version: 1,
   sources: ['strategie', 'motif', 'structure', 'verdict', 'scan'],
   statuts: ['confirme', 'surveiller', 'rejete', 'refuse', 'erreur'],
-  sens: ['long', 'short', 'neutre'],
+  // 'inconnu' est DISTINCT de 'neutre'. « Aucun avantage directionnel établi »
+  // et « la stratégie n'a pas déterminé sa direction » ne sont pas la même
+  // chose : le premier autorise une observation, le second interdit l'exécution.
+  sens: ['long', 'short', 'neutre', 'inconnu'],
+  directions: ['BUY', 'SELL', 'NEUTRAL', 'UNKNOWN'],
   // Présents dans TOUS les signaux, quelle que soit la source.
   champs: ['id', 'source', 'nom', 'tf', 'sens', 'status', 'force',
     'conditions', 'preuves', 'entree', 'stop', 'objectifs', 'rr']
@@ -159,7 +163,17 @@ function sensNormalise(b) {
   if (d === 'BUY' || d === 'ACHAT' || d === 'LONG') return 'long';
   if (d === 'SELL' || d === 'VENTE' || d === 'SHORT') return 'short';
   if (CONTRAT.sens.includes(String(b.sens || '').toLowerCase())) return String(b.sens).toLowerCase();
-  return 'neutre';
+  // Rien d'exploitable : INCONNU. Inventer « neutre » ferait passer une
+  // stratégie muette pour une stratégie sans biais.
+  return 'inconnu';
+}
+
+/** Direction publiée, dérivée du sens interne. */
+function directionDe(sens) {
+  if (sens === 'long') return 'BUY';
+  if (sens === 'short') return 'SELL';
+  if (sens === 'neutre') return 'NEUTRAL';
+  return 'UNKNOWN';
 }
 
 function objectifsNormalises(b, l) {
@@ -186,6 +200,9 @@ function normaliser(brut, options = {}) {
     symbol,
     tf,
     sens,
+    // Deux informations distinctes, jamais fusionnées : la DIRECTION (ce que la
+    // stratégie voit) et la DÉCISION (ce que le moteur autorise).
+    direction: directionDe(sens),
     status: CONTRAT.statuts.includes(b.status) ? b.status
       : CONTRAT.statuts.includes(b.statut) ? b.statut : 'rejete',
     force: force === null ? 0 : force,

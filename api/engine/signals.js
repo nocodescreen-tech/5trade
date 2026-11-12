@@ -881,7 +881,26 @@ function profilDepuisStrategie(doc) {
   // signaux génériques sous son nom, ce qui est exactement le faux positif à
   // interdire. Mieux vaut zéro signal qu'un signal mal attribué.
   const regles = trouvees;
-  const executable = trouvees.length > 0;
+
+  // INDICATEURS QUE CE MOTEUR NE SAIT PAS ÉVALUER.
+  // Mesure : `strategy_trend` (MA 50/200 + RSI) et `strategy_reversal` (double
+  // top + divergence RSI) produisaient TOUTES DEUX la règle unique R2 — parce
+  // que « tendance » et « retournement » mènent au même motif structurel, et
+  // parce que leur condition principale (moyenne mobile, divergence) n'existe
+  // dans aucune règle du moteur. Elles émettaient donc le même BUY sur les
+  // mêmes bougies sous deux noms différents.
+  // Une condition principale non implémentée rend la fiche NON ÉVALUABLE :
+  // ce n'est pas « aucune règle reconnue », et ça ne peut pas produire un signal.
+  const INDICATEURS = [
+    { cle: 'moyenne mobile', motifs: /moyenne mobile|moving average|\bma ?\d{2,3}\b|\bema\b|\bsma\b/ },
+    { cle: 'RSI', motifs: /\brsi\b/ },
+    { cle: 'MACD', motifs: /\bmacd\b/ },
+    { cle: 'stochastique', motifs: /stochastique|stochastic/ },
+    { cle: 'Bollinger', motifs: /bollinger/ },
+    { cle: 'divergence', motifs: /divergence/ }
+  ];
+  const indicateurs = INDICATEURS.filter(i => i.motifs.test(texte)).map(i => i.cle);
+  const executable = trouvees.length > 0 && indicateurs.length === 0;
 
   // Style déduit du texte : c'est lui qui décide des unités de temps à croiser
   // et de la largeur du stop. Une stratégie « scalping » ne se juge pas en 4 h.
@@ -920,12 +939,18 @@ function profilDepuisStrategie(doc) {
       : style === 'intraday' ? ['volatilite'] : [],
     parametres: dStyle ? { atrStop: dStyle.atrStop } : undefined,
     executable,
+    indicateurs,
     version: doc.version || null,
     obligatoires: [],
     deduitDuTexte: trouvees.length > 0,
-    motif: trouvees.length
-      ? `règles déduites du texte${style ? ` · style ${dStyle.label}` : ''}`
-      : 'stratégie non exécutable : aucune règle identifiable dans son texte (elle n\'hérite plus des règles génériques)'
+    motif: indicateurs.length
+      ? `non évaluable : sa condition principale repose sur ${indicateurs.join(', ')},`
+        + " qu'aucune règle de ce moteur ne calcule (disponibles : R1 balayage, R2 structure,"
+        + ' R3 zone, R4 range, R7 déplacement, R8 extension). Définir « moteur » dans la fiche'
+        + ' pour la rendre évaluable.'
+      : trouvees.length
+        ? `règles déduites du texte${style ? ` · style ${dStyle.label}` : ''}`
+        : 'stratégie non exécutable : aucune règle identifiable dans son texte (elle n hérite plus des règles génériques)'
   };
 }
 

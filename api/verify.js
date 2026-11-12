@@ -3865,6 +3865,83 @@ function tinyPng(W = 64, H = 40) {
           fs.readFileSync(path.join(__dirname, 'delivery', 'scan.js'), 'utf8')));
     }
 
+    // ── DIRECTION vs DÉCISION ──────────────────────────────────────────────
+    // Deux informations distinctes : ce que la stratégie voit (BUY/SELL/
+    // NEUTRAL/UNKNOWN) et ce que le moteur autorise (VALID/WAITING/INVALID).
+    // Mesure avant : « En attente » tenait lieu de direction dans le tableau de
+    // surveillance, et l'inconnu était rabattu sur « neutre ».
+    {
+      const Co = require('./engine/contrat');
+
+      ok('une direction absente devient UNKNOWN, pas NEUTRAL',
+        (() => {
+          const c = Co.normaliser({ id: 'x', nom: 'muet' });
+          return c.sens === 'inconnu' && c.direction === 'UNKNOWN';
+        })(), JSON.stringify((() => { const c = Co.normaliser({ id: 'x', nom: 'muet' }); return { sens: c.sens, direction: c.direction }; })()));
+
+      ok('un sens explicite donne la direction correspondante',
+        Co.normaliser({ id: 'a', sens: 'long' }).direction === 'BUY'
+        && Co.normaliser({ id: 'b', sens: 'short' }).direction === 'SELL'
+        && Co.normaliser({ id: 'c', sens: 'neutre' }).direction === 'NEUTRAL');
+
+      ok('une direction textuelle est convertie en sens interne',
+        Co.normaliser({ id: 'd', direction: 'SELL' }).sens === 'short');
+
+      const srcDE = fs.readFileSync(path.join(__dirname, 'engine', 'DecisionEngine.js'), 'utf8');
+      ok('une direction inconnue interdit l exécution',
+        /sens === 'inconnu' \|\| s\.direction === 'UNKNOWN'/.test(srcDE)
+        && /direction inconnue/.test(srcDE));
+
+      ok('le conflit entre stratégies est publié, pas seulement arbitré',
+        /conflit = \{/.test(srcDE) && /conflit: arbitrage\.conflit/.test(srcDE)
+        && /conflit,\n/.test(srcDE.replace(/\r/g, '')));
+
+      const ui = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8');
+      ok('le tableau de surveillance a deux colonnes : Direction et Décision',
+        /<th[^>]*>Direction<\/th>/.test(ui) && /<th[^>]*>Décision<\/th>/.test(ui));
+
+      ok('le tableau n utilise plus « Statut » comme unique information',
+        !/<th[^>]*>Stratégie<\/th>\s*<th[^>]*>Statut<\/th>/.test(ui));
+
+      const srcPr = fs.readFileSync(path.join(__dirname, 'engine', 'preuves.js'), 'utf8');
+      ok('les quatre directions sont stockées, jamais réduites à null',
+        /\['BUY', 'SELL', 'NEUTRAL', 'UNKNOWN'\]/.test(srcPr));
+
+      const srcAl = fs.readFileSync(path.join(__dirname, 'delivery', 'alerts.js'), 'utf8');
+      ok('la surveillance écrit UNKNOWN plutôt qu une direction vide',
+        /return 'UNKNOWN';/.test(srcAl));
+
+      // Une fiche dont la condition PRINCIPALE est un indicateur que le moteur
+      // ne calcule pas n'est pas évaluable. Sans cela, deux stratégies distinctes
+      // (suivi de tendance MA 50/200, retournement + divergence RSI) produisaient
+      // la MÊME règle unique R2 — donc le même BUY sous deux noms.
+      const Sig = require('./engine/signals');
+      ok('une fiche fondée sur un indicateur non calculé est non évaluable',
+        (() => {
+          const p = Sig.profilDepuisStrategie({
+            id: 'x_trend', title: 'Suivi de tendance',
+            content: "Prix au-dessus des moyennes mobiles MA 50 et 200. Confirmation avec RSI > 50."
+          });
+          return p.executable === false && p.indicateurs.includes('moyenne mobile')
+            && /non évaluable/.test(p.motif);
+        })());
+
+      ok('une fiche purement structurelle reste évaluable',
+        Sig.profilDepuisStrategie({
+          id: 'x_smc', title: 'SMC',
+          content: "Balayage de liquidité puis rupture de structure et order block."
+        }).executable === true);
+
+      ok('un moteur déclaré dans la fiche prime sur la détection d indicateur',
+        Sig.profilDepuisStrategie({
+          id: 'x_moteur', title: 'MA maison', content: 'moyenne mobile',
+          moteur: { regles: ['R2'], seuilRegles: 1 }
+        }).executable === true);
+
+      ok('les quatre directions sont rendues distinctement',
+        /'BUY ↗'/.test(ui) && /'SELL ↘'/.test(ui) && /'NEUTRAL ·'/.test(ui) && /'UNKNOWN \?'/.test(ui));
+    }
+
     // ── INVARIANT : toute route qui DÉCIDE fournit les deux garde-fous ────
     // Cartographie mesurée : 108 routes, 2 seulement appellent le Decision
     // Engine. Le flux temps réel en manquait — un signal refusé par le risque

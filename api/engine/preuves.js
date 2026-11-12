@@ -68,7 +68,14 @@ async function enregistrerEvaluation(e) {
   await assurerVersion(e.strategieId, version, e.fiche);
 
   const statut = ['VALID', 'WAITING', 'INVALID', 'NO_DATA'].includes(e.statut) ? e.statut : 'WAITING';
-  const direction = ['BUY', 'SELL'].includes(e.direction) ? e.direction : null;
+  // Les QUATRE directions sont conservées. Avant, tout ce qui n'était ni BUY
+  // ni SELL devenait `null` : le tableau de surveillance n'avait alors aucune
+  // direction à afficher et se rabattait sur « En attente », qui décrit la
+  // validation, pas le sens. NEUTRAL (avis sans biais) et UNKNOWN (aucun avis)
+  // sont deux informations distinctes, et toutes deux utiles.
+  const direction = ['BUY', 'SELL', 'NEUTRAL', 'UNKNOWN'].includes(e.direction)
+    ? e.direction
+    : (e.direction === null || e.direction === undefined ? 'UNKNOWN' : 'UNKNOWN');
 
   try {
     const [ligne] = await sql`

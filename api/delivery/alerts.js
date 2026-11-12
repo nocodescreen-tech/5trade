@@ -554,7 +554,14 @@ async function verifierBrut(force = false) {
             timeframe: m.tf,
             regime: null,
             statut: statutTrace,
-            direction: v.direction,
+            // Jamais null : l'absence de direction est UNKNOWN, pas un vide.
+            direction: (() => {
+              const d = String(v.direction || '').toUpperCase();
+              if (d === 'BUY' || d === 'ACHAT' || d === 'LONG') return 'BUY';
+              if (d === 'SELL' || d === 'VENTE' || d === 'SHORT') return 'SELL';
+              if (d === 'NEUTRAL' || d === 'NEUTRE') return 'NEUTRAL';
+              return 'UNKNOWN';
+            })(),
             conditions: Object.fromEntries((v.reglesActives || []).map(r => [r, true])),
             manquantes: v.bloquantes || [],
             score: v.strength,
