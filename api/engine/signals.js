@@ -900,7 +900,11 @@ function profilDepuisStrategie(doc) {
     { cle: 'divergence', motifs: /divergence/ }
   ];
   const indicateurs = INDICATEURS.filter(i => i.motifs.test(texte)).map(i => i.cle);
-  const executable = trouvees.length > 0 && indicateurs.length === 0;
+  // On ne DÉSACTIVE pas la stratégie : couper 5 fiches d'un coup sans que
+  // l'utilisateur l'ait demandé, c'est lui retirer son outil. On signale que sa
+  // condition principale n'est pas calculée par ce moteur, et on continue.
+  const executable = trouvees.length > 0;
+  const partiel = executable && indicateurs.length > 0;
 
   // Style déduit du texte : c'est lui qui décide des unités de temps à croiser
   // et de la largeur du stop. Une stratégie « scalping » ne se juge pas en 4 h.
@@ -939,12 +943,15 @@ function profilDepuisStrategie(doc) {
       : style === 'intraday' ? ['volatilite'] : [],
     parametres: dStyle ? { atrStop: dStyle.atrStop } : undefined,
     executable,
+    // true = évaluable, mais sa condition principale n'est pas calculée ici :
+    // l'écran doit le dire, l'utilisateur doit le savoir, rien n'est bloqué.
+    partiel,
     indicateurs,
     version: doc.version || null,
     obligatoires: [],
     deduitDuTexte: trouvees.length > 0,
-    motif: indicateurs.length
-      ? `non évaluable : sa condition principale repose sur ${indicateurs.join(', ')},`
+    motif: partiel
+      ? `partiel : sa condition principale repose sur ${indicateurs.join(', ')},`
         + " qu'aucune règle de ce moteur ne calcule (disponibles : R1 balayage, R2 structure,"
         + ' R3 zone, R4 range, R7 déplacement, R8 extension). Définir « moteur » dans la fiche'
         + ' pour la rendre évaluable.'

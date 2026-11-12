@@ -3916,14 +3916,16 @@ function tinyPng(W = 64, H = 40) {
       // (suivi de tendance MA 50/200, retournement + divergence RSI) produisaient
       // la MÊME règle unique R2 — donc le même BUY sous deux noms.
       const Sig = require('./engine/signals');
-      ok('une fiche fondée sur un indicateur non calculé est non évaluable',
+      // La fiche RESTE évaluable : couper une stratégie sans que l'utilisateur
+      // l'ait demandé lui retire son outil. On signale le manque, on n'éteint pas.
+      ok('une fiche fondée sur un indicateur non calculé est signalée, pas désactivée',
         (() => {
           const p = Sig.profilDepuisStrategie({
             id: 'x_trend', title: 'Suivi de tendance',
             content: "Prix au-dessus des moyennes mobiles MA 50 et 200. Confirmation avec RSI > 50."
           });
-          return p.executable === false && p.indicateurs.includes('moyenne mobile')
-            && /non évaluable/.test(p.motif);
+          return p.executable === true && p.partiel === true
+            && p.indicateurs.includes('moyenne mobile') && /partiel/.test(p.motif);
         })());
 
       ok('une fiche purement structurelle reste évaluable',
