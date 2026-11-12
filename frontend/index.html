@@ -90,6 +90,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <!-- Design system 5trade : tokens + thème clair/sombre + mode hors ligne -->
 <link rel="stylesheet" href="design-tokens.css?v=1">
+<!-- Couche mouvement (tokens ECC, transform/opacity, reduced-motion) : chargée
+     après le style inline pour pouvoir affiner sans le réécrire. -->
+<link rel="stylesheet" href="motion.css?v=1">
 <script src="theme.js?v=1"></script>
 <script>
   // Service worker : notifications push uniquement (aucune interception
@@ -2943,7 +2946,28 @@ function MultiTimeframeMatrix({ confluence }) {
         </span>
       </div>
 
-      <div style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 4 }}>
+      {/* Progression d'alignement. La barre pousse par `transform: scaleX` :
+          animer `width` recalculerait la mise en page à chaque image. */}
+      <div
+        className="m-bar"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={detail.length || 1}
+        aria-valuenow={c.nbAlignes}
+        aria-label={`Alignement ${c.nbAlignes} sur ${detail.length || 0} unités de temps`}
+        style={{ height: 4, marginBottom: 10 }}
+      >
+        <span
+          className="m-bar__fill"
+          data-animate="in"
+          style={{
+            '--m-value': detail.length ? c.nbAlignes / detail.length : 0,
+            background: c.aligne ? TT.ok : TT.warn,
+          }}
+        ></span>
+      </div>
+
+      <div className="m-list" style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 4 }}>
         {detail.map(t => {
           const info = parTF.get(t.tf) || {};
           const col = tendCol(t.tendance);

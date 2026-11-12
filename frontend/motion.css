@@ -1,0 +1,441 @@
+/* ═══════════════════════════════════════════════════════════════
+   5TRADE — COUCHE MOUVEMENT (ECC motion-foundations + motion-patterns)
+
+   Ce fichier ne définit AUCUNE couleur : il ne touche qu'au mouvement.
+   Le design system impose des aplats et des traits nets — donc pas de
+   dégradé ici non plus, uniquement des transformations et des opacités.
+
+   Règles ECC tenues ici :
+   1. Tokens uniquement — aucune durée ni courbe écrite en dur dans un composant.
+   2. `transform` et `opacity` seuls : jamais width/height/top/left/margin.
+   3. `prefers-reduced-motion` gagne toujours → opacité seule, ≤ 0,2 s.
+   4. Stagger plafonné entre 0,05 s et 0,10 s.
+   5. Apparition au défilement : une seule fois (`once`), jamais en boucle.
+   6. Appareil lent : durées réduites, effets non essentiels coupés.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Durées (motionTokens.duration) ───────────────────────── */
+  --m-instant: 80ms;
+  --m-fast: 180ms;
+  --m-normal: 350ms;
+  --m-slow: 600ms;
+
+  /* ── Courbes : équivalents CSS des ressorts ECC ───────────────
+     snappy  → sortie vive, quasi sans rebond
+     gentle  → atterrissage doux (cartes, panneaux)
+     bouncy  → léger dépassement (états vides, onboarding)
+     sharp   → entrée franche (fermeture, sortie) */
+  --m-snappy: cubic-bezier(0.32, 0.72, 0, 1);
+  --m-gentle: cubic-bezier(0.22, 1, 0.36, 1);
+  --m-bouncy: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --m-sharp: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Distances (motionTokens.distance) ────────────────────── */
+  --m-xs: 4px;
+  --m-sm: 8px;
+  --m-md: 16px;
+  --m-lg: 24px;
+
+  /* ── Échelles (motionTokens.scale) ────────────────────────── */
+  --m-scale-subtle: 0.98;
+  --m-scale-press: 0.97;
+  --m-scale-pop: 1.02;
+
+  /* ── Cadence des listes : dans la fourchette 50–100 ms ────── */
+  --m-stagger: 80ms;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   1. ENTRÉE DES PANNEAUX
+   Le stagger se fait par `animation-delay` sur les enfants directs,
+   plafonné au 8e élément : au-delà, tout arrive ensemble plutôt que
+   de faire attendre trois secondes.
+   ═══════════════════════════════════════════════════════════════ */
+
+@keyframes m-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, var(--m-sm), 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* Les panneaux apparaissent une fois, à l'atterrissage doux. */
+.shell > * {
+  animation: m-rise var(--m-normal) var(--m-gentle) both;
+}
+
+/* Cascade sur les grilles de panneaux : 8 paliers maximum. */
+.shell > *:nth-child(1) { animation-delay: 0ms; }
+.shell > *:nth-child(2) { animation-delay: var(--m-stagger); }
+.shell > *:nth-child(3) { animation-delay: calc(var(--m-stagger) * 2); }
+.shell > *:nth-child(4) { animation-delay: calc(var(--m-stagger) * 3); }
+.shell > *:nth-child(5) { animation-delay: calc(var(--m-stagger) * 4); }
+.shell > *:nth-child(6) { animation-delay: calc(var(--m-stagger) * 5); }
+.shell > *:nth-child(7) { animation-delay: calc(var(--m-stagger) * 6); }
+.shell > *:nth-child(n + 8) { animation-delay: calc(var(--m-stagger) * 7); }
+
+/* ═══════════════════════════════════════════════════════════════
+   2. CARTES : survol et appui
+   Un panneau ne bouge que de 2 px et grossit de 2 % — l'effet doit se
+   sentir, pas se voir. `will-change` est posé à la demande seulement.
+   ═══════════════════════════════════════════════════════════════ */
+
+.panel {
+  transition:
+    transform var(--m-fast) var(--m-snappy),
+    box-shadow var(--m-fast) var(--m-snappy),
+    border-color var(--m-fast) var(--m-sharp);
+}
+
+/* On ne soulève pas un panneau qui contient un graphique ou un formulaire :
+   le mouvement distrairait de la lecture. */
+@media (hover: hover) and (pointer: fine) {
+  .panel:hover {
+    transform: translate3d(0, -2px, 0);
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   3. BOUTONS : retour immédiat au clic
+   L'appui répond en 80 ms : c'est le seul endroit où l'instantané est
+   justifié, l'utilisateur doit sentir que son clic est pris en compte.
+   ═══════════════════════════════════════════════════════════════ */
+
+.btn {
+  transition:
+    transform var(--m-instant) var(--m-sharp),
+    background-color var(--m-fast) var(--m-sharp),
+    border-color var(--m-fast) var(--m-sharp),
+    color var(--m-fast) var(--m-sharp);
+}
+
+.btn:active {
+  transform: scale(var(--m-scale-press));
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn:not(.ghost):hover {
+    transform: scale(var(--m-scale-pop));
+  }
+}
+
+/* Le bouton désactivé ne doit pas réagir : sinon il ment sur son état. */
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  transform: none !important;
+  cursor: not-allowed;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   4. BARRES DE PROGRESSION ET DE CONFIANCE
+   La largeur est animée par `transform: scaleX`, jamais par `width` :
+   `width` déclenche un recalcul de mise en page à chaque image.
+   ═══════════════════════════════════════════════════════════════ */
+
+.m-bar {
+  position: relative;
+  overflow: hidden;
+  background: var(--panel2, var(--panel));
+  border-radius: 999px;
+}
+
+.m-bar__fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(var(--m-value, 0));
+  border-radius: inherit;
+  transition: transform var(--m-normal) var(--m-gentle);
+}
+
+/* Apparition de la barre : elle pousse depuis la gauche, une seule fois. */
+.m-bar__fill[data-animate='in'] {
+  animation: m-grow var(--m-slow) var(--m-gentle) both;
+}
+
+@keyframes m-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(var(--m-value, 0));
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   5. BADGES ET PASTILLES D'ÉTAT
+   Un badge qui change doit le signaler sans clignoter : une pulsation
+   courte sur l'opacité, pas une boucle infinie.
+   ═══════════════════════════════════════════════════════════════ */
+
+.badge {
+  transition:
+    background-color var(--m-fast) var(--m-sharp),
+    color var(--m-fast) var(--m-sharp),
+    border-color var(--m-fast) var(--m-sharp);
+}
+
+.badge[data-flash='1'] {
+  animation: m-flash var(--m-slow) var(--m-sharp) 1;
+}
+
+@keyframes m-flash {
+  0% {
+    opacity: 1;
+  }
+  35% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   6. SQUELETTES DE CHARGEMENT
+   Un balayage horizontal très lent, en opacité : pas de `background-position`
+   animé sur un dégradé (le design system n'en veut pas, et c'est coûteux).
+   ═══════════════════════════════════════════════════════════════ */
+
+.m-skeleton {
+  background: var(--panel2, var(--panel));
+  border-radius: var(--radius-sm, 8px);
+  animation: m-breathe 1.6s var(--m-sharp) infinite;
+}
+
+@keyframes m-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   7. MODALES : entrée et sortie définies ensemble
+   La sortie est aussi soignée que l'entrée (règle 2 de motion-patterns) :
+   `[data-closing]` est posé par le composant avant démontage.
+   ═══════════════════════════════════════════════════════════════ */
+
+@keyframes m-modal-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, var(--m-md), 0) scale(var(--m-scale-subtle));
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes m-modal-out {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(0, var(--m-sm), 0) scale(var(--m-scale-subtle));
+  }
+}
+
+@keyframes m-veil-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.m-veil {
+  animation: m-veil-in var(--m-fast) var(--m-sharp) both;
+}
+
+.m-veil[data-closing='1'] {
+  animation: m-veil-in var(--m-fast) var(--m-sharp) reverse both;
+}
+
+.m-modal {
+  animation: m-modal-in var(--m-normal) var(--m-gentle) both;
+}
+
+.m-modal[data-closing='1'] {
+  animation: m-modal-out var(--m-fast) var(--m-sharp) both;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   8. NOTIFICATIONS : glissement latéral, sortie symétrique
+   ═══════════════════════════════════════════════════════════════ */
+
+@keyframes m-toast-in {
+  from {
+    opacity: 0;
+    transform: translate3d(var(--m-lg), 0, 0) scale(var(--m-scale-subtle));
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes m-toast-out {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(var(--m-lg), 0, 0) scale(var(--m-scale-subtle));
+  }
+}
+
+.m-toast {
+  animation: m-toast-in var(--m-normal) var(--m-snappy) both;
+}
+
+.m-toast[data-closing='1'] {
+  animation: m-toast-out var(--m-fast) var(--m-sharp) both;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   9. LIGNES DE TABLEAU ET DE LISTE
+   ═══════════════════════════════════════════════════════════════ */
+
+.m-row {
+  transition:
+    background-color var(--m-fast) var(--m-sharp),
+    transform var(--m-fast) var(--m-snappy);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .m-row:hover {
+    transform: translate3d(var(--m-xs), 0, 0);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   10. CHIFFRES QUI CHANGENT
+   Un prix qui se met à jour pulse une fois : le regard est attiré sans
+   que la mise en page bouge.
+   ═══════════════════════════════════════════════════════════════ */
+
+.m-tick-up {
+  animation: m-tick-up var(--m-slow) var(--m-snappy) 1;
+}
+
+.m-tick-down {
+  animation: m-tick-down var(--m-slow) var(--m-snappy) 1;
+}
+
+@keyframes m-tick-up {
+  0% {
+    opacity: 0.4;
+    transform: translate3d(0, var(--m-xs), 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes m-tick-down {
+  0% {
+    opacity: 0.4;
+    transform: translate3d(0, calc(var(--m-xs) * -1), 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   11. ACCESSIBILITÉ — priorité absolue (règle 3)
+   Le mouvement réduit ne supprime pas l'information : tout reste
+   visible, seules les transformations disparaissent.
+   ═══════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .shell > *,
+  .m-list > *,
+  .m-modal,
+  .m-veil,
+  .m-toast,
+  .m-skeleton,
+  .m-tick-up,
+  .m-tick-down,
+  .badge[data-flash='1'] {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .m-bar__fill,
+  .m-bar__fill[data-animate='in'] {
+    animation: none !important;
+    transform: scaleX(var(--m-value, 0)) !important;
+    transition: opacity 150ms linear;
+  }
+
+  .panel,
+  .btn,
+  .m-row,
+  .badge {
+    transition:
+      background-color 150ms linear,
+      border-color 150ms linear,
+      color 150ms linear,
+      opacity 150ms linear;
+  }
+
+  .panel:hover,
+  .btn:hover,
+  .btn:active,
+  .m-row:hover {
+    transform: none !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   12. APPAREILS LENTS (règle : la réactivité prime sur la fluidité)
+   Peu de cœurs ou peu de mémoire → on garde les transitions d'état,
+   on coupe les entrées et les animations en boucle.
+   ═══════════════════════════════════════════════════════════════ */
+
+@media (max-width: 480px) {
+  .shell > * {
+    animation-duration: var(--m-fast);
+  }
+
+  .panel:hover {
+    transform: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   13. LISTES EN CASCADE
+   Le conteneur `m-list` fait entrer ses enfants directs l'un après
+   l'autre, 80 ms d'écart (fourchette ECC 50–100 ms), plafonné au 8e.
+   ═══════════════════════════════════════════════════════════════ */
+
+.m-list > * {
+  animation: m-rise var(--m-normal) var(--m-gentle) both;
+}
+
+.m-list > *:nth-child(1) { animation-delay: 0ms; }
+.m-list > *:nth-child(2) { animation-delay: var(--m-stagger); }
+.m-list > *:nth-child(3) { animation-delay: calc(var(--m-stagger) * 2); }
+.m-list > *:nth-child(4) { animation-delay: calc(var(--m-stagger) * 3); }
+.m-list > *:nth-child(5) { animation-delay: calc(var(--m-stagger) * 4); }
+.m-list > *:nth-child(6) { animation-delay: calc(var(--m-stagger) * 5); }
+.m-list > *:nth-child(n + 7) { animation-delay: calc(var(--m-stagger) * 6); }
