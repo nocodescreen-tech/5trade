@@ -49,14 +49,46 @@ const PORT = process.env.PORT || 3001;
 // les modèles retirés par NVIDIA (404/410) sont volontairement absents — un
 // identifiant annoncé mais mort ne sert à rien dans une chaîne de secours.
 const NVIDIA_URL = process.env.NVIDIA_URL || 'https://integrate.api.nvidia.com/v1/chat/completions';
+// ORDRE = LATENCE MESURÉE, pas ordre de préférence (tools/diag-ia.js) :
+//   nano-omni-30b .......  3,2 s
+//   lightning-30b .......  9,2 s
+//   ultra-550b .......... 54,4 s
+//   mistral-large-4-1t .. aucun réponse (timeout à 60 s et 90 s)
+// L'ancien ordre mettait ultra en tête : chaque analyse attendait 45 s pour un
+// modèle qui dépasse ce délai, puis 45 s de plus sur mistral, avant d'atteindre
+// celui qui répond en 3 s.
 const NVIDIA_MODELS = String(
   process.env.NVIDIA_MODELS ||
-  'nvidia/nemotron-3-ultra-550b-a55b,' +
+  // Les deux modèles qui répondent RÉELLEMENT, dans l'ordre de latence mesurée.
+  // ultra-550b (54 s) et mistral-large-4-1t (jamais de réponse) restent
+  // joignables via NVIDIA_MODELS, mais hors cascade par défaut : les garder ici
+  // faisait attendre 165 s pour un plan que le moteur sait calculer sans IA.
   'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning,' +
-  'nvidia/nemotron-3.5-lightning-30b-a3b,' +
-  'mistralai/mistral-large-4-1t-a52b'
+  'nvidia/nemotron-3.5-lightning-30b-a3b'
 ).split(',').map(m => m.trim()).filter(Boolean);
 const NVIDIA_TIMEOUT_MS = Number(process.env.NVIDIA_TIMEOUT_MS || 45000);
+
+// Délai par modèle : un modèle rapide qui traîne doit céder la place vite, un
+// modèle lent mais fiable a droit à plus de temps. Sans cela, un seul délai
+// global condamne soit les rapides (trop court), soit les lents (trop long).
+const DELAIS_NVIDIA = {
+  // Mesurés : 3,2 s et 9,2 s. On laisse ~3× la marge, et la somme des deux
+  // délais (12 + 18) tient dans l'échéance globale de 30 s.
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning': 12000,
+  'nvidia/nemotron-3.5-lightning-30b-a3b': 18000,
+  // Hors cascade par défaut : joignables si on les réclame explicitement.
+  'nvidia/nemotron-3-ultra-550b-a55b': 90000,
+  'mistralai/mistral-large-4-1t-a52b': 20000
+};
+// Échéance GLOBALE : au-delà, on arrête d'attendre et l'appelant reçoit une
+// erreur — la route d'analyse bascule alors sur le plan calculé par le moteur.
+// Sans ce plafond, quatre modèles à 45 s font une requête de trois minutes.
+const NVIDIA_BUDGET_TOTAL_MS = Number(process.env.NVIDIA_BUDGET_TOTAL_MS || 30000);
+
+function delaiPour(modele) {
+  if (process.env.NVIDIA_TIMEOUT_MS) return Number(process.env.NVIDIA_TIMEOUT_MS);
+  return DELAIS_NVIDIA[modele] || NVIDIA_TIMEOUT_MS;
+}
 
 // ─── Budget IA : moins de tokens, et pas deux fois le même appel ───
 // Le plan d'analyse était demandé à 2200 tokens alors que la réponse JSON
@@ -199,6 +231,9 @@ app.use('/uploads', requireAuth, express.static(UPLOADS_DIR));
 // Les fichiers statiques. La page HTML ne doit JAMAIS être mise en cache : le
 // navigateur gardait l'ancienne version et l'utilisateur ne voyait pas les
 // nouveautés (zones du graphique comprises) malgré un serveur à jour.
+// Raccourci lisible : /pilote → l'écran de conversation.
+app.get('/pilote', requireAuth, (req, res) => res.redirect('/pilote-chat.html'));
+
 app.use(express.static(path.join(ROOT, 'frontend'), {
   setHeaders: (res, chemin) => {
     if (/\.html?$/i.test(chemin)) {
@@ -507,6 +542,7 @@ const Playbooks = require('./delivery/playbooks');
 // Ces modules pilotent le système en langage naturel et apprennent des trades.
 // Initialisés APRÈS les modules existants pour pouvoir les piloter.
 const Memoire = require('./memoire');
+const Scenarios = require('./scenarios');
 const Apprentissage = require('./apprentissage');
 const ChatCrud = require('./chat-crud');
 
@@ -515,8 +551,10 @@ const ChatCrud = require('./chat-crud');
   try {
     await Memoire.init();
     await Apprentissage.init();
+    await Scenarios.init();
     console.log('   Mémoire      : initialisée (faits, croyances, exceptions)');
     console.log('   Apprentissage: seuils chargés, boucle quotidienne à 02:00 UTC');
+    console.log('   Scénarios    : table prête (plan d’attente, expiration 3 h)');
   } catch (e) {
     console.error('   Mémoire      : init échouée —', e.message);
   }
@@ -677,37 +715,53 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false } 
     });
   }
 
-  const res = await fetch(NVIDIA_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${key}`,
-      'Content-Type': 'application/json'
-    },
-    // Les modèles NIM sont majoritairement des modèles « reasoning » : ils
-    // consomment d'abord des tokens à réfléchir, puis écrivent la réponse.
-    // Avec le budget exact, on recevait un contenu vide (finish=length).
-    // Comme c'est gratuit, on ajoute une marge de raisonnement généreuse.
-    body: JSON.stringify({
-      model: modele,
-      messages: msgs,
-      max_tokens: maxTokens + Number(process.env.NVIDIA_MARGE_TOKENS || 1500),
-      temperature: 0.3
-    }),
-    signal: AbortSignal.timeout(NVIDIA_TIMEOUT_MS)
-  });
+  // Budget de tokens : ces modèles RAISONNENT avant d'écrire. Avec un budget
+  // juste, le raisonnement mange tout et `content` revient vide avec
+  // finish=length (mesuré sur les 4 modèles de la cascade). On donne une marge
+  // large — l'appel est gratuit — et on REJOUE une fois avec trois fois plus
+  // si le budget a malgré tout été épuisé.
+  const budget = () => maxTokens + Number(process.env.NVIDIA_MARGE_TOKENS || 6000);
 
-  const brut = await res.text();
-  let data = {};
-  try { data = JSON.parse(brut); } catch { /* réponse non JSON */ }
-  if (!res.ok) {
-    const msg = data.detail || data.error?.message || brut.slice(0, 200) || `HTTP ${res.status}`;
-    throw new Error(`NVIDIA ${modele} HTTP ${res.status} — ${msg}`);
+  async function envoyer(tokens) {
+    const res = await fetch(NVIDIA_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${key}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: modele,
+        messages: msgs,
+        max_tokens: tokens,
+        temperature: 0.3
+      }),
+      signal: AbortSignal.timeout(delaiPour(modele))
+    });
+
+    const brut = await res.text();
+    let data = {};
+    try { data = JSON.parse(brut); } catch { /* réponse non JSON */ }
+    if (!res.ok) {
+      const msg = data.detail || data.error?.message || brut.slice(0, 200) || `HTTP ${res.status}`;
+      throw new Error(`NVIDIA ${modele} HTTP ${res.status} — ${msg}`);
+    }
+    return data;
   }
-  const choix = (data.choices || [])[0] || {};
-  const msg = choix.message || {};
-  // Certains modèles « reasoning » renvoient le contenu final vide quand le
-  // budget de tokens a été mangé par le raisonnement : on le signale.
+
+  let data = await envoyer(budget());
+  let choix = (data.choices || [])[0] || {};
+  let msg = choix.message || {};
   let contenu = msg.content;
+
+  if ((!contenu || !String(contenu).trim()) && choix.finish_reason === 'length') {
+    const elargi = budget() * 3;
+    console.warn(`[IA] ${modele} : contenu vide (finish=length) — second essai à ${elargi} tokens`);
+    data = await envoyer(elargi);
+    choix = (data.choices || [])[0] || {};
+    msg = choix.message || {};
+    contenu = msg.content;
+  }
+
   if (!contenu || !String(contenu).trim()) {
     throw new Error(`NVIDIA ${modele} : réponse vide (finish=${choix.finish_reason || '?'})`);
   }
@@ -736,7 +790,13 @@ async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'i
     throw e;
   }
   const raisons = [];
+  const debut = Date.now();
   for (const modele of NVIDIA_MODELS) {
+    const restant = NVIDIA_BUDGET_TOTAL_MS - (Date.now() - debut);
+    if (restant <= 2000) {
+      raisons.push(`${modele}: non essayé (échéance de ${NVIDIA_BUDGET_TOTAL_MS} ms atteinte)`);
+      break;
+    }
     try {
       const r = await appelNvidia(modele, messages, { maxTokens, json });
       try {
@@ -2977,6 +3037,55 @@ app.get('/api/market/stream', requireAuth, (req, res) => {
   req.on('close', () => { clearInterval(keepAlive); try { stop(); } catch {} });
 });
 
+/**
+ * PLAN SANS IA — le panneau « Plan d'action » ne doit jamais être vide.
+ *
+ * Quand les quatre modèles échouent, l'écran affichait des tirets partout :
+ * l'IA portait à elle seule l'entrée, le stop et les objectifs. Or ces niveaux
+ * ne viennent pas du modèle, ils viennent de la STRUCTURE mesurée. On les
+ * calcule donc ici, avec le générateur de scénarios, et on dit pourquoi.
+ */
+function planDepuisMoteur(candles, meta, report, cause) {
+  let g = { scenarios: [], motif: 'générateur indisponible' };
+  try { g = require('./scenarios/generateur').generer(candles, meta); } catch (e) { g.motif = e.message; }
+  const scn = (g.scenarios || [])[0] || null;
+  const courtCause = String(cause || '').slice(0, 140);
+
+  if (!scn) {
+    return {
+      action: 'HOLD', confidence: 'low', source: 'moteur',
+      reason: `Aucun plan chiffrable : ${g.motif || 'configuration absente'}. `
+        + `Commentaire IA indisponible (${courtCause}).`,
+      entry: { zone: '—', trigger: 'aucun', timeframe: meta.timeframe },
+      stopLoss: {}, riskManagement: {}, takeProfit: [], nextSteps: [], executionPlan: [], risk: 'medium'
+    };
+  }
+
+  const risque = Math.abs(scn.niveauEntree - scn.stop);
+  const rr = risque ? Math.abs(scn.tp1 - scn.niveauEntree) / risque : null;
+  return {
+    action: scn.direction === 'long' ? 'BUY' : 'SELL',
+    confidence: 'medium', source: 'moteur',
+    reason: `Plan calculé par le MOTEUR, pas par l’IA (${courtCause}). `
+      + `Entrée au retest de zone, stop à 1 × ATR au-delà, objectifs sur liquidité mesurée. `
+      + `Aucun chiffre inventé : tout vient de la structure des bougies.`,
+    entry: {
+      zone: String(scn.niveauEntree),
+      trigger: (scn.conditions && scn.conditions[0] && scn.conditions[0].type) || 'prix atteint',
+      timeframe: meta.timeframe
+    },
+    stopLoss: { level: String(scn.stop), reason: 'au-delà de la zone, 1 × ATR(14)' },
+    riskManagement: { riskPerTrade: '0,5 % du capital', rr: rr ? `1:${rr.toFixed(2)}` : '—' },
+    takeProfit: [
+      { level: String(scn.tp1), reason: 'première liquidité identifiée' },
+      { level: String(scn.tp2), reason: 'liquidité suivante' }
+    ],
+    nextSteps: scn.preuves || [],
+    executionPlan: scn.preuves || [],
+    risk: 'medium'
+  };
+}
+
 // Analyse complète : structure calculée + base de connaissance + plan
 // Le modèle rédige à partir de NOMBRES exacts (pas d'une capture).
 app.post('/api/market/analyze', requireAuth, async (req, res) => {
@@ -2998,7 +3107,7 @@ app.post('/api/market/analyze', requireAuth, async (req, res) => {
     try {
       plan = await buildPlan({ pair: symbol, timeframes: [tf], visionAnalysis: report.summary, strategies: top });
     } catch (e) {
-      plan = { action: 'HOLD', reason: 'Combinaison indisponible: ' + e.message, confidence: 'low', entry: {}, nextSteps: [], risk: 'medium' };
+      plan = planDepuisMoteur(candles, { symbol, timeframe: tf }, report, e.message);
     }
 
     const analysis = {
@@ -3796,6 +3905,34 @@ app.get('/api/positions', requireAuth, async (req, res) => {
       // Explicite : rien n'a été appliqué par cette lecture.
       actionsAppliquees: lot.actionsAppliquees
     });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/**
+ * SCÉNARIOS — plan d'attente, pas un signal.
+ * GET : ce qui est en attente. POST /generer : recalcule depuis les bougies.
+ */
+app.get('/api/scenarios', requireAuth, async (req, res) => {
+  try {
+    await Scenarios.expirer();
+    const items = await Scenarios.lister({
+      statut: String(req.query.statut || 'en_attente'),
+      instrument: req.query.symbol ? String(req.query.symbol).toUpperCase() : null,
+      limite: Number(req.query.limite) || 20
+    });
+    res.json({ success: true, total: items.length, scenarios: items });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/scenarios/generer', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.body.symbol || req.query.symbol || '').trim();
+    const tf = String(req.body.tf || req.query.tf || '15m').trim();
+    if (!symbol) return res.status(400).json({ error: 'symbol requis' });
+    const { candles } = await Market.getCandles(symbol, tf, 300);
+    const r = await Scenarios.genererEtEnregistrer(
+      (candles || []).filter(c => c.closed !== false), { symbol, timeframe: tf });
+    res.json({ success: true, ...r });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -4695,10 +4832,41 @@ async function start() {
         utilisateur: req.session.username,
         ip: req.ip
       });
+      // HISTORIQUE : on écrit la question ET la réponse. Sans cela, fermer
+      // l'onglet effaçait la conversation — le chat ne se souvenait de rien.
+      try {
+        const H = require('./chat-crud/historique');
+        const texteReponse = (r && (r.texte || (r.resultat && r.resultat.texte))) || '';
+        await H.enregistrer({ role: 'user', texte: message,
+          verbe: r && r.action ? r.action.verbe : null,
+          sujet: r && r.action ? r.action.sujet : null });
+        if (texteReponse) {
+          await H.enregistrer({ role: 'assistant', texte: texteReponse,
+            verbe: r && r.action ? r.action.verbe : null,
+            action: r && r.action ? r.action : null });
+        }
+      } catch (e) { console.error('chat/historique :', e.message); }
       res.json({ success: true, ...r });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
+  });
+
+  // GET /api/chat/historique — les derniers échanges, du plus ancien au récent.
+  app.get('/api/chat/historique', requireAuth, async (req, res) => {
+    try {
+      const H = require('./chat-crud/historique');
+      const messages = await H.lister({ limite: Number(req.query.limite) || 60 });
+      res.json({ success: true, total: messages.length, messages });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // DELETE /api/chat/historique — effacer la conversation (action explicite).
+  app.delete('/api/chat/historique', requireAuth, async (req, res) => {
+    try {
+      const H = require('./chat-crud/historique');
+      res.json({ success: true, ...(await H.effacer()) });
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   // GET /api/chat/aide — liste des commandes disponibles.

@@ -1,283 +1,279 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>5trade — Pilote</title>
-  <style>
-    :root {
-      --bg: #0a0e1a;
-      --bg-card: #131826;
-      --bg-input: #1a2030;
-      --border: #232a3d;
-      --text: #e4e7ee;
-      --text-muted: #8b94a8;
-      --accent: #4f7cff;
-      --accent-hover: #6b91ff;
-      --success: #10b981;
-      --warning: #f59e0b;
-      --danger: #ef4444;
-      --mono: 'JetBrains Mono', 'Courier New', monospace;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-    header {
-      padding: 12px 20px;
-      background: var(--bg-card);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    header h1 { font-size: 16px; font-weight: 600; }
-    header .badge {
-      font-size: 11px;
-      padding: 3px 8px;
-      background: rgba(79, 124, 255, 0.15);
-      color: var(--accent);
-      border-radius: 4px;
-    }
-    .chat-container {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-    .msg {
-      max-width: 80%;
-      padding: 12px 16px;
-      border-radius: 12px;
-      font-size: 14px;
-      line-height: 1.5;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-    }
-    .msg.user {
-      align-self: flex-end;
-      background: var(--accent);
-      color: white;
-    }
-    .msg.system {
-      align-self: flex-start;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      font-family: var(--mono);
-      font-size: 13px;
-    }
-    .msg.system pre {
-      background: var(--bg-input);
-      padding: 8px;
-      border-radius: 6px;
-      margin: 8px 0;
-      overflow-x: auto;
-    }
-    .msg.system code {
-      background: var(--bg-input);
-      padding: 1px 5px;
-      border-radius: 3px;
-      font-size: 12px;
-      color: var(--accent);
-    }
-    .input-container {
-      padding: 16px 20px;
-      background: var(--bg-card);
-      border-top: 1px solid var(--border);
-      display: flex;
-      gap: 12px;
-      align-items: flex-end;
-    }
-    .input-container textarea {
-      flex: 1;
-      background: var(--bg-input);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 10px 14px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-family: inherit;
-      resize: none;
-      min-height: 44px;
-      max-height: 200px;
-      transition: border-color 0.2s;
-    }
-    .input-container textarea:focus {
-      outline: none;
-      border-color: var(--accent);
-    }
-    .input-container button {
-      background: var(--accent);
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .input-container button:hover { background: var(--accent-hover); }
-    .input-container button:disabled {
-      background: var(--border);
-      cursor: not-allowed;
-    }
-    .suggestions {
-      padding: 0 20px 8px;
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      background: var(--bg-card);
-    }
-    .suggestion {
-      font-size: 12px;
-      padding: 5px 10px;
-      background: var(--bg-input);
-      border: 1px solid var(--border);
-      color: var(--text-muted);
-      border-radius: 12px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .suggestion:hover {
-      border-color: var(--accent);
-      color: var(--text);
-    }
-    .typing {
-      align-self: flex-start;
-      color: var(--text-muted);
-      font-size: 13px;
-      font-style: italic;
-      padding: 8px 12px;
-    }
-    .typing::after {
-      content: '...';
-      animation: blink 1s infinite;
-    }
-    @keyframes blink {
-      0%, 100% { opacity: 0.3; }
-      50% { opacity: 1; }
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>5trade — Pilote</title>
+<style>
+  /* Bulles de conversation. Palette alignée sur l'application : fond profond,
+     accent unique, aucune couleur décorative en plus. */
+  :root{
+    --fond:#0b0d12; --surface:#141821; --surface-2:#1b2130; --ligne:#262d3d;
+    --texte:#e8ecf5; --dim:#8b93a7; --accent:#f4772e; --accent-doux:#3a2416;
+    --ok:#3ddc97; --err:#ff6b6b;
+    --r:16px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--fond); color:var(--texte);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+    display:flex; flex-direction:column;
+  }
+  header{
+    display:flex; align-items:center; gap:12px;
+    padding:14px 18px; border-bottom:1px solid var(--ligne); background:var(--surface);
+    position:sticky; top:0; z-index:2;
+  }
+  .logo{
+    width:32px;height:32px;border-radius:9px;background:var(--accent);
+    display:grid;place-items:center;font-weight:800;color:#120b05;font-size:15px;
+  }
+  .titre{font-weight:650;letter-spacing:-.01em}
+  .sous{font-size:12px;color:var(--dim)}
+  header .droite{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .pastille{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--dim)}
+  .point{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+  .point.off{background:var(--err)}
+  button{
+    font:inherit; color:var(--texte); background:var(--surface-2);
+    border:1px solid var(--ligne); border-radius:10px; padding:8px 12px; cursor:pointer;
+    transition:background .15s, border-color .15s;
+  }
+  button:hover{background:#232a3a;border-color:#323a4d}
+  button:disabled{opacity:.5;cursor:default}
+
+  #fil{flex:1; overflow-y:auto; padding:22px 18px 8px; scroll-behavior:smooth}
+  .rangee{display:flex; gap:10px; margin:0 0 16px; align-items:flex-end}
+  .rangee.moi{flex-direction:row-reverse}
+  .bulle{
+    max-width:min(680px,78%); padding:12px 15px; border-radius:var(--r);
+    background:var(--surface); border:1px solid var(--ligne);
+    white-space:pre-wrap; word-break:break-word;
+    box-shadow:0 1px 0 rgba(255,255,255,.02) inset;
+  }
+  .rangee.moi .bulle{
+    background:var(--accent-doux); border-color:#5a3a22; border-bottom-right-radius:6px;
+  }
+  .rangee.ia .bulle{border-bottom-left-radius:6px}
+  .avatar{
+    width:28px;height:28px;border-radius:8px;background:var(--surface-2);
+    border:1px solid var(--ligne); display:grid;place-items:center;
+    font-size:12px;font-weight:700;color:var(--dim); flex:0 0 auto;
+  }
+  .rangee.moi .avatar{background:var(--accent);color:#120b05;border-color:transparent}
+  .meta{font-size:11px;color:var(--dim);margin-top:6px}
+  .rangee.moi .meta{text-align:right}
+
+  .heure{font-size:11px;color:var(--dim);align-self:flex-end;padding-bottom:2px}
+
+  /* Indicateur de frappe */
+  .frappe{display:inline-flex;gap:4px;padding:4px 2px}
+  .frappe i{
+    width:6px;height:6px;border-radius:50%;background:var(--dim);
+    animation:saut 1.2s infinite ease-in-out;
+  }
+  .frappe i:nth-child(2){animation-delay:.15s}
+  .frappe i:nth-child(3){animation-delay:.3s}
+  @keyframes saut{0%,80%,100%{transform:translateY(0);opacity:.45}40%{transform:translateY(-4px);opacity:1}}
+
+  .raccourcis{display:flex;gap:8px;flex-wrap:wrap;padding:0 18px 10px}
+  .raccourcis button{font-size:12.5px;padding:6px 10px;border-radius:999px;color:var(--dim)}
+  .raccourcis button:hover{color:var(--texte)}
+
+  .confirm{display:flex;gap:8px;margin-top:10px}
+  .confirm button{padding:6px 14px;font-size:13px}
+  .confirm .oui{background:var(--accent);color:#120b05;border-color:transparent;font-weight:650}
+
+  footer{
+    border-top:1px solid var(--ligne); background:var(--surface); padding:12px 18px 16px;
+    position:sticky; bottom:0;
+  }
+  .saisie{display:flex; gap:10px; align-items:flex-end; max-width:980px; margin:0 auto}
+  textarea{
+    flex:1; resize:none; max-height:170px; min-height:46px; padding:12px 14px;
+    background:var(--surface-2); color:var(--texte); border:1px solid var(--ligne);
+    border-radius:12px; font:inherit; line-height:1.4; outline:none;
+  }
+  textarea:focus{border-color:#3a4459}
+  .envoyer{background:var(--accent); color:#120b05; border-color:transparent; font-weight:700; padding:12px 18px}
+  .aide{max-width:980px;margin:8px auto 0;font-size:11.5px;color:var(--dim);display:flex;justify-content:space-between;gap:10px}
+  @media (max-width:560px){ .bulle{max-width:88%} .raccourcis{overflow-x:auto;flex-wrap:nowrap} }
+</style>
 </head>
 <body>
-  <header>
-    <h1>5trade — Pilote</h1>
-    <span class="badge">Chat CRUD</span>
-  </header>
-
-  <div class="chat-container" id="chat">
-    <div class="msg system">Bienvenue dans le Pilote. Tape une commande ou « aide » pour la liste.</div>
+<header>
+  <div class="logo">5</div>
+  <div>
+    <div class="titre">Pilote 5trade</div>
+    <div class="sous">Supervision · diagnostic · administration</div>
   </div>
-
-  <div class="suggestions" id="suggestions">
-    <span class="suggestion" onclick="send('montre l\'état du système')">État du système</span>
-    <span class="suggestion" onclick="send('qu\'est-ce que tu as appris cette semaine ?')">Apprentissage</span>
-    <span class="suggestion" onclick="send('montre les 5 derniers trades')">Derniers trades</span>
-    <span class="suggestion" onclick="send('qu\'est-ce que tu sais sur XAUUSD ?')">Mémoire XAUUSD</span>
-    <span class="suggestion" onclick="send('aide')">Aide</span>
+  <div class="droite">
+    <span class="pastille"><span class="point" id="etat"></span><span id="etatTxt">connexion…</span></span>
+    <button id="effacer" title="Effacer la conversation">Effacer</button>
   </div>
+</header>
 
-  <div class="input-container">
-    <textarea id="input" placeholder="Tape ta commande..." rows="1"
-              onkeydown="handleKey(event)"
-              oninput="autoResize(this)"></textarea>
-    <button id="send" onclick="sendFromInput()">Envoyer</button>
+<div id="fil" aria-live="polite"></div>
+
+<div class="raccourcis" id="raccourcis">
+  <button data-t="montre l'état du système">État du système</button>
+  <button data-t="montre les positions">Positions</button>
+  <button data-t="montre les scénarios en attente">Scénarios</button>
+  <button data-t="montre les stratégies actives">Stratégies</button>
+  <button data-t="qu'est-ce que tu as appris cette semaine ?">Apprentissage</button>
+  <button data-t="aide">Aide</button>
+</div>
+
+<footer>
+  <div class="saisie">
+    <textarea id="champ" rows="1" placeholder="Écris une commande… (« montre les scénarios », « désactive strategy_trend »)"></textarea>
+    <button class="envoyer" id="envoyer">Envoyer</button>
   </div>
+  <div class="aide"><span>Entrée pour envoyer · Maj+Entrée pour un retour à la ligne</span><span id="compteur"></span></div>
+</footer>
 
-  <script>
-    const chat = document.getElementById('chat');
-    const input = document.getElementById('input');
-    const sendBtn = document.getElementById('send');
+<script>
+const fil = document.getElementById('fil');
+const champ = document.getElementById('champ');
+const envoyer = document.getElementById('envoyer');
+const etat = document.getElementById('etat');
+const etatTxt = document.getElementById('etatTxt');
 
-    function autoResize(el) {
-      el.style.height = 'auto';
-      el.style.height = Math.min(200, el.scrollHeight) + 'px';
+const heure = iso => {
+  const d = iso ? new Date(iso) : new Date();
+  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+};
+
+/** Ajoute une bulle. role: 'user' | 'assistant'. */
+function bulle(role, texte, quand, options = {}) {
+  const rangee = document.createElement('div');
+  rangee.className = 'rangee ' + (role === 'user' ? 'moi' : 'ia');
+
+  const av = document.createElement('div');
+  av.className = 'avatar';
+  av.textContent = role === 'user' ? 'M' : '5';
+
+  const bloc = document.createElement('div');
+  const b = document.createElement('div');
+  b.className = 'bulle';
+  b.textContent = texte;
+  bloc.appendChild(b);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = quand || heure();
+  bloc.appendChild(meta);
+
+  // Une réponse qui demande confirmation propose directement les deux boutons.
+  if (options.confirmation) {
+    const c = document.createElement('div');
+    c.className = 'confirm';
+    const oui = document.createElement('button');
+    oui.className = 'oui'; oui.textContent = 'Oui';
+    const non = document.createElement('button');
+    non.textContent = 'Non';
+    oui.onclick = () => { c.remove(); expedier('oui'); };
+    non.onclick = () => { c.remove(); expedier('non'); };
+    c.append(oui, non);
+    bloc.appendChild(c);
+  }
+
+  rangee.append(av, bloc);
+  fil.appendChild(rangee);
+  fil.scrollTop = fil.scrollHeight;
+  return rangee;
+}
+
+function frappe() {
+  const r = document.createElement('div');
+  r.className = 'rangee ia';
+  r.id = 'frappe';
+  const av = document.createElement('div');
+  av.className = 'avatar'; av.textContent = '5';
+  const b = document.createElement('div');
+  b.className = 'bulle';
+  b.innerHTML = '<span class="frappe"><i></i><i></i><i></i></span>';
+  r.append(av, b);
+  fil.appendChild(r);
+  fil.scrollTop = fil.scrollHeight;
+}
+
+const stopFrappe = () => { const f = document.getElementById('frappe'); if (f) f.remove(); };
+
+async function chargerHistorique() {
+  try {
+    const r = await fetch('/api/chat/historique?limite=80', { credentials: 'same-origin' });
+    if (r.status === 401) { etat.classList.add('off'); etatTxt.textContent = 'non authentifié'; return; }
+    const d = await r.json();
+    if (!d.messages || !d.messages.length) {
+      bulle('assistant', "Bonjour. Je pilote le système : je peux montrer l'état, les positions, "
+        + "les scénarios, les stratégies, et en désactiver une après confirmation.\n"
+        + "Tape « aide » pour la liste des commandes.");
+    } else {
+      for (const m of d.messages) bulle(m.role, m.texte, heure(m.creeAt));
     }
+    etat.classList.remove('off');
+    etatTxt.textContent = 'en ligne';
+  } catch (e) {
+    etat.classList.add('off');
+    etatTxt.textContent = 'hors ligne';
+  }
+}
 
-    function handleKey(e) {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendFromInput();
-      }
-    }
+async function expedier(texte) {
+  const t = String(texte || '').trim();
+  if (!t) return;
+  bulle('user', t);
+  champ.value = '';
+  champ.style.height = 'auto';
+  envoyer.disabled = true;
+  frappe();
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ message: t })
+    });
+    const d = await r.json();
+    stopFrappe();
+    const reponse = d.texte || (d.resultat && d.resultat.texte) || d.error
+      || (d.success ? 'Action exécutée.' : 'Réponse vide.');
+    const attendConfirmation = /Confirmer \? \(oui\/non\)/i.test(reponse);
+    bulle('assistant', reponse, null, { confirmation: attendConfirmation });
+  } catch (e) {
+    stopFrappe();
+    bulle('assistant', 'Erreur réseau : ' + e.message);
+  } finally {
+    envoyer.disabled = false;
+    champ.focus();
+  }
+}
 
-    function sendFromInput() {
-      const msg = input.value.trim();
-      if (!msg) return;
-      input.value = '';
-      autoResize(input);
-      send(msg);
-    }
+envoyer.onclick = () => expedier(champ.value);
+champ.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); expedier(champ.value); }
+});
+champ.addEventListener('input', () => {
+  champ.style.height = 'auto';
+  champ.style.height = Math.min(170, champ.scrollHeight) + 'px';
+});
 
-    function send(msg) {
-      addMessage('user', msg);
-      sendBtn.disabled = true;
-      const typing = addMessage('system', 'Le système réfléchit');
-      typing.classList.add('typing');
-      typing.textContent = 'Le système réfléchit';
+document.getElementById('raccourcis').addEventListener('click', e => {
+  const b = e.target.closest('button[data-t]');
+  if (b) expedier(b.dataset.t);
+});
 
-      fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ message: msg })
-      })
-        .then(r => r.json())
-        .then(data => {
-          typing.remove();
-          if (data.error) {
-            addMessage('system', 'Erreur : ' + data.error);
-          } else {
-            // Formate le markdown simple en HTML
-            const html = formatText(data.texte || '');
-            addMessage('system', html, true);
-          }
-        })
-        .catch(e => {
-          typing.remove();
-          addMessage('system', 'Erreur réseau : ' + e.message);
-        })
-        .finally(() => {
-          sendBtn.disabled = false;
-          input.focus();
-        });
-    }
+document.getElementById('effacer').onclick = async () => {
+  if (!confirm('Effacer tout l’historique de conversation ?')) return;
+  await fetch('/api/chat/historique', { method: 'DELETE', credentials: 'same-origin' });
+  fil.innerHTML = '';
+  bulle('assistant', 'Historique effacé.');
+};
 
-    function addMessage(role, content, isHtml = false) {
-      const div = document.createElement('div');
-      div.className = 'msg ' + role;
-      if (isHtml) div.innerHTML = content;
-      else div.textContent = content;
-      chat.appendChild(div);
-      chat.scrollTop = chat.scrollHeight;
-      return div;
-    }
-
-    function formatText(text) {
-      // Échappe le HTML
-      let s = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      // Code inline
-      s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
-      // Blocs de code ```
-      s = s.replace(/```([\s\S]+?)```/g, '<pre>$1</pre>');
-      // Titres markdown
-      s = s.replace(/^### (.+)$/gm, '<strong>$1</strong>');
-      s = s.replace(/^## (.+)$/gm, '<strong style="font-size:15px">$1</strong>');
-      s = s.replace(/^# (.+)$/gm, '<strong style="font-size:16px">$1</strong>');
-      // Listes
-      s = s.replace(/^- (.+)$/gm, '• $1');
-      return s;
-    }
-
-    input.focus();
-  </script>
+chargerHistorique();
+champ.focus();
+</script>
 </body>
 </html>

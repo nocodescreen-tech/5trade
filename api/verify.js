@@ -4011,6 +4011,111 @@ function tinyPng(W = 64, H = 40) {
           return c && c.retenue === false && /désactivée manuellement/.test(c.motif || '');
         })());
 
+    // ── SCÉNARIOS : plan d'attente, persistance et expiration ──────────────
+    // Le chat répondait « connecter à la table scenarios ». La couche existe
+    // maintenant : elle doit refuser un plan sans niveau chiffré, expirer ce qui
+    // est périmé, et ne jamais produire deux directions contradictoires.
+    {
+      const Scn = require('./scenarios');
+      const G = require('./scenarios/generateur');
+
+      const court = G.generer(Array.from({ length: 10 }, (_, i) => ({
+        t: i, o: 1, h: 1, l: 1, c: 1, closed: true
+      })), { symbol: 'TEST', timeframe: '15m' });
+      ok('un scénario exige assez de bougies pour être mesuré',
+        court.scenarios.length === 0 && /trop courte/.test(court.motif || ''), court.motif);
+
+      // Prix strictement plat : ATR nul, donc aucun stop calculable — et on le dit.
+      const plat = Array.from({ length: 120 }, (_, i) => ({
+        t: 1700000000000 + i * 900000, o: 100, h: 100, l: 100, c: 100, closed: true
+      }));
+      const rPlat = G.generer(plat, { symbol: 'TEST', timeframe: '15m' });
+      ok('sans volatilité mesurable, aucun scénario n’est fabriqué',
+        rPlat.scenarios.length === 0 && !!rPlat.motif, rPlat.motif || 'aucun motif');
+
+      // Un plan sans stop chiffré n'est pas un plan.
+      const sansStop = await Scn.creer({ instrument: 'TEST', direction: 'long', niveauEntree: 100 });
+      ok('un scénario sans stop chiffré est refusé',
+        sansStop.ok === false && /stop/.test(sansStop.raison || ''), sansStop.raison);
+      const sansEntree = await Scn.creer({ instrument: 'TEST', direction: 'long', stop: 99 });
+      ok('un scénario sans niveau d’entrée est refusé',
+        sansEntree.ok === false && /entrée/.test(sansEntree.raison || ''), sansEntree.raison);
+      const mauvaiseDir = await Scn.creer({ instrument: 'TEST', direction: 'neutre', niveauEntree: 100, stop: 99 });
+      ok('une direction autre que long/short est refusée',
+        mauvaiseDir.ok === false, mauvaiseDir.raison);
+
+      // Création réelle, lecture, invalidation.
+      const cree = await Scn.creer({
+        instrument: 'TEST', timeframe: '15m', direction: 'long',
+        niveauEntree: 100, stop: 99, tp1: 102, tp2: 103,
+        conditions: [{ type: 'prix_atteint', valeur: 100, obligatoire: true }],
+        preuves: ['test']
+      });
+      ok('un scénario valide est enregistré', cree.ok === true, cree.raison || cree.stockage);
+      const liste = await Scn.lister({ statut: 'en_attente', instrument: 'TEST' });
+      ok('le scénario enregistré se relit',
+        liste.some(s => s.id === cree.id), `${liste.length} en attente`);
+      const invalide = await Scn.changerStatut(cree.id, 'invalide', 'test');
+      ok('un scénario peut être invalidé', invalide.ok === true, invalide.raison);
+
+      // Expiration : un plan qui n'expire jamais n'est pas un plan.
+      const vieux = await Scn.creer({
+        instrument: 'TEST', direction: 'long', niveauEntree: 50, stop: 49, ttlMs: -1000
+      });
+      const exp = await Scn.expirer();
+      const apres = await Scn.lister({ statut: 'expire', instrument: 'TEST' });
+      ok('un scénario hors fenêtre expire',
+        exp.ok === true && apres.some(s => s.id === vieux.id),
+        `${exp.expires} expiré(s)`);
+
+      // Le générateur ne doit jamais produire un long ET un short contradictoires
+      // quand la tendance est mesurée.
+      const source = require('fs').readFileSync(
+        require('path').join(__dirname, 'scenarios', 'generateur.js'), 'utf8');
+      ok('le générateur filtre les directions selon la tendance',
+        /autoriseLong/.test(source) && /autoriseShort/.test(source)
+        && /tendance haussière : long seulement/.test(source));
+    }
+
+    // ── CHAT : historique persistant ───────────────────────────────────────
+    // Le chat répondait mais ne se souvenait de rien : fermer l'onglet effaçait
+    // la conversation. Chaque échange est désormais écrit et relu.
+    {
+      // Table et fichier dédiés : une exécution de tests ne doit ni lire ni
+      // effacer la conversation réelle de l'utilisateur.
+      process.env.CHAT_HISTORIQUE_TABLE = 'chat_messages_verif';
+      process.env.CHAT_HISTORIQUE_FICHIER = require('path').join(
+        require('os').tmpdir(), `chat-verif-${process.pid}.json`);
+      const H = require('./chat-crud/historique');
+      await H.init();
+      await H.effacer();      // repart d'une table de test vide
+
+      const avant = (await H.lister({ limite: 300 })).length;
+      const ecrit = await H.enregistrer({ role: 'user', texte: 'test historique', verbe: 'MONTRE' });
+      ok('un message du chat est enregistré', ecrit.ok === true, ecrit.raison || ecrit.stockage);
+
+      const apres = await H.lister({ limite: 300 });
+      ok('le message enregistré se relit',
+        apres.length === avant + 1 && apres[apres.length - 1].texte === 'test historique',
+        `${avant} → ${apres.length}`);
+
+      const ordre = apres.map(m => m.id || m.cree_at);
+      ok('l’historique est rendu du plus ancien au plus récent',
+        JSON.stringify(ordre) === JSON.stringify([...ordre].sort((a, b) => (a > b ? 1 : a < b ? -1 : 0))));
+
+      // Un message sans rôle n'existe pas : on refuse plutôt que d'inventer.
+      const sansRole = await H.enregistrer({ texte: 'orphelin' });
+      ok('un message sans rôle est refusé', sansRole.ok === false, sansRole.raison);
+
+      // La limite est bornée : un écran ne doit pas demander 10 000 messages.
+      const borne = await H.lister({ limite: 99999 });
+      ok('la limite de lecture est bornée', borne.length <= 300, `${borne.length} message(s)`);
+
+      const vide = await H.effacer();
+      ok('l’historique peut être effacé explicitement',
+        vide.ok === true && (await H.lister({ limite: 10 })).length === 0, vide.stockage);
+    }
+
       ok('le sélecteur expose les doublons de règles au lieu de les compter',
         /doublons/.test(fs.readFileSync(path.join(__dirname, 'strategy-engine', 'selector.js'), 'utf8'))
         && /memeReglesQue/.test(fs.readFileSync(path.join(__dirname, 'strategy-engine', 'selector.js'), 'utf8')));
@@ -4507,7 +4612,16 @@ function tinyPng(W = 64, H = 40) {
     ok('une chaîne IA gratuite existe',
       /integrate\.api\.nvidia\.com/.test(sSrc) && /NVIDIA_MODELS/.test(sSrc));
     ok('la chaîne prend le relais, modèle après modèle',
-      /for \(const modele of NVIDIA_MODELS\)[\s\S]{0,200}?appelNvidia\(modele, messages/.test(sSrc));
+      /for \(const modele of NVIDIA_MODELS\)[\s\S]{0,900}?appelNvidia\(modele, messages/.test(sSrc));
+    // Échéance globale : sans elle, cinq modèles à 45 s font une requête de
+    // plusieurs minutes (mesuré : 180 s avant de rendre la main).
+    ok('la cascade est bornée par une échéance globale',
+      /NVIDIA_BUDGET_TOTAL_MS/.test(sSrc)
+      && /restant <= 2000/.test(sSrc),
+      'au-delà, le moteur fournit le plan sans IA');
+    // Un modèle qui épuise son budget en raisonnant doit être rejoué plus large.
+    ok('un contenu vide par budget épuisé déclenche un second essai',
+      /finish_reason === 'length'/.test(sSrc) && /budget\(\) \* 3/.test(sSrc));
     ok('plus aucun fournisseur payant dans le chemin d\'analyse',
       !/appelDeepSeek/.test(sSrc) && !/DEEPSEEK_API_KEY/.test(sSrc),
       /DEEPSEEK/.test(sSrc) ? 'référence DeepSeek restante' : 'aucune');
