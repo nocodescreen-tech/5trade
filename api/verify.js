@@ -4009,6 +4009,61 @@ function tinyPng(W = 64, H = 40) {
         /'BUY ↗'/.test(ui) && /'SELL ↘'/.test(ui) && /'NEUTRAL ·'/.test(ui) && /'UNKNOWN \?'/.test(ui));
     }
 
+    // ── PHASE 2 : surveillance des positions ouvertes ──────────────────────
+    // Le journal disait, après coup, si une position avait touché son stop. Il
+    // ne disait rien PENDANT. Ce module lit une position et propose une action
+    // motivée — sans jamais déplacer un stop ni fermer quoi que ce soit.
+    {
+      const S = require('./engine/surveillance-positions');
+
+      // Vente 100 → stop 110, objectif 80. À 105, la moitié du risque est
+      // consommée et on est encore loin de l'objectif.
+      const vente = { cle: 't1', symbol: 'R_75', sens: 'short', entree: 100, stop: 110, objectifs: [80, 60] };
+      const a = S.analyserPosition(vente, { prix: 105 });
+      ok('une position à mi-risque est évaluée à −0,5 R',
+        a.evaluable === true && a.rEnCours === -0.5, `${a.rEnCours} R`);
+      ok('le risque restant est calculé, pas deviné',
+        a.risqueRestantR === 0.5, `${a.risqueRestantR} R`);
+
+      const procheStop = S.analyserPosition(vente, { prix: 108 });
+      ok('à 80 % du risque consommé, l’état passe en proche_stop',
+        procheStop.etat === 'proche_stop'
+        && procheStop.recommandations.some(r => r.action === 'surveiller'),
+        `${procheStop.etat} · ${procheStop.recommandations.map(r => r.action).join(',')}`);
+
+      const stop = S.analyserPosition(vente, { prix: 110 });
+      ok('au niveau du stop, la sortie est proposée avec son motif',
+        stop.etat === 'stop_atteint'
+        && stop.recommandations[0].action === 'cloturer', stop.etat);
+
+      const objectif = S.analyserPosition(vente, { prix: 80 });
+      ok('à l’objectif, sécuriser est proposé — jamais appliqué',
+        objectif.recommandations.some(r => r.action === 'securiser')
+        && objectif.stopInchange === true);
+
+      // Le stop n'est JAMAIS déplacé : c'est la garantie demandée.
+      ok('le stop enregistré n’est jamais modifié',
+        stop.stop === 110 && objectif.stop === 110 && a.stop === 110);
+
+      // Structure contraire : seule raison de proposer une sortie avant le stop.
+      const invalide = S.analyserPosition(vente, { prix: 101, structureContraire: 'BOS haussier' });
+      ok('une invalidation structurelle est nommée et propose la sortie',
+        invalide.recommandations.some(r => r.action === 'cloturer' && /structure contraire/.test(r.motif)));
+
+      // Sans prix, on ne devine pas.
+      const sansPrix = S.analyserPosition(vente, {});
+      ok('sans prix, la position est déclarée non évaluable',
+        sansPrix.evaluable === false && /prix courant indisponible/.test(sansPrix.motif));
+
+      // Un lot ne contient que les positions ouvertes, et n'applique rien.
+      const lot = S.analyserLot([
+        { ...vente, cle: 'a', resultat: 'ouvert' },
+        { ...vente, cle: 'b', resultat: 'gagnant' }
+      ], () => ({ prix: 95 }));
+      ok('le lot ne retient que les positions ouvertes et n’applique aucune action',
+        lot.total === 1 && lot.actionsAppliquees.length === 0);
+    }
+
     // ── INVARIANT : toute route qui DÉCIDE fournit les deux garde-fous ────
     // Cartographie mesurée : 108 routes, 2 seulement appellent le Decision
     // Engine. Le flux temps réel en manquait — un signal refusé par le risque

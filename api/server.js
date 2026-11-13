@@ -3655,6 +3655,49 @@ app.get('/api/decision', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+/**
+ * SURVEILLANCE DES POSITIONS OUVERTES.
+ * Lecture seule : ce point d'entrée ne déplace aucun stop et ne ferme rien, il
+ * dit où en est chaque position et ce qu'il serait raisonnable de faire.
+ */
+app.get('/api/positions', requireAuth, async (req, res) => {
+  try {
+    const Surveillance = require('./engine/surveillance-positions');
+    const journal = JournalSignaux.charger();
+    const ouvertes = (journal.signaux || []).filter(x => x.resultat === 'ouvert');
+
+    // Une seule lecture de bougies par couple symbole/unité : sans ce cache,
+    // vingt positions sur le même marché déclenchaient vingt téléchargements.
+    const prix = new Map();
+    const cfg = new Map();
+    for (const pos of ouvertes) {
+      const cleP = `${pos.symbol}|${pos.timeframe}`;
+      if (prix.has(cleP)) continue;
+      try {
+        const { candles, provider } = await Market.getCandles(pos.symbol, pos.timeframe, 120);
+        const cloture = candles.filter(c => c.closed !== false);
+        const dernier = cloture[cloture.length - 1];
+        prix.set(cleP, dernier ? dernier.c : null);
+        cfg.set(cleP, { provider, atr: dernier ? dernier.atr || null : null });
+      } catch (e) { prix.set(cleP, null); }
+    }
+
+    const lot = Surveillance.analyserLot(ouvertes, pos => {
+      const cleP = `${pos.symbol}|${pos.timeframe}`;
+      return { prix: prix.get(cleP), atr: (cfg.get(cleP) || {}).atr };
+    });
+
+    res.json({
+      success: true,
+      at: Date.now(),
+      total: lot.total,
+      positions: lot.positions,
+      // Explicite : rien n'a été appliqué par cette lecture.
+      actionsAppliquees: lot.actionsAppliquees
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/signals', requireAuth, async (req, res) => {
   try {
     const symbol = String(req.query.symbol || '').trim();
