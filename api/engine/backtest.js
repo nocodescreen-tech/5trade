@@ -390,4 +390,35 @@ function resumer(trades, meta = {}) {
   };
 }
 
-module.exports = { lancer, resumer, MAX_BOUGIES, DEPART_MIN };
+/**
+ * Backtest FIDÈLE : rejoue exactement la chaîne du direct.
+ *
+ * L'ancien `lancer()` détecte avec `Multi.detecterTout` puis simule la sortie.
+ * Il ignore donc la validation, l'alignement MTF, les frais, le risque et
+ * l'arbitrage : ses statistiques décrivent un autre système, plus permissif.
+ *
+ * On ne remplace pas `lancer()` — les deux doivent pouvoir être comparés, et
+ * c'est la comparaison qui dit combien de « trades » l'ancien chemin inventait.
+ * `lancerFidele()` est le chemin qui engage le vrai moteur.
+ */
+function lancerFidele(bougies, meta = {}, options = {}) {
+  const Rejeu = require('./rejeu-direct');
+  const r = Rejeu.rejouer(bougies, meta, options.moteur || {}, {
+    fenetre: options.fenetre,
+    pas: options.pas,
+    maxEtapes: options.maxEtapes,
+    optionsDecision: options.decision || { exigerAlignement: false }
+  });
+  return {
+    fidele: true,
+    symbol: meta.symbol || null,
+    timeframe: meta.timeframe || null,
+    pas: Number(options.pas) || 5,
+    etapes: r.etapes.length,
+    trades: r.trades,
+    stats: r.stats,
+    note: 'chaque trade vient de DecisionEngine.decider() ; sortie évaluée par JournalSignaux.evaluer (frais déduits)'
+  };
+}
+
+module.exports = { lancer, lancerFidele, resumer, MAX_BOUGIES, DEPART_MIN };

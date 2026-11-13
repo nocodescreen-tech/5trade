@@ -4219,6 +4219,18 @@ function tinyPng(W = 64, H = 40) {
         `${rejeuPlat.etapes.length} pas examinés`);
       ok('chaque trade du rejeu est attribué au moteur de décision',
         rejeuPlat.trades.every(t => t.source === 'DecisionEngine.decider'));
+
+      // Les DEUX chemins doivent rester disponibles : c'est leur comparaison qui
+      // dit combien de « trades » l'ancien backtest comptait en plus.
+      const B = require('./engine/backtest');
+      ok('le backtest expose un chemin fidèle, distinct de l’ancien',
+        typeof B.lancer === 'function' && typeof B.lancerFidele === 'function');
+      const fidele = B.lancerFidele(plat, { symbol: 'TEST', timeframe: '15m' },
+        { fenetre: 60, pas: 5, maxEtapes: 5, decision: { exigerAlignement: false } });
+      ok('le chemin fidèle se déclare comme tel et ne fabrique aucun trade',
+        fidele.fidele === true && fidele.trades.length === 0
+        && /DecisionEngine\.decider/.test(fidele.note || ''),
+        `${fidele.etapes} étapes · ${fidele.trades.length} trade(s)`);
     }
 
     // ── INVARIANT : toute route qui DÉCIDE fournit les deux garde-fous ────
