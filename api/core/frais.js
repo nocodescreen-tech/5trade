@@ -63,7 +63,10 @@ const REFERENCES_A_VERIFIER = {
   R_100: { spread: 0.90, commissionPct: 0 },
   frxXAUUSD: { spread: 0.30, commissionPct: 0 },
   frxXAGUSD: { spread: 0.03, commissionPct: 0 },
-  frxEURUSD: { spread: 0.00012, commissionPct: 0 },
+  // Forex Deriv, compte STANDARD : 0,5 pip annoncé par l'owner (0,00005 sur une
+  // cotation à 5 décimales). L'ancienne valeur (0,00012 = 1,2 pip) était une
+  // estimation, deux fois et demie trop élevée.
+  frxEURUSD: { spread: 0.00005, commissionPct: 0 },
   frxGBPUSD: { spread: 0.00016, commissionPct: 0 },
   frxUSDJPY: { spread: 0.00016, commissionPct: 0 },
   frxAUDUSD: { spread: 0.00016, commissionPct: 0 },
