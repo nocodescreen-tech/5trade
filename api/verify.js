@@ -4064,6 +4064,63 @@ function tinyPng(W = 64, H = 40) {
         lot.total === 1 && lot.actionsAppliquees.length === 0);
     }
 
+    // ── PHASE 3 : parcours du prix autour d'une zone ───────────────────────
+    // Détecter un FVG et attendre son retest ne sont pas la même information.
+    // Chaque état est déduit des bougies réellement postérieures à la zone.
+    {
+      const P = require('./engine/parcours-prix');
+      const bougie = (o, h, l, c) => ({ o, h, l, c, closed: true });
+      const zone = { type: 'bullish', low: 100, high: 102, index: 0 };
+      const atr = 1;
+
+      const jamais = P.etatZone(zone, [bougie(0, 0, 0, 0), bougie(110, 112, 109, 111)], { atr });
+      ok('une zone jamais retestée reste NOT_RETURNED',
+        jamais.etat === 'NOT_RETURNED', jamais.etat);
+
+      const proche = P.etatZone(zone, [bougie(0, 0, 0, 0), bougie(102.4, 102.5, 102.2, 102.3)], { atr });
+      ok('une zone à moins de 0,35 ATR est APPROACHING',
+        proche.etat === 'APPROACHING', `${proche.etat} (${proche.distanceAtr} ATR)`);
+
+      const dedans = P.etatZone(zone, [bougie(0, 0, 0, 0), bougie(103, 103, 101, 101)], { atr });
+      ok('un prix dans la zone est IN_ZONE',
+        dedans.etat === 'IN_ZONE', dedans.etat);
+
+      const cassee = P.etatZone(zone, [bougie(0, 0, 0, 0), bougie(101, 101.5, 97, 97.5)], { atr });
+      ok('une clôture sous la zone la déclare BROKEN',
+        cassee.etat === 'BROKEN', `${cassee.etat} · ${cassee.preuves[0]}`);
+
+      // Rejet = on entre dans la zone puis on CLÔTURE revenu au-dessus d'elle.
+      // Une clôture encore DANS la zone reste IN_ZONE : c'est une autre information.
+      const rejet = P.etatZone(zone, [bougie(0, 0, 0, 0), bougie(101.8, 102.5, 100.9, 102.4)], { atr });
+      ok('un retour dans la zone avec faible écart donne REJECTED',
+        rejet.etat === 'REJECTED', `${rejet.etat} · ${rejet.preuves[0]}`);
+
+      const confirme = P.etatZone(zone, [bougie(0, 0, 0, 0), bougie(101, 104.2, 100.8, 104)], { atr });
+      ok('un rejet suivi d’un déplacement franc donne CONFIRMED',
+        confirme.etat === 'CONFIRMED', `${confirme.etat} · ${confirme.preuves[0]}`);
+
+      const vieille = P.etatZone(zone, [bougie(0, 0, 0, 0),
+        ...Array.from({ length: 8 }, () => bougie(120, 121, 119, 120))], { atr, ageMax: 5 });
+      ok('une zone jamais retestée au-delà de l’âge maximal expire',
+        vieille.etat === 'EXPIRED', `${vieille.etat} · ${vieille.bougiesDepuis} bougies`);
+
+      // Le défaut mesuré : un drapeau « déjà entré » restait vrai pour toujours,
+      // donc une bougie 300 points plus haut était lue comme un rejet et TOUTES
+      // les zones finissaient CONFIRMED.
+      const apresLoin = P.etatZone(zone, [bougie(0, 0, 0, 0), bougie(101, 101.2, 100.6, 101),
+        bougie(400, 401, 399, 400)], { atr });
+      ok('une bougie lointaine n’est pas un rejet de la zone',
+        apresLoin.etat !== 'CONFIRMED', `${apresLoin.etat} · ${apresLoin.preuves[0]}`);
+
+      const lot = P.suivreZones({
+        orderBlocks: [{ type: 'bullish', low: 100, high: 102, index: 0 }],
+        fvgs: [{ type: 'bearish', low: 200, high: 202, index: 0 }]
+      }, [bougie(0, 0, 0, 0), bougie(101, 101.5, 100.5, 101)], { atr });
+      ok('suivreZones compte chaque état et ne perd aucune zone',
+        lot.total === 2 && Object.values(lot.resume).reduce((a, b) => a + b, 0) === 2,
+        JSON.stringify(lot.resume));
+    }
+
     // ── INVARIANT : toute route qui DÉCIDE fournit les deux garde-fous ────
     // Cartographie mesurée : 108 routes, 2 seulement appellent le Decision
     // Engine. Le flux temps réel en manquait — un signal refusé par le risque

@@ -3656,6 +3656,26 @@ app.get('/api/decision', requireAuth, async (req, res) => {
 });
 
 /**
+ * PARCOURS DU PRIX AUTOUR DES ZONES — lecture seule.
+ * Chaque order block et chaque FVG porte son état : jamais retesté, en
+ * approche, dedans, rejeté, cassé, confirmé ou expiré, avec la preuve.
+ */
+app.get('/api/zones', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').trim();
+    const tf = String(req.query.tf || '15m').trim();
+    if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
+    const { candles, provider } = await Market.getCandles(symbol, tf, 300, String(req.query.provider || '').trim() || undefined);
+    const cloture = candles.filter(c => c.closed !== false);
+    const report = Structure.analyze(cloture);
+    const Parcours = require('./engine/parcours-prix');
+    const suivi = Parcours.suivreZones(report, cloture, { atr: report && report.atr });
+    res.json({ success: true, symbol, timeframe: tf, provider,
+      total: suivi.total, resume: suivi.resume, zones: suivi.zones });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/**
  * SURVEILLANCE DES POSITIONS OUVERTES.
  * Lecture seule : ce point d'entrée ne déplace aucun stop et ne ferme rien, il
  * dit où en est chaque position et ce qu'il serait raisonnable de faire.
