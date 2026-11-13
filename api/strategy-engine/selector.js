@@ -60,6 +60,13 @@ function selectionner({ candles, meta, strategies, regime = null, max = 3 } = {}
       indicateurs: profil.indicateurs || []
     };
 
+    // 0. Désactivée depuis le chat : plus candidate. Sans ce test, le drapeau
+    //    `actif` serait décoratif et « désactive X » ne désactiverait rien.
+    if (doc.actif === false) {
+      return { ...base, compatible: false, retenue: false, score: 0,
+        statut: 'inactive', motif: 'désactivée manuellement' };
+    }
+
     // 1. Fiche sans règle exécutable : écartée, et on le dit.
     if (!profil.executable) {
       return { ...base, compatible: false, retenue: false, score: 0,

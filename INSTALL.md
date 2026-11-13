@@ -44,5 +44,7 @@ npm start
 - API: http://localhost:3001
 
 ## Connexion
-- Username: `rene`
-- Password: `trading2024`
+- Authentification par OTP email (configurer SMTP_HOST/SMTP_USER/SMTP_PASS
+  dans .env, ou BREVO_API_KEY)
+- POST /api/signup avec votre email → code OTP envoyé
+- POST /api/verify-otp avec le code reçu

@@ -503,6 +503,43 @@ const Concepts = require('./delivery/concepts');
 // swing), chacun avec ses prérequis et ses étapes évalués sur le graphique.
 const Playbooks = require('./delivery/playbooks');
 
+// ─── Évolution : mémoire persistante + apprentissage + chat CRUD ───
+// Ces modules pilotent le système en langage naturel et apprennent des trades.
+// Initialisés APRÈS les modules existants pour pouvoir les piloter.
+const Memoire = require('./memoire');
+const Apprentissage = require('./apprentissage');
+const ChatCrud = require('./chat-crud');
+
+// Initialise la mémoire persistante au démarrage (tables + seuils).
+(async () => {
+  try {
+    await Memoire.init();
+    await Apprentissage.init();
+    console.log('   Mémoire      : initialisée (faits, croyances, exceptions)');
+    console.log('   Apprentissage: seuils chargés, boucle quotidienne à 02:00 UTC');
+  } catch (e) {
+    console.error('   Mémoire      : init échouée —', e.message);
+  }
+})();
+
+// Boucle d'apprentissage quotidienne à 02:00 UTC.
+// unref() : ce minuteur ne doit pas empêcher l'arrêt propre du process.
+const PROCHAINE_BOUCLE_MS = (function () {
+  const now = new Date();
+  const prochaine = new Date(now);
+  prochaine.setUTCHours(2, 0, 0, 0);
+  if (prochaine <= now) prochaine.setUTCDate(prochaine.getUTCDate() + 1);
+  return prochaine - now;
+})();
+setTimeout(() => {
+  Apprentissage.boucleQuotidienne({ market: Market, tradesVeille: [], metrics14j: {} })
+    .catch(e => console.error('[apprentissage] boucle échouée :', e.message));
+  setInterval(() => {
+    Apprentissage.boucleQuotidienne({ market: Market, tradesVeille: [], metrics14j: {} })
+      .catch(e => console.error('[apprentissage] boucle échouée :', e.message));
+  }, 24 * 3600 * 1000).unref();
+}, PROCHAINE_BOUCLE_MS).unref();
+
 // Données de marché mises en cache sur disque : l'analyse doit rester
 // possible même sans réseau (et après un redémarrage).
 try {
@@ -4645,6 +4682,56 @@ async function start() {
       .catch(() => { /* un marché en échec ne bloque pas les autres */ });
   }, JOURNAL_INTERVALLE_MS);
   if (typeof minuteurJournal.unref === 'function') minuteurJournal.unref();
+
+  // ─── Évolution : chat CRUD + mémoire + apprentissage (routes) ───
+  // POST /api/chat — pilote tous les modules en langage naturel.
+  // Le chat exige requireAuth : aucune commande destructive ne s'exécute
+  // sans confirmation explicite ("oui"/"ok") en retour.
+  app.post('/api/chat', requireAuth, async (req, res) => {
+    try {
+      const message = String(req.body.message || '').trim();
+      if (!message) return res.status(400).json({ error: 'message requis' });
+      const r = await ChatCrud.executer(message, {
+        utilisateur: req.session.username,
+        ip: req.ip
+      });
+      res.json({ success: true, ...r });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/chat/aide — liste des commandes disponibles.
+  app.get('/api/chat/aide', requireAuth, (req, res) => {
+    const Repondeur = require('./chat-crud/repondeur');
+    res.json({ success: true, aide: Repondeur.aide() });
+  });
+
+  // GET /api/memoire/etat — vue d'ensemble de la mémoire persistante.
+  app.get('/api/memoire/etat', requireAuth, async (req, res) => {
+    try {
+      const etat = await Memoire.etat();
+      res.json({ success: true, ...etat });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/apprentissage/journal — dernier journal d'apprentissage.
+  app.get('/api/apprentissage/journal', requireAuth, async (req, res) => {
+    try {
+      const Diff = require('./apprentissage/diff-versionne');
+      const auj = new Date().toISOString().slice(0, 10);
+      const hier = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      let contenu = await Diff.lireJournal(auj);
+      let date = auj;
+      if (!contenu) { contenu = await Diff.lireJournal(hier); date = hier; }
+      res.json({ success: true, date, contenu });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // 0.0.0.0 en production : derrière le proxy de la plateforme, un bind sur
   // 127.0.0.1 rend le service injoignable (« listening » dans les logs, 502 au
   // health check). En local on reste sur 127.0.0.1.

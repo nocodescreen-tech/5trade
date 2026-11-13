@@ -3998,6 +3998,19 @@ function tinyPng(W = 64, H = 40) {
           return r.candidates[0].retenue === false;
         })());
 
+      // Le chat peut désactiver une fiche : le sélecteur DOIT la retirer, sinon
+      // `actif` est décoratif et « désactive X » ne désactive rien.
+      ok('une fiche désactivée depuis le chat n’est plus candidate',
+        (() => {
+          const r = Sel.selectionner({
+            candles: [], meta: { symbol: 'R_75', timeframe: '15m' },
+            strategies: [{ id: 'f_off', title: 'Off', type: 'strategy',
+              content: 'balayage et rupture de structure', marches: ['*'], actif: false }]
+          });
+          const c = r.candidates[0];
+          return c && c.retenue === false && /désactivée manuellement/.test(c.motif || '');
+        })());
+
       ok('le sélecteur expose les doublons de règles au lieu de les compter',
         /doublons/.test(fs.readFileSync(path.join(__dirname, 'strategy-engine', 'selector.js'), 'utf8'))
         && /memeReglesQue/.test(fs.readFileSync(path.join(__dirname, 'strategy-engine', 'selector.js'), 'utf8')));

@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const DIR = __dirname;   // relatif au fichier : fonctionne sur toute machine
+const DIR = process.env.FRONTEND_DIR || __dirname;   // surchargeable, sinon relatif au fichier
 const HTML = path.join(DIR, 'index.html');
 let html = fs.readFileSync(HTML, 'utf8');
 const avant = html.length;
