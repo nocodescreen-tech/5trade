@@ -28,6 +28,13 @@ const DB = require('./core/db');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const app = express();
+
+// Derrière Render/Cloudflare/Nginx, `req.ip` est l'IP du proxy si on ne le dit
+// pas à Express : tous les visiteurs partagent alors le MÊME compteur de
+// tentatives, et huit échecs suffisent à bloquer la plateforme entière.
+// On ne fait confiance qu'au proxy local par défaut ; TRUST_PROXY permet de
+// déclarer le nombre de sauts en production (ex. TRUST_PROXY=1).
+app.set('trust proxy', process.env.TRUST_PROXY ? Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY : 'loopback');
 const PORT = process.env.PORT || 3001;
 
 // ─── Analyse IA : NVIDIA NIM exclusivement (build.nvidia.com) ───
@@ -216,15 +223,25 @@ async function ensureDirs() {
   }
 }
 
-function hashPassword(password, salt) {
+// scrypt est volontairement coûteux : en version synchrone il bloque la boucle
+// d'événements du serveur, donc quelques connexions simultanées suffisent à
+// geler toute l'API. Les versions asynchrones délèguent au pool de threads.
+const scrypt = require('util').promisify(crypto.scrypt);
+
+async function hashPassword(password, salt) {
   const s = salt || crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(password, s, 64).toString('hex');
-  return { salt: s, hash };
+  const buf = await scrypt(password, s, 64);
+  return { salt: s, hash: Buffer.from(buf).toString('hex') };
 }
 
-function verifyPassword(password, salt, hash) {
-  const attempt = crypto.scryptSync(password, salt, 64).toString('hex');
-  return crypto.timingSafeEqual(Buffer.from(attempt), Buffer.from(hash));
+async function verifyPassword(password, salt, hash) {
+  const buf = await scrypt(password, salt, 64);
+  const attempt = Buffer.from(buf);
+  const attendu = Buffer.from(hash, 'hex');
+  // timingSafeEqual exige des longueurs identiques : sinon il lève, et une
+  // exception sur un hash corrompu deviendrait une erreur 500 au lieu d'un refus.
+  if (attempt.length !== attendu.length) return false;
+  return crypto.timingSafeEqual(attempt, attendu);
 }
 
 /**
@@ -454,6 +471,7 @@ const Structure = require('./engine/structure');
 
 // ─── Signaux (stratégie appliquée + confirmation achat/vente) ───
 const Signals = require('./engine/signals');
+const Selector = require('./strategy-engine/selector');
 // Moteur multi-signaux : une liste de signaux (un par stratégie, un par motif)
 // au lieu d'un verdict unique. Voir signaux.js et patterns.js.
 const Multi = require('./engine/signaux');
@@ -749,7 +767,11 @@ function parseCookies(req) {
 
 function setSessionCookie(res, token) {
   res.setHeader('Set-Cookie',
-    `s5_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`);
+    // `Secure` interdit l'envoi du cookie en HTTP clair. On l'active dès que le
+    // serveur est en production (ou sur demande explicite) ; en développement
+    // local en http, l'activer empêcherait la session de s'établir.
+    `s5_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}` +
+      (process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true' ? '; Secure' : ''));
 }
 function clearSessionCookie(res) {
   res.setHeader('Set-Cookie', 's5_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
@@ -815,8 +837,29 @@ function rateLimitAnalyse(req, res, next) {
 // EMAIL (nodemailer) — envoi des codes OTP
 // ─────────────────────────────────────────────────────────────
 let mailer = null;
+let mailerCle = null;
+
+/**
+ * Le transport est reconstruit dès que la configuration change.
+ *
+ * Défaut vécu : le transport était mis en cache au PREMIER envoi. Si le mot de
+ * passe SMTP était absent ou faux à ce moment-là, tous les envois suivants
+ * échouaient — même après avoir corrigé le .env — jusqu'au redémarrage. Le
+ * symptôme (« impossible d'envoyer le code ») ne disait pas pourquoi.
+ */
+function cleSmtp() {
+  return [process.env.SMTP_HOST, process.env.SMTP_PORT, process.env.SMTP_USER,
+    process.env.SMTP_PASS, process.env.SMTP_SECURE].join('|');
+}
+
 function getMailer() {
-  if (mailer) return mailer;
+  const cle = cleSmtp();
+  if (mailer && mailerCle === cle) return mailer;
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    const e = new Error('configuration SMTP incomplete (SMTP_HOST, SMTP_USER et SMTP_PASS sont requis)');
+    e.code = 'SMTP_INCOMPLET';
+    throw e;
+  }
   const nodemailer = require('nodemailer');
   mailer = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
@@ -826,12 +869,95 @@ function getMailer() {
     connectionTimeout: 15000,
     greetingTimeout: 15000
   });
+  mailerCle = cle;
   return mailer;
 }
 
+/**
+ * Envoi du courriel, par API HTTPS si une clé existe, sinon par SMTP.
+ *
+ * Pourquoi : en production l'application tourne chez un hébergeur qui BLOQUE le
+ * SMTP sortant (port 587). Le code de connexion ne partait donc jamais, alors
+ * que la même configuration fonctionne en local — l'échec ressemblait à un bug
+ * applicatif. Une API HTTP passe là où le SMTP est filtré.
+ *
+ * Variables reconnues, dans cet ordre :
+ *   BREVO_API_KEY   (api.brevo.com)
+ *   RESEND_API_KEY  (api.resend.com)
+ *   SMTP_*          (repli local, ou hébergeur autorisant le SMTP)
+ */
+function expediteur() {
+  return process.env.MAIL_FROM || process.env.SMTP_FROM || process.env.SMTP_USER;
+}
+
+/** Extrait « Nom <adresse> » → { name, email }. */
+function decouper(from) {
+  const m = String(from || '').match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
+  if (m) return { name: m[1] || undefined, email: m[2].trim() };
+  return { email: String(from || '').trim() };
+}
+
+async function envoyerParApiHttp({ to, subject, html }) {
+  const exp = decouper(expediteur());
+  const cle = process.env.BREVO_API_KEY;
+  const cleResend = process.env.RESEND_API_KEY;
+
+  if (cle) {
+    const r = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'api-key': cle, 'Content-Type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({
+        sender: { email: exp.email, name: exp.name || '5trade' },
+        to: [{ email: to }],
+        subject, htmlContent: html
+      }),
+      signal: AbortSignal.timeout(20000)
+    });
+    if (!r.ok) throw new Error(`Brevo HTTP ${r.status} : ${(await r.text()).slice(0, 200)}`);
+    return { via: 'brevo', ok: true };
+  }
+
+  if (cleResend) {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${cleResend}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: expediteur(), to, subject, html }),
+      signal: AbortSignal.timeout(20000)
+    });
+    if (!r.ok) throw new Error(`Resend HTTP ${r.status} : ${(await r.text()).slice(0, 200)}`);
+    return { via: 'resend', ok: true };
+  }
+  return null;
+}
+
 async function sendMail({ to, subject, html }) {
-  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
-  return getMailer().sendMail({ from, to, subject, html });
+  const from = expediteur();
+  let erreurHttp = null;
+
+  // 1. API HTTPS si une clé est présente (seule voie sur un hébergeur qui filtre
+  //    le SMTP). Si elle échoue, on tente quand même le SMTP : mieux vaut deux
+  //    tentatives qu'un abandon.
+  try {
+    const r = await envoyerParApiHttp({ to, subject, html });
+    if (r && r.ok) return r;
+  } catch (e) { erreurHttp = e.message; }
+
+  // 2. SMTP.
+  try {
+    const info = await getMailer().sendMail({ from, to, subject, html });
+    return { via: 'smtp', ok: true, id: info && info.messageId };
+  } catch (e) {
+    const detail = [
+      erreurHttp ? `API mail : ${erreurHttp}` : 'aucune clé API mail (BREVO_API_KEY / RESEND_API_KEY)',
+      `SMTP : ${e.message}`
+    ].join(' | ');
+    const err = new Error(
+      `envoi du courriel impossible — ${detail}. `
+      + `Un hébergeur qui bloque le SMTP sortant exige une clé API (BREVO_API_KEY).`
+    );
+    err.code = 'MAIL_INDISPONIBLE';
+    throw err;
+  }
 }
 
 function maskEmail(e) {
@@ -1023,7 +1149,7 @@ app.post('/api/signup', rateLimitLogin, async (req, res) => {
       return res.status(409).json({ error: 'Une inscription est déjà enregistrée pour cette plateforme.' });
     }
 
-    const { salt, hash } = hashPassword(password);
+    const { salt, hash } = await hashPassword(password);
     const account = {
       id: 'owner',
       username,
@@ -1120,7 +1246,7 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
       return res.status(404).json({ error: 'Aucun compte. Inscrivez-vous d\'abord.' });
     }
     const okUser = username === account.username || username === account.email;
-    if (!okUser || !verifyPassword(password, account.salt, account.hash)) {
+    if (!okUser || !(await verifyPassword(password, account.salt, account.hash))) {
       // Trace de l'échec — jamais le mot de passe, jamais le sel.
       Audit.enregistrer({
         acteur: typeof username === 'string' ? username : null,
@@ -1152,7 +1278,13 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
       await sendOtpEmail(account, code, purpose);
     } catch (mailErr) {
       console.error('Erreur envoi OTP:', mailErr.message);
-      return res.status(502).json({ error: "Impossible d'envoyer le code par email." });
+      // Le message générique laissait l'utilisateur sans piste. On renvoie la
+      // cause (sans secret) : configuration incomplète, SMTP filtré, API refusée.
+      return res.status(502).json({
+        error: "Impossible d'envoyer le code par email.",
+        cause: mailErr.code || null,
+        detail: String(mailErr.message || '').slice(0, 300)
+      });
     }
 
     res.json({
@@ -3461,6 +3593,24 @@ app.get('/api/decision', requireAuth, async (req, res) => {
     // l'écran affichait « 2/3 unités ».
     const { confluence } = await alignementMtf(symbol, tf, provider, options);
 
+    // SÉLECTION RÉELLE EN MODE AUTO. Avant, `optionsAnalyse` renvoyait
+    // `{ mode: 'auto' }` : le moteur analysait avec ses règles génériques sans
+    // jamais comparer les fiches. Chaque fiche est maintenant évaluée seule, avec
+    // ses règles et son marché, et l'exclusion est motivée.
+    let selection = null;
+    if (options.mode === 'auto') {
+      try {
+        const fiches = await loadAllStrategies();
+        selection = Selector.selectionner({
+          candles: closed, meta: { symbol, timeframe: tf }, strategies: fiches || []
+        });
+        if (selection.retenues.length) {
+          const retenues = (fiches || []).filter(d => selection.retenues.includes(d.id));
+          options.profils = retenues.map(d => Signals.profilDepuisStrategie(d));
+        }
+      } catch (e) { selection = { candidates: [], retenues: [], motif: `sélection impossible : ${e.message}` }; }
+    }
+
     // LE RISQUE GARDE LA DÉCISION — le même contrôle que l'inscription au
     // journal, mais AVANT publication. Sans état de compte lisible, la décision
     // le dira (`risque.consulte = false`) au lieu de faire semblant de vérifier.
@@ -3484,6 +3634,22 @@ app.get('/api/decision', requireAuth, async (req, res) => {
       timeframe: tf,
       mode: options.mode,
       strategieAppliquee: options.strategie || null,
+      // Qui a été comparé, qui est retenu, et pourquoi les autres sont écartées.
+      // Sans ce bloc, la sélection restait invisible : l'écran affichait une
+      // décision sans jamais dire sur quelle stratégie elle reposait.
+      selection: selection ? {
+        motif: selection.motif,
+        retenues: selection.retenues,
+        // Fiches qui rejouent les mêmes règles : elles ne comptent pas comme
+        // des confirmations supplémentaires.
+        doublons: selection.doublons || [],
+        compatibilite: selection.compatibilite,
+        candidates: (selection.candidates || []).slice(0, 12).map(c => ({
+          id: c.id, titre: c.titre, retenue: c.retenue, compatible: c.compatible,
+          statut: c.statut, direction: c.direction, score: c.score,
+          regles: c.regles, motif: c.motif, partiel: c.partiel
+        }))
+      } : null,
       decision
     });
   } catch (e) { res.status(500).json({ error: e.message }); }

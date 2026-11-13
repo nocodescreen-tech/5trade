@@ -43,5 +43,11 @@
     "impulsion": 3,
     "atrStop": 1
   },
-  "createdAt": "2026-10-12T12:45:22.662Z"
+  "createdAt": "2026-10-12T12:45:22.662Z",
+  "marches": [
+    "synthetique",
+    "indices"
+  ],
+  "marchesSource": "texte de la fiche",
+  "marchesDeclareLe": "2026-11-12"
 }

@@ -1,6 +1,24 @@
 # 5TRADE — analyse complète (12/11/2026)
 
-Analyse menée sur le dépôt `nocodescreen-tech/5trade`, serveur local `:3001`,
+## Vérification du 12/11 après-midi — état réel
+
+| Constat | État vérifié |
+|---|---|
+| 6 tests en échec (§3.5) | **CORRIGÉ** — `npm run test` → 1289 réussis, 0 échoué, 1 non testé. Les trois fichiers backend ont été committés. |
+| `trust proxy` absent (§3.2) | Toujours présent — 0 occurrence |
+| Cookie sans `Secure` (§3.3) | Toujours présent — `HttpOnly; SameSite=Strict; Path=/` |
+| `scryptSync` (§3.4) | Toujours présent — 2 occurrences |
+| Babel dans le navigateur (§3.1) | Toujours présent, et **empiré** : 15,3 s au repos (10,3 s la veille), DCL 9,0 s, load 12,5 s — `index.html` a grossi |
+| Monolithe (§3.6) | Toujours présent — `server.js` 4 423 lignes, 108 routes |
+| `prototype-redesign.html` non servi (§3.8) | **ERREUR DE MA PART** — il répond 200. Mon test précédent avait expiré sur `networkidle` et j'en ai conclu à tort qu'il n'était pas servi. |
+
+Chantier en cours au moment de la vérification, sans lien avec ces constats :
+`api/strategy-engine/selector.js` (sélection réelle des fiches en mode auto),
+`api/tools/declarer-marches.js`, `api/tools/mesure-selecteur.js`, et 12 fiches
+`knowledge-base/*.json`. `api/server.js` et `strategy-contract.js` sont modifiés
+non committés.
+
+Analyse initiale ci-dessous, conservée telle quelle pour la traçabilité.
 frontend `frontend/index.html`. Toutes les affirmations ci-dessous ont été
 mesurées ou lues dans le code ; rien n'est déduit de l'apparence.
 

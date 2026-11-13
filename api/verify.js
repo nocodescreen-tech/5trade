@@ -18,6 +18,14 @@ const postgres = require('postgres');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const ROOT = path.join(__dirname, '..');
+// L'interface est PRÉCOMPILÉE : la page ne contient plus le code, il vit dans
+// `frontend/src/app.jsx` (compilé vers build/app.js). Les contrôles d'écran
+// doivent lire la SOURCE, sinon ils inspectent un shell de 26 Ko et échouent.
+const uiSrc = () => {
+  const src = path.join(ROOT, 'frontend', 'src', 'app.jsx');
+  if (fs.existsSync(src)) return fs.readFileSync(src, 'utf8');
+  return uiSrc();
+};
 const ENV = path.join(ROOT, '.env');
 const API = 'http://localhost:3001';
 
@@ -383,9 +391,17 @@ function tinyPng(W = 64, H = 40) {
   // dans un lexique décoratif mais sont bien ceux que le verdict emploie.
   const SIGSRC = fs.readFileSync(path.join(__dirname, 'engine/signals.js'), 'utf8');
   // Tous les <script type="text/babel"> sans attribut src = notre application
-  const jsx = [...htmlSrc.matchAll(/<script([^>]*type="text\/babel"[^>]*)>([\s\S]*?)<\/script>/g)]
+  const jsxInline = [...htmlSrc.matchAll(/<script([^>]*type="text\/babel"[^>]*)>([\s\S]*?)<\/script>/g)]
     .filter(m => !/\bsrc=/.test(m[1])).map(m => m[2]).join('\n');
-  ok('bloc JSX inline récupéré', jsx.length > 1000, `${jsx.length} caractères`);
+  // Le dépôt est passé au JSX PRÉCOMPILÉ : la page ne contient plus le code,
+  // elle charge `build/app.js`. La SOURCE est `src/app.jsx` — c'est elle que les
+  // contrôles doivent lire (formatage stable), pas l'artefact de build.
+  const sourceApp = path.join(FRONT, 'src', 'app.jsx');
+  const bundlePath = path.join(FRONT, 'build', 'app.js');
+  const jsx = jsxInline.length > 1000 ? jsxInline
+    : (fs.existsSync(sourceApp) ? fs.readFileSync(sourceApp, 'utf8')
+      : (fs.existsSync(bundlePath) ? fs.readFileSync(bundlePath, 'utf8') : ''));
+  ok('bloc JSX récupéré (inline, source ou bundle)', jsx.length > 1000, `${jsx.length} caractères`);
 
   const babelFile = path.join(__dirname, 'babel.min.js');
   if (!fs.existsSync(babelFile)) {
@@ -413,7 +429,7 @@ function tinyPng(W = 64, H = 40) {
     compile('app (JSX inline)', jsx);
     compile('reactbits.jsx', fs.readFileSync(path.join(FRONT, 'reactbits.jsx'), 'utf8'));
     ok('composant LiveMarket présent', /function LiveMarket\(/.test(jsx));
-    ok('onglet « Direct » déclaré', /id:'live'/.test(jsx));
+    ok('onglet « Direct » déclaré', /id: ?'live'/.test(jsx));
     ok('graphique TradingView (PriceChart)', /function PriceChart\(/.test(jsx));
     ok('Lightweight Charts v4 servi localement',
       /<script src="lightweight-charts\.js\?v=[\d.]+">/.test(htmlSrc) &&
@@ -422,7 +438,7 @@ function tinyPng(W = 64, H = 40) {
     ok('graphique : repli CDN si le fichier local fait défaut',
       /unpkg\.com\/lightweight-charts/.test(htmlSrc) && /lwc-pret/.test(htmlSrc));
     ok('graphique : la taille nulle est corrigée (onglet en arrière-plan)',
-      /clearTimeout\(t1\)/.test(htmlSrc) && /clientWidth/.test(htmlSrc));
+      /clearTimeout\(t1\)/.test(jsx) && /clientWidth/.test(jsx));
     ok('sélecteur multi-plateformes (optgroup par source)', /optgroup/.test(jsx));
     ok('zoom et déplacement actifs', /handleScroll: true, handleScale: true/.test(jsx));
   }
@@ -780,14 +796,15 @@ function tinyPng(W = 64, H = 40) {
       (vManuel.rules || []).map(r => r.rule).join(','));
 
     // Fichier de vérification du front (mode + édition)
-    const htmlMode = fs.readFileSync(path.join(FRONT, 'index.html'), 'utf8');
+    // Shell précompilé : le code vit dans src/app.jsx, pas dans la page.
+    const htmlMode = jsx.length > 1000 ? jsx : fs.readFileSync(path.join(FRONT, 'index.html'), 'utf8');
     ok('interface : sélecteur auto / ma stratégie', /Analyse auto/.test(htmlMode) && /Ma stratégie/.test(htmlMode));
     ok('interface : le mode est transmis au flux de signaux', /&mode=\$\{mode\}/.test(htmlMode));
     ok('interface : la stratégie appliquée est affichée', /signal\.strategieAppliquee\.titre/.test(htmlMode));
     ok('interface : édition d\'une stratégie (bouton crayon)', /ouvrirEdition/.test(htmlMode) && /fa-pen/.test(htmlMode));
     ok('interface : enregistrement d\'une stratégie par PUT',
       /method:'PUT'/.test(htmlMode) && /'\/knowledge\/' \+ encodeURIComponent\(editing\)/.test(htmlMode));
-    ok('interface : onglet Alertes déclaré', /id:'alerts'/.test(htmlMode));
+    ok('interface : onglet Alertes déclaré', /id: ?'alerts'/.test(htmlMode));
     ok('interface : écran des alertes', /function Alertes\(/.test(htmlMode));
     ok('interface : garde-fou contre les erreurs d\'affichage', /class Garde extends React\.Component/.test(htmlMode));
     ok('interface : le graphique tolère une bougie plus ancienne',
@@ -1807,7 +1824,7 @@ function tinyPng(W = 64, H = 40) {
       !/[\d.]+ %/.test(v.forceDetail.lecture));
 
     // Et l'ECRAN lit bien ces champs.
-    const jsx2 = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8');
+    const jsx2 = uiSrc();
     ok('l\'écran lit `reglesEvaluees` (le dénominateur)',
       /reglesEvaluees/.test(jsx2));
     ok('l\'écran lit `reglesSansAvis` et non l\'ancien `reglesMuettes` (jamais exposé)',
@@ -3475,7 +3492,7 @@ function tinyPng(W = 64, H = 40) {
         && /const verificateurRisque = verificateurRisqueCompte\(\)/.test(srv)
         && /verificateurRisque: verificateurRisqueCompte/.test(srv));
       ok('l\'écran distingue un refus de risque d\'une simple attente',
-        /ATTENTE_RISQUE/.test(fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8')));
+        /ATTENTE_RISQUE/.test(uiSrc()));
     }
 
     // ── PERFORMANCE : brut ou net, jamais confondu ─────────────────────────
@@ -3494,7 +3511,7 @@ function tinyPng(W = 64, H = 40) {
         Object.keys(st).filter(k => /brut|frais|critique/i.test(k)).join(', '));
 
       ok('l\'écran ne peut pas présenter du brut comme du net',
-        /coutCritique/.test(fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8')));
+        /coutCritique/.test(uiSrc()));
 
       // Bougie ambiguë : le stop est retenu AVANT l'objectif (choix défavorable).
       ok('sur une bougie ambiguë, le stop passe avant l\'objectif',
@@ -3896,7 +3913,7 @@ function tinyPng(W = 64, H = 40) {
         /conflit = \{/.test(srcDE) && /conflit: arbitrage\.conflit/.test(srcDE)
         && /conflit,\n/.test(srcDE.replace(/\r/g, '')));
 
-      const ui = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'index.html'), 'utf8');
+      const ui = uiSrc();
       ok('le tableau de surveillance a deux colonnes : Direction et Décision',
         /<th[^>]*>Direction<\/th>/.test(ui) && /<th[^>]*>Décision<\/th>/.test(ui));
 
@@ -3957,6 +3974,36 @@ function tinyPng(W = 64, H = 40) {
       // Régression : « risque non vérifié » affiché alors que le compte existait.
       ok('le risque distingue « rien à contrôler » de « compte absent »',
         /aucun trade à soumettre au risque/.test(srcDE));
+
+      // Le sélecteur : chaque fiche évaluée seule, et les doublons de règles ne
+      // comptent pas comme des confirmations indépendantes.
+      const Sel = require('./strategy-engine/selector');
+      ok('le sélecteur écarte une fiche dont le marché est incompatible',
+        (() => {
+          const r = Sel.selectionner({
+            candles: [], meta: { symbol: 'R_75', timeframe: '15m' },
+            strategies: [{ id: 'f_forex', title: 'Forex only', type: 'strategy',
+              content: 'balayage et rupture de structure', marches: ['forex'] }]
+          });
+          const c = r.candidates[0];
+          return c && c.retenue === false && /hors de ceux déclarés/.test(c.motif || '');
+        })());
+
+      ok('une fiche sans règle exécutable est écartée avec son motif',
+        (() => {
+          const r = Sel.selectionner({
+            candles: [], meta: { symbol: 'R_75', timeframe: '15m' },
+            strategies: [{ id: 'f_vide', title: 'Vide', type: 'strategy', content: 'rien', marches: ['*'] }]
+          });
+          return r.candidates[0].retenue === false;
+        })());
+
+      ok('le sélecteur expose les doublons de règles au lieu de les compter',
+        /doublons/.test(fs.readFileSync(path.join(__dirname, 'strategy-engine', 'selector.js'), 'utf8'))
+        && /memeReglesQue/.test(fs.readFileSync(path.join(__dirname, 'strategy-engine', 'selector.js'), 'utf8')));
+
+      ok('le contrat accepte le joker « * » comme marché non restreint',
+        /includes\('\*'\)/.test(fs.readFileSync(path.join(__dirname, 'strategy-engine', 'strategy-contract.js'), 'utf8')));
 
       ok('les quatre directions sont rendues distinctement',
         /'BUY ↗'/.test(ui) && /'SELL ↘'/.test(ui) && /'NEUTRAL ·'/.test(ui) && /'UNKNOWN \?'/.test(ui));
@@ -4942,7 +4989,7 @@ function tinyPng(W = 64, H = 40) {
       /preuves = await Preuves\.dernieresEvaluations/.test(srvJ)
       && /stats: JournalSignaux\.stats\(\), preuves/.test(srvJ));
 
-    const front = fs.readFileSync(path.join(ROOT, 'frontend', 'index.html'), 'utf8');
+    const front = uiSrc();
     ok('l\'écran affiche chaque condition par son nom',
       /Pourquoi ce signal — conditions vérifiées, nommées/.test(front)
       && /c\.condition/.test(front));
@@ -5901,7 +5948,7 @@ function tinyPng(W = 64, H = 40) {
     ok('le mode générique est signalé explicitement',
       /mode: strategies \? 'strategies' : 'generique'/.test(srvS));
 
-    const frontSrc = fs.readFileSync(path.join(ROOT, 'frontend', 'index.html'), 'utf8');
+    const frontSrc = uiSrc();
     ok('l\'écran affiche le statut en direct',
       /function StatutDirectPanel/.test(frontSrc) && /<StatutDirectPanel \/>/.test(frontSrc));
     ok('l\'écran distingue stratégie, motif et structure',
@@ -6102,6 +6149,7 @@ function tinyPng(W = 64, H = 40) {
 
   // ── Frontend sans CDN : l'application ne doit pas dépendre d'un tiers ──
   {
+    // Contrôles sur les BALISES <script> : on lit la page, pas la source JSX.
     const front = fs.readFileSync(path.join(ROOT, 'frontend', 'index.html'), 'utf8');
     for (const f of ['react.production.min.js', 'react-dom.production.min.js', 'babel.min.js', 'tailwind.js']) {
       const existe = fs.existsSync(path.join(ROOT, 'frontend', 'vendor', f));
@@ -6236,7 +6284,7 @@ function tinyPng(W = 64, H = 40) {
       comb.reduce((a, c) => a + c.total, 0) <= s.total,
       `${comb.reduce((a, c) => a + c.total, 0)} ≤ ${s.total}`);
     ok('l\'écran de journal affiche la croisée',
-      /Où ça gagne vraiment/.test(fs.readFileSync(path.join(ROOT, 'frontend', 'index.html'), 'utf8')));
+      /Où ça gagne vraiment/.test(uiSrc()));
   }
 
   // ── Sauvegarde de la base : export, compression, RESTAURATION réelle ──

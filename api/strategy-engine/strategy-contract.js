@@ -30,7 +30,13 @@ function valider(brut) {
   if (!brut.name || typeof brut.name !== 'string') erreurs.push('name manquant');
   if (!VERSION.test(String(brut.version || ''))) erreurs.push('version absente ou non semver (x.y.z)');
 
-  const marches = Array.isArray(brut.supportedMarkets) ? brut.supportedMarkets.filter(Boolean) : [];
+  // `marches` et `supportedMarkets` sont deux orthographes du même champ dans le
+  // dépôt. N'en lire qu'une faisait ignorer la déclaration de la moitié des
+  // fiches. Le joker « * » = « la fiche ne restreint pas son marché », ce qui est
+  // une déclaration explicite, pas une compatibilité supposée.
+  const listeMarches = Array.isArray(brut.supportedMarkets) ? brut.supportedMarkets
+    : (Array.isArray(brut.marches) ? brut.marches : []);
+  const marches = listeMarches.filter(Boolean);
   if (!marches.length) {
     // Avertissement, pas erreur : la fiche reste enregistrable (brouillon), mais
     // aucun contrôle de compatibilité ne pourra la déclarer utilisable.
@@ -117,7 +123,8 @@ function compatibilite(fiche, profil) {
   // n'est pas « du forex » : il n'est accepté que s'il est nommé.
   if (!instrument.reconnu) {
     bloquants.push(`instrument non identifié (${instrument.symbole}) : aucun profil à confronter`);
-  } else if (!fiche.supportedMarkets.includes(instrument.classe)) {
+  } else if (!fiche.supportedMarkets.includes(instrument.classe)
+    && !fiche.supportedMarkets.includes('*')) {
     bloquants.push(`marché « ${instrument.classe} » non déclaré par la stratégie (${fiche.supportedMarkets.join(', ')})`);
   }
 
@@ -170,6 +177,9 @@ function filtrerParClasse(matched, symbole, meta = {}) {
     const declarees = marchesDeclares(f);
     if (!declarees) { nonDeclarees.push(f); continue; }
     if (declarees.includes(instrument.classe)) compatibles.push(f);
+    // « * » : la fiche ne restreint pas son marché. Elle est compatible, mais on
+    // le signale — ce n'est pas la même chose qu'un marché explicitement nommé.
+    else if (declarees.includes('*')) compatibles.push({ ...f, marcheNonRestreint: true });
     else {
       refusees.push({
         ...f,
