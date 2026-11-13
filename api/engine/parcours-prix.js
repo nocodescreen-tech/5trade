@@ -109,11 +109,17 @@ function etatZone(zone, candles, opts = {}) {
     preuves.push(`zone touchée, réaction insuffisante (${derniereInteraction.ecart} écart)`);
   }
 
-  // Expiration : une zone jamais retestée au bout de N bougies n'est plus une
-  // occasion, c'est un dessin.
-  if ((etat === 'NOT_RETURNED' || etat === 'APPROACHING') && apres.length > ageMax) {
+  // Expiration : au bout de N bougies, une zone qui n'est plus en contact avec
+  // le prix n'est plus une occasion, c'est un dessin. On l'applique aussi aux
+  // zones « confirmées » : mesuré sur R_75, quatre FVG confirmaient un
+  // événement vieux de 50 bougies alors que le prix était 750 points plus bas.
+  // Un état décrit ce qui s'est passé ; l'expiration dit si cela compte encore.
+  const depuisInteraction = derniereInteraction ? apres.length - 1 - derniereInteraction.i : apres.length;
+  if (etat !== 'IN_ZONE' && depuisInteraction > ageMax) {
+    const avant = etat;
     etat = 'EXPIRED';
-    preuves.unshift(`${apres.length} bougies sans retest (seuil ${ageMax})`);
+    preuves.unshift(`${depuisInteraction} bougies depuis la dernière interaction (seuil ${ageMax})`
+      + (avant !== 'NOT_RETURNED' && avant !== 'APPROACHING' ? ` — dernier état : ${avant}` : ''));
   }
 
   return {
