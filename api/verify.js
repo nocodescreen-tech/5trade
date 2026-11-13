@@ -4121,6 +4121,62 @@ function tinyPng(W = 64, H = 40) {
         JSON.stringify(lot.resume));
     }
 
+    // ── PHASE 3 : MTF PAR STRATÉGIE (rôles et isolation) ───────────────────
+    // Défaut mesuré : une seule confluence globale était distribuée à toutes les
+    // fiches. Une stratégie H1+M15 pouvait être « confirmée » par les unités
+    // d'une autre stratégie (H4+M5). Chaque fiche doit être jugée sur SES unités.
+    {
+      const O = require('./strategy-engine/orchestrateur-tf');
+
+      const declares = O.rolesDe({ timeframes: { context: ['H4'], confirmation: ['H1'], execution: ['M15'] } });
+      ok('les rôles déclarés par la fiche sont respectés',
+        declares.contexte[0] === 'H4' && declares.confirmation[0] === 'H1'
+        && declares.execution[0] === 'M15' && declares.source === 'declares',
+        `contexte ${declares.contexte[0]} · exécution ${declares.execution[0]} · ${declares.source}`);
+
+      const plates = O.rolesDe({ timeframes: ['M15', 'H4', 'H1'] });
+      ok('une liste plate est classée par durée (le plus grand = contexte)',
+        plates.contexte[0] === 'H4' && plates.execution[0] === 'M15' && plates.source === 'deduits',
+        `${plates.contexte[0]} contexte · ${plates.execution[0]} exécution`);
+
+      ok('une fiche sans timeframe le dit au lieu de deviner',
+        O.rolesDe({}).source === 'absents');
+
+      ok('les durées sont comparables (M15 < H1 < H4)',
+        O.minutes('M15') === 15 && O.minutes('H1') === 60 && O.minutes('H4') === 240);
+
+      // Isolation : A ne doit JAMAIS voir les unités de B.
+      const dirParTF = { H4: 'BUY', M15: 'SELL', M5: 'BUY' };
+      const chargeur = tf => Promise.resolve({ direction: dirParTF[tf] || 'NEUTRE', status: 'confirme', tf });
+
+      const confA = await O.confluenceStrategie(
+        { timeframes: { context: ['H4'], execution: ['M15'] } }, { chargerUnite: chargeur });
+      const confB = await O.confluenceStrategie(
+        { timeframes: { execution: ['M5'] } }, { chargerUnite: chargeur });
+
+      ok('une stratégie n’utilise QUE ses propres unités',
+        confA.detail.every(x => ['H4', 'M15'].includes(x.tf)) && confB.detail.every(x => x.tf === 'M5'),
+        `A: ${confA.detail.map(x => x.tf).join('/')} · B: ${confB.detail.map(x => x.tf).join('/')}`);
+
+      ok('l’exécution est toujours l’unité de travail (première)',
+        confA.detail[0].role === 'execution' && confA.detail[0].tf === 'M15',
+        confA.detail.map(x => `${x.role}:${x.tf}`).join(' '));
+
+      ok('un contexte contre l’exécution est signalé comme conflit',
+        /contexte BUY contre exécution SELL/.test(confA.conflit || ''), confA.conflit || 'aucun');
+
+      // Mesuré sur strategy_trend : 1d SELL, 4h BUY, 1h BUY → la majorité dit
+      // ACHAT, mais le contexte contredit l'exécution. Ce n'est pas un alignement.
+      ok('un conflit de timeframes interdit l’alignement, même majoritaire',
+        confA.aligne === false && /conflit de timeframes/.test(confA.motif || ''),
+        `${confA.aligne} · ${confA.motif}`);
+
+      const sansChargeur = await O.confluenceStrategie({ timeframes: ['M15'] }, {});
+      ok('sans chargeur, la confluence n’est pas inventée',
+        sansChargeur.aligne === false && /chargeur/.test(sansChargeur.motif || ''),
+        sansChargeur.motif || '—');
+    }
+
     // ── INVARIANT : toute route qui DÉCIDE fournit les deux garde-fous ────
     // Cartographie mesurée : 108 routes, 2 seulement appellent le Decision
     // Engine. Le flux temps réel en manquait — un signal refusé par le risque

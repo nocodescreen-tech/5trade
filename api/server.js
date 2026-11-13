@@ -3614,11 +3614,53 @@ app.get('/api/decision', requireAuth, async (req, res) => {
     // LE RISQUE GARDE LA DÉCISION — le même contrôle que l'inscription au
     // journal, mais AVANT publication. Sans état de compte lisible, la décision
     // le dira (`risque.consulte = false`) au lieu de faire semblant de vérifier.
+    // MTF PAR STRATÉGIE — la confluence de la fiche RETENUE remplace la
+    // confluence globale. Une fiche qui exige H1+M15 ne peut plus être validée
+    // par les unités d'une autre fiche (H4+M5) : chacune est jugée sur ses
+    // propres unités et ses rôles (contexte, confirmation, exécution).
+    // Coût maîtrisé : une seule fiche est orchestrée (la retenue n°1), sinon la
+    // route repayerait un téléchargement par unité et par fiche.
+    let confluenceStrategie = null;
+    if (selection && selection.retenues && selection.retenues.length) {
+      try {
+        const Orchestrateur = require('./strategy-engine/orchestrateur-tf');
+        const fiches = await loadAllStrategies();
+        const fiche = (fiches || []).find(d => d.id === selection.retenues[0]);
+        if (fiche) {
+          // Les fiches ne déclarent AUCUNE unité (0 sur 12). On part donc des
+          // unités du profil — celles que le moteur emploie réellement — et on
+          // le dit (`unitesSource`), au lieu de laisser la confluence vide et
+          // de bloquer tous les signaux sur « 0/0 unité ».
+          const profil = Signals.profilDepuisStrategie(fiche);
+          const unitesFiche = (profil && (profil.timeframes || profil.tfs)) || [];
+          const fichePourMtf = (unitesFiche && unitesFiche.length)
+            ? { id: fiche.id, timeframes: unitesFiche } : fiche;
+          confluenceStrategie = await Orchestrateur.confluenceStrategie(fichePourMtf, {
+            chargerUnite: async (unite) => {
+              const r = await Market.getCandles(symbol, unite, 300, provider);
+              const cl = (r.candles || []).filter(c => c.closed !== false);
+              if (cl.length < 20) return null;
+              return Signals.detect(cl, { symbol, timeframe: unite },
+                { profil: Signals.profilDepuisStrategie(fiche) });
+            }
+          });
+          confluenceStrategie.unitesSource = (fichePourMtf !== fiche) ? 'profil (fiche non déclarante)' : 'fiche';
+          selection.parStrategie = { [fiche.id]: confluenceStrategie };
+        }
+      } catch (e) {
+        selection.parStrategie = { erreur: e.message };
+      }
+    }
+
     const verificateurRisque = verificateurRisqueCompte();
 
     const decision = DecisionEngine.decider(closed, { symbol, timeframe: tf }, {
       profils: options.profils || [],
-      confluence,
+      // La confluence par stratégie prime : c'est celle de la fiche retenue.
+      confluence: confluenceStrategie || confluence,
+      // …et elle est aussi fournie par signal : le contrôle MTF de chaque
+      // signal de stratégie doit lire SES unités, pas une confluence vide.
+      confluenceStrategie,
       verificateurRisque,
       rrMin: Number.isFinite(Number(req.query.rrMin)) ? Number(req.query.rrMin) : undefined,
       exigerAlignement: true,
@@ -3637,9 +3679,11 @@ app.get('/api/decision', requireAuth, async (req, res) => {
       // Qui a été comparé, qui est retenu, et pourquoi les autres sont écartées.
       // Sans ce bloc, la sélection restait invisible : l'écran affichait une
       // décision sans jamais dire sur quelle stratégie elle reposait.
+      confluenceSource: confluenceStrategie ? 'strategie' : 'globale',
       selection: selection ? {
         motif: selection.motif,
         retenues: selection.retenues,
+        parStrategie: selection.parStrategie || null,
         // Fiches qui rejouent les mêmes règles : elles ne comptent pas comme
         // des confirmations supplémentaires.
         doublons: selection.doublons || [],

@@ -218,10 +218,20 @@ function niveauConfirmation(signaux, options = {}) {
     // Mesuré : un CHoCH et un Doji étaient confirmés et produisaient un ACHAT
     // alors que la trace notait « alignement 0/2 insuffisant ». Le contexte
     // n'est pas une propriété de la source, c'est une propriété du marché.
-    if (exigerAlignement && s.confluence) {
-      const conf = s.confluence;
+    // La confluence d'une STRATÉGIE est celle de SES unités : elle prime sur
+    // celle calculée à la volée pour le signal. Sans cette priorité, une fiche
+    // H1+M15 restait jugée sur une confluence vide (« 0 unité »).
+    const confSign = (options.confluenceStrategie && s.source === 'strategie')
+      ? options.confluenceStrategie : s.confluence;
+    if (exigerAlignement && confSign) {
+      const conf = confSign;
       if (!conf.aligne) {
-        blocages.push(`alignement MTF insuffisant : ${conf.nbAlignes}/${conf.detail?.length || 0} unités d'accord (seuil ${conf.seuilAlignes})`);
+        const nb = Number.isFinite(conf.nbAlignes) ? conf.nbAlignes
+          : (Array.isArray(conf.detail) ? conf.detail.filter(x => x && x.aligne !== false).length : 0);
+        const total = Number.isFinite(conf.total) ? conf.total : (conf.detail?.length || 0);
+        const seuil = Number.isFinite(conf.seuilAlignes) ? conf.seuilAlignes : 'défaut';
+        blocages.push(`alignement MTF insuffisant : ${nb}/${total} unités d'accord (seuil ${seuil})`
+          + (conf.motif ? ` — ${conf.motif}` : ''));
       }
       if (refuserContreTendance && conf.contreTendance) {
         blocages.push(`contre-tendance détectée : ${conf.motif}`);
