@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const DIR = 'C:/Users/rene/trading-platform/frontend';
+const DIR = __dirname;   // relatif au fichier : fonctionne sur toute machine
 const HTML = path.join(DIR, 'index.html');
 let html = fs.readFileSync(HTML, 'utf8');
 const avant = html.length;

@@ -4177,6 +4177,50 @@ function tinyPng(W = 64, H = 40) {
         sansChargeur.motif || '—');
     }
 
+    // ── REJEU FIDÈLE : le backtest appelle le VRAI moteur ──────────────────
+    // Défaut mesuré : l'ancien backtest appelait un détecteur puis simulait des
+    // sorties, sans validation, sans MTF, sans frais, sans risque. Ses chiffres
+    // ne décrivaient pas le direct.
+    {
+      const R = require('./engine/rejeu-direct');
+
+      const vide = R.statistiques([]);
+      ok('les statistiques d’un rejeu vide ne divisent pas par zéro',
+        vide.n === 0 && vide.esperanceNette === null && vide.tauxReussite === null);
+
+      const faux = [
+        { rBrut: 2.0, rNet: 1.8, coutR: 0.2 },
+        { rBrut: -1.0, rNet: -1.2, coutR: 0.2 },
+        { rBrut: 2.0, rNet: 1.8, coutR: 0.2 }
+      ];
+      const st = R.statistiques(faux);
+      ok('les statistiques distinguent le brut du net',
+        st.rBrut === 3 && st.rNet === 2.4 && st.coutTotalR === 0.6,
+        `brut ${st.rBrut} · net ${st.rNet} · coûts ${st.coutTotalR}`);
+      ok('le taux de réussite se calcule sur le net',
+        st.tauxReussite === 66.7 && st.gagnants === 2, `${st.tauxReussite} %`);
+      ok('les frais renseignés sont comptés',
+        st.fraisRenseignes === 3, `${st.fraisRenseignes}/3`);
+
+      // Série trop courte : on ne rejoue pas, et on ne prétend rien mesurer.
+      const court = R.rejouer([{ t: 1, o: 1, h: 1, l: 1, c: 1, closed: true }],
+        { symbol: 'TEST', timeframe: '15m' }, {}, { fenetre: 60 });
+      ok('une série plus courte que la fenêtre ne produit aucun trade',
+        court.trades.length === 0 && court.stats.n === 0);
+
+      // Prix strictement plat : aucune décision exécutable possible.
+      const plat = Array.from({ length: 120 }, (_, i) => ({
+        t: 1700000000000 + i * 900000, o: 100, h: 100, l: 100, c: 100, closed: true
+      }));
+      const rejeuPlat = R.rejouer(plat, { symbol: 'TEST', timeframe: '15m' }, {},
+        { fenetre: 60, pas: 5, maxEtapes: 10, optionsDecision: { exigerAlignement: false } });
+      ok('un marché parfaitement plat ne produit aucun trade',
+        rejeuPlat.trades.length === 0 && rejeuPlat.etapes.length > 0,
+        `${rejeuPlat.etapes.length} pas examinés`);
+      ok('chaque trade du rejeu est attribué au moteur de décision',
+        rejeuPlat.trades.every(t => t.source === 'DecisionEngine.decider'));
+    }
+
     // ── INVARIANT : toute route qui DÉCIDE fournit les deux garde-fous ────
     // Cartographie mesurée : 108 routes, 2 seulement appellent le Decision
     // Engine. Le flux temps réel en manquait — un signal refusé par le risque

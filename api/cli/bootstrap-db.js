@@ -11,7 +11,7 @@ const path = require('path');
 const postgres = require('postgres');
 
 const ENV_DST = path.join(__dirname, '..', '..', '.env');
-const SRC = process.argv[2] || 'C:\\Users\\rene\\schoolflow\\.env';
+const SRC = process.argv[2] || path.join(__dirname, '..', '..', '.env');
 const DB_NAME = process.argv[3] || '5trade';
 
 function grab(file, key) {
