@@ -7,7 +7,7 @@ const API_BASE = (window.location.port === '5173' || window.location.protocol ==
 
 // Version de l'interface (affichée en en-tête) : permet de voir d'un coup d'œil
 // si la page ouverte est bien la dernière, ou une version restée en cache.
-const UI_VERSION = 'r2026-10-12a';
+const UI_VERSION = 'r2026-11-14a';
 const api = (path, opts = {}) =>
   fetch(`${API_BASE}${path}`, { credentials: 'include', ...opts });
 
@@ -6304,6 +6304,241 @@ function Outils() {
   );
 }
 
+/* ══════════════ PILOTE IA — chat qui pilote le système ══════════════ */
+// Une seule page de conversation, avec des bulles, qui exécute réellement les
+// commandes du chat-crud : lecture (trades, stratégies, scénarios, paramètres,
+// mémoire, apprentissage, état), et écriture (créer, modifier, activer,
+// désactiver, supprimer) avec confirmation « oui/non » avant toute action
+// destructive. Rien n'est simulé ici : chaque bulle vient de /api/chat.
+
+const PILOTE_RACCOURCIS = [
+  { l: "État du système", t: "montre l'état du système" },
+  { l: 'Trades',          t: 'montre les trades' },
+  { l: 'Stratégies',      t: 'montre les stratégies' },
+  { l: 'Scénarios',       t: 'montre les scénarios en attente' },
+  { l: 'Paramètres',      t: 'montre les paramètres' },
+  { l: 'Mémoire',         t: "qu'est-ce que tu sais" },
+  { l: 'Apprentissage',   t: "qu'est-ce que tu as appris cette semaine ?" },
+  { l: 'Aide',            t: 'aide' },
+];
+
+const piloteHeure = (iso) => {
+  const d = iso ? new Date(iso) : new Date();
+  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+};
+
+function Pilote() {
+  const [messages, setMessages] = useState([]);
+  const [saisie, setSaisie] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [etat, setEtat] = useState('connexion');   // connexion | en ligne | hors ligne
+  const [erreur, setErreur] = useState('');
+  const filRef = useRef(null);
+  const champRef = useRef(null);
+
+  const descendre = () => {
+    const el = filRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  };
+
+  useEffect(() => {
+    let vivant = true;
+    (async () => {
+      try {
+        const r = await api('/chat/historique?limite=80');
+        if (r.status === 401) { if (vivant) setEtat('hors ligne'); return; }
+        const d = await r.json();
+        if (!vivant) return;
+        if (!d.messages || !d.messages.length) {
+          setMessages([{
+            role: 'assistant',
+            texte: "Bonjour. Je pilote le système : je lis l'état, les trades, les stratégies, "
+              + 'les scénarios, les paramètres, la mémoire et l\'apprentissage — et je peux créer, '
+              + 'modifier, activer, désactiver ou supprimer, après confirmation.\n'
+              + 'Tape « aide » pour la liste des commandes.',
+            heure: piloteHeure()
+          }]);
+        } else {
+          setMessages(d.messages.map(m => ({
+            role: m.role, texte: m.texte, heure: piloteHeure(m.creeAt), action: m.action
+          })));
+        }
+        setEtat('en ligne');
+      } catch (e) {
+        if (vivant) setEtat('hors ligne');
+      }
+    })();
+    return () => { vivant = false; };
+  }, []);
+
+  useEffect(descendre, [messages, busy]);
+
+  const envoyer = async (texte) => {
+    const t = String(texte || '').trim();
+    if (!t || busy) return;
+    setErreur('');
+    setSaisie('');
+    setMessages(m => [...m, { role: 'user', texte: t, heure: piloteHeure() }]);
+    setBusy(true);
+    try {
+      const r = await api('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: t })
+      });
+      const d = await r.json();
+      const reponse = d.texte || (d.resultat && d.resultat.texte) || d.error
+        || (d.success ? 'Action exécutée.' : 'Réponse vide.');
+      setMessages(m => [...m, {
+        role: 'assistant', texte: reponse, heure: piloteHeure(), action: d.action
+      }]);
+      // Une écriture a réussi : les autres onglets doivent relire leurs données.
+      if (d.success && d.action && !/Confirmer \? \(oui\/non\)/i.test(reponse)) {
+        window.dispatchEvent(new Event('5trade-refresh'));
+      }
+      setEtat('en ligne');
+    } catch (e) {
+      setMessages(m => [...m, {
+        role: 'assistant', texte: 'Erreur réseau : ' + e.message, heure: piloteHeure()
+      }]);
+      setEtat('hors ligne');
+    } finally {
+      setBusy(false);
+      if (champRef.current) champRef.current.focus();
+    }
+  };
+
+  const effacer = async () => {
+    if (busy) return;
+    if (!window.confirm('Effacer tout l’historique de conversation ?')) return;
+    try {
+      await api('/chat/historique', { method: 'DELETE' });
+      setMessages([{ role: 'assistant', texte: 'Historique effacé.', heure: piloteHeure() }]);
+      setErreur('');
+    } catch (e) { setErreur('Effacement impossible : ' + e.message); }
+  };
+
+  const point = etat === 'en ligne' ? 'var(--ok)' : etat === 'hors ligne' ? 'var(--bad)' : 'var(--warn)';
+
+  return (
+    <div className="panel" style={{ padding:0, overflow:'hidden', display:'flex', flexDirection:'column' }}>
+      {/* En-tête */}
+      <div style={{ display:'flex', alignItems:'center', gap:12, padding:'14px 18px',
+        borderBottom:'1px solid var(--border)', background:'var(--panel2)', flexWrap:'wrap' }}>
+        <div style={{ width:34, height:34, borderRadius:10, background:'var(--accent)', color:'#fff',
+          display:'grid', placeItems:'center', fontWeight:800, fontSize:14 }}>5</div>
+        <div style={{ minWidth:0 }}>
+          <div style={{ fontWeight:650, letterSpacing:'-.01em' }}>Pilote IA</div>
+          <div style={{ fontSize:12, color:'var(--muted)' }}>
+            Supervision · diagnostic · administration — commandes en langage naturel
+          </div>
+        </div>
+        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:10 }}>
+          <span style={{ display:'inline-flex', alignItems:'center', gap:7, fontSize:12, color:'var(--muted)' }}>
+            <span style={{ width:7, height:7, borderRadius:'50%', background:point }}></span>
+            {etat}
+          </span>
+          <button className="btn ghost sm" onClick={effacer} disabled={busy}>
+            <i className="fas fa-eraser"></i>Effacer
+          </button>
+        </div>
+      </div>
+
+      {/* Fil de conversation */}
+      <div ref={filRef} aria-live="polite"
+        style={{ flex:1, minHeight:380, maxHeight:'calc(100vh - 330px)', overflowY:'auto',
+          padding:'20px 18px 10px', background:'var(--bg)' }}>
+        {messages.map((m, i) => {
+          const moi = m.role === 'user';
+          const confirmation = !moi && /Confirmer \? \(oui\/non\)/i.test(m.texte || '');
+          return (
+            <div key={i} style={{ display:'flex', gap:10, marginBottom:14,
+              flexDirection: moi ? 'row-reverse' : 'row', alignItems:'flex-start' }}>
+              <div style={{ width:28, height:28, borderRadius:8, flex:'0 0 auto', display:'grid',
+                placeItems:'center', fontSize:12, fontWeight:700,
+                background: moi ? 'var(--accent)' : 'var(--panel2)',
+                color: moi ? '#fff' : 'var(--muted)',
+                border: moi ? '1px solid transparent' : '1px solid var(--border)' }}>
+                {moi ? 'M' : '5'}
+              </div>
+              <div style={{ maxWidth:'min(720px, 80%)' }}>
+                <div style={{
+                  padding:'11px 14px', borderRadius:14, whiteSpace:'pre-wrap', wordBreak:'break-word',
+                  fontSize:14, lineHeight:1.5,
+                  background: moi ? 'var(--accent)' : 'var(--panel2)',
+                  color: moi ? '#fff' : 'var(--txt)',
+                  border: moi ? '1px solid transparent' : '1px solid var(--border)',
+                  borderBottomRightRadius: moi ? 5 : 14,
+                  borderBottomLeftRadius: moi ? 14 : 5 }}>
+                  {m.texte}
+                </div>
+                <div style={{ fontSize:11, color:'var(--dim)', marginTop:5, textAlign: moi ? 'right' : 'left' }}>
+                  {m.heure}
+                  {m.action && m.action.verbe && (
+                    <span style={{ marginLeft:8, opacity:.85 }}>
+                      · {m.action.verbe}{m.action.sujet ? ` ${m.action.sujet}` : ''}
+                    </span>
+                  )}
+                </div>
+                {confirmation && (
+                  <div style={{ display:'flex', gap:8, marginTop:8 }}>
+                    <button className="btn sm" onClick={() => envoyer('oui')} disabled={busy}>
+                      <i className="fas fa-check"></i>Oui
+                    </button>
+                    <button className="btn ghost sm" onClick={() => envoyer('non')} disabled={busy}>
+                      <i className="fas fa-xmark"></i>Non
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {busy && (
+          <div style={{ display:'flex', gap:10, marginBottom:14, alignItems:'flex-start' }}>
+            <div style={{ width:28, height:28, borderRadius:8, flex:'0 0 auto', display:'grid',
+              placeItems:'center', fontSize:12, fontWeight:700, background:'var(--panel2)',
+              color:'var(--muted)', border:'1px solid var(--border)' }}>5</div>
+            <div style={{ padding:'14px 16px', borderRadius:14, background:'var(--panel2)',
+              border:'1px solid var(--border)', color:'var(--muted)', fontSize:13 }}>
+              <i className="fas fa-circle-notch fa-spin"></i> analyse…
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Raccourcis + saisie */}
+      <div style={{ borderTop:'1px solid var(--border)', background:'var(--panel)', padding:'10px 18px 14px' }}>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:10 }}>
+          {PILOTE_RACCOURCIS.map((r, i) => (
+            <button key={i} className="btn ghost sm" style={{ padding:'5px 11px', fontSize:12 }}
+              onClick={() => envoyer(r.t)} disabled={busy}>{r.l}</button>
+          ))}
+        </div>
+        {erreur && <div style={{ fontSize:12, color:'var(--bad)', marginBottom:8 }}>{erreur}</div>}
+        <div style={{ display:'flex', gap:10, alignItems:'flex-end' }}>
+          <textarea ref={champRef} className="fld" rows={1} value={saisie}
+            placeholder="Écris une commande… (« montre les scénarios », « désactive strategy_trend »)"
+            style={{ flex:1, minHeight:46, maxHeight:150, resize:'none', margin:0 }}
+            onChange={e => setSaisie(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); envoyer(saisie); }
+            }} />
+          <button className="btn" onClick={() => envoyer(saisie)} disabled={busy || !saisie.trim()}
+            style={{ minHeight:46 }}>
+            <i className={`fas ${busy ? 'fa-circle-notch fa-spin' : 'fa-paper-plane'}`}></i>Envoyer
+          </button>
+        </div>
+        <div style={{ display:'flex', justifyContent:'space-between', gap:10, marginTop:8,
+          fontSize:11.5, color:'var(--dim)' }}>
+          <span>Entrée pour envoyer · Maj+Entrée pour un retour à la ligne</span>
+          <span>{messages.length} message{messages.length > 1 ? 's' : ''}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ user, onLogout }) {
   const [tab, setTab] = useState('live');
   // Sur mobile, la barre du bas ne garde que l'essentiel ; le reste s'ouvre ici.
@@ -6365,11 +6600,15 @@ function Dashboard({ user, onLogout }) {
 
   // Onglets toujours visibles sur mobile, et ceux ranges dans « Plus ».
   const NAV_PRINCIPAL = ['live', 'analyze', 'strategies', 'journal'];
-  const NAV_SECONDAIRE = ['add', 'history', 'news', 'termes', 'alerts', 'outils', 'systeme'];
+  const NAV_SECONDAIRE = ['pilote', 'add', 'history', 'news', 'termes', 'alerts', 'outils', 'systeme'];
 
   const NAV = [
     { id:'live',       label:'Direct',    icon:'fa-satellite-dish' },
     { id:'analyze',    label:'Analyse',   icon:'fa-crosshairs' },
+    // Le pilote conversationnel est une entrée de premier niveau : c'est le seul
+    // endroit où l'on pilote réellement le système (CRUD complet) sans chercher
+    // un bouton dans six onglets.
+    { id:'pilote',     label:'Pilote IA', icon:'fa-comments' },
     { id:'add',        label:'Ajouter',   icon:'fa-circle-plus' },
     { id:'strategies', label:'Stratégies',icon:'fa-book' },
     { id:'journal',    label:'Journal',   icon:'fa-receipt' },
@@ -6460,6 +6699,7 @@ function Dashboard({ user, onLogout }) {
 
           <Garde>
             {tab === 'live' && <LiveMarket onToJournal={sendToJournal} />}
+            {tab === 'pilote' && <Pilote />}
             {tab === 'add' && <AddKnowledge refresh={load} />}
             {tab === 'strategies' && <Strategies strategies={strategies} onDelete={del} onSaved={load} />}
             {tab === 'journal' && <Journal prefill={prefill} onPrefillUsed={()=>setPrefill(null)} strategies={strategies} />}

@@ -15,6 +15,93 @@ const Validateur = require('./validateur');
 const Auditeur = require('./auditeur');
 const Repondeur = require('./repondeur');
 
+// ── Conversation libre ────────────────────────────────────────────────────
+// Le chat n'est PAS un menu de commandes : c'est un assistant ouvert à toutes
+// les conversations. Ce qui ne correspond à aucune commande structurée part
+// vers l'IA de l'application (NVIDIA NIM, cascade) avec l'historique récent.
+// Ce qui touche aux données du système reste exécuté par les commandes : une
+// réponse IA ne remplace jamais une lecture réelle (aucun chiffre inventé).
+const PROMPT_SYSTEME = [
+  "Tu es le pilote de 5trade, la plateforme de trading assistée par IA de René.",
+  "Tu discutes librement : tu réponds à TOUTE question, trading ou non, en français,",
+  "de façon directe et concise, sans emphase et sans emoji.",
+  "",
+  "Ce que tu sais du système : moteurs d'analyse (structure, niveaux, confluence",
+  "multi-timeframe), stratégies (achat/vente validées par règles), scénarios en",
+  "attente, trades et leur issue en R, mémoire persistante (faits, croyances,",
+  "exceptions), apprentissage walk-forward quotidien, gestion du risque et frais.",
+  "",
+  "Règles absolues :",
+  "1. N'invente jamais une donnée du système (prix, trade, stratégie, performance,",
+  "   état d'un module). Ces données se lisent par une commande ; si on te les",
+  "   demande, dis quelle commande les affiche au lieu de deviner.",
+  "2. Tu ne prétends jamais avoir exécuté une action : les actions passent par les",
+  "   commandes, avec confirmation. Si on veut agir, donne la commande exacte.",
+  "3. Pas de conseil financier personnalisé ; tu expliques, tu ne certifies pas un gain.",
+  "4. Ne recopie JAMAIS un message précédent de la conversation : réponds avec tes",
+  "   propres mots, même si la question est courte (« hi », « ok », « pourquoi ? »).",
+  "   Si on te salue, réponds en une phrase et rappelle en une ligne ce que tu sais faire.",
+  "",
+  "Commandes que l'utilisateur peut taper :",
+  "  montre l'état du système · montre les trades · montre les stratégies",
+  "  montre les scénarios en attente · montre les paramètres",
+  "  qu'est-ce que tu sais · qu'est-ce que tu as appris cette semaine ?",
+  "  crée une stratégie … · crée une exception : ne pas trader EURUSD vendredi après 16h",
+  "  modifie le stop ATR à 1.2 sur XAUUSD · active la stratégie momentum",
+  "  désactive … · supprime … · pourquoi tu as pris ce trade #847 ? · aide",
+].join('\n');
+
+/**
+ * Réponse libre par l'IA, avec l'historique récent comme contexte.
+ * @param {string} message
+ * @param {object} ctx  { utilisateur, ia? }
+ * @param {string} [raison]  pourquoi la commande structurée n'a pas répondu
+ */
+async function repondreLibre(message, ctx, raison) {
+  if (typeof ctx.ia !== 'function') {
+    return {
+      texte: `Je n'ai pas reconnu cette commande et l'IA n'est pas branchée.\n` +
+             `Reformule ou tape « aide ».\nMessage : « ${message} »`,
+      action: null
+    };
+  }
+
+  // Historique récent : c'est lui qui rend la conversation continue. La question
+  // en cours n'y est pas encore (la route l'écrit après coup).
+  let historique = [];
+  try {
+    const H = require('./historique');
+    const l = await H.lister({ limite: 12 });
+    historique = (l || [])
+      // Les anciennes réponses « je n'ai pas reconnu » n'apprennent rien au
+      // modèle et l'incitaient à les recopier : on ne les renvoie pas.
+      .filter(m => m && m.texte && !/^Je n'ai pas reconnu cette commande/i.test(String(m.texte)))
+      .map(m => ({
+        role: m.role === 'user' ? 'user' : 'assistant',
+        content: String(m.texte).slice(0, 1500)
+      }));
+  } catch { /* sans historique, on répond quand même */ }
+
+  const messages = [
+    { role: 'system', content: PROMPT_SYSTEME },
+    ...historique,
+    { role: 'user', content: String(message).slice(0, 4000) }
+  ];
+
+  try {
+    const texte = await ctx.ia(messages, { maxTokens: 900, route: 'chat' });
+    const propre = String(texte || '').trim();
+    if (!propre) throw new Error('réponse vide');
+    return { texte: propre, action: null, ia: true, raison: raison || null };
+  } catch (e) {
+    return {
+      texte: `IA indisponible : ${e.message}\n` +
+             `En attendant, tape « aide » pour la liste des commandes.`,
+      action: null, ia: true, erreurIA: e.message
+    };
+  }
+}
+
 // File d'attente des confirmations en attente.
 // Clé = empreinte du message original, valeur = action à confirmer.
 const confirmationsEnAttente = new Map();
@@ -54,14 +141,11 @@ async function executer(message, ctx = {}) {
   // Parser
   const action = Parseur.parser(message);
   if (action.verbe === 'LLM') {
-    // En production : appel à NVIDIA NIM pour parser le message
-    return {
-      texte: `Je n'ai pas reconnu cette commande. Reformule ou tape « aide ».\n` +
-             `Message : « ${message} »`
-    };
+    // Aucune commande structurée : conversation libre, l'IA répond.
+    return await repondreLibre(message, ctx, 'aucune commande reconnue');
   }
   if (action.verbe === 'INCONNU') {
-    return { texte: 'Commande non reconnue. Tape « aide ».' };
+    return await repondreLibre(message, ctx, 'message illisible');
   }
 
   return await executerAction(action, ctx);
@@ -92,16 +176,10 @@ async function executerAction(action, ctx) {
   // Router
   const route = Routeur.router(action);
   if (route.domaine === 'inconnu') {
-    return {
-      texte: `Domaine non reconnu : ${route.raison}. Tape « aide » pour voir les commandes.`,
-      action
-    };
+    return await repondreLibre(action.brut || `${action.verbe} ${action.sujet}`, ctx, route.raison);
   }
   if (!route.handler) {
-    return {
-      texte: `Verbe ${action.verbe} non supporté pour ce domaine (${route.raison || 'raison inconnue'}).`,
-      action
-    };
+    return await repondreLibre(action.brut || `${action.verbe} ${action.sujet}`, ctx, route.raison);
   }
 
   // Exécuter

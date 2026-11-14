@@ -4830,7 +4830,15 @@ async function start() {
       if (!message) return res.status(400).json({ error: 'message requis' });
       const r = await ChatCrud.executer(message, {
         utilisateur: req.session.username,
-        ip: req.ip
+        ip: req.ip,
+        // CONVERSATION LIBRE : le chat n'est pas limité aux commandes. Tout ce
+        // qui n'est pas reconnu part vers l'IA de l'application (même cascade
+        // NVIDIA que l'analyse), avec l'historique récent : « hi », une question
+        // de trading, une question hors sujet — elle répond.
+        ia: (messages, opts = {}) => analyserIA(messages, {
+          maxTokens: opts.maxTokens || 900,
+          route: opts.route || 'chat'
+        })
       });
       // HISTORIQUE : on écrit la question ET la réponse. Sans cela, fermer
       // l'onglet effaçait la conversation — le chat ne se souvenait de rien.
