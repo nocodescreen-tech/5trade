@@ -7,7 +7,7 @@ const API_BASE = (window.location.port === '5173' || window.location.protocol ==
 
 // Version de l'interface (affichée en en-tête) : permet de voir d'un coup d'œil
 // si la page ouverte est bien la dernière, ou une version restée en cache.
-const UI_VERSION = 'r2026-11-14a';
+const UI_VERSION = 'r2026-11-14c';
 const api = (path, opts = {}) =>
   fetch(`${API_BASE}${path}`, { credentials: 'include', ...opts });
 
@@ -2751,6 +2751,173 @@ function SignalHistory({ journal }) {
 
 /* ══════════════════════════ ÉCRAN DIRECT ══════════════════════════ */
 
+/* ══════════════ GESTION DES POSITIONS (couche L6) ══════════════ */
+// Ce que le système ne montrait nulle part : les positions OUVERTES et ce qu'il
+// faudrait en faire, chiffré — où déplacer le stop, quelle part fermer à quel
+// niveau, depuis combien de temps la position traîne sans atteindre TP1.
+// Lecture seule : rien n'est appliqué ici, aucune position n'est fermée.
+function PositionsGestion() {
+  const [etat, setEtat] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const charger = useCallback(async () => {
+    setBusy(true);
+    try {
+      const r = await api('/positions');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setEtat(d); setErr('');
+    } catch (e) { setErr(e.message || 'lecture impossible'); }
+    finally { setBusy(false); }
+  }, []);
+
+  useEffect(() => {
+    charger();
+    const t = setInterval(charger, 30000);
+    return () => clearInterval(t);
+  }, [charger]);
+
+  const positions = (etat && etat.positions) || [];
+  const total = etat ? etat.total : null;
+
+  return (
+    <div className="panel" style={{ padding: 0, marginBottom: 12, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 15px',
+        borderBottom: '1px solid ' + TT.line, flexWrap: 'wrap' }}>
+        <TtLabel style={{ margin: 0 }}>Gestion des positions</TtLabel>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+          {total === null ? 'lecture…' : total === 0 ? 'aucune position ouverte'
+            : `${total} position${total > 1 ? 's' : ''} ouverte${total > 1 ? 's' : ''}`}
+        </span>
+        <span style={{ flex: '1 1 auto' }}></span>
+        <button className="btn ghost sm" onClick={charger} disabled={busy}>
+          <i className={`fas ${busy ? 'fa-circle-notch fa-spin' : 'fa-rotate'}`}></i>Rafraîchir
+        </button>
+      </div>
+
+      {err && (
+        <div style={{ padding: '10px 15px', fontSize: 12.5, color: TT.bad }}>
+          <i className="fas fa-triangle-exclamation" style={{ marginRight: 8 }}></i>{err}
+        </div>
+      )}
+
+      {!err && total === 0 && (
+        <div style={{ padding: '14px 15px', fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.55 }}>
+          Rien à gérer : aucune position ouverte. Dès qu'un signal du journal passe en position,
+          son plan apparaît ici — stop cible (breakeven puis trailing 1,5 ATR), partiels
+          TP1 50 % / TP2 30 % / runner 20 %, et invalidation temporelle à 3 h sans TP1.
+        </div>
+      )}
+
+      {!err && positions.map((p, i) => {
+        const plan = p.plan || null;
+        const long = p.sens === 'long';
+        const col = !p.evaluable ? TT.neu : (p.rEnCours || 0) >= 0 ? TT.ok : TT.bad;
+        const stopChange = plan && plan.stopCible !== null && plan.stopCible !== plan.stopActuel;
+        return (
+          <div key={(p.cle || '') + i} style={{ padding: '12px 15px',
+            borderTop: i ? '1px solid ' + TT.line : 'none' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <TtPill tone={long ? 'ok' : 'bad'}>{long ? 'ACHAT' : 'VENTE'}</TtPill>
+              <b style={{ fontSize: 13.5 }}>{p.symbol || '—'} <span style={{ color: 'var(--dim)', fontWeight: 500 }}>
+                · {p.timeframe || '—'}</span></b>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                entrée {ttFmt(p.entree)} · stop {ttFmt(p.stop)}
+              </span>
+              <span style={{ flex: '1 1 auto' }}></span>
+              <span style={{ fontSize: 14, fontWeight: 800, color: col, fontVariantNumeric: 'tabular-nums' }}>
+                {p.evaluable ? `${p.rEnCours > 0 ? '+' : ''}${p.rEnCours} R` : 'non évaluable'}
+              </span>
+            </div>
+
+            {/* D'où vient la position : stratégie enregistrée, structure ou pattern.
+                Un terminal qui cache l'origine d'un trade ne permet pas de juger. */}
+            <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 5 }}>
+              <i className="fas fa-code-branch" style={{ marginRight: 6, opacity: .7 }}></i>
+              {p.nom || 'signal sans nom'}
+              {' · '}
+              {p.strategie
+                ? <>stratégie <b style={{ color: 'var(--txt)' }}>{p.strategie}</b></>
+                : <>aucune stratégie enregistrée — moteur <b style={{ color: 'var(--txt)' }}>
+                    {p.source === 'motif' ? 'patterns graphiques' : p.source === 'structure' ? 'structure de marché' : (p.source || 'inconnu')}
+                  </b></>}
+              {p.concept && <span style={{ color: 'var(--dim)' }}> · {p.concept}</span>}
+            </div>
+
+            {!p.evaluable && (
+              <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 6 }}>
+                {p.motif || 'position non évaluable'} — aucune consigne inventée.
+              </div>
+            )}
+
+            {p.evaluable && plan && (
+              <>
+                <div style={{ display: 'grid', gap: 6, marginTop: 9,
+                  gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))' }}>
+                  {/* Stop cible */}
+                  <div style={{ border: '1px solid ' + TT.line, borderRadius: 10, padding: '8px 10px' }}>
+                    <TtLabel style={{ margin: 0 }}>Stop</TtLabel>
+                    <div style={{ fontSize: 13, marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+                      {ttFmt(plan.stopActuel)}
+                      {stopChange && <> <i className="fas fa-arrow-right" style={{ fontSize: 10, margin: '0 4px' }}></i>
+                        <b style={{ color: TT.warn }}>{ttFmt(plan.stopCible)}</b></>}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>{plan.motifStop}</div>
+                  </div>
+
+                  {/* Partiels */}
+                  <div style={{ border: '1px solid ' + TT.line, borderRadius: 10, padding: '8px 10px' }}>
+                    <TtLabel style={{ margin: 0 }}>Partiels</TtLabel>
+                    {(plan.partiels || []).map((x, k) => (
+                      <div key={k} style={{ fontSize: 11.5, marginTop: 2, color: x.atteint ? TT.ok : 'var(--muted)',
+                        fontVariantNumeric: 'tabular-nums' }}>
+                        <i className={`fas ${x.atteint ? 'fa-circle-check' : 'fa-circle'}`}
+                          style={{ fontSize: 9, marginRight: 5 }}></i>
+                        {x.niveau} {x.pct} %{x.prix ? ` @ ${ttFmt(x.prix)}${x.r !== null ? ` (${x.r} R)` : ''}` : ''}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Invalidation temporelle */}
+                  <div style={{ border: '1px solid ' + TT.line, borderRadius: 10, padding: '8px 10px' }}>
+                    <TtLabel style={{ margin: 0 }}>Invalidation</TtLabel>
+                    {plan.invalidationTemporelle ? (
+                      <>
+                        <div style={{ fontSize: 13, marginTop: 2,
+                          color: plan.invalidationTemporelle.depassee ? TT.bad : 'var(--txt)',
+                          fontWeight: plan.invalidationTemporelle.depassee ? 800 : 500 }}>
+                          {plan.invalidationTemporelle.ageHeures === null ? 'âge inconnu'
+                            : `${plan.invalidationTemporelle.ageHeures} h / ${plan.invalidationTemporelle.limiteHeures} h`}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
+                          {plan.invalidationTemporelle.motif}
+                        </div>
+                      </>
+                    ) : <div style={{ fontSize: 11.5, color: 'var(--dim)' }}>—</div>}
+                  </div>
+                </div>
+
+                {/* Ce qu'il serait raisonnable de faire — jamais appliqué */}
+                <div style={{ marginTop: 8, display: 'grid', gap: 4 }}>
+                  {(p.recommandations || []).map((r, k) => (
+                    <div key={k} style={{ fontSize: 12, color: 'var(--muted)' }}>
+                      <span className="tag" style={{ marginRight: 7 }}>{r.action}</span>{r.motif}
+                    </div>
+                  ))}
+                  <div style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 2 }}>
+                    Lecture seule : le stop n'est jamais déplacé et aucune position n'est fermée par cette page.
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function LiveMarket({ onToJournal }) {
   const [meta, setMeta] = useState({ symbols: [], timeframes: ['1m', '5m', '15m', '1h'] });
   const [symbol, setSymbol] = useState('R_75');
@@ -3163,6 +3330,10 @@ function LiveMarket({ onToJournal }) {
       <TradeSetupCard signal={meilleurSetup} decision={decision || (sse && sse.decision ? sse : null)}
         sens={sensAffiche} onToJournal={onToJournal} symbol={symbol} tf={tf}
         provider={provider} providerLabel={providerLabel} />
+
+      {/* Couche L6 — les positions ouvertes et leur plan de gestion chiffré.
+          Un radar qui ne dit pas quoi faire d'une position ouverte n'est qu'un radar. */}
+      <PositionsGestion />
 
       {/* Graphique : accessible tôt, sans écraser la décision */}
       <div className="panel" style={{ padding: 14, marginBottom: 12 }}>
@@ -6341,35 +6512,47 @@ function Pilote() {
     if (el) el.scrollTop = el.scrollHeight;
   };
 
-  useEffect(() => {
-    let vivant = true;
-    (async () => {
-      try {
-        const r = await api('/chat/historique?limite=80');
-        if (r.status === 401) { if (vivant) setEtat('hors ligne'); return; }
-        const d = await r.json();
-        if (!vivant) return;
-        if (!d.messages || !d.messages.length) {
-          setMessages([{
-            role: 'assistant',
-            texte: "Bonjour. Je pilote le système : je lis l'état, les trades, les stratégies, "
-              + 'les scénarios, les paramètres, la mémoire et l\'apprentissage — et je peux créer, '
-              + 'modifier, activer, désactiver ou supprimer, après confirmation.\n'
-              + 'Tape « aide » pour la liste des commandes.',
-            heure: piloteHeure()
-          }]);
-        } else {
-          setMessages(d.messages.map(m => ({
-            role: m.role, texte: m.texte, heure: piloteHeure(m.creeAt), action: m.action
-          })));
-        }
-        setEtat('en ligne');
-      } catch (e) {
-        if (vivant) setEtat('hors ligne');
+  const vusRef = useRef(new Set());   // ids déjà affichés : aucun doublon
+
+  // Une seule lecture, utilisée au montage ET par la veille périodique. Les
+  // événements du système (stop touché, TP atteint, retournement de biais,
+  // scénario expiré) arrivent donc ici comme des messages, sans recharger.
+  const chargerFil = useCallback(async ({ silencieux = false } = {}) => {
+    try {
+      const r = await api('/chat/historique?limite=80');
+      if (r.status === 401) { setEtat('hors ligne'); return; }
+      const d = await r.json();
+      const liste = (d.messages || []).map(m => ({
+        id: m.id, role: m.role, texte: m.texte, heure: piloteHeure(m.creeAt),
+        action: m.action, evenement: m.verbe === 'ÉVÉNEMENT'
+      }));
+      if (!liste.length) {
+        if (!silencieux) setMessages([{
+          role: 'assistant',
+          texte: "Bonjour. Je pilote le système : je lis l'état, les trades, les stratégies, "
+            + 'les scénarios, les paramètres, la mémoire et l\'apprentissage — et je te préviens '
+            + 'ici quand un stop est touché, un objectif atteint ou un biais se retourne.\n'
+            + 'Tape « aide » pour la liste des commandes.',
+          heure: piloteHeure()
+        }]);
+      } else {
+        const nouveaux = liste.filter(m => m.id !== undefined && !vusRef.current.has(m.id));
+        for (const m of nouveaux) vusRef.current.add(m.id);
+        // Au premier passage on remplace tout ; ensuite on n'ajoute que le neuf.
+        setMessages(prev => (prev.length && silencieux ? [...prev, ...nouveaux] : liste));
       }
-    })();
-    return () => { vivant = false; };
+      setEtat('en ligne');
+    } catch (e) {
+      setEtat('hors ligne');
+    }
   }, []);
+
+  useEffect(() => {
+    chargerFil();
+    // Toutes les 10 s : le fil se met à jour tout seul quand le moteur publie.
+    const t = setInterval(() => chargerFil({ silencieux: true }), 10000);
+    return () => clearInterval(t);
+  }, [chargerFil]);
 
   useEffect(descendre, [messages, busy]);
 
@@ -6470,6 +6653,22 @@ function Pilote() {
                   border: moi ? '1px solid transparent' : '1px solid var(--border)',
                   borderBottomRightRadius: moi ? 5 : 14,
                   borderBottomLeftRadius: moi ? 14 : 5 }}>
+                  {/* Événement du moteur : ce n'est pas une phrase de l'assistant,
+                      c'est un fait constaté (stop touché, objectif, retournement).
+                      La pastille le dit, la couleur suit la gravité. */}
+                  {m.evenement && (() => {
+                    const g = (m.action && m.action.gravite) || 'info';
+                    const c = g === 'bad' ? 'var(--bad)' : g === 'ok' ? 'var(--ok)'
+                      : g === 'warn' ? 'var(--warn)' : 'var(--accent2)';
+                    return (
+                      <span style={{ display:'inline-flex', alignItems:'center', gap:5, marginBottom:6,
+                        fontSize:10.5, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase',
+                        color:c }}>
+                        <i className="fas fa-bolt" style={{ fontSize:10 }}></i>événement
+                      </span>
+                    );
+                  })()}
+                  {m.evenement && <br />}
                   {m.texte}
                 </div>
                 <div style={{ fontSize:11, color:'var(--dim)', marginTop:5, textAlign: moi ? 'right' : 'left' }}>

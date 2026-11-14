@@ -443,6 +443,7 @@ async function mettreAJour(getBougies, options = {}) {
   }
 
   let maj = 0;
+  const transitions = [];
   for (const [k, liste] of groupes) {
     const [symbol, timeframe, provider] = k.split('|');
     let bougies = null;
@@ -455,12 +456,23 @@ async function mettreAJour(getBougies, options = {}) {
       const avant = s.resultat;
       evaluer(s, bougies);
       if (s.resultat !== avant) maj++;
+      // Une issue n'est pas une ligne de tableau : c'est un fait qui doit être
+      // DIT. Le flux publie une bulle dans la conversation (stop touché, TP1,
+      // TP2, retour à l'entrée, expiration) — une seule fois par transition.
+      if (s.resultat !== avant) transitions.push({ sig: s, avant });
     }
   }
 
   if (maj) {
     data.majLe = Date.now();
     sauver(data);
+    // Publication APRÈS l'écriture : si la sauvegarde échoue, on n'annonce pas
+    // une issue qui n'est pas enregistrée. Un échec d'annonce ne casse jamais
+    // la mise à jour du journal.
+    try {
+      const Flux = require('../chat-crud/flux');
+      for (const t of transitions) await Flux.issuePosition(t.sig, t.avant);
+    } catch (e) { console.error('journal : publication de l’issue impossible —', e.message); }
   }
   return { maj, restants: data.signaux.filter(s => s.resultat === 'ouvert').length, perimes };
 }

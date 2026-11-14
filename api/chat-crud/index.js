@@ -57,6 +57,55 @@ const PROMPT_SYSTEME = [
  * @param {object} ctx  { utilisateur, ia? }
  * @param {string} [raison]  pourquoi la commande structurée n'a pas répondu
  */
+
+// ── Contexte temps réel ──────────────────────────────────────────────────────
+// L'IA ne doit pas seulement répondre : elle doit SAVOIR. Ce bloc lui donne
+// l'état réel au moment de la question — positions ouvertes avec leurs niveaux,
+// plans d'attente en cours, derniers événements (stop touché, TP atteint,
+// expiration). Tout vient des modules, rien n'est supposé.
+const heureCourte = (ms) => new Date(ms).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+const num = (x) => (Number.isFinite(Number(x))
+  ? (Math.abs(Number(x)) >= 1000 ? Number(x).toFixed(2) : Number(x).toFixed(5)) : '—');
+
+async function contexteTempsReel() {
+  const lignes = [];
+
+  // 1. Positions ouvertes (journal des signaux).
+  try {
+    const J = require('../engine/journal-signaux');
+    const journal = J.charger();
+    const ouvertes = (journal.signaux || []).filter(s => s.resultat === 'ouvert');
+    lignes.push(`Positions ouvertes : ${ouvertes.length}`);
+    for (const s of ouvertes.slice(0, 8)) {
+      const age = s.at ? ((Date.now() - s.at) / 3600000).toFixed(1) : '?';
+      lignes.push(`- ${s.symbol || '?'} ${s.timeframe || '?'} ${s.sens} : entrée ${num(s.entree)}, `
+        + `stop ${num(s.stop)}, objectifs ${(s.objectifs || []).map(num).join(' / ') || '—'}, `
+        + `ouverte depuis ${age} h${s.atteintTP1 ? ', TP1 déjà atteint' : ''}`);
+    }
+    if (!ouvertes.length) lignes.push('- aucune');
+  } catch { /* le contexte est un bonus : son absence ne bloque pas la réponse */ }
+
+  // 2. Plans d'attente en cours (scénarios).
+  try {
+    const Scenarios = require('../scenarios');
+    const enAttente = await Scenarios.lister({ statut: 'en_attente', limite: 5 });
+    lignes.push(`Scénarios en attente : ${enAttente.length}`);
+    for (const s of enAttente) {
+      lignes.push(`- ${s.instrument} ${s.timeframe || ''} ${s.direction} si le prix atteint `
+        + `${num(s.niveauEntree)} (stop ${num(s.stop)}, TP1 ${num(s.tp1)})`);
+    }
+  } catch { /* idem */ }
+
+  // 3. Derniers événements publiés (stop touché, objectifs, expirations).
+  try {
+    const Flux = require('./flux');
+    const r = Flux.resume(8);
+    if (r) lignes.push('Derniers événements :\n' + r);
+  } catch { /* idem */ }
+
+  return lignes.join('\n');
+}
+
 async function repondreLibre(message, ctx, raison) {
   if (typeof ctx.ia !== 'function') {
     return {
@@ -76,14 +125,21 @@ async function repondreLibre(message, ctx, raison) {
       // Les anciennes réponses « je n'ai pas reconnu » n'apprennent rien au
       // modèle et l'incitaient à les recopier : on ne les renvoie pas.
       .filter(m => m && m.texte && !/^Je n'ai pas reconnu cette commande/i.test(String(m.texte)))
+      // Les événements (stop touché, TP, expiration) sont déjà fournis dans le
+      // bloc d'état ci-dessous : les rejouer comme des tours de conversation
+      // ferait croire que l'assistant les a « dits » dans cet ordre.
+      .filter(m => m.verbe !== 'ÉVÉNEMENT')
       .map(m => ({
         role: m.role === 'user' ? 'user' : 'assistant',
         content: String(m.texte).slice(0, 1500)
       }));
   } catch { /* sans historique, on répond quand même */ }
 
+  const etat = await contexteTempsReel();
   const messages = [
     { role: 'system', content: PROMPT_SYSTEME },
+    ...(etat ? [{ role: 'system',
+      content: `État réel du système à ${heureCourte(Date.now())} (source : modules, jamais inventé) :\n${etat}` }] : []),
     ...historique,
     { role: 'user', content: String(message).slice(0, 4000) }
   ];

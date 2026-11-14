@@ -4820,6 +4820,35 @@ async function start() {
   }, JOURNAL_INTERVALLE_MS);
   if (typeof minuteurJournal.unref === 'function') minuteurJournal.unref();
 
+  // ─────────────────────────────────────────────────────────────
+  // Veille des marchés → conversation.
+  // Un retournement de biais n'est pas une ligne de tableau : c'est un fait qui
+  // change une décision. Toutes les 5 minutes, on compare la direction de chaque
+  // marché surveillé à celle du tour précédent ; si elle s'inverse, l'événement
+  // est écrit dans le fil du chat. Le premier tour est silencieux (il mémorise
+  // l'état de départ) — sinon chaque démarrage annoncerait de faux retournements.
+  const VEILLE_INTERVALLE_MS = Math.max(60, Number(process.env.VEILLE_INTERVALLE_SEC || 300)) * 1000;
+  try {
+    const Veille = require('./chat-crud/veille-marches');
+    const tourVeille = () => Veille.tick().catch(e => console.error('veille :', e.message));
+    setTimeout(tourVeille, 90 * 1000);
+    const minuteurVeille = setInterval(tourVeille, VEILLE_INTERVALLE_MS);
+    if (typeof minuteurVeille.unref === 'function') minuteurVeille.unref();
+  } catch (e) {
+    console.error('veille : démarrage impossible —', e.message);
+  }
+
+  // GET /api/veille — ce que la veille a retenu, et les derniers événements.
+  app.get('/api/veille', requireAuth, (req, res) => {
+    try {
+      const Veille = require('./chat-crud/veille-marches');
+      const Flux = require('./chat-crud/flux');
+      res.json({ success: true, marches: Veille.marchesSurveilles().length,
+        etat: Veille.photographie(),
+        evenements: Flux.lister(Number(req.query.limite) || 20) });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // ─── Évolution : chat CRUD + mémoire + apprentissage (routes) ───
   // POST /api/chat — pilote tous les modules en langage naturel.
   // Le chat exige requireAuth : aucune commande destructive ne s'exécute

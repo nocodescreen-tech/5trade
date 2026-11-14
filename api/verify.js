@@ -4182,6 +4182,114 @@ function tinyPng(W = 64, H = 40) {
         lot.total === 1 && lot.actionsAppliquees.length === 0);
     }
 
+    // ── COUCHE L6 : plan de gestion d'une position ouverte ─────────────────
+    // « Sécuriser » sans dire à quel prix, quelle part et depuis quand n'est pas
+    // une consigne. Le plan doit être chiffré, et calculé uniquement sur des
+    // valeurs enregistrées (entrée, stop, objectifs, ATR, date d'ouverture).
+    {
+      const S = require('./engine/surveillance-positions');
+      const maintenant = 1794614400000;                       // instant de référence
+      const ouverteIlYa = (h) => maintenant - h * 3600 * 1000;
+      // Vente 100 → stop 110, TP1 80, TP2 60, runner au-delà.
+      const base = { cle: 'g1', symbol: 'EURUSD', timeframe: '5m', sens: 'short',
+        entree: 100, stop: 110, objectifs: [80, 60, 40], at: ouverteIlYa(1) };
+
+      const avantTP1 = S.analyserPosition(base, { prix: 95, atr: 5, maintenant });
+      ok('avant TP1, aucun stop cible n’est proposé — le stop ne bouge pas',
+        avantTP1.plan.stopCible === null && avantTP1.plan.stopActuel === 110,
+        `cible ${avantTP1.plan.stopCible}`);
+      ok('les partiels annoncent 50 % / 30 % / 20 % avec leur R',
+        avantTP1.plan.partiels.length === 3
+        && avantTP1.plan.partiels[0].pct === 50 && avantTP1.plan.partiels[0].r === 2
+        && avantTP1.plan.partiels[1].pct === 30
+        && avantTP1.plan.partiels[2].niveau === 'runner' && avantTP1.plan.partiels[2].pct === 20);
+
+      const aTP1 = S.analyserPosition(base, { prix: 79, atr: 5, maintenant });
+      ok('TP1 atteint : le stop cible passe à l’entrée (breakeven)',
+        aTP1.plan.stopCible === 100 && /breakeven/.test(aTP1.plan.motifStop),
+        `${aTP1.plan.stopCible} · ${aTP1.plan.motifStop}`);
+      ok('TP1 atteint : la part à fermer est annoncée (50 %)',
+        aTP1.recommandations.some(r => r.action === 'reduire' && /fermer 50 %/.test(r.motif)));
+
+      const aTP2 = S.analyserPosition(base, { prix: 55, atr: 5, maintenant });
+      ok('TP2 atteint : le stop suit un trailing de 1,5 ATR, jamais plus large',
+        aTP2.plan.stopCible === 62.5 && aTP2.plan.trailing.multipleAtr === 1.5,
+        `${aTP2.plan.stopCible}`);
+      ok('à TP2, c’est la part de TP2 (30 %) qui est annoncée, pas celle de TP1',
+        aTP2.recommandations.some(r => r.action === 'reduire' && /fermer 30 %/.test(r.motif)));
+
+      // Un stop ne recule jamais : même avec un ATR énorme, la cible reste au
+      // moins au niveau du breakeven.
+      const atrEnorme = S.analyserPosition(base, { prix: 55, atr: 100, maintenant });
+      ok('un ATR démesuré ne fait pas reculer le stop sous le breakeven',
+        atrEnorme.plan.stopCible === 100, `${atrEnorme.plan.stopCible}`);
+
+      // Invalidation temporelle : 3 h sans TP1.
+      const jeune = S.analyserPosition(base, { prix: 100, atr: 5, maintenant });
+      ok('une position récente n’est pas invalidée', jeune.plan.invalidationTemporelle.depassee === false,
+        `${jeune.plan.invalidationTemporelle.ageHeures} h`);
+      const vieille = S.analyserPosition({ ...base, at: ouverteIlYa(4) }, { prix: 100, atr: 5, maintenant });
+      ok('au-delà de 3 h sans TP1, la clôture est proposée avec son âge',
+        vieille.plan.invalidationTemporelle.depassee === true
+        && vieille.recommandations.some(r => r.action === 'cloturer' && /4 h/.test(r.motif)),
+        vieille.plan.invalidationTemporelle.motif);
+      const sansDate = S.analyserPosition({ ...base, at: undefined, enregistreAt: undefined },
+        { prix: 100, atr: 5, maintenant });
+      ok('sans date d’ouverture, l’âge est déclaré inconnu plutôt que deviné',
+        sansDate.plan.invalidationTemporelle.ageHeures === null
+        && /inconnu/.test(sansDate.plan.invalidationTemporelle.motif));
+
+      // Le plan est une lecture : rien n'est appliqué.
+      ok('le plan se déclare non appliqué et le stop enregistré reste intact',
+        aTP2.plan.applique === false && aTP2.stop === 110 && aTP2.stopInchange === true);
+
+      // Aucune action proposée deux fois à l'écran.
+      const actions = aTP2.recommandations.map(r => r.action);
+      ok('une même action n’est jamais proposée deux fois',
+        actions.length === new Set(actions).size, actions.join(','));
+    }
+
+    // ── FLUX D'ÉVÉNEMENTS → CONVERSATION ───────────────────────────────────
+    // Ce que l'IA doit savoir sans qu'on le lui demande : un stop touché, un
+    // objectif atteint, un scénario expiré. Ces messages sont composés par des
+    // fonctions pures, donc vérifiables sans écrire dans la vraie conversation.
+    {
+      const F = require('./chat-crud/flux');
+      const sig = { symbol: 'EURUSD', timeframe: '5m', sens: 'long',
+        entree: 1.0850, stop: 1.0820, objectifs: [1.0900, 1.0950], r: -1.02 };
+
+      ok('aucun événement n’est émis sans changement d’état',
+        F.composerIssue(sig, 'sl') === null && F.composerIssue(null, 'ouvert') === null);
+
+      const sl = F.composerIssue({ ...sig, resultat: 'sl' }, 'ouvert');
+      ok('un stop touché produit un message de gravité « bad » qui nomme le R',
+        sl && sl.gravite === 'bad' && /^Stop touché/.test(sl.texte) && /R/.test(sl.texte),
+        sl && sl.texte.slice(0, 60));
+
+      const tp1 = F.composerIssue({ ...sig, resultat: 'tp1', r: 1.4 }, 'ouvert');
+      ok('TP1 annonce la part à fermer (50 %) et le stop à l’entrée',
+        tp1 && tp1.gravite === 'ok' && /ferme 50 %/i.test(tp1.texte), tp1 && tp1.texte.slice(0, 60));
+      const tp2 = F.composerIssue({ ...sig, resultat: 'tp2', r: 2.6 }, 'ouvert');
+      ok('TP2 annonce 30 % et le trailing de 1,5 ATR',
+        tp2 && /30 %/.test(tp2.texte) && /1,5 ATR/.test(tp2.texte));
+
+      const be = F.composerIssue({ ...sig, resultat: 'be', r: 0 }, 'ouvert');
+      ok('un retour à l’entrée est dit « protégé », jamais « gagné »',
+        be && be.gravite === 'warn' && /protégé/.test(be.texte));
+
+      const scn = { id: 'scn_t', instrument: 'XAUUSD', timeframe: '15m',
+        direction: 'long', niveauEntree: 2389.5 };
+      const exp = F.composerScenario(scn, 'expire');
+      ok('un scénario expiré est annoncé avec son niveau jamais atteint',
+        exp && /expiré/i.test(exp.texte) && /2389/.test(exp.texte), exp && exp.texte.slice(0, 70));
+      ok('un scénario sans niveau ne produit pas d’événement inventé',
+        F.composerScenario(null, 'expire') === null);
+
+      // Le résumé sert de contexte au modèle : il doit rester lisible.
+      ok('le module expose un résumé textuel et une mémoire bornée',
+        typeof F.resume === 'function' && F.MAX_MEMOIRE > 0);
+    }
+
     // ── PHASE 3 : parcours du prix autour d'une zone ───────────────────────
     // Détecter un FVG et attendre son retest ne sont pas la même information.
     // Chaque état est déduit des bougies réellement postérieures à la zone.

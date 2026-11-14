@@ -16,7 +16,7 @@ const API_BASE = window.location.port === '5173' || window.location.protocol ===
 
 // Version de l'interface (affichée en en-tête) : permet de voir d'un coup d'œil
 // si la page ouverte est bien la dernière, ou une version restée en cache.
-const UI_VERSION = 'r2026-11-14a';
+const UI_VERSION = 'r2026-11-14c';
 const api = (path, opts = {}) => fetch(`${API_BASE}${path}`, {
   credentials: 'include',
   ...opts
@@ -5102,6 +5102,281 @@ function SignalHistory({
 
 /* ══════════════════════════ ÉCRAN DIRECT ══════════════════════════ */
 
+/* ══════════════ GESTION DES POSITIONS (couche L6) ══════════════ */
+// Ce que le système ne montrait nulle part : les positions OUVERTES et ce qu'il
+// faudrait en faire, chiffré — où déplacer le stop, quelle part fermer à quel
+// niveau, depuis combien de temps la position traîne sans atteindre TP1.
+// Lecture seule : rien n'est appliqué ici, aucune position n'est fermée.
+function PositionsGestion() {
+  const [etat, setEtat] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const charger = useCallback(async () => {
+    setBusy(true);
+    try {
+      const r = await api('/positions');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setEtat(d);
+      setErr('');
+    } catch (e) {
+      setErr(e.message || 'lecture impossible');
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+  useEffect(() => {
+    charger();
+    const t = setInterval(charger, 30000);
+    return () => clearInterval(t);
+  }, [charger]);
+  const positions = etat && etat.positions || [];
+  const total = etat ? etat.total : null;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "panel",
+    style: {
+      padding: 0,
+      marginBottom: 12,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      padding: '12px 15px',
+      borderBottom: '1px solid ' + TT.line,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement(TtLabel, {
+    style: {
+      margin: 0
+    }
+  }, "Gestion des positions"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11.5,
+      color: 'var(--muted)'
+    }
+  }, total === null ? 'lecture…' : total === 0 ? 'aucune position ouverte' : `${total} position${total > 1 ? 's' : ''} ouverte${total > 1 ? 's' : ''}`), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: '1 1 auto'
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost sm",
+    onClick: charger,
+    disabled: busy
+  }, /*#__PURE__*/React.createElement("i", {
+    className: `fas ${busy ? 'fa-circle-notch fa-spin' : 'fa-rotate'}`
+  }), "Rafra\xEEchir")), err && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '10px 15px',
+      fontSize: 12.5,
+      color: TT.bad
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-triangle-exclamation",
+    style: {
+      marginRight: 8
+    }
+  }), err), !err && total === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '14px 15px',
+      fontSize: 12.5,
+      color: 'var(--muted)',
+      lineHeight: 1.55
+    }
+  }, "Rien \xE0 g\xE9rer : aucune position ouverte. D\xE8s qu'un signal du journal passe en position, son plan appara\xEEt ici \u2014 stop cible (breakeven puis trailing 1,5 ATR), partiels TP1 50 % / TP2 30 % / runner 20 %, et invalidation temporelle \xE0 3 h sans TP1."), !err && positions.map((p, i) => {
+    const plan = p.plan || null;
+    const long = p.sens === 'long';
+    const col = !p.evaluable ? TT.neu : (p.rEnCours || 0) >= 0 ? TT.ok : TT.bad;
+    const stopChange = plan && plan.stopCible !== null && plan.stopCible !== plan.stopActuel;
+    return /*#__PURE__*/React.createElement("div", {
+      key: (p.cle || '') + i,
+      style: {
+        padding: '12px 15px',
+        borderTop: i ? '1px solid ' + TT.line : 'none'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        flexWrap: 'wrap'
+      }
+    }, /*#__PURE__*/React.createElement(TtPill, {
+      tone: long ? 'ok' : 'bad'
+    }, long ? 'ACHAT' : 'VENTE'), /*#__PURE__*/React.createElement("b", {
+      style: {
+        fontSize: 13.5
+      }
+    }, p.symbol || '—', " ", /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--dim)',
+        fontWeight: 500
+      }
+    }, "\xB7 ", p.timeframe || '—')), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        color: 'var(--muted)'
+      }
+    }, "entr\xE9e ", ttFmt(p.entree), " \xB7 stop ", ttFmt(p.stop)), /*#__PURE__*/React.createElement("span", {
+      style: {
+        flex: '1 1 auto'
+      }
+    }), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 14,
+        fontWeight: 800,
+        color: col,
+        fontVariantNumeric: 'tabular-nums'
+      }
+    }, p.evaluable ? `${p.rEnCours > 0 ? '+' : ''}${p.rEnCours} R` : 'non évaluable')), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11.5,
+        color: 'var(--muted)',
+        marginTop: 5
+      }
+    }, /*#__PURE__*/React.createElement("i", {
+      className: "fas fa-code-branch",
+      style: {
+        marginRight: 6,
+        opacity: .7
+      }
+    }), p.nom || 'signal sans nom', ' · ', p.strategie ? /*#__PURE__*/React.createElement(React.Fragment, null, "strat\xE9gie ", /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: 'var(--txt)'
+      }
+    }, p.strategie)) : /*#__PURE__*/React.createElement(React.Fragment, null, "aucune strat\xE9gie enregistr\xE9e \u2014 moteur ", /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: 'var(--txt)'
+      }
+    }, p.source === 'motif' ? 'patterns graphiques' : p.source === 'structure' ? 'structure de marché' : p.source || 'inconnu')), p.concept && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--dim)'
+      }
+    }, " \xB7 ", p.concept)), !p.evaluable && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: 'var(--dim)',
+        marginTop: 6
+      }
+    }, p.motif || 'position non évaluable', " \u2014 aucune consigne invent\xE9e."), p.evaluable && plan && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'grid',
+        gap: 6,
+        marginTop: 9,
+        gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        border: '1px solid ' + TT.line,
+        borderRadius: 10,
+        padding: '8px 10px'
+      }
+    }, /*#__PURE__*/React.createElement(TtLabel, {
+      style: {
+        margin: 0
+      }
+    }, "Stop"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        marginTop: 2,
+        fontVariantNumeric: 'tabular-nums'
+      }
+    }, ttFmt(plan.stopActuel), stopChange && /*#__PURE__*/React.createElement(React.Fragment, null, " ", /*#__PURE__*/React.createElement("i", {
+      className: "fas fa-arrow-right",
+      style: {
+        fontSize: 10,
+        margin: '0 4px'
+      }
+    }), /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: TT.warn
+      }
+    }, ttFmt(plan.stopCible)))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: 'var(--dim)',
+        marginTop: 2
+      }
+    }, plan.motifStop)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        border: '1px solid ' + TT.line,
+        borderRadius: 10,
+        padding: '8px 10px'
+      }
+    }, /*#__PURE__*/React.createElement(TtLabel, {
+      style: {
+        margin: 0
+      }
+    }, "Partiels"), (plan.partiels || []).map((x, k) => /*#__PURE__*/React.createElement("div", {
+      key: k,
+      style: {
+        fontSize: 11.5,
+        marginTop: 2,
+        color: x.atteint ? TT.ok : 'var(--muted)',
+        fontVariantNumeric: 'tabular-nums'
+      }
+    }, /*#__PURE__*/React.createElement("i", {
+      className: `fas ${x.atteint ? 'fa-circle-check' : 'fa-circle'}`,
+      style: {
+        fontSize: 9,
+        marginRight: 5
+      }
+    }), x.niveau, " ", x.pct, " %", x.prix ? ` @ ${ttFmt(x.prix)}${x.r !== null ? ` (${x.r} R)` : ''}` : ''))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        border: '1px solid ' + TT.line,
+        borderRadius: 10,
+        padding: '8px 10px'
+      }
+    }, /*#__PURE__*/React.createElement(TtLabel, {
+      style: {
+        margin: 0
+      }
+    }, "Invalidation"), plan.invalidationTemporelle ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        marginTop: 2,
+        color: plan.invalidationTemporelle.depassee ? TT.bad : 'var(--txt)',
+        fontWeight: plan.invalidationTemporelle.depassee ? 800 : 500
+      }
+    }, plan.invalidationTemporelle.ageHeures === null ? 'âge inconnu' : `${plan.invalidationTemporelle.ageHeures} h / ${plan.invalidationTemporelle.limiteHeures} h`), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: 'var(--dim)',
+        marginTop: 2
+      }
+    }, plan.invalidationTemporelle.motif)) : /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11.5,
+        color: 'var(--dim)'
+      }
+    }, "\u2014"))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 8,
+        display: 'grid',
+        gap: 4
+      }
+    }, (p.recommandations || []).map((r, k) => /*#__PURE__*/React.createElement("div", {
+      key: k,
+      style: {
+        fontSize: 12,
+        color: 'var(--muted)'
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "tag",
+      style: {
+        marginRight: 7
+      }
+    }, r.action), r.motif)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10.5,
+        color: 'var(--dim)',
+        marginTop: 2
+      }
+    }, "Lecture seule : le stop n'est jamais d\xE9plac\xE9 et aucune position n'est ferm\xE9e par cette page."))));
+  }));
+}
 function LiveMarket({
   onToJournal
 }) {
@@ -5716,7 +5991,7 @@ function LiveMarket({
     tf: tf,
     provider: provider,
     providerLabel: providerLabel
-  }), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement(PositionsGestion, null), /*#__PURE__*/React.createElement("div", {
     className: "panel",
     style: {
       padding: 14,
@@ -11637,40 +11912,54 @@ function Pilote() {
     const el = filRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   };
-  useEffect(() => {
-    let vivant = true;
-    (async () => {
-      try {
-        const r = await api('/chat/historique?limite=80');
-        if (r.status === 401) {
-          if (vivant) setEtat('hors ligne');
-          return;
-        }
-        const d = await r.json();
-        if (!vivant) return;
-        if (!d.messages || !d.messages.length) {
-          setMessages([{
-            role: 'assistant',
-            texte: "Bonjour. Je pilote le système : je lis l'état, les trades, les stratégies, " + 'les scénarios, les paramètres, la mémoire et l\'apprentissage — et je peux créer, ' + 'modifier, activer, désactiver ou supprimer, après confirmation.\n' + 'Tape « aide » pour la liste des commandes.',
-            heure: piloteHeure()
-          }]);
-        } else {
-          setMessages(d.messages.map(m => ({
-            role: m.role,
-            texte: m.texte,
-            heure: piloteHeure(m.creeAt),
-            action: m.action
-          })));
-        }
-        setEtat('en ligne');
-      } catch (e) {
-        if (vivant) setEtat('hors ligne');
+  const vusRef = useRef(new Set()); // ids déjà affichés : aucun doublon
+
+  // Une seule lecture, utilisée au montage ET par la veille périodique. Les
+  // événements du système (stop touché, TP atteint, retournement de biais,
+  // scénario expiré) arrivent donc ici comme des messages, sans recharger.
+  const chargerFil = useCallback(async ({
+    silencieux = false
+  } = {}) => {
+    try {
+      const r = await api('/chat/historique?limite=80');
+      if (r.status === 401) {
+        setEtat('hors ligne');
+        return;
       }
-    })();
-    return () => {
-      vivant = false;
-    };
+      const d = await r.json();
+      const liste = (d.messages || []).map(m => ({
+        id: m.id,
+        role: m.role,
+        texte: m.texte,
+        heure: piloteHeure(m.creeAt),
+        action: m.action,
+        evenement: m.verbe === 'ÉVÉNEMENT'
+      }));
+      if (!liste.length) {
+        if (!silencieux) setMessages([{
+          role: 'assistant',
+          texte: "Bonjour. Je pilote le système : je lis l'état, les trades, les stratégies, " + 'les scénarios, les paramètres, la mémoire et l\'apprentissage — et je te préviens ' + 'ici quand un stop est touché, un objectif atteint ou un biais se retourne.\n' + 'Tape « aide » pour la liste des commandes.',
+          heure: piloteHeure()
+        }]);
+      } else {
+        const nouveaux = liste.filter(m => m.id !== undefined && !vusRef.current.has(m.id));
+        for (const m of nouveaux) vusRef.current.add(m.id);
+        // Au premier passage on remplace tout ; ensuite on n'ajoute que le neuf.
+        setMessages(prev => prev.length && silencieux ? [...prev, ...nouveaux] : liste);
+      }
+      setEtat('en ligne');
+    } catch (e) {
+      setEtat('hors ligne');
+    }
   }, []);
+  useEffect(() => {
+    chargerFil();
+    // Toutes les 10 s : le fil se met à jour tout seul quand le moteur publie.
+    const t = setInterval(() => chargerFil({
+      silencieux: true
+    }), 10000);
+    return () => clearInterval(t);
+  }, [chargerFil]);
   useEffect(descendre, [messages, busy]);
   const envoyer = async texte => {
     const t = String(texte || '').trim();
@@ -11863,7 +12152,28 @@ function Pilote() {
         borderBottomRightRadius: moi ? 5 : 14,
         borderBottomLeftRadius: moi ? 14 : 5
       }
-    }, m.texte), /*#__PURE__*/React.createElement("div", {
+    }, m.evenement && (() => {
+      const g = m.action && m.action.gravite || 'info';
+      const c = g === 'bad' ? 'var(--bad)' : g === 'ok' ? 'var(--ok)' : g === 'warn' ? 'var(--warn)' : 'var(--accent2)';
+      return /*#__PURE__*/React.createElement("span", {
+        style: {
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+          marginBottom: 6,
+          fontSize: 10.5,
+          fontWeight: 700,
+          letterSpacing: '.06em',
+          textTransform: 'uppercase',
+          color: c
+        }
+      }, /*#__PURE__*/React.createElement("i", {
+        className: "fas fa-bolt",
+        style: {
+          fontSize: 10
+        }
+      }), "\xE9v\xE9nement");
+    })(), m.evenement && /*#__PURE__*/React.createElement("br", null), m.texte), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 11,
         color: 'var(--dim)',

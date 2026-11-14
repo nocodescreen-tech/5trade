@@ -161,12 +161,25 @@ async function changerStatut(id, statut, motif = null) {
  * Un plan d'attente qui n'expire jamais n'est pas un plan : c'est un espoir.
  */
 async function expirer() {
+  // Un plan qui meurt doit être ANNONCÉ : l'utilisateur n'a pas à découvrir
+  // dans un tableau qu'un scénario a expiré pendant qu'il regardait ailleurs.
+  const annoncer = async (scn) => {
+    try {
+      const Flux = require('../chat-crud/flux');
+      await Flux.issueScenario(scn, 'expire');
+    } catch { /* une annonce ratée ne bloque jamais l'expiration */ }
+  };
+
   if (!dispo()) {
     const maintenant = Date.now();
     let n = 0;
+    const venus = [];
     for (const s of memoire) {
-      if (s.statut === 'en_attente' && new Date(s.expireAt).getTime() < maintenant) { s.statut = 'expire'; n++; }
+      if (s.statut === 'en_attente' && new Date(s.expireAt).getTime() < maintenant) {
+        s.statut = 'expire'; n++; venus.push(s);
+      }
     }
+    for (const s of venus) await annoncer(s);
     return { ok: true, expires: n };
   }
   try {
@@ -174,7 +187,8 @@ async function expirer() {
     const r = await sql`
       update ${sql(TABLE)} set statut = 'expire'
       where statut = 'en_attente' and expire_at is not null and expire_at < now()
-      returning id`;
+      returning id, instrument, timeframe, direction, niveau_entree as "niveauEntree"`;
+    for (const s of r) await annoncer(s);
     return { ok: true, expires: r.length };
   } catch (e) { return { ok: false, raison: e.message }; }
 }
