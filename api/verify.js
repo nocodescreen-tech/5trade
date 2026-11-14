@@ -4200,6 +4200,28 @@ function tinyPng(W = 64, H = 40) {
       ok('objectifs : sans liquidité, la source est dite « multiple du risque »',
         courtCibles.sourceTP1 === 'multiple du risque' && courtCibles.rrTP2 >= 2);
 
+      // ── Génération automatique : anti-doublon ─────────────────────────────
+      // La génération tourne à chaque clôture H1 (TTL 3 h). Sans dédoublonnage,
+      // le même plan apparaissait trois fois à l'écran.
+      {
+        const Scn = require('./scenarios');
+        const m = { symbol: 'TEST', timeframe: '1h' };
+        const un = await Scn.genererEtEnregistrer(avecZone, m, { dedupe: true });
+        const deux = await Scn.genererEtEnregistrer(avecZone, m, { dedupe: true });
+        ok('scénarios : le même plan n’est pas enregistré deux fois',
+          un.crees > 0 && deux.crees === 0 && deux.doublons > 0,
+          `1er ${un.crees} créé(s) · 2e ${deux.crees} créé(s), ${deux.doublons} doublon(s)`);
+        for (const id of un.ids) await Scn.changerStatut(id, 'invalide', 'test');
+        ok('scénarios : le plan d’attente porte un TP1 atteignable et un TP2 au-delà',
+          (() => {
+            const s = Scn.generer(avecZone, m).scenarios[0];
+            if (!s) return false;
+            const risque = Math.abs(s.niveauEntree - s.stop);
+            return (s.tp1 - s.niveauEntree) / risque > 1.2
+              && (s.tp2 - s.niveauEntree) / risque > (s.tp1 - s.niveauEntree) / risque;
+          })());
+      }
+
       // ── Rejeu par le cerveau réel ─────────────────────────────────────────
       const Cerveau = require('./apprentissage/rejeu-cerveau');
       const fixture = (() => {

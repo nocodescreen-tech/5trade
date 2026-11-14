@@ -580,6 +580,41 @@ setTimeout(() => {
   }, 24 * 3600 * 1000).unref();
 }, PROCHAINE_BOUCLE_MS).unref();
 
+// ─── Plans d'attente : génération à chaque clôture H1 ───────────────────────
+// Le registre et le générateur existaient, mais RIEN ne les appelait : la table
+// restait vide et l'écran n'avait rien à montrer. Un plan d'attente qui n'est
+// jamais émis n'est pas un plan d'attente.
+const INSTRUMENTS_PLANS = ['frxEURUSD', 'frxGBPUSD', 'frxUSDJPY', 'frxXAUUSD'];
+let derniereHeurePlans = null;
+
+async function genererPlansAttente() {
+  let seuils = {};
+  try { seuils = await Apprentissage.Ajusteur.charger(); } catch { /* défauts */ }
+  for (const symbol of INSTRUMENTS_PLANS) {
+    try {
+      const { candles } = await Market.getCandles(symbol, '1h', 300);
+      const serie = (candles || []).filter(c => c.closed !== false);
+      if (serie.length < 60) continue;
+      const alignement = await Scenarios.alignement(symbol, Market);
+      await Scenarios.genererEtEnregistrer(serie, { symbol, timeframe: '1h' }, {
+        alignement, tp1R: seuils.tp1_r, tp2R: seuils.tp2_r, dedupe: true
+      });
+    } catch (e) {
+      console.error(`[scénarios] ${symbol} :`, e.message);
+    }
+  }
+}
+
+// Première passe peu après le démarrage (l'écran ne doit pas attendre une heure),
+// puis une passe par heure UTC — la structure ne change qu'à la clôture H1.
+setTimeout(() => { genererPlansAttente().catch(() => {}); }, 20 * 1000).unref();
+setInterval(() => {
+  const h = new Date(); h.setUTCMinutes(0, 0, 0);
+  if (h.getTime() === derniereHeurePlans) return;
+  derniereHeurePlans = h.getTime();
+  genererPlansAttente().catch(() => {});
+}, 10 * 60 * 1000).unref();
+
 // Données de marché mises en cache sur disque : l'analyse doit rester
 // possible même sans réseau (et après un redémarrage).
 try {
@@ -3942,7 +3977,7 @@ app.post('/api/scenarios/generer', requireAuth, async (req, res) => {
     try { seuils = await require('./apprentissage/ajusteur-seuils').charger(); } catch { /* seuils absents : défauts */ }
     const r = await Scenarios.genererEtEnregistrer(
       (candles || []).filter(c => c.closed !== false), { symbol, timeframe: tf },
-      { alignement, tp1R: seuils.tp1_r, tp2R: seuils.tp2_r });
+      { alignement, tp1R: seuils.tp1_r, tp2R: seuils.tp2_r, dedupe: true });
     res.json({ success: true, ...r });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

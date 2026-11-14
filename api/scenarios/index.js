@@ -19,12 +19,27 @@ const generateur = require('./generateur');
 async function genererEtEnregistrer(candles, meta = {}, options = {}) {
   const r = generateur.generer(candles, meta, options);
   const ids = [];
+  let doublons = 0;
+  // Anti-doublon : la génération tourne à chaque clôture H1. Sans ce filtre, le
+  // même plan était recréé trois fois avant d'expirer (TTL 3 h) et l'écran
+  // affichait trois lignes identiques.
+  let existants = [];
+  if (options.dedupe) {
+    try { existants = await registre.lister({ statut: 'en_attente', instrument: meta.symbol, limite: 20 }); }
+    catch { existants = []; }
+  }
   for (const s of r.scenarios) {
+    if (options.dedupe) {
+      const deja = existants.some(e => e.instrument === s.instrument
+        && e.direction === s.direction
+        && Math.abs(Number(e.niveauEntree) - Number(s.niveauEntree)) <= Math.abs(Number(s.niveauEntree)) * 0.0005);
+      if (deja) { doublons++; continue; }
+    }
     const c = await registre.creer(s);
     if (c.ok) ids.push(c.id);
   }
   return {
-    crees: ids.length, ids, motif: r.motif, atr: r.atr, prix: r.prix,
+    crees: ids.length, ids, doublons, motif: r.motif, atr: r.atr, prix: r.prix,
     alignement: r.alignement || null
   };
 }
