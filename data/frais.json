@@ -1,13 +1,13 @@
 {
-  "_note": "Compte CFD STANDARD — levier 1:1000, commission 0, spread minimum 0,1 pip. Le spread est exprimé en UNITÉS DE PRIX (convention de core/frais.js) : 0,1 pip = 0,00001 sur une paire à 5 décimales, 0,001 sur une paire en JPY. ATTENTION : ce sont des PLANCHERS, pas des moyennes — le spread réel s'élargit en session chargée et sur les annonces. Sur l'or, 0,1 pip = 0,01 $ alors que le spread observé chez Deriv tourne autour de 0,30 $ : la valeur ci-dessous rend le coût de l'or quasi invisible, à remplacer par le spread constaté dès qu'il est relevé.",
+  "_note": "Compte CFD STANDARD — levier 1:1000, commission 0, spread minimum annoncé 0,1 pip. Le spread est exprimé en UNITÉS DE PRIX (convention de core/frais.js). Deux valeurs distinctes, volontairement : (1) le MINIMUM annoncé par le courtier = 0,1 pip, qui n'arrive que sur les majors en séance calme ; (2) la valeur RETENUE ici = 0,3 pip sur le FX et 0,30 $ sur l'or, c'est-à-dire l'ordre de grandeur observé sur un compte standard en séance normale. Juger un système sur son meilleur spread est la façon la plus sûre de se mentir. Le glissement (0,2 pip FX / 0,02 $ or) est compté à l'entrée ET à la sortie par core/frais.",
   "defaut": 0,
   "commissionDefaut": 0,
   "glissement": 0,
   "partMax": 0.15,
   "parSymbole": {
-    "frxEURUSD": { "spread": 0.00001, "commissionPct": 0, "glissement": 0 },
-    "frxGBPUSD": { "spread": 0.00001, "commissionPct": 0, "glissement": 0 },
-    "frxUSDJPY": { "spread": 0.001, "commissionPct": 0, "glissement": 0 },
-    "frxXAUUSD": { "spread": 0.01, "commissionPct": 0, "glissement": 0 }
+    "frxEURUSD": { "spread": 0.00003, "commissionPct": 0, "glissement": 0.00002 },
+    "frxGBPUSD": { "spread": 0.00003, "commissionPct": 0, "glissement": 0.00002 },
+    "frxUSDJPY": { "spread": 0.003, "commissionPct": 0, "glissement": 0.002 },
+    "frxXAUUSD": { "spread": 0.3, "commissionPct": 0, "glissement": 0.02 }
   }
 }
