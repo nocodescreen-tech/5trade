@@ -3812,7 +3812,8 @@ app.get('/api/decision', requireAuth, async (req, res) => {
       exigerAlignement: true,
       refuserDesaccord: true,
       refuserContreTendance: true,
-      verifierFrais: true,
+      // FRAIS_STRICT=1 : un coût inconnu devient un refus, pas une hypothèse.
+      verifierFrais: process.env.FRAIS_STRICT === '1' ? 'strict' : true,
       verifierModele: true
     });
 
@@ -4059,7 +4060,8 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
           exigerAlignement: true,
           refuserDesaccord: true,
           refuserContreTendance: true,
-          verifierFrais: true,
+          // FRAIS_STRICT=1 : un coût inconnu devient un refus, pas une hypothèse.
+      verifierFrais: process.env.FRAIS_STRICT === '1' ? 'strict' : true,
           verifierModele: true
         });
       } catch (e) { decision = null; }

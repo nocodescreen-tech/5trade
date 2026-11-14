@@ -135,7 +135,12 @@ function lancer(candles, meta = {}, options = {}) {
     // (même entrée, même stop) : une seule prise, les concepts se cumulent.
     const parCle = new Map();
     for (const s of r.signaux) {
-      if (s.status !== 'confirme' && s.status !== 'surveiller') continue;
+      // Le DIRECT n'exécute que « confirme ». Le backtest acceptait aussi
+      // « surveiller » : il prenait donc des trades que le direct n'aurait
+      // jamais pris, et surestimait la performance. Le mode permissif reste
+      // accessible pour MESURER l'écart, mais il n'est plus le défaut.
+      const accepteSurveiller = options.accepterSurveiller === true;
+      if (s.status !== 'confirme' && !(accepteSurveiller && s.status === 'surveiller')) continue;
       if (!s.entree || !s.stop || !Array.isArray(s.objectifs) || !s.objectifs.length) continue;
       if (!s.sens || s.sens === 'neutre') continue;
       // FILTRE DE RÉGIME (optionnel). Mesuré sur NQ 1d : les trades dans le sens

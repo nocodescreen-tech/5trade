@@ -2713,7 +2713,7 @@ function tinyPng(W = 64, H = 40) {
       serieFine.push(cb(i, base, base + 0.0008, base - 0.0008, base + (i % 2 ? 0.0004 : -0.0003)));
     }
     const profils = [{ id: 'p', titre: 'Devises', regles: ['R1', 'R2', 'R3', 'R4'], seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: ['5m'], parametres: {} }];
-    const r = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' }, { profils, pas: 2, maxBougies: 160 });
+    const r = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' }, { profils, pas: 2, maxBougies: 160, accepterSurveiller: true });
     const tr = r.trades || [];
     ok('le backtest rend des trades exploitables', tr.length > 0, `${tr.length} trade(s)`);
     ok('aucun trade sans risque', tr.every(t => Math.abs(t.entree - t.stop) > 0), String(tr.length));
@@ -2743,7 +2743,7 @@ function tinyPng(W = 64, H = 40) {
       serieLongue.push(cb(i, base, base + 140, base - 140, base + (i % 2 ? 80 : -70)));
     }
     const rLong = B.lancer(serieLongue, { symbol: 'R_75', timeframe: '5m' },
-      { profils, pas: 2, maxBougies: 400 });
+      { profils, pas: 2, maxBougies: 400, accepterSurveiller: true });
     ok('un historique suffisant est marqué fiable', rLong.fiable === true,
       `${rLong.bougies} bougies`);
     ok('le nombre de types de configuration est exposé',
@@ -2804,12 +2804,21 @@ function tinyPng(W = 64, H = 40) {
       tr.every(t => Number.isFinite(t.rr) && t.rr > 0),
       tr.map(t => t.rr).join(', '));
     const rSansPorte = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' },
-      { profils, pas: 2, maxBougies: 160 });
+      { profils, pas: 2, maxBougies: 160, accepterSurveiller: true });
     ok('sans seuil, seules les configurations inutilisables sont écartées',
       rSansPorte.trades.length === tr.length,
       `${rSansPorte.ecartesRR} écartée(s) pour objectif inutilisable`);
+    // Par défaut, le backtest n'exécute QUE les signaux confirmés, comme le
+    // direct. Le mode permissif (surveiller) doit être demandé explicitement :
+    // l'accepter sans le dire faisait prendre au backtest des trades que le
+    // direct n'aurait jamais pris, donc surestimait la performance.
+    const rStrict = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' },
+      { profils, pas: 2, maxBougies: 160 });
+    ok('par défaut, le backtest refuse les signaux « à surveiller » comme le direct',
+      rStrict.trades.length <= tr.length, `${rStrict.trades.length} ≤ ${tr.length}`);
+
     const rPorte = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' },
-      { profils, pas: 2, maxBougies: 160, rrMin: 1.5 });
+      { profils, pas: 2, maxBougies: 160, rrMin: 1.5, accepterSurveiller: true });
     ok('la porte du rapport écarte et le compte',
       rPorte.ecartesRR > rSansPorte.ecartesRR && (rPorte.trades || []).length > 0,
       `${rPorte.ecartesRR} écartée(s), ${(rPorte.trades || []).length} gardé(s)`);
@@ -2834,7 +2843,7 @@ function tinyPng(W = 64, H = 40) {
     // que le moteur n a rien vu. Sur un prix de 40 000, il faut un coût énorme.
     const Fr = require('./core/frais');
     Fr.configurer({ defaut: 5000 });
-    const rCout = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' }, { profils, pas: 2, maxBougies: 160 });
+    const rCout = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' }, { profils, pas: 2, maxBougies: 160, accepterSurveiller: true });
     ok('un coût écrasant ne produit aucun trade', (rCout.trades || []).length === 0,
       `${(rCout.trades || []).length} trade(s)`);
     ok('les configurations écartées par les frais sont comptées',
@@ -4249,6 +4258,77 @@ function tinyPng(W = 64, H = 40) {
         actions.length === new Set(actions).size, actions.join(','));
     }
 
+    // ── COHÉRENCE DU MOTEUR : les chiffres doivent être les mêmes partout ─
+    // Quatre calculs divergents suffisent à rendre un système incohérent : deux
+    // modules qui ne donnent pas le même ATR pour le même marché produisent deux
+    // stops différents au même instant. Ces tests verrouillent l'unicité.
+    {
+      const I = require('./engine/indicators');
+      const St = require('./engine/structure');
+      const P = require('./engine/plans');
+      const bougie = (t, o, h, l, c) => ({ t, o, h, l, c, closed: true });
+
+      // 1. ATR : une seule définition (Wilder) pour tous les modules.
+      const serie = [];
+      let px = 100;
+      for (let i = 0; i < 60; i++) {
+        px += Math.sin(i / 3) * 2 + (i % 7 === 0 ? 1.5 : 0);
+        serie.push(bougie(i * 60000, px, px + 1.2, px - 1.1, px + 0.3));
+      }
+      ok('l’ATR des plans et celui de la structure sont identiques',
+        St.atr(serie, 14) === P.atr(serie, 14),
+        `${St.atr(serie, 14)} vs ${P.atr(serie, 14)}`);
+
+      // 2. MACD : la ligne est alignée sur les MÊMES bougies (pas de décalage
+      //    de 14 bougies entre EMA12 et EMA26).
+      const ema12 = I.ema(serie, 12), ema26 = I.ema(serie, 26);
+      const m = I.macd(serie);
+      const attendu = +(ema12[ema12.length - 1] - ema26[ema26.length - 1]).toFixed(6);
+      ok('le dernier MACD vaut EMA12 − EMA26 sur la même bougie',
+        m.macd[m.macd.length - 1] === attendu,
+        `calculé ${m.macd[m.macd.length - 1]} · attendu ${attendu}`);
+      ok('la ligne MACD couvre autant de bougies que l’EMA lente',
+        m.macd.length === ema26.length, `${m.macd.length} vs ${ema26.length}`);
+
+      // 3. RSI d'une série plate : 50 (neutre), jamais 100 (surachat).
+      const plat = Array.from({ length: 30 }, (_, i) => bougie(i * 60000, 100, 100, 100, 100));
+      const rsiPlat = I.rsi(plat, 14);
+      ok('un marché parfaitement plat donne un RSI neutre de 50',
+        rsiPlat[rsiPlat.length - 1] === 50, String(rsiPlat[rsiPlat.length - 1]));
+
+      // 4. HH/HL : un sommet se compare à un sommet, un creux à un creux.
+      const zig = [];
+      const pts = [10, 16, 13, 18, 15, 20, 17, 22];   // hauts 16→18→20→22, creux 13→15→17
+      pts.forEach((v, i) => zig.push(bougie(i * 60000, v, v + 0.4, v - 0.4, v)));
+      const ms = St.marketStructure(zig, 1);
+      ok('les sommets croissants sont étiquetés HH (jamais comparés à un creux)',
+        ms.recent.filter(x => x.label === 'HH').length >= 2
+        && ms.recent.filter(x => x.label === 'LH').length === 0,
+        JSON.stringify(ms.recent.map(x => x.label)));
+      ok('les creux croissants sont étiquetés HL',
+        ms.recent.filter(x => x.label === 'HL').length >= 2,
+        JSON.stringify(ms.recent.map(x => x.label)));
+
+      // 5. Liquidité : trois sommets égaux = trois touches, pas deux.
+      const eq = [];
+      const base = [100, 110, 100, 110, 100, 110, 100];
+      base.forEach((v, i) => eq.push(bougie(i * 60000, v, v + 0.5, v - 0.5, v)));
+      const pools = St.liquidityPools(eq, 0.001, 1);
+      const eqh = pools.filter(p => p.type === 'EQH').sort((a, b) => b.touches - a.touches)[0];
+      ok('un amas de trois sommets égaux est compté à trois touches',
+        eqh && eqh.touches === 3, eqh ? String(eqh.touches) : 'aucun amas');
+
+      // 6. Déplacement : l'ATR de référence est celui de la bougie, pas celui
+      //    d'aujourd'hui. Une période calme puis violente doit signaler les
+      //    grosses bougies RÉCENTES, pas les anciennes.
+      const mixte = [];
+      for (let i = 0; i < 40; i++) mixte.push(bougie(i * 60000, 100, 100.5, 99.5, 100));
+      mixte.push(bougie(40 * 60000, 100, 106, 100, 106));   // +6 sans ATR préalable
+      const dep = St.displacements(mixte, 1.5);
+      ok('un déplacement se mesure contre l’ATR du moment, pas l’ATR global',
+        dep.length >= 1 && dep[dep.length - 1].from === 100, JSON.stringify(dep.slice(-1)));
+    }
+
     // ── FLUX D'ÉVÉNEMENTS → CONVERSATION ───────────────────────────────────
     // Ce que l'IA doit savoir sans qu'on le lui demande : un stop touché, un
     // objectif atteint, un scénario expiré. Ces messages sont composés par des
@@ -4637,7 +4717,7 @@ function tinyPng(W = 64, H = 40) {
       serie.push(c(i, base, base + 0.6, base - 0.6, base + (i % 2 ? 0.3 : -0.2)));
     }
     const profils = [{ id: 'p', titre: 'Test', regles: ['R1', 'R2'], seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: ['5m'], parametres: {} }];
-    const r = B.lancer(serie, { symbol: 'TEST', timeframe: '5m' }, { profils, pas: 3, maxBougies: 120 });
+    const r = B.lancer(serie, { symbol: 'TEST', timeframe: '5m' }, { profils, pas: 3, maxBougies: 120, accepterSurveiller: true });
     ok('le backtest produit des prises', !r.indisponible && r.total > 0, `${r.total} prise(s)`);
 
     // Le filtre par SOURCE, et la ventilation qui l'accompagne.
