@@ -75,7 +75,8 @@ function rejouer({ instrument, h1, m5, seuils = {}, options = {} } = {}) {
 
     let generation;
     try {
-      generation = Generateur.generer(tranche, { symbol: instrument, timeframe: '1h' });
+      generation = Generateur.generer(tranche, { symbol: instrument, timeframe: '1h' },
+        { tp1R: seuils.tp1_r, tp2R: seuils.tp2_r });
     } catch (e) {
       rejets.sans_scenario++;
       continue;
@@ -231,7 +232,10 @@ function simulerGestion({ suite, long, entree, stop0, tp1, tp2, atr, seuils = {}
     }
 
     // 4. Runner sous trailing ATR (le stop ne recule jamais).
-    if (tp2Fait && restantPct > 0 && Number.isFinite(atr) && atr > 0) {
+    // Le trailing démarre DÈS le TP1 : entre TP1 et TP2, la part restante (50 %)
+    // était auparavant collée au stop d'entrée, donc toute respiration la sortait
+    // à 0 R. Un trader qui a sécurisé laisse courir sous trailing, pas sous BE.
+    if (tp1Fait && restantPct > 0 && Number.isFinite(atr) && atr > 0) {
       const candidat = long ? c.h - trailingAtr * atr : c.l + trailingAtr * atr;
       stop = long ? Math.max(stop, candidat) : Math.min(stop, candidat);
     }

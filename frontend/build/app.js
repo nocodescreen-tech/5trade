@@ -16,7 +16,7 @@ const API_BASE = window.location.port === '5173' || window.location.protocol ===
 
 // Version de l'interface (affichée en en-tête) : permet de voir d'un coup d'œil
 // si la page ouverte est bien la dernière, ou une version restée en cache.
-const UI_VERSION = 'r2026-11-14c';
+const UI_VERSION = 'r2026-11-14d';
 const api = (path, opts = {}) => fetch(`${API_BASE}${path}`, {
   credentials: 'include',
   ...opts
@@ -5100,6 +5100,237 @@ function SignalHistory({
   }))));
 }
 
+/* ══════════════ PLANS D'ATTENTE + CERVEAU ══════════════ */
+// Trois choses que le système calculait sans jamais les montrer à l'écran :
+//   - les plans d'attente (« SI le prix revient à X ET confirme, ALORS … ») ;
+//   - l'alignement H4 + D1 qui autorise ou interdit un plan ;
+//   - les seuils appris et les shadow runs en cours.
+// Lecture seule : aucun plan n'est exécuté ici.
+const PLAN_DIR = {
+  long: 'ACHAT',
+  short: 'VENTE'
+};
+function PlansAttente({
+  symbol
+}) {
+  const [plans, setPlans] = useState([]);
+  const [alig, setAlig] = useState(null);
+  const [cerveau, setCerveau] = useState(null);
+  const [err, setErr] = useState('');
+  const [ouvert, setOuvert] = useState(true);
+  useEffect(() => {
+    let vivant = true;
+    const charger = async () => {
+      try {
+        const appels = [api('/scenarios?statut=en_attente&limite=10'), api('/apprentissage/shadow')];
+        if (symbol) appels.push(api('/alignement?symbol=' + encodeURIComponent(symbol)));
+        const rep = await Promise.all(appels);
+        const dPlans = await rep[0].json();
+        const dCer = await rep[1].json();
+        if (!vivant) return;
+        if (dPlans.success) setPlans(Array.isArray(dPlans.scenarios) ? dPlans.scenarios : []);
+        if (dCer.success) setCerveau(dCer);
+        if (rep[2]) {
+          const dAl = await rep[2].json();
+          if (vivant && dAl.success) setAlig(dAl);else if (vivant) setAlig(null);
+        } else setAlig(null);
+        setErr('');
+      } catch (e) {
+        if (vivant) setErr(e.message || 'lecture impossible');
+      }
+    };
+    charger();
+    const t = setInterval(charger, 60000);
+    return () => {
+      vivant = false;
+      clearInterval(t);
+    };
+  }, [symbol]);
+  const reste = iso => {
+    const ms = Date.parse(iso) - Date.now();
+    if (!Number.isFinite(ms)) return '—';
+    if (ms <= 0) return 'échu';
+    const m = Math.round(ms / 60000);
+    return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${m} min`;
+  };
+  const enR = (s, niveau) => {
+    const risque = Math.abs(Number(s.niveauEntree) - Number(s.stop));
+    if (!(risque > 0) || !Number.isFinite(Number(niveau))) return '—';
+    const r = (Number(niveau) - Number(s.niveauEntree)) * (s.direction === 'long' ? 1 : -1) / risque;
+    return `${r >= 0 ? '+' : ''}${r.toFixed(2)} R`;
+  };
+  const seuils = cerveau && cerveau.seuils || {};
+  const shadow = cerveau && cerveau.shadow || [];
+  const aligne = alig && alig.aligne === true;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "panel",
+    style: {
+      padding: 0,
+      marginBottom: 12,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      padding: '11px 15px',
+      borderBottom: ouvert ? '1px solid ' + TT.line : 'none',
+      flexWrap: 'wrap',
+      cursor: 'pointer'
+    },
+    onClick: () => setOuvert(v => !v)
+  }, /*#__PURE__*/React.createElement(TtLabel, {
+    style: {
+      margin: 0
+    }
+  }, "Plans d'attente"), /*#__PURE__*/React.createElement(TtPill, {
+    tone: plans.length ? 'info' : 'neu'
+  }, plans.length, " en attente"), alig && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11.5,
+      color: 'var(--muted)'
+    }
+  }, "Biais H4/D1 : ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: aligne ? TT.ok : TT.neu
+    }
+  }, "H4 ", alig.H4, " \xB7 D1 ", alig.D1), aligne ? ' — aligné ' + alig.direction : ' — aucun trade autorisé'), /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: 'auto',
+      fontSize: 11,
+      color: 'var(--dim)'
+    }
+  }, "seuils v", seuils.version || '?', " \xB7 TP1 ", seuils.tp1_r ?? 1.27, " R / TP2 ", seuils.tp2_r ?? 2, " R", shadow.length ? ` · ${shadow.length} shadow` : '', ' · ', /*#__PURE__*/React.createElement("i", {
+    className: `fas fa-chevron-${ouvert ? 'up' : 'down'}`
+  }))), ouvert && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '10px 15px 12px'
+    }
+  }, err && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: TT.bad,
+      marginBottom: 8
+    }
+  }, err), plans.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: 'var(--dim)'
+    }
+  }, "Aucun plan conditionnel en attente. Le g\xE9n\xE9rateur n'en produit que si la structure mesur\xE9e le permet : zone intacte, ATR disponible, sens compatible avec l'alignement H4/D1.") : /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gap: 3
+    }
+  }, plans.map(s => {
+    const achat = s.direction === 'long';
+    return /*#__PURE__*/React.createElement("div", {
+      key: s.id,
+      style: {
+        display: 'grid',
+        gridTemplateColumns: '58px 84px repeat(4, minmax(64px, 1fr)) 62px',
+        gap: 6,
+        alignItems: 'center',
+        fontSize: 11.5,
+        padding: '4px 0',
+        borderBottom: '1px solid ' + TT.line
+      }
+    }, /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: achat ? TT.ok : TT.bad
+      }
+    }, PLAN_DIR[s.direction] || s.direction), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#dbe4f0'
+      }
+    }, s.instrument), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--muted)'
+      },
+      title: "niveau d'entr\xE9e"
+    }, ttFmt(s.niveauEntree)), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: TT.bad,
+        fontVariantNumeric: 'tabular-nums'
+      },
+      title: "stop"
+    }, ttFmt(s.stop)), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: TT.ok,
+        fontVariantNumeric: 'tabular-nums'
+      },
+      title: "objectif 1"
+    }, ttFmt(s.tp1), " ", /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--dim)'
+      }
+    }, enR(s, s.tp1))), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: TT.ok,
+        fontVariantNumeric: 'tabular-nums'
+      },
+      title: "objectif 2"
+    }, ttFmt(s.tp2), " ", /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--dim)'
+      }
+    }, enR(s, s.tp2))), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--dim)',
+        textAlign: 'right'
+      },
+      title: "expiration"
+    }, reste(s.expireAt)));
+  }), plans[0] && Array.isArray(plans[0].preuves) && plans[0].preuves.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--dim)',
+      marginTop: 6
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-circle-info",
+    style: {
+      marginRight: 6
+    }
+  }), "Pourquoi : ", plans[0].preuves.join(' · '))), shadowsListe(shadow)));
+}
+function shadowsListe(shadow) {
+  if (!shadow || !shadow.length) return null;
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 9,
+      borderTop: '1px solid ' + TT.line,
+      paddingTop: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--muted)',
+      marginBottom: 4
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-flask",
+    style: {
+      marginRight: 6,
+      color: TT.info
+    }
+  }), "R\xE9glages en shadow run (test\xE9s 3 jours avant promotion)"), shadow.map(c => /*#__PURE__*/React.createElement("div", {
+    key: c.id,
+    style: {
+      display: 'flex',
+      gap: 8,
+      fontSize: 11,
+      color: 'var(--dim)'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#93c5fd',
+      minWidth: 210
+    }
+  }, c.parametre), /*#__PURE__*/React.createElement("span", null, "\u2192 ", String(c.valeur)), /*#__PURE__*/React.createElement("span", null, "\xB7 promotion possible le ", String(c.applicable_at).slice(0, 10)))));
+}
+
 /* ══════════════════════════ ÉCRAN DIRECT ══════════════════════════ */
 
 /* ══════════════ GESTION DES POSITIONS (couche L6) ══════════════ */
@@ -6047,6 +6278,8 @@ function LiveMarket({
     setTypeTrade: setTypeTrade
   }), /*#__PURE__*/React.createElement(MultiTimeframeMatrix, {
     confluence: confluence
+  }), /*#__PURE__*/React.createElement(PlansAttente, {
+    symbol: symbol
   }), /*#__PURE__*/React.createElement(SignalExplanation, {
     trace: decision && decision.trace || sse && sse.trace,
     decision: decision,

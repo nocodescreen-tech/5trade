@@ -3936,9 +3936,25 @@ app.post('/api/scenarios/generer', requireAuth, async (req, res) => {
     // Alignement H4 + D1 : mesuré sur l'historique H1, pas deviné. Il filtre les
     // plans contraires à la tendance supérieure (règle intraday).
     const alignement = await Scenarios.alignement(symbol, Market);
+    // Les multiples d'objectif viennent des seuils appris, comme en rejeu :
+    // le direct et l'apprentissage ne peuvent pas viser deux choses différentes.
+    let seuils = {};
+    try { seuils = await require('./apprentissage/ajusteur-seuils').charger(); } catch { /* seuils absents : défauts */ }
     const r = await Scenarios.genererEtEnregistrer(
-      (candles || []).filter(c => c.closed !== false), { symbol, timeframe: tf }, { alignement });
+      (candles || []).filter(c => c.closed !== false), { symbol, timeframe: tf },
+      { alignement, tp1R: seuils.tp1_r, tp2R: seuils.tp2_r });
     res.json({ success: true, ...r });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Alignement H4 + D1 d'un instrument : ce que le plan d'attente consulte avant
+// d'exister, rendu visible. Coûteux (historique long), donc mis en cache 5 min.
+app.get('/api/alignement', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').trim();
+    if (!symbol) return res.status(400).json({ error: 'symbol requis' });
+    const a = await Scenarios.alignement(symbol, Market, 800, { force: req.query.force === '1' });
+    res.json({ success: true, symbol, ...a });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -52,6 +52,11 @@ function seuilsParDefaut() {
     stop_atr: 1.0,
     tp1_atr: 1.27,
     tp2_atr: 2.0,
+    // Objectifs en R — les VRAIS multiples utilisés par le générateur. Les deux
+    // lignes `_atr` ci-dessus étaient des multiples d'ATR utilisés par l'ancien
+    // rejeu factice ; elles restent pour ne pas casser les anciens journaux.
+    tp1_r: 1.27,
+    tp2_r: 2.0,
     trailing_atr: 1.5,
     invalidation_temporelle_minutes: 180,
     invalidation_seuil_r: 0.3,          // progrès en R exigé pour ne pas couper au délai

@@ -4175,6 +4175,31 @@ function tinyPng(W = 64, H = 40) {
       ok('générateur : sans alignement fourni, rien n’est filtré en silence',
         Generateur.generer(avecZone, { symbol: 'TEST', timeframe: '1h' }).alignement === null);
 
+      // ── Objectifs : le générateur et le plan de gestion doivent viser pareil ──
+      // Avant : TP1 = « première liquidité au-delà de 1,2 × risque, sinon 2 × risque »
+      // alors que le plan sécurise à 1,27 R. TP1 était donc presque toujours
+      // inatteignable, et 22 trades sur 43 mouraient en invalidation temporelle.
+      const planLong = libre.scenarios.find(s => s.direction === 'long');
+      const risqueLong = Math.abs(planLong.niveauEntree - planLong.stop);
+      const rr1 = (planLong.tp1 - planLong.niveauEntree) / risqueLong;
+      const rr2 = (planLong.tp2 - planLong.niveauEntree) / risqueLong;
+      ok('objectifs : TP1 est à 1,27 R (le palier de sécurisation du plan)',
+        Math.abs(rr1 - 1.27) < 0.01, `RR1 = ${rr1.toFixed(2)}`);
+      ok('objectifs : TP2 est strictement au-delà de TP1 et d’au moins 2 R',
+        rr2 > rr1 + 0.1 && rr2 >= 2 - 0.01, `RR2 = ${rr2.toFixed(2)}`);
+      ok('objectifs : la preuve dit le multiple et sa source',
+        /TP1 = 1\.27 R \(/.test(planLong.preuves.join(' | ')), planLong.preuves.slice(-1)[0]);
+      const planLarge = Generateur.generer(avecZone, { symbol: 'TEST', timeframe: '1h' }, { tp1R: 2, tp2R: 3 })
+        .scenarios.find(s => s.direction === 'long');
+      const rrLarge = (planLarge.tp1 - planLarge.niveauEntree) / Math.abs(planLarge.niveauEntree - planLarge.stop);
+      ok('objectifs : les multiples viennent des seuils, pas d’une constante cachée',
+        Math.abs(rrLarge - 2) < 0.01, `RR1 = ${rrLarge.toFixed(2)}`);
+      const courtCibles = Generateur.cibles(100, 10, 'short', [], 1.27, 2);
+      ok('objectifs : symétrie short (TP1 sous l’entrée, TP2 plus bas)',
+        courtCibles.tp1 < 100 && courtCibles.tp2 < courtCibles.tp1);
+      ok('objectifs : sans liquidité, la source est dite « multiple du risque »',
+        courtCibles.sourceTP1 === 'multiple du risque' && courtCibles.rrTP2 >= 2);
+
       // ── Rejeu par le cerveau réel ─────────────────────────────────────────
       const Cerveau = require('./apprentissage/rejeu-cerveau');
       const fixture = (() => {
@@ -4291,6 +4316,28 @@ function tinyPng(W = 64, H = 40) {
 
       process.env.DATA_DIR = dataAvant;
       delete require.cache[require.resolve('./apprentissage/ajusteur-seuils')];
+
+      // ── Écran : ce que le système calcule doit être visible ───────────────
+      // Le plan d'attente, l'alignement H4/D1 et les shadow runs existaient côté
+      // API mais n'apparaissaient nulle part : un mécanisme invisible ne se
+      // vérifie pas, et ne se corrige pas.
+      const ecran = uiSrc();
+      const serveurSrc = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+      ok('écran : les plans d’attente affichent entrée, stop, TP1/TP2 et leur R',
+        /function PlansAttente/.test(ecran) && /enR\(s, s\.tp1\)/.test(ecran) && /enR\(s, s\.tp2\)/.test(ecran));
+      ok('écran : l’alignement H4/D1 est affiché et son refus est lisible',
+        /Biais H4\/D1/.test(ecran) && /aucun trade autorisé/.test(ecran));
+      ok('écran : les shadow runs sont visibles avec leur date de promotion',
+        /shadow run/i.test(ecran) && /applicable_at/.test(ecran));
+      ok('écran : le panneau est réellement monté dans le tableau de bord',
+        /<PlansAttente symbol=\{symbol\} \/>/.test(ecran));
+      ok('API : alignement H4/D1 et état du cerveau sont exposés',
+        /'\/api\/alignement'/.test(serveurSrc) && /'\/api\/apprentissage\/shadow'/.test(serveurSrc));
+      ok('build : la version d’interface est celle du code source',
+        new RegExp(`UI_VERSION\\s*=\\s*'([^']+)'`).exec(ecran)
+        && fs.readFileSync(path.join(ROOT, 'frontend', 'build', 'app.js'), 'utf8')
+          .includes(`UI_VERSION = '${/UI_VERSION\s*=\s*'([^']+)'/.exec(ecran)[1]}'`),
+        (() => { const m = /UI_VERSION\s*=\s*'([^']+)'/.exec(ecran); return m ? m[1] : '?'; })());
     }
 
     // ── CHAT : historique persistant ───────────────────────────────────────

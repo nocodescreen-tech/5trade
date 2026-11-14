@@ -29,6 +29,44 @@ function zoneUtilisable(z, candles, atr) {
 }
 
 /**
+ * Objectifs en R — le point où le plan et la gestion se contredisaient.
+ *
+ * Le générateur posait TP1 sur « la première liquidité au-delà de 1,2 × risque,
+ * sinon 2 × risque ». Le plan de gestion, lui, parle de TP1 = 1,27 R (50 %),
+ * TP2 = 2 R (30 %). Résultat mesuré en rejeu : TP1 presque jamais atteint, et
+ * 22 trades sur 43 coupés par l'invalidation temporelle.
+ *
+ * Règle retenue, celle d'un trader qui sécurise :
+ *   - TP1 = la première liquidité RÉELLE dans la bande [tp1R, 1,6 × tp1R] ;
+ *     à défaut, un palier au multiple du risque (on ne fabrique pas un niveau,
+ *     on assume un multiple) ;
+ *   - TP2 = la première liquidité à au moins tp2R et strictement au-delà de TP1 ;
+ *     à défaut, un multiple du risque au-delà de TP1.
+ */
+function cibles(entree, risque, sens, liquidites, tp1R, tp2R) {
+  const s = sens === 'long' ? 1 : -1;
+  const enR = prix => ((prix - entree) * s) / risque;
+
+  const bande = liquidites
+    .filter(l => { const r = enR(l.prix); return r >= tp1R && r <= tp1R * 1.6; })
+    .sort((a, b) => enR(a.prix) - enR(b.prix));
+  const tp1 = bande.length ? bande[0].prix : entree + s * risque * tp1R;
+
+  const auDela = liquidites
+    .filter(l => enR(l.prix) >= Math.max(tp2R, enR(tp1) + 0.5))
+    .sort((a, b) => enR(a.prix) - enR(b.prix));
+  const tp2 = auDela.length ? auDela[0].prix : entree + s * risque * Math.max(tp2R, enR(tp1) + 0.5);
+
+  return {
+    tp1, tp2,
+    sourceTP1: bande.length ? 'liquidité' : 'multiple du risque',
+    sourceTP2: auDela.length ? 'liquidité' : 'multiple du risque',
+    rrTP1: +enR(tp1).toFixed(2),
+    rrTP2: +enR(tp2).toFixed(2)
+  };
+}
+
+/**
  * Construit 0 à 2 scénarios pour un instrument, à partir des bougies réelles.
  * @returns {{scenarios: Array, motif: string|null}}
  */
@@ -68,6 +106,11 @@ function generer(candles, meta = {}, options = {}) {
     .map(l => ({ prix: Number(l.prix ?? l.price ?? l.level), type: l.type }))
     .filter(l => Number.isFinite(l.prix));
 
+  // Multiples de sécurisation : réglables par les seuils appris (tp1_r / tp2_r).
+  // Les défauts sont ceux du plan de gestion — une seule doctrine dans le dépôt.
+  const tp1R = Number.isFinite(Number(options.tp1R)) && Number(options.tp1R) > 0 ? Number(options.tp1R) : 1.27;
+  const tp2R = Number.isFinite(Number(options.tp2R)) && Number(options.tp2R) > 0 ? Number(options.tp2R) : 2.0;
+
   const scenarios = [];
   const motifParts = [];
 
@@ -83,9 +126,9 @@ function generer(candles, meta = {}, options = {}) {
     const risque = entree - stop;
     if (!(risque > 0)) continue;
 
-    const cibles = liquidites.filter(l => l.prix > entree + risque * 1.2).sort((a, b) => a.prix - b.prix);
-    const tp1 = cibles[0] ? cibles[0].prix : entree + risque * 2;
-    const tp2 = cibles[1] ? cibles[1].prix : entree + risque * 3;
+    const ob = cibles(entree, risque, 'long', liquidites, tp1R, tp2R);
+    const tp1 = ob.tp1;
+    const tp2 = ob.tp2;
 
     scenarios.push({
       instrument: meta.symbol || null,
@@ -104,9 +147,7 @@ function generer(candles, meta = {}, options = {}) {
         `${z.origine} haussier ${+z.low.toFixed(4)}–${+z.high.toFixed(4)} à ${((prix - z.high) / atr).toFixed(2)} ATR sous le prix`,
         `zone ${String(etat.etat).toLowerCase()} (${etat.preuves[0] || 'sans détail'})`,
         `ATR(14) = ${atr.toFixed(4)} · stop sous la zone`,
-        cibles[0]
-          ? `objectif = liquidité ${cibles[0].type || ''} à ${tp1.toFixed(4)}`
-          : `objectif = ${(2).toFixed(0)} × le risque (aucune liquidité identifiée au-dessus)`
+        `TP1 = ${ob.rrTP1} R (${ob.sourceTP1}) · TP2 = ${ob.rrTP2} R (${ob.sourceTP2})`
       ],
       ttlMs: TTL_MS
     });
@@ -127,9 +168,9 @@ function generer(candles, meta = {}, options = {}) {
     const risque = stop - entree;
     if (!(risque > 0)) continue;
 
-    const cibles = liquidites.filter(l => l.prix < entree - risque * 1.2).sort((a, b) => b.prix - a.prix);
-    const tp1 = cibles[0] ? cibles[0].prix : entree - risque * 2;
-    const tp2 = cibles[1] ? cibles[1].prix : entree - risque * 3;
+    const ob = cibles(entree, risque, 'short', liquidites, tp1R, tp2R);
+    const tp1 = ob.tp1;
+    const tp2 = ob.tp2;
 
     scenarios.push({
       instrument: meta.symbol || null,
@@ -147,9 +188,7 @@ function generer(candles, meta = {}, options = {}) {
         `${z.origine} baissier ${+z.low.toFixed(4)}–${+z.high.toFixed(4)} à ${((z.low - prix) / atr).toFixed(2)} ATR au-dessus du prix`,
         `zone ${String(etat.etat).toLowerCase()} (${etat.preuves[0] || 'sans détail'})`,
         `ATR(14) = ${atr.toFixed(4)} · stop au-dessus de la zone`,
-        cibles[0]
-          ? `objectif = liquidité ${cibles[0].type || ''} à ${tp1.toFixed(4)}`
-          : 'objectif = 2 × le risque (aucune liquidité identifiée en dessous)'
+        `TP1 = ${ob.rrTP1} R (${ob.sourceTP1}) · TP2 = ${ob.rrTP2} R (${ob.sourceTP2})`
       ],
       ttlMs: TTL_MS
     });
@@ -180,8 +219,9 @@ function generer(candles, meta = {}, options = {}) {
     atr: +atr.toFixed(6),
     prix: +prix.toFixed(6),
     tendance: tendance || 'inconnue',
-    alignement: alignement || null
+    alignement: alignement || null,
+    ciblesR: { tp1R, tp2R }
   };
 }
 
-module.exports = { generer, TTL_MS };
+module.exports = { generer, cibles, TTL_MS };

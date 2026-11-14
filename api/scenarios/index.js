@@ -30,7 +30,21 @@ async function genererEtEnregistrer(candles, meta = {}, options = {}) {
 }
 
 /** Alignement H4/D1 pour un instrument, à partir de son historique H1. */
-async function alignement(symbol, market, count = 800) {
+const CACHE_ALIGNEMENT = new Map();          // symbole → { at, valeur }
+const TTL_ALIGNEMENT_MS = 5 * 60 * 1000;     // le H4 ne change pas toutes les 10 s
+
+async function alignement(symbol, market, count = 800, options = {}) {
+  const cle = String(symbol || '').toUpperCase();
+  const cache = CACHE_ALIGNEMENT.get(cle);
+  if (!options.force && cache && (Date.now() - cache.at) < TTL_ALIGNEMENT_MS) {
+    return { ...cache.valeur, cache: true };
+  }
+  const valeur = await calculerAlignement(symbol, market, count);
+  CACHE_ALIGNEMENT.set(cle, { at: Date.now(), valeur });
+  return valeur;
+}
+
+async function calculerAlignement(symbol, market, count = 800) {
   const Alignement = require('../regime/alignment-htf');
   try {
     const { candles } = await market.getCandles(symbol, '1h', count);
