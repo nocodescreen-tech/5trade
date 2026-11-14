@@ -25,13 +25,19 @@ const isCandle = c => c && Number.isFinite(c.h) && Number.isFinite(c.l) && Numbe
  * par le bruit normal du marché.
  */
 function atr(candles, period = 14) {
-  if (candles.length < 2) return null;
+  // Un ATR(14) se calcule sur 14 VRAIS intervalles, donc au moins 15 bougies.
+  // L'ancienne version rabotait la période (`Math.min(period, trs.length)`) :
+  // avec 3 bougies elle rendait un « ATR 14 » qui était en réalité un ATR de 2
+  // intervalles, sans le dire. Les stops se retrouvaient dimensionnés sur deux
+  // bougies, et le régime comparé à une référence qui n'existait pas.
+  // Mieux vaut ne rien rendre : les appelants ont tous un chemin de repli.
+  if (!Array.isArray(candles) || candles.length < period + 1) return null;
   const trs = [];
   for (let i = 1; i < candles.length; i++) {
     const p = candles[i - 1], c = candles[i];
     trs.push(Math.max(c.h - c.l, Math.abs(c.h - p.c), Math.abs(c.l - p.c)));
   }
-  const n = Math.min(period, trs.length);
+  const n = period;
   // Amorce : moyenne simple des n premiers TR (c'est ainsi que Wilder démarre).
   let valeur = trs.slice(0, n).reduce((a, x) => a + x, 0) / n;
   // Puis lissage exponentiel de Wilder sur le reste.

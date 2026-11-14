@@ -4279,6 +4279,15 @@ function tinyPng(W = 64, H = 40) {
         St.atr(serie, 14) === P.atr(serie, 14),
         `${St.atr(serie, 14)} vs ${P.atr(serie, 14)}`);
 
+      // Un ATR(14) exige 15 bougies. En dessous, on ne rend RIEN plutôt qu'un
+      // ATR de période plus courte présenté comme un ATR 14.
+      const court = Array.from({ length: 8 }, (_, i) => bougie(i * 60000, 100, 101 + i, 99, 100));
+      ok('un ATR(14) sur 8 bougies est refusé, pas raboté',
+        St.atr(court, 14) === null, String(St.atr(court, 14)));
+      const juste = Array.from({ length: 15 }, (_, i) => bougie(i * 60000, 100, 101 + i, 99, 100 + i));
+      ok('un ATR(14) sur 15 bougies est calculé (14 intervalles réels)',
+        Number.isFinite(St.atr(juste, 14)) && St.atr(juste, 14) > 0, String(St.atr(juste, 14)));
+
       // 2. MACD : la ligne est alignée sur les MÊMES bougies (pas de décalage
       //    de 14 bougies entre EMA12 et EMA26).
       const ema12 = I.ema(serie, 12), ema26 = I.ema(serie, 26);
