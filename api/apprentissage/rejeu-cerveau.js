@@ -69,8 +69,17 @@ function rejouer({ instrument, h1, m5, seuils = {}, options = {} } = {}) {
   const rejets = { hors_killzone: 0, non_declenche: 0, chevauchement: 0, sans_scenario: 0 };
   let derniereSortieT = 0;
 
+  // Les deux séries sont triées : on avance un curseur au lieu de filtrer 20 000
+  // bougies M5 à chaque bougie H1 (6 000 × 20 000 = 120 M de comparaisons par
+  // instrument — 7 minutes pour une paire, et la boucle de nuit en aurait fait 21).
+  let curseurM5 = 0;
+  // Fenêtre d'analyse : la structure se lit sur un historique LOCAL (swings, FVG,
+  // order blocks, liquidité). Analyser 6 000 bougies à chaque pas coûtait 60 % du
+  // temps de rejeu pour des niveaux que personne ne regarde à 250 jours de distance.
+  const fenetreH1 = Number(options.fenetreH1) > 0 ? Math.round(Number(options.fenetreH1)) : 600;
+
   for (let i = 60; i < serieH1.length; i++) {
-    const tranche = serieH1.slice(0, i + 1);
+    const tranche = serieH1.slice(Math.max(0, i + 1 - fenetreH1), i + 1);
     const bougie = serieH1[i];
 
     let generation;
@@ -105,21 +114,30 @@ function rejouer({ instrument, h1, m5, seuils = {}, options = {} } = {}) {
       // Fenêtre de validité du plan : TTL du scénario, borné par l'horizon.
       const ttl = Number(scenario.ttlMs) > 0 ? Number(scenario.ttlMs) : 3 * 3600 * 1000;
       const finValidite = bougie.t + Math.min(ttl, horizonMs);
-      const fenetre = serieM5.filter(c => c.t > bougie.t && c.t <= finValidite);
-      if (!fenetre.length) { rejets.non_declenche++; continue; }
 
-      // Déclenchement : le prix ATTEINT le niveau (ordre limite, pas de chasse).
-      const idx = fenetre.findIndex(c => (long ? c.l <= entree : c.h >= entree));
+      // Curseur monotone : les bougies M5 antérieures à cette H1 sont derrière nous.
+      while (curseurM5 < serieM5.length && serieM5[curseurM5].t <= bougie.t) curseurM5++;
+      let finFenetre = curseurM5;
+      while (finFenetre < serieM5.length && serieM5[finFenetre].t <= finValidite) finFenetre++;
+
+      let idx = -1;
+      for (let k = curseurM5; k < finFenetre; k++) {
+        if (long ? serieM5[k].l <= entree : serieM5[k].h >= entree) { idx = k; break; }
+      }
       if (idx < 0) { rejets.non_declenche++; continue; }
-      const tEntree = fenetre[idx].t;
+      const tEntree = serieM5[idx].t;
 
       if (tEntree <= derniereSortieT) { rejets.chevauchement++; continue; }
 
       const kz = Killzones.pour(tEntree);
       if (killzoneObligatoire && !kz) { rejets.hors_killzone++; continue; }
 
+      let finSuite = idx;
+      const limiteSuite = tEntree + horizonMs;
+      while (finSuite < serieM5.length && serieM5[finSuite].t <= limiteSuite) finSuite++;
+
       const sim = simulerGestion({
-        suite: serieM5.filter(c => c.t >= tEntree && c.t <= tEntree + horizonMs),
+        suite: serieM5.slice(idx, finSuite),
         long, entree, stop0, tp1: Number(scenario.tp1), tp2: Number(scenario.tp2),
         atr, seuils, tEntree
       });
