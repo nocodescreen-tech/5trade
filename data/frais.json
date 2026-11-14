@@ -1,7 +1,13 @@
 {
+  "_note": "Compte CFD STANDARD — levier 1:1000, commission 0, spread minimum 0,1 pip. Le spread est exprimé en UNITÉS DE PRIX (convention de core/frais.js) : 0,1 pip = 0,00001 sur une paire à 5 décimales, 0,001 sur une paire en JPY. ATTENTION : ce sont des PLANCHERS, pas des moyennes — le spread réel s'élargit en session chargée et sur les annonces. Sur l'or, 0,1 pip = 0,01 $ alors que le spread observé chez Deriv tourne autour de 0,30 $ : la valeur ci-dessous rend le coût de l'or quasi invisible, à remplacer par le spread constaté dès qu'il est relevé.",
   "defaut": 0,
   "commissionDefaut": 0,
   "glissement": 0,
-  "parSymbole": {},
-  "partMax": 0.15
+  "partMax": 0.15,
+  "parSymbole": {
+    "frxEURUSD": { "spread": 0.00001, "commissionPct": 0, "glissement": 0 },
+    "frxGBPUSD": { "spread": 0.00001, "commissionPct": 0, "glissement": 0 },
+    "frxUSDJPY": { "spread": 0.001, "commissionPct": 0, "glissement": 0 },
+    "frxXAUUSD": { "spread": 0.01, "commissionPct": 0, "glissement": 0 }
+  }
 }
