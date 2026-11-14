@@ -54,6 +54,7 @@ function seuilsParDefaut() {
     tp2_atr: 2.0,
     trailing_atr: 1.5,
     invalidation_temporelle_minutes: 180,
+    invalidation_seuil_r: 0.3,          // progrès en R exigé pour ne pas couper au délai
     force_minimale: 0.35,
     'biais.htf_required_count': 2,
     'killzones.asia.actif_en_range': true,
@@ -118,8 +119,134 @@ async function proposer(parametre, valeurCandidate) {
 }
 
 /**
- * Applique un ajustement promu (après shadow run réussi).
+ * Ajustement d'un paramètre BASCULE (booléen) : couper une killzone, activer un
+ * filtre. Le garde-fou en pourcentage ne s'applique pas à un booléen — le vrai
+ * risque est de couper une séance sur trois trades. On exige donc le même
+ * échantillon minimum que pour un seuil numérique, et on passe par un shadow
+ * run de 3 jours avant promotion.
+ *
+ * @param {string} parametre
+ * @param {boolean} valeurCandidate
+ * @param {{trades:number}} [preuve]
  */
+async function proposerBascule(parametre, valeurCandidate, preuve = {}) {
+  const seuils = await charger();
+  if (!(parametre in seuils)) {
+    return { statut: 'rejete', raison: `paramètre inconnu : ${parametre}` };
+  }
+  if (typeof seuils[parametre] !== 'boolean') {
+    return { statut: 'rejete', raison: `${parametre} n’est pas une bascule (valeur actuelle : ${JSON.stringify(seuils[parametre])})` };
+  }
+  if (typeof valeurCandidate !== 'boolean') {
+    return { statut: 'rejete', raison: 'la valeur candidate doit être true ou false' };
+  }
+  if (seuils[parametre] === valeurCandidate) {
+    return { statut: 'rejete', raison: `${parametre} vaut déjà ${valeurCandidate}` };
+  }
+  const trades = Number(preuve.trades) || 0;
+  if (trades < LIMITES.tradesMinPourAjustement) {
+    return {
+      statut: 'reporte',
+      raison: `${trades} trade(s) < ${LIMITES.tradesMinPourAjustement} requis : pas d’ajustement sur un échantillon court`
+    };
+  }
+  const entree = await enregistrerShadow(parametre, valeurCandidate, preuve);
+  return {
+    statut: 'shadow_3j',
+    valeur: valeurCandidate,
+    applicable_en: LIMITES.joursShadowRunAvantPromotion * 24 * 3600 * 1000,
+    shadow: entree,
+    raison: `${trades} trades, shadow run ${LIMITES.joursShadowRunAvantPromotion}j avant promotion`
+  };
+}
+
+// ── Shadow runs : c'est ce qui manquait ──────────────────────────────────────
+// `proposer()` renvoyait « shadow_3j » et rien n'enregistrait la candidature :
+// le statut était un mot, pas un état. Rien n'était jamais promu, donc les
+// seuils ne bougeaient jamais — l'apprentissage affichait un mécanisme éteint.
+const SHADOW_FILE = () => path.join(process.env.DATA_DIR || './data', 'apprentissage', 'shadow.json');
+
+async function lireShadow() {
+  try {
+    const j = JSON.parse(await fs.readFile(SHADOW_FILE(), 'utf8'));
+    return Array.isArray(j.candidats) ? j : { candidats: [] };
+  } catch {
+    return { candidats: [] };
+  }
+}
+
+async function ecrireShadow(doc) {
+  await fs.mkdir(path.dirname(SHADOW_FILE()), { recursive: true });
+  await fs.writeFile(SHADOW_FILE(), JSON.stringify(doc, null, 2));
+  return doc;
+}
+
+async function enregistrerShadow(parametre, valeur, preuve = {}) {
+  const doc = await lireShadow();
+  const maintenant = Date.now();
+  const entree = {
+    id: `sh_${parametre}_${maintenant}`,
+    parametre,
+    valeur,
+    decide_at: new Date(maintenant).toISOString(),
+    applicable_at: new Date(maintenant + LIMITES.joursShadowRunAvantPromotion * 24 * 3600 * 1000).toISOString(),
+    preuve,
+    statut: 'shadow'
+  };
+  doc.candidats.push(entree);
+  await ecrireShadow(doc);
+  return entree;
+}
+
+/** Liste des shadow runs (pour l'écran et le journal). */
+async function shadowEnCours() {
+  const doc = await lireShadow();
+  const maintenant = Date.now();
+  return doc.candidats.filter(c => c.statut === 'shadow' && Date.parse(c.applicable_at) > maintenant);
+}
+
+/**
+ * Promeut les candidatures arrivées à échéance SI la période a été positive.
+ * Sinon, elle est abandonnée avec son motif — un shadow run qui échoue doit
+ * laisser une trace, pas disparaître.
+ *
+ * @param {{expectancyR:number, trades:number}} bilan bilan de la période écoulée
+ */
+async function promouvoirEchues(bilan = {}) {
+  const doc = await lireShadow();
+  const maintenant = Date.now();
+  const expectancy = Number(bilan.expectancyR);
+  const trades = Number(bilan.trades) || 0;
+  const decisions = [];
+
+  for (const c of doc.candidats) {
+    if (c.statut !== 'shadow' || Date.parse(c.applicable_at) > maintenant) continue;
+
+    if (trades < LIMITES.tradesMinPourAjustement) {
+      c.statut = 'reporte_shadow';
+      c.raison = `échéance atteinte mais ${trades} trade(s) < ${LIMITES.tradesMinPourAjustement} : shadow prolongé`;
+      decisions.push({ parametre: c.parametre, decision: c.statut, raison: c.raison });
+      continue;
+    }
+    if (Number.isFinite(expectancy) && expectancy < LIMITES.expectancyMin14j) {
+      c.statut = 'abandonnee';
+      c.raison = `espérance ${expectancy} R < ${LIMITES.expectancyMin14j} R : candidature abandonnée`;
+      decisions.push({ parametre: c.parametre, decision: c.statut, raison: c.raison });
+      continue;
+    }
+
+    const r = await appliquer(c.parametre, c.valeur);
+    c.statut = 'promue';
+    c.promue_at = new Date().toISOString();
+    c.raison = `promue (espérance ${Number.isFinite(expectancy) ? expectancy : 'n/a'} R sur ${trades} trades)`;
+    decisions.push({ parametre: c.parametre, decision: 'promue', ancien: r.ancien, nouveau: r.nouveau, raison: c.raison });
+  }
+
+  await ecrireShadow(doc);
+  return decisions;
+}
+
+
 async function appliquer(parametre, nouvelleValeur) {
   const seuils = await charger();
   const ancien = seuils[parametre];
@@ -139,4 +266,8 @@ async function retourArriere14j(snapshot14j) {
   return { ok: true, raison: 'retour aux seuils d\'il y a 14j' };
 }
 
-module.exports = { charger, proposer, appliquer, retourArriere14j, LIMITES, seuilsParDefaut };
+module.exports = {
+  charger, proposer, proposerBascule, appliquer, retourArriere14j,
+  promouvoirEchues, shadowEnCours, enregistrerShadow,
+  LIMITES, seuilsParDefaut
+};

@@ -570,10 +570,12 @@ const PROCHAINE_BOUCLE_MS = (function () {
   return prochaine - now;
 })();
 setTimeout(() => {
-  Apprentissage.boucleQuotidienne({ market: Market, tradesVeille: [], metrics14j: {} })
+  // Les dépendances ne sont plus des constantes vides : la boucle lit elle-même
+  // les trades réels du journal des signaux et recalcule les métriques 14 j.
+  Apprentissage.boucleQuotidienne({ market: Market })
     .catch(e => console.error('[apprentissage] boucle échouée :', e.message));
   setInterval(() => {
-    Apprentissage.boucleQuotidienne({ market: Market, tradesVeille: [], metrics14j: {} })
+    Apprentissage.boucleQuotidienne({ market: Market })
       .catch(e => console.error('[apprentissage] boucle échouée :', e.message));
   }, 24 * 3600 * 1000).unref();
 }, PROCHAINE_BOUCLE_MS).unref();
@@ -3931,9 +3933,21 @@ app.post('/api/scenarios/generer', requireAuth, async (req, res) => {
     const tf = String(req.body.tf || req.query.tf || '15m').trim();
     if (!symbol) return res.status(400).json({ error: 'symbol requis' });
     const { candles } = await Market.getCandles(symbol, tf, 300);
+    // Alignement H4 + D1 : mesuré sur l'historique H1, pas deviné. Il filtre les
+    // plans contraires à la tendance supérieure (règle intraday).
+    const alignement = await Scenarios.alignement(symbol, Market);
     const r = await Scenarios.genererEtEnregistrer(
-      (candles || []).filter(c => c.closed !== false), { symbol, timeframe: tf });
+      (candles || []).filter(c => c.closed !== false), { symbol, timeframe: tf }, { alignement });
     res.json({ success: true, ...r });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Shadow runs et seuils courants : un mécanisme invisible ne se vérifie pas.
+app.get('/api/apprentissage/shadow', requireAuth, async (req, res) => {
+  try {
+    const Ajusteur = require('./apprentissage/ajusteur-seuils');
+    const [seuils, shadow] = await Promise.all([Ajusteur.charger(), Ajusteur.shadowEnCours()]);
+    res.json({ success: true, seuils, shadow, limites: Ajusteur.LIMITES });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

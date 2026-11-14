@@ -4086,6 +4086,213 @@ function tinyPng(W = 64, H = 40) {
         && /tendance haussière : long seulement/.test(source));
     }
 
+    // ── CERVEAU D'APPRENTISSAGE : une source, un vrai rejeu, une boucle fermée ─
+    // Trois défauts mesurés avant ce bloc :
+    //   1. deux définitions des killzones (7-10 h ici, 8-11 h dans le rejeu) ;
+    //   2. un rejeu qui ne partageait aucun module avec le direct (POC = médiane
+    //      des plus bas, longs seulement, R codés en dur, zéro frais) ;
+    //   3. une boucle nourrie de constantes vides (`tradesVeille: []`,
+    //      `metrics14j: {}`) : rien n'était jamais appris ni promu.
+    {
+      const K = require('./gestion/killzones');
+      ok('killzone : Londres ouvre à 07 h UTC',
+        K.pour(Date.UTC(2026, 0, 5, 7)) === 'london', String(K.pour(Date.UTC(2026, 0, 5, 7))));
+      ok('killzone : 11 h UTC est hors séance',
+        K.pour(Date.UTC(2026, 0, 5, 11)) === null);
+      ok('killzone : 23 h UTC = Asie',
+        K.pour(Date.UTC(2026, 0, 5, 23)) === 'asia');
+      const horsKz = K.autorise(Date.UTC(2026, 0, 5, 11));
+      ok('hors killzone : refus motivé, pas un refus muet',
+        horsKz.ok === false && /hors killzone/.test(horsKz.raison), horsKz.raison);
+      const asiaRange = K.autorise(Date.UTC(2026, 0, 5, 23),
+        { 'killzones.asia.actif_en_range': false }, { regime: 'ranging' });
+      ok('Asie en range : la règle apprise s’applique au vocabulaire réel du détecteur',
+        asiaRange.ok === false && /range/.test(asiaRange.raison), asiaRange.raison);
+
+      // La structure et le rejeu lisent désormais la MÊME source.
+      const St = require('./engine/structure');
+      const plat = Array.from({ length: 40 }, (_, i) => ({
+        t: Date.UTC(2026, 0, 5, 7) + i * 3600000, o: 100, h: 100.2, l: 99.8, c: 100, closed: true
+      }));
+      const sess = St.analyze(plat).sessions;
+      ok('structure.sessions et gestion/killzones ne divergent plus',
+        sess.killZoneId === K.pour(plat[plat.length - 1].t), `${sess.killZoneId} vs ${K.pour(plat[plat.length - 1].t)}`);
+
+      // ── Alignement H4 + D1 ────────────────────────────────────────────────
+      const Al = require('./regime/alignment-htf');
+      const tendance = (sens) => {
+        const out = []; let p = 100;
+        for (let i = 0; i < 720; i++) {
+          const bruit = 0.06 * Math.sin(i / 3);
+          const pas = sens * (0.03 + bruit);
+          const o = p, c = p + pas;
+          out.push({ t: Date.UTC(2026, 0, 1) + i * 3600000, o, h: Math.max(o, c) + 0.05, l: Math.min(o, c) - 0.05, c, closed: true });
+          p = c;
+        }
+        return out;
+      };
+      ok('rééchantillonnage : 720 H1 → 180 blocs H4 et 30 blocs D1',
+        Al.resampler(tendance(1), 4).length === 180 && Al.resampler(tendance(1), 24).length === 30,
+        `${Al.resampler(tendance(1), 4).length} / ${Al.resampler(tendance(1), 24).length}`);
+
+      const haut = Al.aligner({ h1: tendance(1) });
+      const bas = Al.aligner({ h1: tendance(-1) });
+      ok('alignement : un marché qui monte est long en H4 ET en D1',
+        haut.H4 === 'long' && haut.D1 === 'long' && haut.aligne === true, `${haut.H4}/${haut.D1}`);
+      ok('alignement : un marché qui descend est short en H4 ET en D1',
+        bas.H4 === 'short' && bas.D1 === 'short' && bas.aligne === true, `${bas.H4}/${bas.D1}`);
+      ok('alignement : un trade contre H4+D1 est refusé avec son motif',
+        Al.autorise(haut, 'short').ok === false && /contre/.test(Al.autorise(haut, 'short').raison));
+      ok('alignement : historique court = inconnu, jamais inventé',
+        Al.aligner({ h1: tendance(1).slice(0, 60) }).aligne === false);
+
+      // ── Filtre d'alignement dans le générateur ────────────────────────────
+      const Generateur = require('./scenarios/generateur');
+      const bougie = (t, o, h, l, c) => ({ t, o, h, l, c, closed: true });
+      const avecZone = (() => {
+        const c = []; let t = Date.UTC(2026, 0, 1); let p = 100;
+        for (let i = 0; i < 100; i++) {
+          const pas = 0.35 + 0.25 * Math.sin(i / 4);
+          c.push(bougie(t, p, p + pas + 0.18, p - 0.18, p + pas)); t += 3600000; p += pas;
+        }
+        const base = p;
+        c.push(bougie(t, base, base + 0.4, base - 0.1, base + 0.3)); t += 3600000;
+        c.push(bougie(t, base + 0.3, base + 2.2, base + 0.25, base + 2.0)); t += 3600000;
+        c.push(bougie(t, base + 2.0, base + 2.3, base + 1.8, base + 2.1)); t += 3600000;
+        for (let i = 0; i < 8; i++) {
+          const o = c[c.length - 1].c;
+          c.push(bougie(t, o, o + 0.15, o - 0.4, o - 0.25)); t += 3600000;
+        }
+        return c;
+      })();
+      const libre = Generateur.generer(avecZone, { symbol: 'TEST', timeframe: '1h' });
+      ok('générateur : la fixture produit bien un plan long', libre.scenarios.some(s => s.direction === 'long'),
+        `${libre.scenarios.length} scénario(s)`);
+      const contre = Generateur.generer(avecZone, { symbol: 'TEST', timeframe: '1h' },
+        { alignement: { aligne: true, direction: 'short', H4: 'short', D1: 'short' } });
+      ok('générateur : un plan long est écarté contre un alignement short, et le dit',
+        contre.scenarios.length === 0 && /alignement short/.test(contre.motif || ''), contre.motif);
+      ok('générateur : sans alignement fourni, rien n’est filtré en silence',
+        Generateur.generer(avecZone, { symbol: 'TEST', timeframe: '1h' }).alignement === null);
+
+      // ── Rejeu par le cerveau réel ─────────────────────────────────────────
+      const Cerveau = require('./apprentissage/rejeu-cerveau');
+      const fixture = (() => {
+        const H = [], M = [];
+        let t = Date.UTC(2026, 0, 5), p = 100;
+        const bloc = (t0, o, c, n = 12) => {
+          H.push(bougie(t0, o, Math.max(o, c) + 0.18, Math.min(o, c) - 0.18, c));
+          for (let k = 0; k < n; k++) {
+            const a = o + (c - o) * k / n, z = o + (c - o) * (k + 1) / n;
+            M.push(bougie(t0 + k * 300000, a, Math.max(a, z) + 0.06, Math.min(a, z) - 0.06, z));
+          }
+        };
+        for (let i = 0; i < 140; i++) { const pas = 0.35 + 0.25 * Math.sin(i / 4); bloc(t, p, p + pas); t += 3600000; p += pas; }
+        const base = p;
+        bloc(t, base, base + 0.3); t += 3600000;
+        bloc(t, base + 0.3, base + 2.0); t += 3600000;
+        bloc(t, base + 2.0, base + 2.1); t += 3600000;
+        for (let i = 0; i < 20; i++) { const o = p; bloc(t, o, o - 0.25); t += 3600000; p = o - 0.25; }
+        return { H, M };
+      })();
+      const rejeu = Cerveau.rejouer({ instrument: 'frxTEST', h1: fixture.H, m5: fixture.M, seuils: {}, options: { killzoneObligatoire: false } });
+      ok('rejeu cerveau : des trades sont mesurés sur données synthétiques',
+        rejeu.trades.length > 0, `${rejeu.trades.length} trade(s), ${JSON.stringify(rejeu.rejets)}`);
+      ok('rejeu cerveau : chaque trade porte un R net fini et une issue',
+        rejeu.trades.every(t => Number.isFinite(t.r_net) && typeof t.issue === 'string'));
+      ok('rejeu cerveau : l’espérance est celle des trades rejoués',
+        Math.abs(rejeu.metrics.expectancyR
+          - (rejeu.trades.reduce((a, t) => a + t.r_net, 0) / rejeu.trades.length)) < 1e-4);
+      ok('rejeu cerveau : régime, killzone et direction sont tracés par trade',
+        rejeu.trades.every(t => typeof t.regime === 'string' && typeof t.killzone === 'string'
+          && (t.direction === 'long' || t.direction === 'short')));
+      const rejeu2 = Cerveau.rejouer({ instrument: 'frxTEST', h1: fixture.H, m5: fixture.M, seuils: {}, options: { killzoneObligatoire: false } });
+      ok('rejeu cerveau : le même historique donne le même résultat (déterministe)',
+        JSON.stringify(rejeu.metrics) === JSON.stringify(rejeu2.metrics));
+      const court = Cerveau.rejouer({ instrument: 'frxTEST', h1: fixture.H.slice(0, 50), m5: fixture.M, seuils: {} });
+      ok('rejeu cerveau : historique trop court = refus motivé, pas des trades inventés',
+        court.trades.length === 0 && /80/.test(court.motifs[0] || ''), court.motifs[0]);
+
+      // Frais : un rejeu sans coût surestime. Le coût est injectable (ici une
+      // grille de test), mais il est TOUJOURS soustrait du R.
+      const rejeuFrais = Cerveau.rejouer({
+        instrument: 'frxTEST', h1: fixture.H, m5: fixture.M, seuils: {},
+        options: { killzoneObligatoire: false, coutEnR: () => ({ enR: 0.15, applique: true, connu: true }) }
+      });
+      ok('rejeu cerveau : les frais sont déduits du R (net < brut)',
+        rejeuFrais.trades.length > 0 && rejeuFrais.trades.every(t => t.r_net < t.r_brut),
+        `${rejeuFrais.trades[0] && rejeuFrais.trades[0].r_brut} → ${rejeuFrais.trades[0] && rejeuFrais.trades[0].r_net}`);
+      ok('rejeu cerveau : un coût réellement saisi est marqué connu',
+        rejeuFrais.metrics.fraisConnus === true);
+
+      // Candidats : une séance perdante sur un échantillon suffisant propose sa coupure.
+      const cands = Cerveau.candidatsDepuisMetrics({
+        n: 30,
+        parKillzone: { ny: { n: 25, expectancyR: -0.4, winRate: 20 } },
+        parRegime: { ranging: { n: 25, expectancyR: -0.3 } }
+      }, { minTrades: 20 });
+      ok('candidats : une killzone perdante sur 25 trades propose sa désactivation',
+        cands.some(c => c.parametre === 'killzones.ny.actif' && c.valeurCandidate === false));
+      ok('candidats : 5 trades ne suffisent pas à couper une séance',
+        Cerveau.candidatsDepuisMetrics({ n: 5, parKillzone: { ny: { n: 5, expectancyR: -2 } } }, { minTrades: 20 }).length === 0);
+
+      // ── Ajusteur : shadow run enregistré, promu ou abandonné ──────────────
+      const dataAvant = process.env.DATA_DIR;
+      process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'appr-'));
+      delete require.cache[require.resolve('./apprentissage/ajusteur-seuils')];
+      const Aj = require('./apprentissage/ajusteur-seuils');
+      await Aj.charger();
+
+      const trop = await Aj.proposerBascule('killzones.ny.actif', false, { trades: 5 });
+      ok('ajusteur : une bascule sur 5 trades est reportée, pas appliquée',
+        trop.statut === 'reporte', trop.raison);
+      const okBascule = await Aj.proposerBascule('killzones.ny.actif', false, { trades: 25, n: 25 });
+      ok('ajusteur : une bascule sur 25 trades part en shadow run',
+        okBascule.statut === 'shadow_3j', okBascule.raison);
+      const enCours = await Aj.shadowEnCours();
+      ok('ajusteur : la candidature est réellement enregistrée (un statut n’est pas un état)',
+        enCours.some(c => c.parametre === 'killzones.ny.actif'));
+
+      // Échéance forcée dans le passé → promotion si le bilan est positif.
+      const shadowDoc = JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'apprentissage', 'shadow.json'), 'utf8'));
+      for (const c of shadowDoc.candidats) c.applicable_at = new Date(Date.now() - 1000).toISOString();
+      fs.writeFileSync(path.join(process.env.DATA_DIR, 'apprentissage', 'shadow.json'), JSON.stringify(shadowDoc, null, 2));
+      const promues = await Aj.promouvoirEchues({ expectancyR: 0.35, trades: 25 });
+      const seuilsApres = await Aj.charger();
+      ok('ajusteur : un shadow échu et positif est promu dans les seuils',
+        promues.some(p => p.decision === 'promue') && seuilsApres['killzones.ny.actif'] === false,
+        JSON.stringify(promues));
+
+      // Bilan négatif → abandon, jamais promotion.
+      await Aj.proposerBascule('killzones.london.actif', false, { trades: 25, n: 25 });
+      const doc2 = JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'apprentissage', 'shadow.json'), 'utf8'));
+      for (const c of doc2.candidats) if (c.statut === 'shadow') c.applicable_at = new Date(Date.now() - 1000).toISOString();
+      fs.writeFileSync(path.join(process.env.DATA_DIR, 'apprentissage', 'shadow.json'), JSON.stringify(doc2, null, 2));
+      const bilanNegatif = await Aj.promouvoirEchues({ expectancyR: -0.2, trades: 25 });
+      const seuilsNeg = await Aj.charger();
+      ok('ajusteur : un shadow déficitaire est abandonné et laisse une trace',
+        bilanNegatif.some(p => p.decision === 'abandonnee')
+        && seuilsNeg['killzones.london.actif'] === true, JSON.stringify(bilanNegatif));
+
+      // ── Boucle quotidienne : plus de constantes vides ─────────────────────
+      const Appr = require('./apprentissage');
+      const boucle = await Appr.boucleQuotidienne({ market: null });
+      ok('boucle quotidienne : sans marché, le rejeu est refusé avec son motif (pas de chiffres inventés)',
+        Array.isArray(boucle.rejeux) && boucle.rejeux.every(r => r.trades.length === 0 && r.motifs.length));
+      ok('boucle quotidienne : le bilan expose ses sources et son absence de frais connus',
+        boucle.bilan && boucle.bilan.n === 0 && boucle.bilan.fraisConnus === false);
+      const journalFichier = path.join(process.env.DATA_DIR, 'apprentissage', `journal-${new Date().toISOString().slice(0, 10)}.md`);
+      ok('boucle quotidienne : le journal est bien publié sur disque',
+        fs.existsSync(journalFichier) && /Expectancy/.test(fs.readFileSync(journalFichier, 'utf8')));
+      const srcBoucle = fs.readFileSync(path.join(__dirname, 'apprentissage', 'index.js'), 'utf8');
+      ok('boucle quotidienne : plus aucun `tradesVeille: []` ni `metrics14j: {}` en dur côté serveur',
+        !/tradesVeille:\s*\[\]/.test(fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8'))
+        && /tradesDeLaJournee/.test(srcBoucle) && /metricsDepuisJournal/.test(srcBoucle));
+
+      process.env.DATA_DIR = dataAvant;
+      delete require.cache[require.resolve('./apprentissage/ajusteur-seuils')];
+    }
+
     // ── CHAT : historique persistant ───────────────────────────────────────
     // Le chat répondait mais ne se souvenait de rien : fermer l'onglet effaçait
     // la conversation. Chaque échange est désormais écrit et relu.

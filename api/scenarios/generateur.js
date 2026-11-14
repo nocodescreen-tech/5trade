@@ -32,7 +32,7 @@ function zoneUtilisable(z, candles, atr) {
  * Construit 0 à 2 scénarios pour un instrument, à partir des bougies réelles.
  * @returns {{scenarios: Array, motif: string|null}}
  */
-function generer(candles, meta = {}) {
+function generer(candles, meta = {}, options = {}) {
   const serie = (candles || []).filter(c => c && c.closed !== false);
   if (serie.length < 60) return { scenarios: [], motif: `série trop courte (${serie.length} bougies)` };
 
@@ -158,12 +158,29 @@ function generer(candles, meta = {}) {
   if (!autoriseShort) motifParts.push('short écarté — ' + motifTendance);
   else if (!shortZones.length) motifParts.push('aucune zone baissière au-dessus du prix');
 
+  // ── Alignement H4 + D1 ────────────────────────────────────────────────────
+  // Règle intraday : on ne prépare pas un plan contre l'alignement supérieur.
+  // L'alignement est CALCULÉ par l'appelant (il faut de l'historique H1) et
+  // passé ici : le générateur ne devine pas la tendance supérieure à partir de
+  // la série courante. Sans alignement fourni, rien n'est filtré et le motif
+  // le dit — un filtre silencieux serait pire qu'aucun filtre.
+  const alignement = options.alignement || null;
+  if (alignement && alignement.aligne === true) {
+    for (let i = scenarios.length - 1; i >= 0; i--) {
+      if (scenarios[i].direction !== alignement.direction) {
+        motifParts.push(`${scenarios[i].direction} écarté — contre l’alignement ${alignement.direction} (H4 ${alignement.H4} / D1 ${alignement.D1})`);
+        scenarios.splice(i, 1);
+      }
+    }
+  }
+
   return {
     scenarios,
     motif: scenarios.length ? null : (motifParts.join(' · ') || 'aucune configuration exploitable'),
     atr: +atr.toFixed(6),
     prix: +prix.toFixed(6),
-    tendance: tendance || 'inconnue'
+    tendance: tendance || 'inconnue',
+    alignement: alignement || null
   };
 }
 

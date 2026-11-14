@@ -97,7 +97,7 @@ async function generer(trade) {
   if (trade.issue === 'timeout' || (trade.duree_minutes > 180 && !gagnant)) {
     lecons.push(`Trade long sans issue favorable (${trade.duree_minutes} min). Invalidation temporelle tardive.`);
     candidats.push({
-      parametre: 'gestion.invalidation_temporelle_minutes',
+      parametre: 'invalidation_temporelle_minutes',
       ancien: 180,
       nouveau: 150,
       raison: `timeout à ${trade.duree_minutes} min`,

@@ -13,6 +13,8 @@
 /** Bougie attendue : { t, o, h, l, c, v }. */
 const isCandle = c => c && Number.isFinite(c.h) && Number.isFinite(c.l) && Number.isFinite(c.c);
 
+const Killzones = require('../gestion/killzones');
+
 /**
  * Vrai ATR de Wilder — sert à dimensionner SL/TP.
  *
@@ -416,10 +418,14 @@ function sessions(candles) {
   }
   const now = new Date(candles[candles.length - 1].t).getUTCHours();
   const actives = SESSIONS.filter(s => (s.from <= s.to ? now >= s.from && now < s.to : now >= s.from || now < s.to));
+  // La killzone vient de `gestion/killzones` : une seule définition dans le
+  // dépôt. Deux fenêtres différentes (7-10 ici, 8-11 dans le rejeu) faisaient
+  // apprendre le système sur des heures qu'il ne trade pas.
+  const kz = Killzones.pour(candles[candles.length - 1].t);
   return {
     sessionCourante: actives.map(s => s.label).join(' + ') || 'hors séance',
-    killZone: (now >= 7 && now < 10) ? 'Londres (7 h–10 h UTC)'
-      : (now >= 12 && now < 15) ? 'New York (12 h–15 h UTC)' : 'aucune en ce moment',
+    killZone: kz ? Killzones.libelle(kz) : 'aucune en ce moment',
+    killZoneId: kz,
     compteParSession: counts
   };
 }
