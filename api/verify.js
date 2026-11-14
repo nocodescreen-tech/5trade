@@ -4339,6 +4339,75 @@ function tinyPng(W = 64, H = 40) {
       process.env.DATA_DIR = dataAvant;
       delete require.cache[require.resolve('./apprentissage/ajusteur-seuils')];
 
+      // ── Chat : « active <titre> » et confirmation qui survit ──────────────
+      // Symptôme rapporté : « Confirmer ? (oui/non) » puis « oui » → « Aucune
+      // action en attente » en boucle. Trois causes distinctes, toutes réparées :
+      //   1. le routeur ne reconnaissait pas « OB / SMC / déséquilibre » ;
+      //   2. la commande ne savait résoudre qu'un id `strategy_…`, alors que les
+      //      fiches s'appellent `man_…` avec un `title` lisible ;
+      //   3. la file de confirmations vivait en mémoire : un redémarrage l'effaçait.
+      {
+        const RT = require('./chat-crud/routeur');
+        const PS = require('./chat-crud/parseur');
+        const sujet = 'ca =OB 5 étoiles SMC : Entrée sur déséquilibre institutionnel';
+        const action = PS.parser('active ' + sujet);
+        const route = RT.router(action);
+        ok('chat : « active <stratégie SMC> » trouve son domaine',
+          route.domaine === 'strategies' && typeof route.handler === 'function', route.domaine || route.raison);
+        ok('chat : un verbe d’activation route même sans mot-clé dans le sujet',
+          RT.router({ verbe: 'ACTIVE', sujet: 'zzz sans vocabulaire' }).domaine === 'strategies');
+        ok('chat : « supprime le trade 12 » reste dans les trades',
+          RT.router({ verbe: 'SUPPRIME', sujet: 'le trade 12' }).domaine === 'trades');
+
+        const Cmd = require('./chat-crud/commandes/strategies');
+        const fiches = [
+          { id: 'man_abc123', title: 'OB 5 étoiles SMC : Entrée sur déséquilibre institutionnel' },
+          { id: 'man_def456', title: 'Retour à la moyenne' },
+          { id: 'srch_ghi789', title: 'Breakout de Londres' }
+        ];
+        ok('chat : une stratégie se résout par son titre exact',
+          (Cmd.resoudre(fiches[0].title, fiches) || {}).id === 'man_abc123');
+        ok('chat : une stratégie se résout par son identifiant réel (man_…)',
+          (Cmd.resoudre('active man_def456', fiches) || {}).id === 'man_def456');
+        ok('chat : un titre noyé dans une phrase se résout quand il est unique',
+          (Cmd.resoudre('active ca =OB 5 étoiles SMC : Entrée sur déséquilibre institutionnel', fiches) || {}).id === 'man_abc123');
+        const avecJumeau = [...fiches, { id: 'man_xyz000', title: 'Retour à la moyenne pondérée' }];
+        ok('chat : deux titres compatibles ne sont pas départagés au hasard',
+          Cmd.resoudre('la moyenne', avecJumeau) === null,
+          (Cmd.resoudre('la moyenne', avecJumeau) || {}).id || 'null');
+
+        // Confirmation persistée : on simule un redémarrage en rechargeant le module.
+        const fichierConf = path.join(os.tmpdir(), `confirmations-${process.pid}.json`);
+        process.env.CHAT_CONFIRMATIONS_FICHIER = fichierConf;
+        delete require.cache[require.resolve('./chat-crud')];
+        const ChatA = require('./chat-crud');
+        const ctxChat = { utilisateur: 'testeur' };
+        const rep1 = await ChatA.executer('active man_def456', ctxChat);
+        ok('chat : une action sensible demande confirmation',
+          /Confirmation requise/i.test(String(rep1.texte)), String(rep1.texte).split('\n')[0]);
+        ok('chat : la confirmation est écrite sur disque (pas seulement en mémoire)',
+          fs.existsSync(fichierConf) && /man_def456/.test(fs.readFileSync(fichierConf, 'utf8')));
+
+        delete require.cache[require.resolve('./chat-crud')];
+        const ChatB = require('./chat-crud');
+        const rep2 = await ChatB.executer('oui', ctxChat);
+        ok('chat : « oui » exécute l’action même après un rechargement du module',
+          !/Aucune action en attente/i.test(String(rep2.texte)), String(rep2.texte).split('\n')[0]);
+        const rep3 = await ChatB.executer('oui', ctxChat);
+        ok('chat : un second « oui » ne rejoue pas l’action (pas de double exécution)',
+          /Aucune action en attente/i.test(String(rep3.texte)));
+
+        // Péremption : une confirmation vieille de 20 min n'est plus honorée.
+        fs.writeFileSync(fichierConf, JSON.stringify({
+          testeur: { action: { verbe: 'ACTIVE', sujet: 'man_def456' }, timestamp: Date.now() - 20 * 60 * 1000 }
+        }));
+        const rep4 = await ChatB.executer('oui', ctxChat);
+        ok('chat : une confirmation périmée est refusée, pas exécutée à retardement',
+          /Aucune action en attente/i.test(String(rep4.texte)));
+        process.env.CHAT_CONFIRMATIONS_FICHIER = '';
+        delete require.cache[require.resolve('./chat-crud')];
+      }
+
       // ── Écran : ce que le système calcule doit être visible ───────────────
       // Le plan d'attente, l'alignement H4/D1 et les shadow runs existaient côté
       // API mais n'apparaissaient nulle part : un mécanisme invisible ne se

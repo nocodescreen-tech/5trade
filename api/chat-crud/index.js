@@ -158,9 +158,68 @@ async function repondreLibre(message, ctx, raison) {
   }
 }
 
-// File d'attente des confirmations en attente.
-// Clé = empreinte du message original, valeur = action à confirmer.
-const confirmationsEnAttente = new Map();
+// Confirmations en attente — PERSISTÉES, pas en mémoire.
+// Symptôme rapporté : « Confirmer ? (oui/non) » puis « oui » → « Aucune action en
+// attente de confirmation. » à répétition. La file vivait dans une Map : un
+// redémarrage du serveur (ou deux requêtes servies par deux instances) suffisait
+// à perdre l'action proposée. Une action proposée doit survivre à la seconde qui
+// suit, sinon la confirmation est un bouton décoratif.
+const fs = require('fs');
+const path = require('path');
+
+const DUREE_CONFIRMATION_MS = 15 * 60 * 1000;
+const FICHIER_CONFIRMATIONS = () =>
+  process.env.CHAT_CONFIRMATIONS_FICHIER
+  || path.join(process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data'), 'chat-confirmations.json');
+
+function lireConfirmations() {
+  try {
+    const j = JSON.parse(fs.readFileSync(FICHIER_CONFIRMATIONS(), 'utf8'));
+    return j && typeof j === 'object' ? j : {};
+  } catch { return {}; }
+}
+
+function ecrireConfirmations(doc) {
+  const fichier = FICHIER_CONFIRMATIONS();
+  const tmp = `${fichier}.${process.pid}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(fichier), { recursive: true });
+    fs.writeFileSync(tmp, JSON.stringify(doc, null, 2));
+    fs.renameSync(tmp, fichier);          // écriture atomique : jamais de JSON tronqué
+  } catch (e) {
+    // Disque indisponible : on ne bloque pas l'action, on le dit.
+    console.error('[chat] confirmations non persistées :', e.message);
+  }
+}
+
+const cleDe = ctx => ctx.utilisateur || 'anon';
+
+function poserConfirmation(ctx, action) {
+  const doc = lireConfirmations();
+  doc[cleDe(ctx)] = { action, timestamp: Date.now() };
+  ecrireConfirmations(doc);
+}
+
+/** Retire et rend l'action en attente, si elle existe et n'est pas périmée. */
+function prendreConfirmation(ctx) {
+  const doc = lireConfirmations();
+  const cle = cleDe(ctx);
+  const entree = doc[cle];
+  if (!entree) return null;
+  delete doc[cle];
+  ecrireConfirmations(doc);
+  if (!entree.timestamp || Date.now() - entree.timestamp > DUREE_CONFIRMATION_MS) return null;
+  return entree.action || null;
+}
+
+function annulerConfirmation(ctx) {
+  const doc = lireConfirmations();
+  const cle = cleDe(ctx);
+  if (!doc[cle]) return false;
+  delete doc[cle];
+  ecrireConfirmations(doc);
+  return true;
+}
 
 /**
  * @param {string} message   texte brut tapé par l'utilisateur
@@ -179,18 +238,12 @@ async function executer(message, ctx = {}) {
 
   // Confirmation d'une action précédente
   if (/^(oui|ok|confirmer?|yes)$/i.test(message.trim())) {
-    const cle = ctx.utilisateur || 'anon';
-    const enAttente = confirmationsEnAttente.get(cle);
-    if (!enAttente) return { texte: 'Aucune action en attente de confirmation.' };
-    confirmationsEnAttente.delete(cle);
-    return await executerAction(enAttente.action, { ...ctx, confirmed: true });
+    const action = prendreConfirmation(ctx);
+    if (!action) return { texte: 'Aucune action en attente de confirmation.' };
+    return await executerAction(action, { ...ctx, confirmed: true });
   }
   if (/^(non|annuler?|no|cancel)$/i.test(message.trim())) {
-    const cle = ctx.utilisateur || 'anon';
-    if (confirmationsEnAttente.has(cle)) {
-      confirmationsEnAttente.delete(cle);
-      return { texte: 'Action annulée.' };
-    }
+    if (annulerConfirmation(ctx)) return { texte: 'Action annulée.' };
     return { texte: 'Rien à annuler.' };
   }
 
@@ -216,8 +269,7 @@ async function executerAction(action, ctx) {
 
   // Confirmation requise ?
   if (validation.confirmation_requise && !ctx.confirmed) {
-    const cle = ctx.utilisateur || 'anon';
-    confirmationsEnAttente.set(cle, { action });
+    poserConfirmation(ctx, action);
     return {
       texte: Repondeur.formater({
         confirmation_requise: true,
@@ -262,15 +314,18 @@ async function executerAction(action, ctx) {
 }
 
 /**
- * Nettoie les confirmations expirées (à appeler périodiquement).
+ * Purge les confirmations périmées. Elles le sont de toute façon à la lecture ;
+ * cette fonction sert à ne pas laisser traîner un fichier qui grossit.
  */
-function nettoyerConfirmations(maxAgeMs = 5 * 60 * 1000) {
+function nettoyerConfirmations(maxAgeMs = DUREE_CONFIRMATION_MS) {
+  const doc = lireConfirmations();
   const maintenant = Date.now();
-  for (const [cle, val] of confirmationsEnAttente.entries()) {
-    if (val.timestamp && maintenant - val.timestamp > maxAgeMs) {
-      confirmationsEnAttente.delete(cle);
-    }
+  let purgees = 0;
+  for (const [cle, val] of Object.entries(doc)) {
+    if (!val || !val.timestamp || maintenant - val.timestamp > maxAgeMs) { delete doc[cle]; purgees++; }
   }
+  if (purgees) ecrireConfirmations(doc);
+  return purgees;
 }
 
 module.exports = { executer, nettoyerConfirmations };

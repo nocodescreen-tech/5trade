@@ -22,8 +22,13 @@ function detecterDomaine(sujet) {
   if (!sujet) return null;
   const s = sujet.toLowerCase();
 
-  if (/\btrade[s]?\b|position[s]?|tp|stop|issue|r[ée]alis[ée]/i.test(s)) return 'trades';
+  if (/\btrade[s]?\b|position[s]?|\btp\b|\bstop\b|\bissue\b|r[ée]alis[ée]/i.test(s)) return 'trades';
+  // SMC / concepts de structure : « OB 5 étoiles », FVG, order block, liquidité…
+  // Sans eux, « active ca =OB 5 étoiles SMC : Entrée sur déséquilibre
+  // institutionnel » tombait sur un domaine inconnu — la stratégie existait
+  // pourtant en base, avec exactement ce titre.
   if (/strat[ée]gie|momentum|breakout|reversal|trend|price\s*action|retour\s+moyenne/i.test(s)) return 'strategies';
+  if (/\bsmc\b|order\s*block|\bob\b|\bfvg\b|fair\s*value|imbalance|d[ée]s[ée]quilibre|liquidit[ée]|breaker|\b[ée]toiles?\b/i.test(s)) return 'strategies';
   if (/sc[ée]nario|en\s+attente|expir/i.test(s)) return 'scenarios';
   if (/apprenti|appris|journal|post-mortem|walk-forward|shadow/i.test(s)) return 'apprentissage';
   if (/croyance|exception|fait|m[ée]moire|ce que tu sais|comp[ée]tence/i.test(s)) return 'memoire';
@@ -32,6 +37,11 @@ function detecterDomaine(sujet) {
 
   return null;
 }
+
+// Verbes qui n'existent que dans UN domaine : ils suffisent à router quand le
+// sujet ne porte aucun mot-clé. « active <titre de stratégie> » ne peut viser
+// qu'une stratégie — le routeur n'a pas à exiger un vocabulaire particulier.
+const DOMAINE_PAR_VERBE = { ACTIVE: 'strategies', DÉSACTIVE: 'strategies', CRÉE: 'strategies' };
 
 /**
  * @param {{verbe:string, sujet:string, type?:string}} action
@@ -49,7 +59,7 @@ function router(action) {
     return { domaine: 'apprentissage', handler: cmdApprentissage.dernierJournal };
   }
 
-  const domaine = detecterDomaine(action.sujet);
+  const domaine = detecterDomaine(action.sujet) || DOMAINE_PAR_VERBE[action.verbe] || null;
   if (!domaine) {
     return { domaine: 'inconnu', raison: `domaine non reconnu pour « ${action.sujet} »` };
   }
