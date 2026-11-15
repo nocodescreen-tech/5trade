@@ -82,22 +82,34 @@ function absorption(candles) {
   const absorptions = [];
   const deltas = delta(candles);
 
-  // L'absorption se produit quand le prix ne bouge pas malgré un volume élevé
+  // L'absorption se produit quand le prix ne bouge pas malgré un volume élevé.
+  // La comparaison d'origine était `priceRange < avgVolume * 0.001` : une
+  // distance de PRIX comparée à un VOLUME, deux unités sans rapport. Sur l'or
+  // comme sur EURUSD elle ne pouvait jamais être vraie. On compare désormais ce
+  // qui est comparable : l'amplitude de la fenêtre à sa propre amplitude
+  // moyenne, et le volume à sa propre moyenne.
   for (let i = 5; i < candles.length; i++) {
     const recent = candles.slice(i - 5, i + 1);
     const priceRange = Math.max(...recent.map(c => c.h)) - Math.min(...recent.map(c => c.l));
+    const avgRange = recent.reduce((a, c) => a + (c.h - c.l), 0) / recent.length;
     const avgVolume = recent.reduce((a, c) => a + (c.v || 0), 0) / recent.length;
 
-    // Si le range est petit mais le volume élevé = absorption
-    if (priceRange < avgVolume * 0.001 && avgVolume > 0) {
+    // Référence de volume : les 20 bougies précédentes, pas la fenêtre elle-même.
+    const base = candles.slice(Math.max(0, i - 20), i);
+    const volumeRef = base.length ? base.reduce((a, c) => a + (c.v || 0), 0) / base.length : 0;
+
+    const rangeCompresse = avgRange > 0 && priceRange < avgRange * 3;
+    const volumeEleve = volumeRef > 0 ? avgVolume > volumeRef * 1.5 : avgVolume > 0;
+    if (rangeCompresse && volumeEleve) {
       const prix = (candles[i].h + candles[i].l) / 2;
       const type = deltas[i] > 0 ? 'achat' : 'vente';
 
       absorptions.push({
         prix: +prix.toFixed(6),
         type,
-        force: Math.min(avgVolume / 1000, 10),
-        detail: `absorption ${type} à ${prix.toFixed(2)} — range ${priceRange.toFixed(2)} avec volume ${avgVolume.toFixed(0)}`
+        force: volumeRef > 0 ? +Math.min(avgVolume / volumeRef, 10).toFixed(2) : null,
+        detail: `absorption ${type} à ${prix.toFixed(2)} — amplitude ${priceRange.toFixed(4)} `
+          + `avec volume ${avgVolume.toFixed(0)}${volumeRef > 0 ? ` (${(avgVolume / volumeRef).toFixed(1)}× la référence)` : ''}`
       });
     }
   }

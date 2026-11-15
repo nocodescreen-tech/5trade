@@ -78,27 +78,36 @@ function detecter(bougies, options = {}) {
     return { regime: 'UNKNOWN', confiance: 0, mesures: { bougies: closes.length }, classe, seuils: S, raison: 'ATR non calculable : régime non déterminable' };
   }
 
-  const aRef = atr((bougies || []).filter(b => b && b.closed !== false).slice(0, -20), 14) || a;
-  const ratioVolatilite = a / aRef;
+  // ATR de référence : sur les bougies ANCIENNES (sans les 20 dernières). Si
+  // l'historique est trop court pour la calculer, on ne rabat pas sur l'ATR
+  // courant — cela donnait un ratio de 1, donc « jamais volatil ». On rend le
+  // ratio null et le régime le dit.
+  const anciennes = (bougies || []).filter(b => b && b.closed !== false).slice(0, -20);
+  const aRef = anciennes.length > 15 ? atr(anciennes, 14) : null;
+  const ratioVolatilite = Number.isFinite(aRef) && aRef > 0 ? a / aRef : null;
   const eff = efficacite(fenetre);
   const pente = penteNormalisee(fenetre, a);
   const amplitude = (Math.max(...fenetre) - Math.min(...fenetre)) / a;
+
+  // `ratioVolatilite` peut être null (référence non mesurable) : on ne peut plus
+  // appeler .toFixed dessus. Le texte le dit au lieu de casser.
+  const ratioTxt = ratioVolatilite === null ? 'non mesurable' : `${ratioVolatilite.toFixed(2)}×`;
 
   const mesures = {
     bougies: closes.length,
     classe,
     atr: Number(a.toFixed(5)),
-    atrRelatif: Number(ratioVolatilite.toFixed(2)),
+    atrRelatif: ratioVolatilite === null ? null : Number(ratioVolatilite.toFixed(2)),
     efficacite: Number(eff.toFixed(3)),
     pente: Number(pente.toFixed(3)),
     amplitudeAtr: Number(amplitude.toFixed(2))
   };
 
   // Volatilité d'abord : un marché brusque n'est ni tendance ni range stable.
-  if (ratioVolatilite >= S.atrVolatil) {
+  if (ratioVolatilite !== null && ratioVolatilite >= S.atrVolatil) {
     const force = Math.min(1, (ratioVolatilite - S.atrVolatil) / 1.4 + 0.55);
     return { regime: 'volatil', confiance: Number(force.toFixed(2)), mesures, classe, seuils: S,
-      raison: `ATR ${ratioVolatilite.toFixed(2)}× sa référence : mouvements brusques` };
+      raison: `ATR ${ratioTxt} sa référence : mouvements brusques` };
   }
 
   if (eff >= S.efficaciteTendance && Math.abs(pente) >= S.penteTendance) {
@@ -107,7 +116,7 @@ function detecter(bougies, options = {}) {
       raison: `efficacité ${eff.toFixed(2)} et pente ${pente.toFixed(2)} : mouvement directionnel` };
   }
 
-  if (amplitude <= S.rangeEtroit && ratioVolatilite < 1) {
+  if (amplitude <= S.rangeEtroit && ratioVolatilite !== null && ratioVolatilite < 1) {
     return { regime: 'faible volatilite', confiance: 0.6, mesures, classe, seuils: S,
       raison: `amplitude ${amplitude.toFixed(2)} ATR et volatilité en baisse : marché étroit` };
   }
@@ -120,7 +129,7 @@ function detecter(bougies, options = {}) {
 
   // Signal mixte : on ne tranche pas.
   return { regime: 'UNKNOWN', confiance: Number(Math.min(0.45, eff).toFixed(2)), mesures, classe, seuils: S,
-    raison: `mesures contradictoires (efficacité ${eff.toFixed(2)}, pente ${pente.toFixed(2)}, volatilité ${ratioVolatilite.toFixed(2)}) : régime non tranchable` };
+    raison: `mesures contradictoires (efficacité ${eff.toFixed(2)}, pente ${pente.toFixed(2)}, volatilité ${ratioTxt}) : régime non tranchable` };
 }
 
 module.exports = { detecter, SEUILS, atr, efficacite };

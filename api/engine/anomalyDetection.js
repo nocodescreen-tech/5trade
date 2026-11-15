@@ -54,7 +54,9 @@ function anomaliesVolume(candles) {
   const anomalies = [];
   const volumes = candles.map(c => c.v || 0);
   const avgVolume = volumes.reduce((a, b) => a + b, 0) / volumes.length;
-  const stdVolume = Math.sqrt(volumes.reduce((a, v) => a + (v - avgVolume) ** 2, 0) / volumes.length);
+  const stdVolume = volumes.length > 1
+    ? Math.sqrt(volumes.reduce((a, v) => a + (v - avgVolume) ** 2, 0) / (volumes.length - 1))
+    : 0;
 
   for (let i = 0; i < candles.length; i++) {
     const v = candles[i].v || 0;

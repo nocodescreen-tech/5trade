@@ -12,7 +12,17 @@ function exploitables(trades) {
   return (trades || [])
     .filter(t => t && Number.isFinite(Number(t.r)))
     .map(t => ({ ...t, r: Number(t.r), at: t.at || t.closAt || t.emissionAt || null }))
-    .sort((a, b) => (new Date(a.at || 0) - new Date(b.at || 0)));
+    // Un trade sans date n'est pas « le 1er janvier 1970 » : il n'a pas de place
+    // dans l'ordre. On le met en fin de liste, sans inventer d'horodatage.
+    .sort((a, b) => {
+      const ta = a.at ? Date.parse(a.at) : NaN;
+      const tb = b.at ? Date.parse(b.at) : NaN;
+      const va = Number.isFinite(ta), vb = Number.isFinite(tb);
+      if (!va && !vb) return 0;
+      if (!va) return 1;
+      if (!vb) return -1;
+      return ta - tb;
+    });
 }
 
 /**

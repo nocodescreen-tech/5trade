@@ -13,6 +13,7 @@
  */
 
 const { TF_MS } = require('../sources/market');
+const ATR = require('../atr-unifie');
 
 /**
  * Détecte le range asiatique (0h – 8h UTC).
@@ -121,11 +122,21 @@ function evaluerQualite(lb, candles) {
   facteurs.force = Math.min(lb.force / 3, 30);
 
   // 2. Taille du range (0-20 points)
-  // Un range trop étroit = faux signal, un range trop large = moins fiable
-  if (range) {
-    const atr = 100; // approximation
-    const rangeAtr = range.range / atr;
-    facteurs.tailRange = rangeAtr > 0.5 && rangeAtr < 3 ? 20 : 10;
+  // Un range trop étroit = faux signal, un range trop large = moins fiable.
+  // L'ATR était écrit `const atr = 100; // approximation` : pour l'or (ATR ≈ 3,5)
+  // comme pour EURUSD (ATR ≈ 0,001), le ratio range/ATR ne voulait plus rien
+  // dire. On mesure l'ATR réel de la série fournie.
+  if (range && range.nbBougies >= 5) {
+    const lot = candles.filter(c => c && c.closed !== false);
+    const atrReel = ATR.atr(lot, 14);
+    if (Number.isFinite(atrReel) && atrReel > 0) {
+      const rangeAtr = range.range / atrReel;
+      facteurs.tailRange = rangeAtr > 0.5 && rangeAtr < 3 ? 20 : 10;
+      facteurs.rangeAtr = +rangeAtr.toFixed(2);
+    } else {
+      facteurs.tailRange = 10;
+      facteurs.noteRange = 'ATR indisponible : taille du range non notée';
+    }
   } else {
     facteurs.tailRange = 10;
   }

@@ -659,7 +659,10 @@ function tinyPng(W = 64, H = 40) {
         { symbol: 'A', tf: '1m', provider: 'x' }, { symbol: 'B' }] }).marches.length === 1);
 
     const envois = [];
-    Al.update({ actif: false, email: 'a@b.co', marches: [{ symbol: 'R_75', tf: '15m', provider: 'test' }] });
+    // Symbole RÉEL dans la fixture : les indices synthétiques sont désormais
+    // refusés par la surveillance (RNG sans avantage possible), et le test doit
+    // prouver l'envoi d'un signal, pas la tolérance aux synthétiques.
+    Al.update({ actif: false, email: 'a@b.co', marches: [{ symbol: 'frxXAUUSD', tf: '15m', provider: 'test' }] });
     Al.start({ market: faux, signals: Sig, sendMail: async m => envois.push(m), labelOf: () => 'test',
       DecisionEngine: fauxDE });
     let rr = await Al.verifier(false);
@@ -4477,6 +4480,99 @@ function tinyPng(W = 64, H = 40) {
           r.mesures.positionsRisqueInconnu === 1);
       }
 
+      // ── Troisième passe : vérifier les affirmations avant de les croire ──
+      {
+        const Inst = require('./core/instruments');
+        const j = Inst.jambes('frxXAUUSD');
+        ok('instruments : les deux jambes d’un symbole Deriv sont lues correctement',
+          j[0] === 'XAU' && j[1] === 'USD', JSON.stringify(j));
+        ok('instruments : une devise n’est plus une tranche de 3 caractères',
+          Inst.deviseDe('frxXAUUSD') === 'XAU' && Inst.deviseDe('R_75') === 'R_75'
+          && Inst.deviseDe('BTCUSDT') === 'BTC',
+          `${Inst.deviseDe('frxXAUUSD')} / ${Inst.deviseDe('R_75')} / ${Inst.deviseDe('BTCUSDT')}`);
+
+        const CS = require('./engine/currencyStrength');
+        const hausse = Array.from({ length: 25 }, (_, i) => ({
+          t: i * 60000, o: 100 + i * 0.04, h: 100.05 + i * 0.04, l: 99.95 + i * 0.04, c: 100 + i * 0.04, closed: true
+        }));
+        const forces = CS.forceDevises({ frxXAUUSD: hausse }, 20);
+        ok('force des devises : l’or n’est plus exclu du calcul',
+          Number.isFinite(forces.XAU) && forces.XAU !== 0 && forces.FRX === undefined,
+          `XAU=${forces.XAU} FRX=${forces.FRX}`);
+        // La sortie est normalisée sur ±100 : c'est là que se voit la
+        // proportionnalité entre deux paires, pas l'unité interne du cumul.
+        const deuxPaires = CS.forceDevises({ frxXAUUSD: hausse, frxEURUSD: hausse }, 20);
+        const sommeForces = Object.values(deuxPaires).reduce((a, v) => a + v, 0);
+        ok('force des devises : la somme des forces reste nulle (jeu à somme nulle)',
+          Math.abs(sommeForces) < 1e-9, `somme=${sommeForces} · XAU=${deuxPaires.XAU} USD=${deuxPaires.USD}`);
+
+        const Corr = require('./engine/correlation');
+        ok('corrélation : une série constante n’est pas « corrélation nulle »',
+          Corr.pearson([1, 1, 1, 1], [1, 2, 3, 4]) === null);
+        ok('corrélation : deux séries proportionnelles valent bien 1',
+          Math.abs(Corr.pearson([1, 2, 3, 4], [2, 4, 6, 8]) - 1) < 1e-9);
+
+        const DD = require('./risk/drawdownProtection');
+        const apresDeuxGains = DD.ajusterRisque({
+          trades: [{ result: 'win' }, { result: 'win' }, { result: 'loss' }], drawdownPct: 0, risqueNormalPct: 1
+        });
+        ok('drawdown : deux gains consécutifs rétablissent le risque normal',
+          apresDeuxGains.niveau === 'normal' && apresDeuxGains.risquePct === 1, JSON.stringify(apresDeuxGains));
+
+        // Alignement des indicateurs : l'affirmation « RSI/MACD décalés de 14/25 »
+        // se vérifie en comparant la DERNIÈRE valeur au calcul mené sur la fin.
+        const Ind = require('./engine/indicators');
+        const serieInd = Array.from({ length: 80 }, (_, i) => ({
+          t: i * 60000, o: 100 + Math.sin(i / 5) * 2, h: 101 + Math.sin(i / 5) * 2,
+          l: 99 + Math.sin(i / 5) * 2, c: 100 + Math.sin(i / 5) * 2, closed: true
+        }));
+        const rsiSerie = Ind.rsi(serieInd, 14);
+        const rsiTronque = Ind.rsi(serieInd.slice(0, 70), 14);
+        ok('indicateurs : le RSI de la bougie i est bien celui de la bougie i',
+          rsiSerie.length === serieInd.length - 14
+          && Math.abs(rsiSerie[55] - rsiTronque[rsiTronque.length - 1]) < 1e-9,
+          `${rsiSerie.length} valeurs`);
+        const m = Ind.macd(serieInd);
+        ok('indicateurs : la ligne MACD est alignée sur la dernière bougie',
+          m.macd.length === serieInd.length - 25
+          && Math.abs(m.macd[m.macd.length - 1] - (Ind.ema(serieInd, 12).pop() - Ind.ema(serieInd, 26).pop())) < 1e-6,
+          `${m.macd.length} valeurs`);
+
+        const LB = require('./engine/londonBreakout');
+        const lbCandles = Array.from({ length: 40 }, (_, i) => ({
+          t: Date.UTC(2026, 0, 5) + i * 3600000,
+          o: 100 + (i % 5), h: 100.3 + (i % 5), l: 99.8 + (i % 5), c: 100.1 + (i % 5), v: 100, closed: true
+        }));
+        const qual = LB.evaluerQualite({ detecte: true, force: 2, type: 'haussier', level: 101 }, lbCandles);
+        ok('london breakout : la taille du range est comparée à un ATR réel, pas à 100',
+          Number.isFinite(qual.facteurs.rangeAtr) || qual.facteurs.noteRange !== undefined,
+          JSON.stringify({ rangeAtr: qual.facteurs.rangeAtr, note: qual.facteurs.noteRange }));
+      }
+
+      // ── Message Telegram : un signal doit être lisible sans aller sur l'écran ──
+      {
+        const Al = require('./delivery/alerts');
+        const v = {
+          direction: 'BUY', strength: 0.62, confirmations: 3, price: 2401.5,
+          levels: { entry: 2401, stop: 2395.5, target1: 2408, target2: 2414 },
+          rules: [{ name: 'R3 BOS', detail: 'clôture au-dessus du sommet' }],
+          checklist: [{ ok: true, label: 'BOS haussier' }, { ok: false, label: 'killzone NY' }]
+        };
+        const msg = Al.messageTelegram(v, { symbol: 'frxXAUUSD', tf: '15m' }, {
+          rr: 2.3, confluence: { nbAlignes: 2, detail: [{ tf: '15m', tendance: 'bullish', status: 'confirmé', direction: 'BUY' }] }
+        });
+        ok('alerte Telegram : le message porte entrée, stop, objectifs ET leur multiple en R',
+          /Entrée : <b>2401<\/b>/.test(msg) && /Invalidation : <b>2395.5<\/b>/.test(msg)
+          && /Objectif 1 : <b>2408<\/b> \(1\.27 R\)/.test(msg), msg.split('\n').slice(0, 5).join(' | '));
+        ok('alerte Telegram : les conditions et la raison du signal sont incluses',
+          /Conditions/.test(msg) && /✓ BOS haussier/.test(msg) && /Pourquoi/.test(msg) && /R3 BOS/.test(msg));
+        ok('alerte Telegram : l’alignement est détaillé unité par unité',
+          /Alignement : 2\/1/.test(msg) && /15m : bullish/.test(msg));
+        const sansNiveaux = Al.messageTelegram({ direction: 'SELL', strength: 0.4 }, { symbol: 'frxEURUSD', tf: '1h' }, {});
+        ok('alerte Telegram : un niveau manquant est dit « non chiffrée », pas « — »',
+          /Entrée : <b>non chiffrée<\/b>/.test(sansNiveaux) && !/Invalidation : —/.test(sansNiveaux));
+      }
+
       // ── Écran : ce que le système calcule doit être visible ───────────────
       // Le plan d'attente, l'alignement H4/D1 et les shadow runs existaient côté
       // API mais n'apparaissaient nulle part : un mécanisme invisible ne se
@@ -6267,7 +6363,7 @@ function tinyPng(W = 64, H = 40) {
     };
     Al.load();
     Al.update({ actif: true, email: 'cycle@test.local',
-      marches: [{ symbol: 'R_75', tf: '15m', provider: 'test' }] });
+      marches: [{ symbol: 'frxXAUUSD', tf: '15m', provider: 'test' }] });
     Al.start({ market: lent, signals: Sig, sendMail: async () => {}, labelOf: () => 'test' });
 
     const [premier, second] = await Promise.all([Al.verifier(true), Al.verifier(true)]);

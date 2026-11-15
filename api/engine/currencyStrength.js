@@ -8,7 +8,16 @@
  * Devises suivies : EUR, GBP, USD, JPY, AUD, CAD, CHF, NZD
  */
 
-const DEVISES = ['EUR', 'GBP', 'USD', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD'];
+const DEVISES = ['EUR', 'GBP', 'USD', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD', 'XAU', 'XAG'];
+
+/**
+ * Décompose un symbole en deux jambes. Le découpage vit dans
+ * `core/instruments` : il n'y a qu'une définition dans le dépôt (le
+ * `slice(0,3)` d'origine rendait « FRX » pour frxXAUUSD et excluait l'or).
+ */
+function jambes(symbol) {
+  return require('../core/instruments').jambes(symbol);
+}
 
 /**
  * Calcule la force de chaque devise à partir des variations récentes.
@@ -24,20 +33,20 @@ function forceDevises(parPaire, lookback = 20) {
   for (const [symbol, candles] of Object.entries(parPaire)) {
     if (!candles || candles.length < lookback + 1) continue;
 
-    const devise1 = symbol.slice(0, 3).toUpperCase();
-    const devise2 = symbol.slice(3, 6).toUpperCase();
+    const [devise1, devise2] = jambes(symbol);
+    if (!devise1 || !devise2) continue;
 
-    if (!forces.hasOwnProperty(devise1) || !forces.hasOwnProperty(devise2)) continue;
-
-    // Variation récente en %
+    // Variation récente en % (garde : une cotation à zéro n'a pas de variation)
     const recent = candles.slice(-lookback - 1);
     const first = recent[0];
     const last = recent[recent.length - 1];
+    if (!first || !Number.isFinite(first.c) || first.c === 0) continue;
     const variationPct = ((last.c - first.c) / first.c) * 100;
 
-    // La devise 1 gagne si le prix monte, la devise 2 gagne si le prix descend
-    forces[devise1] += variationPct * 100;
-    forces[devise2] -= variationPct * 100;
+    // `variationPct` est DÉJÀ en pourcentage : le ×100 supplémentaire donnait des
+    // « forces » en %², sans unité interprétable.
+    forces[devise1] += variationPct;
+    forces[devise2] -= variationPct;
   }
 
   // Normaliser entre -100 et +100

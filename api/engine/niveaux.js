@@ -84,6 +84,14 @@ function assainirNiveaux(niv, sens, atr, risqueMini = 0.5) {
   for (let i = 0; i < 5 && Math.abs(niv.entree - stop) < mini; i++) {
     stop = arrondiPrix(long ? stop - pasPrix(stop) : stop + pasPrix(stop));
   }
+  // Garantie finale : `pasPrix(stop)` change quand le stop traverse un seuil de
+  // décimales (99,99 → 100,00 fait passer le pas de 0,0001 à 0,01). La boucle
+  // pouvait donc sortir encore sous le plancher. On mesure le dernier pas sur le
+  // PRIX d'entrée, stable, et on impose la distance minimale.
+  if (Math.abs(niv.entree - stop) < mini) {
+    const pas = pasPrix(niv.entree);
+    stop = arrondiPrix(long ? niv.entree - mini - pas : niv.entree + mini + pas);
+  }
   return {
     ...niv,
     objectifs: valides,

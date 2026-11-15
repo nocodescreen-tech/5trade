@@ -106,9 +106,13 @@ function peutOuvrirPosition({ positionsExistantes, capital, nouvelleRisquePct, l
 function risqueParDevise(positions, capital) {
   const parDevise = {};
   for (const pos of positions) {
-    const devise = pos.pair ? pos.pair.slice(0, 3).toUpperCase() : '???';
+    // `pair.slice(0, 3)` donnait 'FRX' pour frxXAUUSD, 'BTC' pour BTCUSDT et
+    // 'R_7' pour R_75 : le risque « par devise » était faux pour tout ce qui
+    // n'est pas une paire forex à 6 lettres. On réutilise le découpage unique.
+    const { deviseDe } = require('../core/instruments');
+    const devise = deviseDe(pos.pair);
     const risqueMontant = (pos.risk || 0) * (pos.size || 0);
-    const risquePct = (risqueMontant / capital) * 100;
+    const risquePct = capital > 0 ? (risqueMontant / capital) * 100 : 0;
     parDevise[devise] = (parDevise[devise] || 0) + risquePct;
   }
   for (const d of Object.keys(parDevise)) {

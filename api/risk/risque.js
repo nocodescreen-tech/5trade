@@ -225,7 +225,9 @@ function etat(signaux, options = {}) {
     perteJourPct: +perteJourPct.toFixed(2),
     // Risque et exposition : deux choses différentes, toutes deux exposées.
     risqueEngage: +risqueTotal.toFixed(2),
-    risqueEngagePct: +((risqueTotal / capital) * 100).toFixed(2),
+    // Un compte à zéro n'a pas un risque « infini pour cent » : la part n'existe
+    // pas. La ligne voisine (levier) était déjà protégée, pas celle-ci.
+    risqueEngagePct: capital > 0 ? +((risqueTotal / capital) * 100).toFixed(2) : null,
     risqueParMarche,
     expositionTotale: +expositionTotale.toFixed(2),
     expositionParMarche,
