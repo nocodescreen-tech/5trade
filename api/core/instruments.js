@@ -30,6 +30,46 @@ function synthetique(symbol) {
   return SYNTHETIQUES.some(re => re.test(s));
 }
 
+/**
+ * Devise (ou actif de base) d'un symbole, pour l'exposition par devise.
+ *
+ * `pair.slice(0, 3)` donnait 'FRX' pour frxXAUUSD, 'BTC' pour BTCUSDT et 'R_7'
+ * pour R_75 — trois clés qui ne veulent rien dire. Ici, un seul découpage pour
+ * tout le dépôt : on retire le préfixe du fournisseur, puis on lit les jambes.
+ * Ce qui n'est pas décomposable est rendu tel quel ('R_75', 'BTCUSDT') plutôt
+ * que tronqué.
+ */
+const DEVISES_CONNUES = ['EUR', 'GBP', 'USD', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD', 'XAU', 'XAG'];
+
+/**
+ * Les deux jambes d'une paire, ou [null, null]. Une seule implémentation pour
+ * tout le dépôt : `currencyStrength`, l'exposition et les stats s'y réfèrent.
+ */
+function jambes(symbol) {
+  const brut = String(symbol || '').toUpperCase().replace(/[^A-Z]/g, '');
+  const sansPrefixe = brut.replace(/^(FRX|CRY|OTC|WLD)/, '');
+  for (const d of DEVISES_CONNUES) {
+    if (!sansPrefixe.startsWith(d)) continue;
+    const reste = sansPrefixe.slice(d.length);
+    const quote = DEVISES_CONNUES.find(q => reste.startsWith(q));
+    if (quote) return [d, quote];
+  }
+  return [null, null];
+}
+
+function deviseDe(symbol) {
+  const [base] = jambes(symbol);
+  if (base) return base;
+  // Crypto : l'actif de base est ce qui porte le risque (BTC, ETH…). On ne
+  // l'ajoute PAS à la force des devises (ce n'est pas un taux de change), mais
+  // l'exposition par actif doit rester lisible.
+  const brut = String(symbol || '').toUpperCase().replace(/[^A-Z]/g, '').replace(/^(CRY|FRX|OTC|WLD)/, '');
+  const crypto = ['BTC', 'ETH', 'SOL', 'XRP', 'BNB', 'ADA', 'DOGE', 'PAXG'].find(c => brut.startsWith(c));
+  if (crypto) return crypto;
+  // Pas une paire : on rend le symbole nettoyé, jamais une tranche arbitraire.
+  return String(symbol || '???').toUpperCase() || '???';
+}
+
 /** Avertissement à afficher, ou null si l'instrument est un vrai marché. */
 function avertissement(symbol) {
   if (!synthetique(symbol)) return null;
@@ -39,4 +79,4 @@ function avertissement(symbol) {
     + `Conclure sur un marché réel (XAUUSD, forex, crypto).`;
 }
 
-module.exports = { synthetique, avertissement, SYNTHETIQUES };
+module.exports = { synthetique, avertissement, SYNTHETIQUES, deviseDe, jambes };

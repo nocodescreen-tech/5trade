@@ -73,9 +73,7 @@ async function enregistrerEvaluation(e) {
   // direction à afficher et se rabattait sur « En attente », qui décrit la
   // validation, pas le sens. NEUTRAL (avis sans biais) et UNKNOWN (aucun avis)
   // sont deux informations distinctes, et toutes deux utiles.
-  const direction = ['BUY', 'SELL', 'NEUTRAL', 'UNKNOWN'].includes(e.direction)
-    ? e.direction
-    : (e.direction === null || e.direction === undefined ? 'UNKNOWN' : 'UNKNOWN');
+  const direction = ['BUY', 'SELL', 'NEUTRAL', 'UNKNOWN'].includes(e.direction) ? e.direction : 'UNKNOWN';
 
   try {
     const [ligne] = await sql`

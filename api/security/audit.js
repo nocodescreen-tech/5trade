@@ -14,15 +14,22 @@ const DB = require('../core/db');
 
 const TABLE = 'audit_log';
 
+// Résultat mémorisé : `disponible()` interrogeait `information_schema` à CHAQUE
+// entrée de journal, soit une requête système par ligne écrite. La table ne
+// disparaît pas en cours de route ; on garde donc la première réponse positive.
+let tableVue = null;
+
 const disponible = async () => {
+  if (tableVue !== null) return tableVue;
   const sql = DB.client();
   if (!sql) return false;
   try {
     const r = await sql`
       select count(*)::int as n from information_schema.tables
       where table_schema = 'public' and table_name = ${TABLE}`;
-    return r[0] && r[0].n === 1;
-  } catch { return false; }
+    tableVue = !!(r[0] && r[0].n === 1);
+    return tableVue;
+  } catch { return false; }   // pas de cache sur erreur : la table peut apparaître
 };
 
 /** Retire tout ce qui ressemble à un secret avant d'écrire quoi que ce soit. */

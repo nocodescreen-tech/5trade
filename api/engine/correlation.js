@@ -36,19 +36,28 @@ function correlationGlissante(candles1, candles2, period = 20) {
  * Coefficient de corrélation de Pearson entre deux séries.
  */
 function pearson(x, y) {
-  const n = x.length;
-  if (n < 2) return 0;
+  const n = Math.min(x.length, y.length);
+  // Série trop courte ou constante : la corrélation n'est pas MESURABLE. Rendre 0
+  // faisait passer « on ne sait pas » pour « aucune corrélation » — deux
+  // informations opposées que l'appelant ne pouvait plus distinguer.
+  if (n < 2) return null;
 
-  const sumX = x.reduce((a, b) => a + b, 0);
-  const sumY = y.reduce((a, b) => a + b, 0);
-  const sumXY = x.reduce((a, xi, i) => a + xi * y[i], 0);
-  const sumX2 = x.reduce((a, b) => a + b * b, 0);
-  const sumY2 = y.reduce((a, b) => a + b * b, 0);
+  const sx = x.slice(0, n), sy = y.slice(0, n);
+  const sumX = sx.reduce((a, b) => a + b, 0);
+  const sumY = sy.reduce((a, b) => a + b, 0);
+  const sumXY = sx.reduce((a, xi, i) => a + xi * sy[i], 0);
+  const sumX2 = sx.reduce((a, b) => a + b * b, 0);
+  const sumY2 = sy.reduce((a, b) => a + b * b, 0);
 
   const num = n * sumXY - sumX * sumY;
   const den = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
 
-  return den === 0 ? 0 : num / den;
+  // Une série constante donne un déterminant nul, et une erreur d'arrondi peut
+  // le rendre NÉGATIF : `Math.sqrt(-1e-12)` vaut NaN, qui se propageait ensuite
+  // dans le position sizing sans que personne ne le voie. Tout ce qui n'est pas
+  // strictement positif n'est pas mesurable.
+  if (!(den > 0)) return null;
+  return Math.max(-1, Math.min(1, num / den));
 }
 
 /**

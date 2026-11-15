@@ -17,17 +17,16 @@
  * d'en recevoir un faux.
  */
 
+// UN SEUL ATR dans tout le dépôt : celui de `structure.js` (lissage de Wilder).
+// La version locale faisait une MOYENNE SIMPLE des 14 derniers TR : pour le même
+// marché au même instant, un stop calculé ici et un stop calculé ailleurs
+// n'avaient pas la même largeur. Deux formules = deux vérités = aucun résultat
+// reproductible.
+const Structure = require('./structure');
 function atr(candles, periode = 14) {
   if (!Array.isArray(candles) || candles.length < periode + 2) return null;
-  const vrais = [];
-  for (let i = candles.length - periode; i < candles.length; i++) {
-    const b = candles[i], p = candles[i - 1];
-    if (!b || !p) continue;
-    vrais.push(Math.max(b.h - b.l, Math.abs(b.h - p.c), Math.abs(b.l - p.c)));
-  }
-  if (!vrais.length) return null;
-  const moyenne = vrais.reduce((a, b) => a + b, 0) / vrais.length;
-  return Number.isFinite(moyenne) && moyenne > 0 ? moyenne : null;
+  const v = Structure.atr(candles, periode);
+  return Number.isFinite(v) && v > 0 ? v : null;
 }
 
 const arrondi = (v, ref) => {

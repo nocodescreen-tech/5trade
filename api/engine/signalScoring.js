@@ -50,7 +50,7 @@ function vecteur(t) {
  * @returns {{weights:number[], bias:number, entraine:boolean, echantillon:number,
  *            minimumRequis:number, avertissement?:string}}
  */
-function entrainerModele(trades) {
+function entrainerModele(trades, options = {}) {
   const lot = fermes(trades);
   const echantillon = lot.length;
 
@@ -66,7 +66,7 @@ function entrainerModele(trades) {
       + 'Les poids affichés sont un point de départ, pas un apprentissage.');
   }
 
-  const X = lot.map(vecteur);
+  const Xbrut = lot.map(vecteur);
   const y = lot.map(t => (t.result === 'win' ? 1 : 0));
   const gains = y.reduce((a, b) => a + b, 0);
   if (gains === 0 || gains === y.length) {
@@ -74,26 +74,58 @@ function entrainerModele(trades) {
       + `${gains === 0 ? 'perdants' : 'gagnants'}. Sans les deux issues, il n'y a rien à distinguer.`);
   }
 
-  // Régression logistique (descente de gradient), mêmes hyperparamètres qu'avant.
+  // NORMALISATION (z-score) avant l'entraînement. `atrRel` peut valoir 3,5 quand
+  // les cinq autres features valent 0 ou 1 : sans normalisation, le gradient
+  // n'ajustait en pratique que le poids de cette feature, et les autres
+  // bougeaient d'un centième par epoch. Les moyennes/écarts-types sont STOCKÉS
+  // dans le modèle : `predireSucces` doit appliquer exactement la même échelle,
+  // sinon les poids appris ne veulent plus rien dire au moment de prédire.
+  const n = Xbrut.length;
+  const moyenne = new Array(FEATURES).fill(0);
+  for (const x of Xbrut) for (let j = 0; j < FEATURES; j++) moyenne[j] += x[j] / n;
+  const ecartType = new Array(FEATURES).fill(0);
+  for (const x of Xbrut) for (let j = 0; j < FEATURES; j++) ecartType[j] += ((x[j] - moyenne[j]) ** 2) / n;
+  for (let j = 0; j < FEATURES; j++) {
+    ecartType[j] = Math.sqrt(ecartType[j]);
+    if (!(ecartType[j] > 1e-9)) ecartType[j] = 1;      // feature constante
+  }
+  const X = Xbrut.map(x => x.map((v, j) => (v - moyenne[j]) / ecartType[j]));
+
+  // Régression logistique (descente de gradient) avec régularisation L2.
+  // Hyperparamètres exposés : ils étaient écrits en dur (0,01 et 100 epochs), on
+  // ne pouvait donc rien mesurer sans modifier le code. `l2` pénalise les poids
+  // — sans lui, 6 paramètres sur 30 trades apprennent le bruit de l'échantillon.
   const weights = POIDS_DEPART.slice();
   let bias = -0.5;
-  const lr = 0.01;
-  const epochs = 100;
+  const lr = Number.isFinite(options.tauxApprentissage) ? options.tauxApprentissage : 0.05;
+  const epochs = Number.isFinite(options.epochs) ? options.epochs : 300;
+  const l2 = Number.isFinite(options.regularisation) ? options.regularisation : 0.01;
   for (let epoch = 0; epoch < epochs; epoch++) {
     for (let i = 0; i < X.length; i++) {
       const pred = sigmoid(dot(weights, X[i]) + bias);
       const error = pred - y[i];
-      for (let j = 0; j < weights.length; j++) weights[j] -= lr * error * X[i][j];
+      for (let j = 0; j < weights.length; j++) {
+        weights[j] -= lr * (error * X[i][j] + l2 * weights[j]);
+      }
       bias -= lr * error;
     }
   }
-  return { weights, bias, entraine: true, echantillon, minimumRequis: MIN_ENTRAINEMENT };
+  return {
+    weights, bias, entraine: true, echantillon, minimumRequis: MIN_ENTRAINEMENT,
+    moyenne, ecartType, hyperparametres: { tauxApprentissage: lr, epochs, regularisation: l2 }
+  };
 }
 
 /** Probabilité de succès prédite (0 à 1). */
 function predireSucces(signal, modele) {
   if (!modele || !Array.isArray(modele.weights)) return 0.5;
-  return sigmoid(dot(modele.weights, vecteur(signal)) + (modele.bias || 0));
+  let x = vecteur(signal);
+  // Même échelle qu'à l'entraînement. Un modèle sans moyenne/écart-type est un
+  // modèle de secours (poids fixes, non entraîné) : on le laisse tel quel.
+  if (Array.isArray(modele.moyenne) && Array.isArray(modele.ecartType)) {
+    x = x.map((v, j) => (v - (modele.moyenne[j] || 0)) / (modele.ecartType[j] || 1));
+  }
+  return sigmoid(dot(modele.weights, x) + (modele.bias || 0));
 }
 
 /** Ajuste un seuil de décision autour de 0,5 selon la probabilité prédite. */

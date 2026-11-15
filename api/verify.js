@@ -659,7 +659,10 @@ function tinyPng(W = 64, H = 40) {
         { symbol: 'A', tf: '1m', provider: 'x' }, { symbol: 'B' }] }).marches.length === 1);
 
     const envois = [];
-    Al.update({ actif: false, email: 'a@b.co', marches: [{ symbol: 'R_75', tf: '15m', provider: 'test' }] });
+    // Symbole RÉEL dans la fixture : les indices synthétiques sont désormais
+    // refusés par la surveillance (RNG sans avantage possible), et le test doit
+    // prouver l'envoi d'un signal, pas la tolérance aux synthétiques.
+    Al.update({ actif: false, email: 'a@b.co', marches: [{ symbol: 'frxXAUUSD', tf: '15m', provider: 'test' }] });
     Al.start({ market: faux, signals: Sig, sendMail: async m => envois.push(m), labelOf: () => 'test',
       DecisionEngine: fauxDE });
     let rr = await Al.verifier(false);
@@ -2713,7 +2716,7 @@ function tinyPng(W = 64, H = 40) {
       serieFine.push(cb(i, base, base + 0.0008, base - 0.0008, base + (i % 2 ? 0.0004 : -0.0003)));
     }
     const profils = [{ id: 'p', titre: 'Devises', regles: ['R1', 'R2', 'R3', 'R4'], seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: ['5m'], parametres: {} }];
-    const r = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' }, { profils, pas: 2, maxBougies: 160 });
+    const r = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' }, { profils, pas: 2, maxBougies: 160, accepterSurveiller: true });
     const tr = r.trades || [];
     ok('le backtest rend des trades exploitables', tr.length > 0, `${tr.length} trade(s)`);
     ok('aucun trade sans risque', tr.every(t => Math.abs(t.entree - t.stop) > 0), String(tr.length));
@@ -2743,7 +2746,7 @@ function tinyPng(W = 64, H = 40) {
       serieLongue.push(cb(i, base, base + 140, base - 140, base + (i % 2 ? 80 : -70)));
     }
     const rLong = B.lancer(serieLongue, { symbol: 'R_75', timeframe: '5m' },
-      { profils, pas: 2, maxBougies: 400 });
+      { profils, pas: 2, maxBougies: 400, accepterSurveiller: true });
     ok('un historique suffisant est marqué fiable', rLong.fiable === true,
       `${rLong.bougies} bougies`);
     ok('le nombre de types de configuration est exposé',
@@ -2804,12 +2807,21 @@ function tinyPng(W = 64, H = 40) {
       tr.every(t => Number.isFinite(t.rr) && t.rr > 0),
       tr.map(t => t.rr).join(', '));
     const rSansPorte = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' },
-      { profils, pas: 2, maxBougies: 160 });
+      { profils, pas: 2, maxBougies: 160, accepterSurveiller: true });
     ok('sans seuil, seules les configurations inutilisables sont écartées',
       rSansPorte.trades.length === tr.length,
       `${rSansPorte.ecartesRR} écartée(s) pour objectif inutilisable`);
+    // Par défaut, le backtest n'exécute QUE les signaux confirmés, comme le
+    // direct. Le mode permissif (surveiller) doit être demandé explicitement :
+    // l'accepter sans le dire faisait prendre au backtest des trades que le
+    // direct n'aurait jamais pris, donc surestimait la performance.
+    const rStrict = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' },
+      { profils, pas: 2, maxBougies: 160 });
+    ok('par défaut, le backtest refuse les signaux « à surveiller » comme le direct',
+      rStrict.trades.length <= tr.length, `${rStrict.trades.length} ≤ ${tr.length}`);
+
     const rPorte = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' },
-      { profils, pas: 2, maxBougies: 160, rrMin: 1.5 });
+      { profils, pas: 2, maxBougies: 160, rrMin: 1.5, accepterSurveiller: true });
     ok('la porte du rapport écarte et le compte',
       rPorte.ecartesRR > rSansPorte.ecartesRR && (rPorte.trades || []).length > 0,
       `${rPorte.ecartesRR} écartée(s), ${(rPorte.trades || []).length} gardé(s)`);
@@ -2834,7 +2846,7 @@ function tinyPng(W = 64, H = 40) {
     // que le moteur n a rien vu. Sur un prix de 40 000, il faut un coût énorme.
     const Fr = require('./core/frais');
     Fr.configurer({ defaut: 5000 });
-    const rCout = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' }, { profils, pas: 2, maxBougies: 160 });
+    const rCout = B.lancer(serie, { symbol: 'R_75', timeframe: '5m' }, { profils, pas: 2, maxBougies: 160, accepterSurveiller: true });
     ok('un coût écrasant ne produit aucun trade', (rCout.trades || []).length === 0,
       `${(rCout.trades || []).length} trade(s)`);
     ok('les configurations écartées par les frais sont comptées',
@@ -3197,16 +3209,25 @@ function tinyPng(W = 64, H = 40) {
       { entree: 4109.97, stop: 4124.06, objectifs: [4114.32, 4109.79] }, 'short', 8);
     ok('un objectif du mauvais côté est refusé', shortFaux === null,
       shortFaux ? `objectifs ${JSON.stringify(shortFaux.objectifs)}` : 'refusé');
-    // Cible correcte pour un short → conservée telle quelle.
+    // Cible correcte ET assez lointaine pour un short → conservée telle quelle.
+    // (La garde impose désormais TP1 ≥ 1,27 × risque et ≥ 1 ATR : une cible du
+    // bon côté mais trop courte est ramenée au plancher, pas conservée.)
     const shortBon = Multi.assainirNiveaux(
-      { entree: 4109.97, stop: 4124.06, objectifs: [4100, 4090] }, 'short', 8);
-    ok('un objectif du bon côté est conservé',
-      !!shortBon && shortBon.objectifs[0] === 4100, JSON.stringify(shortBon && shortBon.objectifs));
-    // Deuxième cible derrière l'entrée → tronquée, la première reste en place.
+      { entree: 4109.97, stop: 4124.06, objectifs: [4080, 4060] }, 'short', 8);
+    ok('un objectif du bon côté et assez lointain est conservé',
+      !!shortBon && shortBon.objectifs[0] === 4080, JSON.stringify(shortBon && shortBon.objectifs));
+    // Cible du bon côté mais PLUS COURTE que le risque → ramenée au plancher.
+    const court = Multi.assainirNiveaux(
+      { entree: 4109.97, stop: 4124.06, objectifs: [4100] }, 'short', 8);
+    ok('une cible plus courte que le risque est ramenée au plancher de 1,27 R',
+      !!court && court.objectifs[0] < 4100
+      && Math.abs(court.objectifs[0] - 4109.97) >= 14.09 * 1.27 - 0.01,
+      JSON.stringify(court && court.objectifs));
+    // Deuxième cible derrière l'entrée → écartée, le rang 1 reste le premier.
     const tronque = Multi.assainirNiveaux(
-      { entree: 4109.97, stop: 4124.06, objectifs: [4100, 4130] }, 'short', 8);
-    ok('une cible lointaine invalide est tronquée sans décaler les rangs',
-      !!tronque && tronque.objectifs.length === 1 && tronque.objectifs[0] === 4100,
+      { entree: 4109.97, stop: 4124.06, objectifs: [4080, 4130] }, 'short', 8);
+    ok('une cible du mauvais côté est écartée sans décaler les rangs',
+      !!tronque && tronque.objectifs[0] === 4080,
       JSON.stringify(tronque && tronque.objectifs));
     // Aucun objectif → pas de trade.
     ok('un signal sans objectif est refusé', Multi.assainirNiveaux(
@@ -3998,6 +4019,631 @@ function tinyPng(W = 64, H = 40) {
           return r.candidates[0].retenue === false;
         })());
 
+      // Le chat peut désactiver une fiche : le sélecteur DOIT la retirer, sinon
+      // `actif` est décoratif et « désactive X » ne désactive rien.
+      ok('une fiche désactivée depuis le chat n’est plus candidate',
+        (() => {
+          const r = Sel.selectionner({
+            candles: [], meta: { symbol: 'R_75', timeframe: '15m' },
+            strategies: [{ id: 'f_off', title: 'Off', type: 'strategy',
+              content: 'balayage et rupture de structure', marches: ['*'], actif: false }]
+          });
+          const c = r.candidates[0];
+          return c && c.retenue === false && /désactivée manuellement/.test(c.motif || '');
+        })());
+
+    // ── SCÉNARIOS : plan d'attente, persistance et expiration ──────────────
+    // Le chat répondait « connecter à la table scenarios ». La couche existe
+    // maintenant : elle doit refuser un plan sans niveau chiffré, expirer ce qui
+    // est périmé, et ne jamais produire deux directions contradictoires.
+    {
+      const Scn = require('./scenarios');
+      const G = require('./scenarios/generateur');
+
+      const court = G.generer(Array.from({ length: 10 }, (_, i) => ({
+        t: i, o: 1, h: 1, l: 1, c: 1, closed: true
+      })), { symbol: 'TEST', timeframe: '15m' });
+      ok('un scénario exige assez de bougies pour être mesuré',
+        court.scenarios.length === 0 && /trop courte/.test(court.motif || ''), court.motif);
+
+      // Prix strictement plat : ATR nul, donc aucun stop calculable — et on le dit.
+      const plat = Array.from({ length: 120 }, (_, i) => ({
+        t: 1700000000000 + i * 900000, o: 100, h: 100, l: 100, c: 100, closed: true
+      }));
+      const rPlat = G.generer(plat, { symbol: 'TEST', timeframe: '15m' });
+      ok('sans volatilité mesurable, aucun scénario n’est fabriqué',
+        rPlat.scenarios.length === 0 && !!rPlat.motif, rPlat.motif || 'aucun motif');
+
+      // Un plan sans stop chiffré n'est pas un plan.
+      const sansStop = await Scn.creer({ instrument: 'TEST', direction: 'long', niveauEntree: 100 });
+      ok('un scénario sans stop chiffré est refusé',
+        sansStop.ok === false && /stop/.test(sansStop.raison || ''), sansStop.raison);
+      const sansEntree = await Scn.creer({ instrument: 'TEST', direction: 'long', stop: 99 });
+      ok('un scénario sans niveau d’entrée est refusé',
+        sansEntree.ok === false && /entrée/.test(sansEntree.raison || ''), sansEntree.raison);
+      const mauvaiseDir = await Scn.creer({ instrument: 'TEST', direction: 'neutre', niveauEntree: 100, stop: 99 });
+      ok('une direction autre que long/short est refusée',
+        mauvaiseDir.ok === false, mauvaiseDir.raison);
+
+      // Création réelle, lecture, invalidation.
+      const cree = await Scn.creer({
+        instrument: 'TEST', timeframe: '15m', direction: 'long',
+        niveauEntree: 100, stop: 99, tp1: 102, tp2: 103,
+        conditions: [{ type: 'prix_atteint', valeur: 100, obligatoire: true }],
+        preuves: ['test']
+      });
+      ok('un scénario valide est enregistré', cree.ok === true, cree.raison || cree.stockage);
+      const liste = await Scn.lister({ statut: 'en_attente', instrument: 'TEST' });
+      ok('le scénario enregistré se relit',
+        liste.some(s => s.id === cree.id), `${liste.length} en attente`);
+      const invalide = await Scn.changerStatut(cree.id, 'invalide', 'test');
+      ok('un scénario peut être invalidé', invalide.ok === true, invalide.raison);
+
+      // Expiration : un plan qui n'expire jamais n'est pas un plan.
+      const vieux = await Scn.creer({
+        instrument: 'TEST', direction: 'long', niveauEntree: 50, stop: 49, ttlMs: -1000
+      });
+      const exp = await Scn.expirer();
+      const apres = await Scn.lister({ statut: 'expire', instrument: 'TEST' });
+      ok('un scénario hors fenêtre expire',
+        exp.ok === true && apres.some(s => s.id === vieux.id),
+        `${exp.expires} expiré(s)`);
+
+      // Le générateur ne doit jamais produire un long ET un short contradictoires
+      // quand la tendance est mesurée.
+      const source = require('fs').readFileSync(
+        require('path').join(__dirname, 'scenarios', 'generateur.js'), 'utf8');
+      ok('le générateur filtre les directions selon la tendance',
+        /autoriseLong/.test(source) && /autoriseShort/.test(source)
+        && /tendance haussière : long seulement/.test(source));
+    }
+
+    // ── CERVEAU D'APPRENTISSAGE : une source, un vrai rejeu, une boucle fermée ─
+    // Trois défauts mesurés avant ce bloc :
+    //   1. deux définitions des killzones (7-10 h ici, 8-11 h dans le rejeu) ;
+    //   2. un rejeu qui ne partageait aucun module avec le direct (POC = médiane
+    //      des plus bas, longs seulement, R codés en dur, zéro frais) ;
+    //   3. une boucle nourrie de constantes vides (`tradesVeille: []`,
+    //      `metrics14j: {}`) : rien n'était jamais appris ni promu.
+    {
+      const K = require('./gestion/killzones');
+      ok('killzone : Londres ouvre à 07 h UTC',
+        K.pour(Date.UTC(2026, 0, 5, 7)) === 'london', String(K.pour(Date.UTC(2026, 0, 5, 7))));
+      ok('killzone : 11 h UTC est hors séance',
+        K.pour(Date.UTC(2026, 0, 5, 11)) === null);
+      ok('killzone : 23 h UTC = Asie',
+        K.pour(Date.UTC(2026, 0, 5, 23)) === 'asia');
+      const horsKz = K.autorise(Date.UTC(2026, 0, 5, 11));
+      ok('hors killzone : refus motivé, pas un refus muet',
+        horsKz.ok === false && /hors killzone/.test(horsKz.raison), horsKz.raison);
+      const asiaRange = K.autorise(Date.UTC(2026, 0, 5, 23),
+        { 'killzones.asia.actif_en_range': false }, { regime: 'ranging' });
+      ok('Asie en range : la règle apprise s’applique au vocabulaire réel du détecteur',
+        asiaRange.ok === false && /range/.test(asiaRange.raison), asiaRange.raison);
+
+      // La structure et le rejeu lisent désormais la MÊME source.
+      const St = require('./engine/structure');
+      const plat = Array.from({ length: 40 }, (_, i) => ({
+        t: Date.UTC(2026, 0, 5, 7) + i * 3600000, o: 100, h: 100.2, l: 99.8, c: 100, closed: true
+      }));
+      const sess = St.analyze(plat).sessions;
+      ok('structure.sessions et gestion/killzones ne divergent plus',
+        sess.killZoneId === K.pour(plat[plat.length - 1].t), `${sess.killZoneId} vs ${K.pour(plat[plat.length - 1].t)}`);
+
+      // ── Alignement H4 + D1 ────────────────────────────────────────────────
+      const Al = require('./regime/alignment-htf');
+      const tendance = (sens) => {
+        const out = []; let p = 100;
+        for (let i = 0; i < 720; i++) {
+          const bruit = 0.06 * Math.sin(i / 3);
+          const pas = sens * (0.03 + bruit);
+          const o = p, c = p + pas;
+          out.push({ t: Date.UTC(2026, 0, 1) + i * 3600000, o, h: Math.max(o, c) + 0.05, l: Math.min(o, c) - 0.05, c, closed: true });
+          p = c;
+        }
+        return out;
+      };
+      ok('rééchantillonnage : 720 H1 → 180 blocs H4 et 30 blocs D1',
+        Al.resampler(tendance(1), 4).length === 180 && Al.resampler(tendance(1), 24).length === 30,
+        `${Al.resampler(tendance(1), 4).length} / ${Al.resampler(tendance(1), 24).length}`);
+
+      const haut = Al.aligner({ h1: tendance(1) });
+      const bas = Al.aligner({ h1: tendance(-1) });
+      ok('alignement : un marché qui monte est long en H4 ET en D1',
+        haut.H4 === 'long' && haut.D1 === 'long' && haut.aligne === true, `${haut.H4}/${haut.D1}`);
+      ok('alignement : un marché qui descend est short en H4 ET en D1',
+        bas.H4 === 'short' && bas.D1 === 'short' && bas.aligne === true, `${bas.H4}/${bas.D1}`);
+      ok('alignement : un trade contre H4+D1 est refusé avec son motif',
+        Al.autorise(haut, 'short').ok === false && /contre/.test(Al.autorise(haut, 'short').raison));
+      ok('alignement : historique court = inconnu, jamais inventé',
+        Al.aligner({ h1: tendance(1).slice(0, 60) }).aligne === false);
+
+      // ── Filtre d'alignement dans le générateur ────────────────────────────
+      const Generateur = require('./scenarios/generateur');
+      const bougie = (t, o, h, l, c) => ({ t, o, h, l, c, closed: true });
+      const avecZone = (() => {
+        const c = []; let t = Date.UTC(2026, 0, 1); let p = 100;
+        for (let i = 0; i < 100; i++) {
+          const pas = 0.35 + 0.25 * Math.sin(i / 4);
+          c.push(bougie(t, p, p + pas + 0.18, p - 0.18, p + pas)); t += 3600000; p += pas;
+        }
+        const base = p;
+        c.push(bougie(t, base, base + 0.4, base - 0.1, base + 0.3)); t += 3600000;
+        c.push(bougie(t, base + 0.3, base + 2.2, base + 0.25, base + 2.0)); t += 3600000;
+        c.push(bougie(t, base + 2.0, base + 2.3, base + 1.8, base + 2.1)); t += 3600000;
+        for (let i = 0; i < 8; i++) {
+          const o = c[c.length - 1].c;
+          c.push(bougie(t, o, o + 0.15, o - 0.4, o - 0.25)); t += 3600000;
+        }
+        return c;
+      })();
+      const libre = Generateur.generer(avecZone, { symbol: 'TEST', timeframe: '1h' });
+      ok('générateur : la fixture produit bien un plan long', libre.scenarios.some(s => s.direction === 'long'),
+        `${libre.scenarios.length} scénario(s)`);
+      const contre = Generateur.generer(avecZone, { symbol: 'TEST', timeframe: '1h' },
+        { alignement: { aligne: true, direction: 'short', H4: 'short', D1: 'short' } });
+      ok('générateur : un plan long est écarté contre un alignement short, et le dit',
+        contre.scenarios.length === 0 && /alignement short/.test(contre.motif || ''), contre.motif);
+      ok('générateur : sans alignement fourni, rien n’est filtré en silence',
+        Generateur.generer(avecZone, { symbol: 'TEST', timeframe: '1h' }).alignement === null);
+
+      // ── Objectifs : le générateur et le plan de gestion doivent viser pareil ──
+      // Avant : TP1 = « première liquidité au-delà de 1,2 × risque, sinon 2 × risque »
+      // alors que le plan sécurise à 1,27 R. TP1 était donc presque toujours
+      // inatteignable, et 22 trades sur 43 mouraient en invalidation temporelle.
+      const planLong = libre.scenarios.find(s => s.direction === 'long');
+      const risqueLong = Math.abs(planLong.niveauEntree - planLong.stop);
+      const rr1 = (planLong.tp1 - planLong.niveauEntree) / risqueLong;
+      const rr2 = (planLong.tp2 - planLong.niveauEntree) / risqueLong;
+      ok('objectifs : TP1 est à 1,27 R (le palier de sécurisation du plan)',
+        Math.abs(rr1 - 1.27) < 0.01, `RR1 = ${rr1.toFixed(2)}`);
+      ok('objectifs : TP2 est strictement au-delà de TP1 et d’au moins 2 R',
+        rr2 > rr1 + 0.1 && rr2 >= 2 - 0.01, `RR2 = ${rr2.toFixed(2)}`);
+      ok('objectifs : la preuve dit le multiple et sa source',
+        /TP1 = 1\.27 R \(/.test(planLong.preuves.join(' | ')), planLong.preuves.slice(-1)[0]);
+      const planLarge = Generateur.generer(avecZone, { symbol: 'TEST', timeframe: '1h' }, { tp1R: 2, tp2R: 3 })
+        .scenarios.find(s => s.direction === 'long');
+      const rrLarge = (planLarge.tp1 - planLarge.niveauEntree) / Math.abs(planLarge.niveauEntree - planLarge.stop);
+      ok('objectifs : les multiples viennent des seuils, pas d’une constante cachée',
+        Math.abs(rrLarge - 2) < 0.01, `RR1 = ${rrLarge.toFixed(2)}`);
+      const courtCibles = Generateur.cibles(100, 10, 'short', [], 1.27, 2);
+      ok('objectifs : symétrie short (TP1 sous l’entrée, TP2 plus bas)',
+        courtCibles.tp1 < 100 && courtCibles.tp2 < courtCibles.tp1);
+      ok('objectifs : sans liquidité, la source est dite « multiple du risque »',
+        courtCibles.sourceTP1 === 'multiple du risque' && courtCibles.rrTP2 >= 2);
+
+      // ── Génération automatique : anti-doublon ─────────────────────────────
+      // La génération tourne à chaque clôture H1 (TTL 3 h). Sans dédoublonnage,
+      // le même plan apparaissait trois fois à l'écran.
+      {
+        const Scn = require('./scenarios');
+        const m = { symbol: 'TEST', timeframe: '1h' };
+        const un = await Scn.genererEtEnregistrer(avecZone, m, { dedupe: true });
+        const deux = await Scn.genererEtEnregistrer(avecZone, m, { dedupe: true });
+        ok('scénarios : le même plan n’est pas enregistré deux fois',
+          un.crees > 0 && deux.crees === 0 && deux.doublons > 0,
+          `1er ${un.crees} créé(s) · 2e ${deux.crees} créé(s), ${deux.doublons} doublon(s)`);
+        for (const id of un.ids) await Scn.changerStatut(id, 'invalide', 'test');
+        ok('scénarios : le plan d’attente porte un TP1 atteignable et un TP2 au-delà',
+          (() => {
+            const s = Scn.generer(avecZone, m).scenarios[0];
+            if (!s) return false;
+            const risque = Math.abs(s.niveauEntree - s.stop);
+            return (s.tp1 - s.niveauEntree) / risque > 1.2
+              && (s.tp2 - s.niveauEntree) / risque > (s.tp1 - s.niveauEntree) / risque;
+          })());
+      }
+
+      // ── Rejeu par le cerveau réel ─────────────────────────────────────────
+      const Cerveau = require('./apprentissage/rejeu-cerveau');
+      const fixture = (() => {
+        const H = [], M = [];
+        let t = Date.UTC(2026, 0, 5), p = 100;
+        const bloc = (t0, o, c, n = 12) => {
+          H.push(bougie(t0, o, Math.max(o, c) + 0.18, Math.min(o, c) - 0.18, c));
+          for (let k = 0; k < n; k++) {
+            const a = o + (c - o) * k / n, z = o + (c - o) * (k + 1) / n;
+            M.push(bougie(t0 + k * 300000, a, Math.max(a, z) + 0.06, Math.min(a, z) - 0.06, z));
+          }
+        };
+        for (let i = 0; i < 140; i++) { const pas = 0.35 + 0.25 * Math.sin(i / 4); bloc(t, p, p + pas); t += 3600000; p += pas; }
+        const base = p;
+        bloc(t, base, base + 0.3); t += 3600000;
+        bloc(t, base + 0.3, base + 2.0); t += 3600000;
+        bloc(t, base + 2.0, base + 2.1); t += 3600000;
+        for (let i = 0; i < 20; i++) { const o = p; bloc(t, o, o - 0.25); t += 3600000; p = o - 0.25; }
+        return { H, M };
+      })();
+      const rejeu = Cerveau.rejouer({ instrument: 'frxTEST', h1: fixture.H, m5: fixture.M, seuils: {}, options: { killzoneObligatoire: false } });
+      ok('rejeu cerveau : des trades sont mesurés sur données synthétiques',
+        rejeu.trades.length > 0, `${rejeu.trades.length} trade(s), ${JSON.stringify(rejeu.rejets)}`);
+      ok('rejeu cerveau : chaque trade porte un R net fini et une issue',
+        rejeu.trades.every(t => Number.isFinite(t.r_net) && typeof t.issue === 'string'));
+      ok('rejeu cerveau : l’espérance est celle des trades rejoués',
+        Math.abs(rejeu.metrics.expectancyR
+          - (rejeu.trades.reduce((a, t) => a + t.r_net, 0) / rejeu.trades.length)) < 1e-4);
+      ok('rejeu cerveau : régime, killzone et direction sont tracés par trade',
+        rejeu.trades.every(t => typeof t.regime === 'string' && typeof t.killzone === 'string'
+          && (t.direction === 'long' || t.direction === 'short')));
+      const rejeu2 = Cerveau.rejouer({ instrument: 'frxTEST', h1: fixture.H, m5: fixture.M, seuils: {}, options: { killzoneObligatoire: false } });
+      ok('rejeu cerveau : le même historique donne le même résultat (déterministe)',
+        JSON.stringify(rejeu.metrics) === JSON.stringify(rejeu2.metrics));
+      const court = Cerveau.rejouer({ instrument: 'frxTEST', h1: fixture.H.slice(0, 50), m5: fixture.M, seuils: {} });
+      ok('rejeu cerveau : historique trop court = refus motivé, pas des trades inventés',
+        court.trades.length === 0 && /80/.test(court.motifs[0] || ''), court.motifs[0]);
+
+      // Frais : un rejeu sans coût surestime. Le coût est injectable (ici une
+      // grille de test), mais il est TOUJOURS soustrait du R.
+      const rejeuFrais = Cerveau.rejouer({
+        instrument: 'frxTEST', h1: fixture.H, m5: fixture.M, seuils: {},
+        options: { killzoneObligatoire: false, coutEnR: () => ({ enR: 0.15, applique: true, connu: true }) }
+      });
+      ok('rejeu cerveau : les frais sont déduits du R (net < brut)',
+        rejeuFrais.trades.length > 0 && rejeuFrais.trades.every(t => t.r_net < t.r_brut),
+        `${rejeuFrais.trades[0] && rejeuFrais.trades[0].r_brut} → ${rejeuFrais.trades[0] && rejeuFrais.trades[0].r_net}`);
+      ok('rejeu cerveau : un coût réellement saisi est marqué connu',
+        rejeuFrais.metrics.fraisConnus === true);
+
+      // Candidats : une séance perdante sur un échantillon suffisant propose sa coupure.
+      const cands = Cerveau.candidatsDepuisMetrics({
+        n: 30,
+        parKillzone: { ny: { n: 25, expectancyR: -0.4, winRate: 20 } },
+        parRegime: { ranging: { n: 25, expectancyR: -0.3 } }
+      }, { minTrades: 20 });
+      ok('candidats : une killzone perdante sur 25 trades propose sa désactivation',
+        cands.some(c => c.parametre === 'killzones.ny.actif' && c.valeurCandidate === false));
+      ok('candidats : 5 trades ne suffisent pas à couper une séance',
+        Cerveau.candidatsDepuisMetrics({ n: 5, parKillzone: { ny: { n: 5, expectancyR: -2 } } }, { minTrades: 20 }).length === 0);
+
+      // ── Ajusteur : shadow run enregistré, promu ou abandonné ──────────────
+      const dataAvant = process.env.DATA_DIR;
+      process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'appr-'));
+      delete require.cache[require.resolve('./apprentissage/ajusteur-seuils')];
+      const Aj = require('./apprentissage/ajusteur-seuils');
+      await Aj.charger();
+
+      const trop = await Aj.proposerBascule('killzones.ny.actif', false, { trades: 5 });
+      ok('ajusteur : une bascule sur 5 trades est reportée, pas appliquée',
+        trop.statut === 'reporte', trop.raison);
+      const okBascule = await Aj.proposerBascule('killzones.ny.actif', false, { trades: 25, n: 25 });
+      ok('ajusteur : une bascule sur 25 trades part en shadow run',
+        okBascule.statut === 'shadow_3j', okBascule.raison);
+      const enCours = await Aj.shadowEnCours();
+      ok('ajusteur : la candidature est réellement enregistrée (un statut n’est pas un état)',
+        enCours.some(c => c.parametre === 'killzones.ny.actif'));
+
+      // Échéance forcée dans le passé → promotion si le bilan est positif.
+      const shadowDoc = JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'apprentissage', 'shadow.json'), 'utf8'));
+      for (const c of shadowDoc.candidats) c.applicable_at = new Date(Date.now() - 1000).toISOString();
+      fs.writeFileSync(path.join(process.env.DATA_DIR, 'apprentissage', 'shadow.json'), JSON.stringify(shadowDoc, null, 2));
+      const promues = await Aj.promouvoirEchues({ expectancyR: 0.35, trades: 25 });
+      const seuilsApres = await Aj.charger();
+      ok('ajusteur : un shadow échu et positif est promu dans les seuils',
+        promues.some(p => p.decision === 'promue') && seuilsApres['killzones.ny.actif'] === false,
+        JSON.stringify(promues));
+
+      // Bilan négatif → abandon, jamais promotion.
+      await Aj.proposerBascule('killzones.london.actif', false, { trades: 25, n: 25 });
+      const doc2 = JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'apprentissage', 'shadow.json'), 'utf8'));
+      for (const c of doc2.candidats) if (c.statut === 'shadow') c.applicable_at = new Date(Date.now() - 1000).toISOString();
+      fs.writeFileSync(path.join(process.env.DATA_DIR, 'apprentissage', 'shadow.json'), JSON.stringify(doc2, null, 2));
+      const bilanNegatif = await Aj.promouvoirEchues({ expectancyR: -0.2, trades: 25 });
+      const seuilsNeg = await Aj.charger();
+      ok('ajusteur : un shadow déficitaire est abandonné et laisse une trace',
+        bilanNegatif.some(p => p.decision === 'abandonnee')
+        && seuilsNeg['killzones.london.actif'] === true, JSON.stringify(bilanNegatif));
+
+      // ── Boucle quotidienne : plus de constantes vides ─────────────────────
+      const Appr = require('./apprentissage');
+      const boucle = await Appr.boucleQuotidienne({ market: null });
+      ok('boucle quotidienne : sans marché, le rejeu est refusé avec son motif (pas de chiffres inventés)',
+        Array.isArray(boucle.rejeux) && boucle.rejeux.every(r => r.trades.length === 0 && r.motifs.length));
+      ok('boucle quotidienne : le bilan expose ses sources et son absence de frais connus',
+        boucle.bilan && boucle.bilan.n === 0 && boucle.bilan.fraisConnus === false);
+      const journalFichier = path.join(process.env.DATA_DIR, 'apprentissage', `journal-${new Date().toISOString().slice(0, 10)}.md`);
+      ok('boucle quotidienne : le journal est bien publié sur disque',
+        fs.existsSync(journalFichier) && /Expectancy/.test(fs.readFileSync(journalFichier, 'utf8')));
+      const srcBoucle = fs.readFileSync(path.join(__dirname, 'apprentissage', 'index.js'), 'utf8');
+      ok('boucle quotidienne : plus aucun `tradesVeille: []` ni `metrics14j: {}` en dur côté serveur',
+        !/tradesVeille:\s*\[\]/.test(fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8'))
+        && /tradesDeLaJournee/.test(srcBoucle) && /metricsDepuisJournal/.test(srcBoucle));
+
+      process.env.DATA_DIR = dataAvant;
+      delete require.cache[require.resolve('./apprentissage/ajusteur-seuils')];
+
+      // ── Chat : « active <titre> » et confirmation qui survit ──────────────
+      // Symptôme rapporté : « Confirmer ? (oui/non) » puis « oui » → « Aucune
+      // action en attente » en boucle. Trois causes distinctes, toutes réparées :
+      //   1. le routeur ne reconnaissait pas « OB / SMC / déséquilibre » ;
+      //   2. la commande ne savait résoudre qu'un id `strategy_…`, alors que les
+      //      fiches s'appellent `man_…` avec un `title` lisible ;
+      //   3. la file de confirmations vivait en mémoire : un redémarrage l'effaçait.
+      {
+        const RT = require('./chat-crud/routeur');
+        const PS = require('./chat-crud/parseur');
+        const sujet = 'ca =OB 5 étoiles SMC : Entrée sur déséquilibre institutionnel';
+        const action = PS.parser('active ' + sujet);
+        const route = RT.router(action);
+        ok('chat : « active <stratégie SMC> » trouve son domaine',
+          route.domaine === 'strategies' && typeof route.handler === 'function', route.domaine || route.raison);
+        ok('chat : un verbe d’activation route même sans mot-clé dans le sujet',
+          RT.router({ verbe: 'ACTIVE', sujet: 'zzz sans vocabulaire' }).domaine === 'strategies');
+        ok('chat : « supprime le trade 12 » reste dans les trades',
+          RT.router({ verbe: 'SUPPRIME', sujet: 'le trade 12' }).domaine === 'trades');
+
+        const Cmd = require('./chat-crud/commandes/strategies');
+        const fiches = [
+          { id: 'man_abc123', title: 'OB 5 étoiles SMC : Entrée sur déséquilibre institutionnel' },
+          { id: 'man_def456', title: 'Retour à la moyenne' },
+          { id: 'srch_ghi789', title: 'Breakout de Londres' }
+        ];
+        ok('chat : une stratégie se résout par son titre exact',
+          (Cmd.resoudre(fiches[0].title, fiches) || {}).id === 'man_abc123');
+        ok('chat : une stratégie se résout par son identifiant réel (man_…)',
+          (Cmd.resoudre('active man_def456', fiches) || {}).id === 'man_def456');
+        ok('chat : un titre noyé dans une phrase se résout quand il est unique',
+          (Cmd.resoudre('active ca =OB 5 étoiles SMC : Entrée sur déséquilibre institutionnel', fiches) || {}).id === 'man_abc123');
+        const avecJumeau = [...fiches, { id: 'man_xyz000', title: 'Retour à la moyenne pondérée' }];
+        ok('chat : deux titres compatibles ne sont pas départagés au hasard',
+          Cmd.resoudre('la moyenne', avecJumeau) === null,
+          (Cmd.resoudre('la moyenne', avecJumeau) || {}).id || 'null');
+
+        // Confirmation persistée : on simule un redémarrage en rechargeant le module.
+        const fichierConf = path.join(os.tmpdir(), `confirmations-${process.pid}.json`);
+        process.env.CHAT_CONFIRMATIONS_FICHIER = fichierConf;
+        delete require.cache[require.resolve('./chat-crud')];
+        const ChatA = require('./chat-crud');
+        const ctxChat = { utilisateur: 'testeur' };
+        const rep1 = await ChatA.executer('active man_def456', ctxChat);
+        ok('chat : une action sensible demande confirmation',
+          /Confirmation requise/i.test(String(rep1.texte)), String(rep1.texte).split('\n')[0]);
+        ok('chat : la confirmation est écrite sur disque (pas seulement en mémoire)',
+          fs.existsSync(fichierConf) && /man_def456/.test(fs.readFileSync(fichierConf, 'utf8')));
+
+        delete require.cache[require.resolve('./chat-crud')];
+        const ChatB = require('./chat-crud');
+        const rep2 = await ChatB.executer('oui', ctxChat);
+        ok('chat : « oui » exécute l’action même après un rechargement du module',
+          !/Aucune action en attente/i.test(String(rep2.texte)), String(rep2.texte).split('\n')[0]);
+        const rep3 = await ChatB.executer('oui', ctxChat);
+        ok('chat : un second « oui » ne rejoue pas l’action (pas de double exécution)',
+          /Aucune action en attente/i.test(String(rep3.texte)));
+
+        // Péremption : une confirmation vieille de 20 min n'est plus honorée.
+        fs.writeFileSync(fichierConf, JSON.stringify({
+          testeur: { action: { verbe: 'ACTIVE', sujet: 'man_def456' }, timestamp: Date.now() - 20 * 60 * 1000 }
+        }));
+        const rep4 = await ChatB.executer('oui', ctxChat);
+        ok('chat : une confirmation périmée est refusée, pas exécutée à retardement',
+          /Aucune action en attente/i.test(String(rep4.texte)));
+        process.env.CHAT_CONFIRMATIONS_FICHIER = '';
+        delete require.cache[require.resolve('./chat-crud')];
+      }
+
+      // ── Deuxième passe d'audit : ce qui était faux et ne l'est plus ────────
+      {
+        const Dash = require('./delivery/dashboard');
+        const trades = [
+          { status: 'open', pair: 'frxEURUSD', direction: 'BUY', entry: 100, size: 2, risk: 1 },
+          { status: 'open', pair: 'frxXAUUSD', direction: 'SELL', entry: 3900, size: 1, risk: 10 },
+          { status: 'closed', result: 'win', pnl: 50, r: 1 },
+          { status: 'closed', result: 'loss', pnl: -20, r: -1 },
+          { status: 'closed', result: 'breakeven', pnl: 0, r: 0 }
+        ];
+        const dash = await Dash.buildDashboard({ trades, capital: null, prixParSymbole: { frxEURUSD: 110 } });
+        ok('dashboard : le capital par défaut vient de data/risque.json, pas de 10 000',
+          dash.capital === 1000, String(dash.capital));
+        const explicite = await Dash.buildDashboard({ trades: [], capital: 500 });
+        ok('dashboard : un capital explicite reste prioritaire', explicite.capital === 500, String(explicite.capital));
+        ok('dashboard : le PnL d’une position ouverte est calculé avec le prix courant',
+          dash.positions.ouvertes[0].pnlActuel === 20, String(dash.positions.ouvertes[0].pnlActuel));
+        ok('dashboard : sans prix courant, le PnL est null AVEC son motif (jamais 0)',
+          dash.positions.ouvertes[1].pnlActuel === null && /indisponible/.test(dash.positions.ouvertes[1].pnlMotif || ''));
+        ok('dashboard : le taux de réussite exclut le BE du dénominateur',
+          dash.stats.wins === 1 && dash.stats.losses === 1 && dash.stats.winRate === 50
+          && dash.stats.sansVerdict === 1, JSON.stringify({ w: dash.stats.wins, l: dash.stats.losses, taux: dash.stats.winRate }));
+        ok('dashboard : le PnL total ne compte que les trades qui en ont un',
+          dash.stats.pnlTotal === 30 && dash.stats.pnlConnus === 3, String(dash.stats.pnlTotal));
+
+        const C = require('./engine/contrat');
+        const inconnu = C.normaliserSignal({
+          id: 'x', source: 'verdict', nom: 'test', tf: '15m', sens: 'inconnu',
+          entree: 100, stop: 99, objectifs: [102]
+        });
+        ok('contrat : UNKNOWN n’est plus confondu avec « neutre »', inconnu.sens === 'inconnu', inconnu.sens);
+        const rrFaux = C.normaliserSignal({
+          id: 'y', source: 'verdict', nom: 'test', tf: '15m', sens: 'long',
+          entree: 100, stop: 99, objectifs: [102], rr: null
+        });
+        ok('contrat : un RR ne masque plus un objectif placé du mauvais côté',
+          rrFaux.rr === null || rrFaux.rr > 0, String(rrFaux.rr));
+
+        const PP = require('./engine/parcours-prix');
+        ok('parcours : l’état INCONNU est déclaré (une zone invalide reste comptée)',
+          PP.ETATS.includes('INCONNU'));
+        const serie = Array.from({ length: 12 }, (_, i) => ({
+          t: 1000 + i * 60000, o: 100, h: 101, l: 99, c: 100, closed: true
+        }));
+        const zone = { type: 'bullish', low: 99.5, high: 100.5, ts: serie[5].t };
+        const etatParTs = PP.etatZone(zone, serie.slice(4), { atr: 1 });
+        ok('parcours : une zone est située par son timestamp, pas par un index d’un autre tableau',
+          etatParTs.motif !== 'aucune bougie après la création de la zone', etatParTs.motif || etatParTs.etat);
+
+        const Perf = require('./engine/performance');
+        const avecCout = Perf.appliquerCout([{ r: 1, rBrut: 1.2 }], 0.2);
+        ok('performance : le coût ne s’applique pas deux fois à un trade déjà net',
+          Math.abs(avecCout[0].r - 1.0) < 1e-9 && avecCout[0].rBrut === 1.2,
+          `r=${avecCout[0].r} rBrut=${avecCout[0].rBrut}`);
+
+        const Exp = require('./risk-engine/exposure-manager');
+        const r = Exp.verifier({
+          capital: 1000,
+          ouvertes: [{ symbole: 'A', direction: null, risqueMontant: null }],
+          nouvelle: { symbole: 'B', direction: null, risqueMontant: 5 },
+          series: { A: [1, 2, 3, 4, 5], B: [1.01, 2.01, 3.01, 4.01, 5.01] }
+        });
+        ok('exposition : deux directions inconnues ne sont pas « le même sens »',
+          !(r.mesures.correlees || []).some(c => c.memeSens === true),
+          JSON.stringify(r.mesures.correeles || r.mesures.correlees || []));
+        ok('exposition : une position sans risque chiffré est signalée',
+          r.mesures.positionsRisqueInconnu === 1);
+      }
+
+      // ── Troisième passe : vérifier les affirmations avant de les croire ──
+      {
+        const Inst = require('./core/instruments');
+        const j = Inst.jambes('frxXAUUSD');
+        ok('instruments : les deux jambes d’un symbole Deriv sont lues correctement',
+          j[0] === 'XAU' && j[1] === 'USD', JSON.stringify(j));
+        ok('instruments : une devise n’est plus une tranche de 3 caractères',
+          Inst.deviseDe('frxXAUUSD') === 'XAU' && Inst.deviseDe('R_75') === 'R_75'
+          && Inst.deviseDe('BTCUSDT') === 'BTC',
+          `${Inst.deviseDe('frxXAUUSD')} / ${Inst.deviseDe('R_75')} / ${Inst.deviseDe('BTCUSDT')}`);
+
+        const CS = require('./engine/currencyStrength');
+        const hausse = Array.from({ length: 25 }, (_, i) => ({
+          t: i * 60000, o: 100 + i * 0.04, h: 100.05 + i * 0.04, l: 99.95 + i * 0.04, c: 100 + i * 0.04, closed: true
+        }));
+        const forces = CS.forceDevises({ frxXAUUSD: hausse }, 20);
+        ok('force des devises : l’or n’est plus exclu du calcul',
+          Number.isFinite(forces.XAU) && forces.XAU !== 0 && forces.FRX === undefined,
+          `XAU=${forces.XAU} FRX=${forces.FRX}`);
+        // La sortie est normalisée sur ±100 : c'est là que se voit la
+        // proportionnalité entre deux paires, pas l'unité interne du cumul.
+        const deuxPaires = CS.forceDevises({ frxXAUUSD: hausse, frxEURUSD: hausse }, 20);
+        const sommeForces = Object.values(deuxPaires).reduce((a, v) => a + v, 0);
+        ok('force des devises : la somme des forces reste nulle (jeu à somme nulle)',
+          Math.abs(sommeForces) < 1e-9, `somme=${sommeForces} · XAU=${deuxPaires.XAU} USD=${deuxPaires.USD}`);
+
+        const Corr = require('./engine/correlation');
+        ok('corrélation : une série constante n’est pas « corrélation nulle »',
+          Corr.pearson([1, 1, 1, 1], [1, 2, 3, 4]) === null);
+        ok('corrélation : deux séries proportionnelles valent bien 1',
+          Math.abs(Corr.pearson([1, 2, 3, 4], [2, 4, 6, 8]) - 1) < 1e-9);
+
+        const DD = require('./risk/drawdownProtection');
+        const apresDeuxGains = DD.ajusterRisque({
+          trades: [{ result: 'win' }, { result: 'win' }, { result: 'loss' }], drawdownPct: 0, risqueNormalPct: 1
+        });
+        ok('drawdown : deux gains consécutifs rétablissent le risque normal',
+          apresDeuxGains.niveau === 'normal' && apresDeuxGains.risquePct === 1, JSON.stringify(apresDeuxGains));
+
+        // Alignement des indicateurs : l'affirmation « RSI/MACD décalés de 14/25 »
+        // se vérifie en comparant la DERNIÈRE valeur au calcul mené sur la fin.
+        const Ind = require('./engine/indicators');
+        const serieInd = Array.from({ length: 80 }, (_, i) => ({
+          t: i * 60000, o: 100 + Math.sin(i / 5) * 2, h: 101 + Math.sin(i / 5) * 2,
+          l: 99 + Math.sin(i / 5) * 2, c: 100 + Math.sin(i / 5) * 2, closed: true
+        }));
+        const rsiSerie = Ind.rsi(serieInd, 14);
+        const rsiTronque = Ind.rsi(serieInd.slice(0, 70), 14);
+        ok('indicateurs : le RSI de la bougie i est bien celui de la bougie i',
+          rsiSerie.length === serieInd.length - 14
+          && Math.abs(rsiSerie[55] - rsiTronque[rsiTronque.length - 1]) < 1e-9,
+          `${rsiSerie.length} valeurs`);
+        const m = Ind.macd(serieInd);
+        ok('indicateurs : la ligne MACD est alignée sur la dernière bougie',
+          m.macd.length === serieInd.length - 25
+          && Math.abs(m.macd[m.macd.length - 1] - (Ind.ema(serieInd, 12).pop() - Ind.ema(serieInd, 26).pop())) < 1e-6,
+          `${m.macd.length} valeurs`);
+
+        const LB = require('./engine/londonBreakout');
+        const lbCandles = Array.from({ length: 40 }, (_, i) => ({
+          t: Date.UTC(2026, 0, 5) + i * 3600000,
+          o: 100 + (i % 5), h: 100.3 + (i % 5), l: 99.8 + (i % 5), c: 100.1 + (i % 5), v: 100, closed: true
+        }));
+        const qual = LB.evaluerQualite({ detecte: true, force: 2, type: 'haussier', level: 101 }, lbCandles);
+        ok('london breakout : la taille du range est comparée à un ATR réel, pas à 100',
+          Number.isFinite(qual.facteurs.rangeAtr) || qual.facteurs.noteRange !== undefined,
+          JSON.stringify({ rangeAtr: qual.facteurs.rangeAtr, note: qual.facteurs.noteRange }));
+      }
+
+      // ── Message Telegram : un signal doit être lisible sans aller sur l'écran ──
+      {
+        const Al = require('./delivery/alerts');
+        const v = {
+          direction: 'BUY', strength: 0.62, confirmations: 3, price: 2401.5,
+          levels: { entry: 2401, stop: 2395.5, target1: 2408, target2: 2414 },
+          rules: [{ name: 'R3 BOS', detail: 'clôture au-dessus du sommet' }],
+          checklist: [{ ok: true, label: 'BOS haussier' }, { ok: false, label: 'killzone NY' }]
+        };
+        const msg = Al.messageTelegram(v, { symbol: 'frxXAUUSD', tf: '15m' }, {
+          rr: 2.3, confluence: { nbAlignes: 2, detail: [{ tf: '15m', tendance: 'bullish', status: 'confirmé', direction: 'BUY' }] }
+        });
+        ok('alerte Telegram : le message porte entrée, stop, objectifs ET leur multiple en R',
+          /Entrée : <b>2401(?:\.0+)?<\/b>/.test(msg) && /Invalidation : <b>2395\.5(?:0+)?<\/b>/.test(msg)
+          && /Objectif 1 : <b>2408(?:\.0+)?<\/b> \(1\.27 R\)/.test(msg), msg.split('\n').slice(0, 5).join(' | '));
+        ok('alerte Telegram : les conditions et la raison du signal sont incluses',
+          /Conditions/.test(msg) && /✓ BOS haussier/.test(msg) && /Pourquoi/.test(msg) && /R3 BOS/.test(msg));
+        ok('alerte Telegram : l’alignement est détaillé unité par unité',
+          /Alignement : 2\/1/.test(msg) && /15m : bullish/.test(msg));
+        const sansNiveaux = Al.messageTelegram({ direction: 'SELL', strength: 0.4 }, { symbol: 'frxEURUSD', tf: '1h' }, {});
+        ok('alerte Telegram : un niveau manquant est dit « non chiffrée », pas « — »',
+          /Entrée : <b>non chiffrée<\/b>/.test(sansNiveaux) && !/Invalidation : —/.test(sansNiveaux));
+      }
+
+      // ── Écran : ce que le système calcule doit être visible ───────────────
+      // Le plan d'attente, l'alignement H4/D1 et les shadow runs existaient côté
+      // API mais n'apparaissaient nulle part : un mécanisme invisible ne se
+      // vérifie pas, et ne se corrige pas.
+      const ecran = uiSrc();
+      const serveurSrc = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+      ok('écran : les plans d’attente affichent entrée, stop, TP1/TP2 et leur R',
+        /function PlansAttente/.test(ecran) && /enR\(s, s\.tp1\)/.test(ecran) && /enR\(s, s\.tp2\)/.test(ecran));
+      ok('écran : l’alignement H4/D1 est affiché et son refus est lisible',
+        /Biais H4\/D1/.test(ecran) && /aucun trade autorisé/.test(ecran));
+      ok('écran : les shadow runs sont visibles avec leur date de promotion',
+        /shadow run/i.test(ecran) && /applicable_at/.test(ecran));
+      ok('écran : le panneau est réellement monté dans le tableau de bord',
+        /<PlansAttente symbol=\{symbol\} \/>/.test(ecran));
+      ok('API : alignement H4/D1 et état du cerveau sont exposés',
+        /'\/api\/alignement'/.test(serveurSrc) && /'\/api\/apprentissage\/shadow'/.test(serveurSrc));
+      ok('build : la version d’interface est celle du code source',
+        new RegExp(`UI_VERSION\\s*=\\s*'([^']+)'`).exec(ecran)
+        && fs.readFileSync(path.join(ROOT, 'frontend', 'build', 'app.js'), 'utf8')
+          .includes(`UI_VERSION = '${/UI_VERSION\s*=\s*'([^']+)'/.exec(ecran)[1]}'`),
+        (() => { const m = /UI_VERSION\s*=\s*'([^']+)'/.exec(ecran); return m ? m[1] : '?'; })());
+    }
+
+    // ── CHAT : historique persistant ───────────────────────────────────────
+    // Le chat répondait mais ne se souvenait de rien : fermer l'onglet effaçait
+    // la conversation. Chaque échange est désormais écrit et relu.
+    {
+      // Table et fichier dédiés : une exécution de tests ne doit ni lire ni
+      // effacer la conversation réelle de l'utilisateur.
+      process.env.CHAT_HISTORIQUE_TABLE = 'chat_messages_verif';
+      process.env.CHAT_HISTORIQUE_FICHIER = require('path').join(
+        require('os').tmpdir(), `chat-verif-${process.pid}.json`);
+      const H = require('./chat-crud/historique');
+      await H.init();
+      await H.effacer();      // repart d'une table de test vide
+
+      const avant = (await H.lister({ limite: 300 })).length;
+      const ecrit = await H.enregistrer({ role: 'user', texte: 'test historique', verbe: 'MONTRE' });
+      ok('un message du chat est enregistré', ecrit.ok === true, ecrit.raison || ecrit.stockage);
+
+      const apres = await H.lister({ limite: 300 });
+      ok('le message enregistré se relit',
+        apres.length === avant + 1 && apres[apres.length - 1].texte === 'test historique',
+        `${avant} → ${apres.length}`);
+
+      const ordre = apres.map(m => m.id || m.cree_at);
+      ok('l’historique est rendu du plus ancien au plus récent',
+        JSON.stringify(ordre) === JSON.stringify([...ordre].sort((a, b) => (a > b ? 1 : a < b ? -1 : 0))));
+
+      // Un message sans rôle n'existe pas : on refuse plutôt que d'inventer.
+      const sansRole = await H.enregistrer({ texte: 'orphelin' });
+      ok('un message sans rôle est refusé', sansRole.ok === false, sansRole.raison);
+
+      // La limite est bornée : un écran ne doit pas demander 10 000 messages.
+      const borne = await H.lister({ limite: 99999 });
+      ok('la limite de lecture est bornée', borne.length <= 300, `${borne.length} message(s)`);
+
+      const vide = await H.effacer();
+      ok('l’historique peut être effacé explicitement',
+        vide.ok === true && (await H.lister({ limite: 10 })).length === 0, vide.stockage);
+    }
+
       ok('le sélecteur expose les doublons de règles au lieu de les compter',
         /doublons/.test(fs.readFileSync(path.join(__dirname, 'strategy-engine', 'selector.js'), 'utf8'))
         && /memeReglesQue/.test(fs.readFileSync(path.join(__dirname, 'strategy-engine', 'selector.js'), 'utf8')));
@@ -4062,6 +4708,194 @@ function tinyPng(W = 64, H = 40) {
       ], () => ({ prix: 95 }));
       ok('le lot ne retient que les positions ouvertes et n’applique aucune action',
         lot.total === 1 && lot.actionsAppliquees.length === 0);
+    }
+
+    // ── COUCHE L6 : plan de gestion d'une position ouverte ─────────────────
+    // « Sécuriser » sans dire à quel prix, quelle part et depuis quand n'est pas
+    // une consigne. Le plan doit être chiffré, et calculé uniquement sur des
+    // valeurs enregistrées (entrée, stop, objectifs, ATR, date d'ouverture).
+    {
+      const S = require('./engine/surveillance-positions');
+      const maintenant = 1794614400000;                       // instant de référence
+      const ouverteIlYa = (h) => maintenant - h * 3600 * 1000;
+      // Vente 100 → stop 110, TP1 80, TP2 60, runner au-delà.
+      const base = { cle: 'g1', symbol: 'EURUSD', timeframe: '5m', sens: 'short',
+        entree: 100, stop: 110, objectifs: [80, 60, 40], at: ouverteIlYa(1) };
+
+      const avantTP1 = S.analyserPosition(base, { prix: 95, atr: 5, maintenant });
+      ok('avant TP1, aucun stop cible n’est proposé — le stop ne bouge pas',
+        avantTP1.plan.stopCible === null && avantTP1.plan.stopActuel === 110,
+        `cible ${avantTP1.plan.stopCible}`);
+      ok('les partiels annoncent 50 % / 30 % / 20 % avec leur R',
+        avantTP1.plan.partiels.length === 3
+        && avantTP1.plan.partiels[0].pct === 50 && avantTP1.plan.partiels[0].r === 2
+        && avantTP1.plan.partiels[1].pct === 30
+        && avantTP1.plan.partiels[2].niveau === 'runner' && avantTP1.plan.partiels[2].pct === 20);
+
+      const aTP1 = S.analyserPosition(base, { prix: 79, atr: 5, maintenant });
+      ok('TP1 atteint : le stop cible passe à l’entrée (breakeven)',
+        aTP1.plan.stopCible === 100 && /breakeven/.test(aTP1.plan.motifStop),
+        `${aTP1.plan.stopCible} · ${aTP1.plan.motifStop}`);
+      ok('TP1 atteint : la part à fermer est annoncée (50 %)',
+        aTP1.recommandations.some(r => r.action === 'reduire' && /fermer 50 %/.test(r.motif)));
+
+      const aTP2 = S.analyserPosition(base, { prix: 55, atr: 5, maintenant });
+      ok('TP2 atteint : le stop suit un trailing de 1,5 ATR, jamais plus large',
+        aTP2.plan.stopCible === 62.5 && aTP2.plan.trailing.multipleAtr === 1.5,
+        `${aTP2.plan.stopCible}`);
+      ok('à TP2, c’est la part de TP2 (30 %) qui est annoncée, pas celle de TP1',
+        aTP2.recommandations.some(r => r.action === 'reduire' && /fermer 30 %/.test(r.motif)));
+
+      // Un stop ne recule jamais : même avec un ATR énorme, la cible reste au
+      // moins au niveau du breakeven.
+      const atrEnorme = S.analyserPosition(base, { prix: 55, atr: 100, maintenant });
+      ok('un ATR démesuré ne fait pas reculer le stop sous le breakeven',
+        atrEnorme.plan.stopCible === 100, `${atrEnorme.plan.stopCible}`);
+
+      // Invalidation temporelle : 3 h sans TP1.
+      const jeune = S.analyserPosition(base, { prix: 100, atr: 5, maintenant });
+      ok('une position récente n’est pas invalidée', jeune.plan.invalidationTemporelle.depassee === false,
+        `${jeune.plan.invalidationTemporelle.ageHeures} h`);
+      const vieille = S.analyserPosition({ ...base, at: ouverteIlYa(4) }, { prix: 100, atr: 5, maintenant });
+      ok('au-delà de 3 h sans TP1, la clôture est proposée avec son âge',
+        vieille.plan.invalidationTemporelle.depassee === true
+        && vieille.recommandations.some(r => r.action === 'cloturer' && /4 h/.test(r.motif)),
+        vieille.plan.invalidationTemporelle.motif);
+      const sansDate = S.analyserPosition({ ...base, at: undefined, enregistreAt: undefined },
+        { prix: 100, atr: 5, maintenant });
+      ok('sans date d’ouverture, l’âge est déclaré inconnu plutôt que deviné',
+        sansDate.plan.invalidationTemporelle.ageHeures === null
+        && /inconnu/.test(sansDate.plan.invalidationTemporelle.motif));
+
+      // Le plan est une lecture : rien n'est appliqué.
+      ok('le plan se déclare non appliqué et le stop enregistré reste intact',
+        aTP2.plan.applique === false && aTP2.stop === 110 && aTP2.stopInchange === true);
+
+      // Aucune action proposée deux fois à l'écran.
+      const actions = aTP2.recommandations.map(r => r.action);
+      ok('une même action n’est jamais proposée deux fois',
+        actions.length === new Set(actions).size, actions.join(','));
+    }
+
+    // ── COHÉRENCE DU MOTEUR : les chiffres doivent être les mêmes partout ─
+    // Quatre calculs divergents suffisent à rendre un système incohérent : deux
+    // modules qui ne donnent pas le même ATR pour le même marché produisent deux
+    // stops différents au même instant. Ces tests verrouillent l'unicité.
+    {
+      const I = require('./engine/indicators');
+      const St = require('./engine/structure');
+      const P = require('./engine/plans');
+      const bougie = (t, o, h, l, c) => ({ t, o, h, l, c, closed: true });
+
+      // 1. ATR : une seule définition (Wilder) pour tous les modules.
+      const serie = [];
+      let px = 100;
+      for (let i = 0; i < 60; i++) {
+        px += Math.sin(i / 3) * 2 + (i % 7 === 0 ? 1.5 : 0);
+        serie.push(bougie(i * 60000, px, px + 1.2, px - 1.1, px + 0.3));
+      }
+      ok('l’ATR des plans et celui de la structure sont identiques',
+        St.atr(serie, 14) === P.atr(serie, 14),
+        `${St.atr(serie, 14)} vs ${P.atr(serie, 14)}`);
+
+      // Un ATR(14) exige 15 bougies. En dessous, on ne rend RIEN plutôt qu'un
+      // ATR de période plus courte présenté comme un ATR 14.
+      const court = Array.from({ length: 8 }, (_, i) => bougie(i * 60000, 100, 101 + i, 99, 100));
+      ok('un ATR(14) sur 8 bougies est refusé, pas raboté',
+        St.atr(court, 14) === null, String(St.atr(court, 14)));
+      const juste = Array.from({ length: 15 }, (_, i) => bougie(i * 60000, 100, 101 + i, 99, 100 + i));
+      ok('un ATR(14) sur 15 bougies est calculé (14 intervalles réels)',
+        Number.isFinite(St.atr(juste, 14)) && St.atr(juste, 14) > 0, String(St.atr(juste, 14)));
+
+      // 2. MACD : la ligne est alignée sur les MÊMES bougies (pas de décalage
+      //    de 14 bougies entre EMA12 et EMA26).
+      const ema12 = I.ema(serie, 12), ema26 = I.ema(serie, 26);
+      const m = I.macd(serie);
+      const attendu = +(ema12[ema12.length - 1] - ema26[ema26.length - 1]).toFixed(6);
+      ok('le dernier MACD vaut EMA12 − EMA26 sur la même bougie',
+        m.macd[m.macd.length - 1] === attendu,
+        `calculé ${m.macd[m.macd.length - 1]} · attendu ${attendu}`);
+      ok('la ligne MACD couvre autant de bougies que l’EMA lente',
+        m.macd.length === ema26.length, `${m.macd.length} vs ${ema26.length}`);
+
+      // 3. RSI d'une série plate : 50 (neutre), jamais 100 (surachat).
+      const plat = Array.from({ length: 30 }, (_, i) => bougie(i * 60000, 100, 100, 100, 100));
+      const rsiPlat = I.rsi(plat, 14);
+      ok('un marché parfaitement plat donne un RSI neutre de 50',
+        rsiPlat[rsiPlat.length - 1] === 50, String(rsiPlat[rsiPlat.length - 1]));
+
+      // 4. HH/HL : un sommet se compare à un sommet, un creux à un creux.
+      const zig = [];
+      const pts = [10, 16, 13, 18, 15, 20, 17, 22];   // hauts 16→18→20→22, creux 13→15→17
+      pts.forEach((v, i) => zig.push(bougie(i * 60000, v, v + 0.4, v - 0.4, v)));
+      const ms = St.marketStructure(zig, 1);
+      ok('les sommets croissants sont étiquetés HH (jamais comparés à un creux)',
+        ms.recent.filter(x => x.label === 'HH').length >= 2
+        && ms.recent.filter(x => x.label === 'LH').length === 0,
+        JSON.stringify(ms.recent.map(x => x.label)));
+      ok('les creux croissants sont étiquetés HL',
+        ms.recent.filter(x => x.label === 'HL').length >= 2,
+        JSON.stringify(ms.recent.map(x => x.label)));
+
+      // 5. Liquidité : trois sommets égaux = trois touches, pas deux.
+      const eq = [];
+      const base = [100, 110, 100, 110, 100, 110, 100];
+      base.forEach((v, i) => eq.push(bougie(i * 60000, v, v + 0.5, v - 0.5, v)));
+      const pools = St.liquidityPools(eq, 0.001, 1);
+      const eqh = pools.filter(p => p.type === 'EQH').sort((a, b) => b.touches - a.touches)[0];
+      ok('un amas de trois sommets égaux est compté à trois touches',
+        eqh && eqh.touches === 3, eqh ? String(eqh.touches) : 'aucun amas');
+
+      // 6. Déplacement : l'ATR de référence est celui de la bougie, pas celui
+      //    d'aujourd'hui. Une période calme puis violente doit signaler les
+      //    grosses bougies RÉCENTES, pas les anciennes.
+      const mixte = [];
+      for (let i = 0; i < 40; i++) mixte.push(bougie(i * 60000, 100, 100.5, 99.5, 100));
+      mixte.push(bougie(40 * 60000, 100, 106, 100, 106));   // +6 sans ATR préalable
+      const dep = St.displacements(mixte, 1.5);
+      ok('un déplacement se mesure contre l’ATR du moment, pas l’ATR global',
+        dep.length >= 1 && dep[dep.length - 1].from === 100, JSON.stringify(dep.slice(-1)));
+    }
+
+    // ── FLUX D'ÉVÉNEMENTS → CONVERSATION ───────────────────────────────────
+    // Ce que l'IA doit savoir sans qu'on le lui demande : un stop touché, un
+    // objectif atteint, un scénario expiré. Ces messages sont composés par des
+    // fonctions pures, donc vérifiables sans écrire dans la vraie conversation.
+    {
+      const F = require('./chat-crud/flux');
+      const sig = { symbol: 'EURUSD', timeframe: '5m', sens: 'long',
+        entree: 1.0850, stop: 1.0820, objectifs: [1.0900, 1.0950], r: -1.02 };
+
+      ok('aucun événement n’est émis sans changement d’état',
+        F.composerIssue(sig, 'sl') === null && F.composerIssue(null, 'ouvert') === null);
+
+      const sl = F.composerIssue({ ...sig, resultat: 'sl' }, 'ouvert');
+      ok('un stop touché produit un message de gravité « bad » qui nomme le R',
+        sl && sl.gravite === 'bad' && /^Stop touché/.test(sl.texte) && /R/.test(sl.texte),
+        sl && sl.texte.slice(0, 60));
+
+      const tp1 = F.composerIssue({ ...sig, resultat: 'tp1', r: 1.4 }, 'ouvert');
+      ok('TP1 annonce la part à fermer (50 %) et le stop à l’entrée',
+        tp1 && tp1.gravite === 'ok' && /ferme 50 %/i.test(tp1.texte), tp1 && tp1.texte.slice(0, 60));
+      const tp2 = F.composerIssue({ ...sig, resultat: 'tp2', r: 2.6 }, 'ouvert');
+      ok('TP2 annonce 30 % et le trailing de 1,5 ATR',
+        tp2 && /30 %/.test(tp2.texte) && /1,5 ATR/.test(tp2.texte));
+
+      const be = F.composerIssue({ ...sig, resultat: 'be', r: 0 }, 'ouvert');
+      ok('un retour à l’entrée est dit « protégé », jamais « gagné »',
+        be && be.gravite === 'warn' && /protégé/.test(be.texte));
+
+      const scn = { id: 'scn_t', instrument: 'XAUUSD', timeframe: '15m',
+        direction: 'long', niveauEntree: 2389.5 };
+      const exp = F.composerScenario(scn, 'expire');
+      ok('un scénario expiré est annoncé avec son niveau jamais atteint',
+        exp && /expiré/i.test(exp.texte) && /2389/.test(exp.texte), exp && exp.texte.slice(0, 70));
+      ok('un scénario sans niveau ne produit pas d’événement inventé',
+        F.composerScenario(null, 'expire') === null);
+
+      // Le résumé sert de contexte au modèle : il doit rester lisible.
+      ok('le module expose un résumé textuel et une mémoire bornée',
+        typeof F.resume === 'function' && F.MAX_MEMOIRE > 0);
     }
 
     // ── PHASE 3 : parcours du prix autour d'une zone ───────────────────────
@@ -4411,7 +5245,7 @@ function tinyPng(W = 64, H = 40) {
       serie.push(c(i, base, base + 0.6, base - 0.6, base + (i % 2 ? 0.3 : -0.2)));
     }
     const profils = [{ id: 'p', titre: 'Test', regles: ['R1', 'R2'], seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: ['5m'], parametres: {} }];
-    const r = B.lancer(serie, { symbol: 'TEST', timeframe: '5m' }, { profils, pas: 3, maxBougies: 120 });
+    const r = B.lancer(serie, { symbol: 'TEST', timeframe: '5m' }, { profils, pas: 3, maxBougies: 120, accepterSurveiller: true });
     ok('le backtest produit des prises', !r.indisponible && r.total > 0, `${r.total} prise(s)`);
 
     // Le filtre par SOURCE, et la ventilation qui l'accompagne.
@@ -4494,7 +5328,16 @@ function tinyPng(W = 64, H = 40) {
     ok('une chaîne IA gratuite existe',
       /integrate\.api\.nvidia\.com/.test(sSrc) && /NVIDIA_MODELS/.test(sSrc));
     ok('la chaîne prend le relais, modèle après modèle',
-      /for \(const modele of NVIDIA_MODELS\)[\s\S]{0,200}?appelNvidia\(modele, messages/.test(sSrc));
+      /for \(const modele of NVIDIA_MODELS\)[\s\S]{0,900}?appelNvidia\(modele, messages/.test(sSrc));
+    // Échéance globale : sans elle, cinq modèles à 45 s font une requête de
+    // plusieurs minutes (mesuré : 180 s avant de rendre la main).
+    ok('la cascade est bornée par une échéance globale',
+      /NVIDIA_BUDGET_TOTAL_MS/.test(sSrc)
+      && /restant <= 2000/.test(sSrc),
+      'au-delà, le moteur fournit le plan sans IA');
+    // Un modèle qui épuise son budget en raisonnant doit être rejoué plus large.
+    ok('un contenu vide par budget épuisé déclenche un second essai',
+      /finish_reason === 'length'/.test(sSrc) && /budget\(\) \* 3/.test(sSrc));
     ok('plus aucun fournisseur payant dans le chemin d\'analyse',
       !/appelDeepSeek/.test(sSrc) && !/DEEPSEEK_API_KEY/.test(sSrc),
       /DEEPSEEK/.test(sSrc) ? 'référence DeepSeek restante' : 'aucune');
@@ -5358,10 +6201,13 @@ function tinyPng(W = 64, H = 40) {
     ok('le taux de réussite exclut les trades neutres',
       m.winRate === 50, `${m.winRate} %`);
 
-    // Zéro perte : le PF est infini, et on le dit au lieu de mentir.
+    // Zéro perte : le PF n'a pas de valeur numérique. Il rend null ET un drapeau
+    // séparé — un type à trois formes ('infini', nombre, null) cassait les calculs
+    // qui multipliaient le PF par un capital.
     const sansPerte = P.metriques([{ r: 1, at: '2026-01-01' }, { r: 2, at: '2026-01-02' }]);
-    ok('sans aucune perte, le profit factor est annoncé « infini »',
-      sansPerte.profitFactor === 'infini', String(sansPerte.profitFactor));
+    ok('sans aucune perte, le profit factor est null et signalé par un drapeau',
+      sansPerte.profitFactor === null && sansPerte.sansPerte === true,
+      `${sansPerte.profitFactor} / sansPerte=${sansPerte.sansPerte}`);
 
     // Découpe chronologique : jamais de mélange.
     const long = Array.from({ length: 60 }, (_, i) => ({
@@ -5473,7 +6319,12 @@ function tinyPng(W = 64, H = 40) {
     const r4 = Q.ratios([{ r: 1 }, { r: 1 }, { r: 1 }, { r: -1 }]);
     ok('le Sharpe est calculé par trade, en R', r4.sharpe === 0.5, String(r4.sharpe));
     ok('le Sortino ne pénalise que la volatilité baissière', r4.sortino === 0.5, String(r4.sortino));
-    ok('le Calmar rapporte la performance au drawdown', r4.calmar === 2, String(r4.calmar));
+    // Calmar et recovery factor avaient la même formule sous deux noms. Le
+    // recovery factor reste ; le Calmar exige une annualisation qu'on ne peut pas
+    // faire en R par trade, donc il vaut null avec sa raison.
+    ok('le recovery factor rapporte la performance au drawdown', r4.recoveryFactor === 2, String(r4.recoveryFactor));
+    ok('le Calmar ne recopie pas le recovery factor',
+      r4.calmar === null && /annualis/i.test(r4.calmarMotif || ''), String(r4.calmar));
     ok('les pertes consécutives sont comptées',
       Q.ratios([{ r: 1 }, { r: -1 }, { r: -1 }, { r: -1 }, { r: 1 }]).pertesConsecutives === 3);
     ok('moins de deux trades : aucun ratio',
@@ -5521,7 +6372,7 @@ function tinyPng(W = 64, H = 40) {
     };
     Al.load();
     Al.update({ actif: true, email: 'cycle@test.local',
-      marches: [{ symbol: 'R_75', tf: '15m', provider: 'test' }] });
+      marches: [{ symbol: 'frxXAUUSD', tf: '15m', provider: 'test' }] });
     Al.start({ market: lent, signals: Sig, sendMail: async () => {}, labelOf: () => 'test' });
 
     const [premier, second] = await Promise.all([Al.verifier(true), Al.verifier(true)]);
@@ -6649,6 +7500,9 @@ function tinyPng(W = 64, H = 40) {
       !JSON.stringify(A.diagnostic()).includes('telegramToken'));
   }
 
+  // ── Moteur : mesures justes (la fonction est déclarée plus bas, hissée ici) ──
+  testsMoteurAudit(ok, section);
+
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──
   // Mesure réelle : 8,7 s pour joindre Telegram depuis cette connexion. Sans
   // reprise, l'alerte échouait sur un appel pourtant valide.
@@ -6700,6 +7554,306 @@ function tinyPng(W = 64, H = 40) {
       process.exit(fail ? 1 : 0);
     })();
     return;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // [11] MOTEUR — mesures justes (audit externe, 4e passe)
+  // Déclaré en FONCTION (et non en bloc anonyme) parce que la section réseau
+  // ci-dessous se termine par un `return` : tout ce qui la suit ne serait jamais
+  // exécuté. Une fonction déclarée est hissée, donc appelable avant sa
+  // définition — l'appel est juste au-dessus de la section réseau.
+  // Chaque point corrigé ici a d'abord été RELU dans le code : sur les 94
+  // points de l'audit, plusieurs étaient déjà réglés ou faux. Un contrôle vert
+  // vaut mieux qu'un commentaire : il empêche la régression.
+  // ═══════════════════════════════════════════════════════════════
+  function testsMoteurAudit(ok, section) {
+    section('[11] Moteur — mesures (audit 4e passe)');
+    const Ind = require('./engine/indicators');
+    const St = require('./engine/structure');
+    const OF = require('./engine/orderFlow');
+    const VP = require('./engine/volumeProfile');
+    const CS = require('./engine/currencyStrength');
+    const Cor = require('./engine/correlation');
+    const An = require('./engine/anomalyDetection');
+    const PR = require('./engine/patternRecognition');
+    const Pat = require('./engine/patterns');
+    const Tr = require('./delivery/trades');
+    const Reg = require('./strategy-engine/registry');
+    const Q = require('./data-engine/quality');
+
+    const serie = (n = 150, base = 100, pas = 0.4) => {
+      const out = []; let p = base;
+      for (let i = 0; i < n; i++) {
+        const o = p;
+        p = o + Math.sin(i / 7) * pas + (i % 5 === 0 ? pas : -pas / 3);
+        out.push({
+          t: 1700000000000 + i * 3600e3, o,
+          h: Math.max(o, p) + pas * 0.6, l: Math.min(o, p) - pas * 0.6,
+          c: p, v: 100 + (i % 11) * 37, closed: true
+        });
+      }
+      return out;
+    };
+    const C = serie();
+
+    // — VWAP sans volume : un prix, jamais zéro
+    {
+      const sansVol = C.map(c => ({ ...c, v: 0 }));
+      const v = Ind.vwap(sansVol);
+      const typique = sansVol.reduce((a, c) => a + (c.h + c.l + c.c) / 3, 0) / sansVol.length;
+      ok('vwap sans volume rend le prix typique moyen (pas 0)',
+        Math.abs(v - typique) < 1e-6 && v > 0, `${v.toFixed(4)} vs ${typique.toFixed(4)}`);
+    }
+
+    // — Delta d'order flow : réparti selon la clôture dans le range
+    {
+      const bougie = [{ t: 1, o: 100, h: 130, l: 100, c: 101, v: 1000 },
+                      { t: 2, o: 100, h: 130, l: 100, c: 101, v: 1000 }];
+      const d = OF.delta(bougie);
+      // part = (101-100)/30 = 0,0333 → delta = 1000 × (2×0,0333 − 1) = −933,33
+      ok('delta borné par le volume et proportionnel à la clôture',
+        Math.abs(d[0] - (-933.33)) < 0.5, `delta ${d[0]}`);
+      ok('le delta ne vaut plus « tout le volume » dès que le prix monte',
+        d[0] < 0, 'une bougie qui clôture près de son plus bas est vendeuse');
+    }
+
+    // — Fibonacci : sens, ratios standards, clés pointées
+    {
+      // Série en zigzag à vagues franches : `serie()` (sinusoïde fine) n'a pas de
+      // swing strict au sens de `swings(candles, 2)`, donc fibLevels y rend null.
+      const zigzag = (n = 80, amplitude = 20, periode = 10) => {
+        const out = [];
+        for (let i = 0; i < n; i++) {
+          const t = (i % periode) / periode;
+          const d = t <= 0.5 ? t * 2 : (1 - t) * 2;   // triangle 0 → 1 → 0
+          const base = 100 + d * amplitude;
+          out.push({ t: i * 3600e3, o: base, h: base + 1, l: base - 1, c: base, v: 500, closed: true });
+        }
+        return out;
+      };
+      const CZ = zigzag();
+      const fib = St.fibLevels(CZ);
+      ok('fibonacci : 5 ratios standards, plus de « 0,705 » inventé',
+        fib && Object.keys(fib.levels).join(',') === '0.236,0.382,0.5,0.618,0.786',
+        fib ? Object.keys(fib.levels).join(' · ') : 'aucun swing');
+      ok('fibonacci : les clés sont en notation pointée (plus de virgule française)',
+        fib && Object.keys(fib.levels).every(k => !k.includes(',')));
+      ok('fibonacci : tous les niveaux restent DANS le swing',
+        fib && Object.values(fib.levels).every(v => v >= fib.from - 1e-6 && v <= fib.to + 1e-6),
+        fib ? `${fib.from} → ${fib.to}` : '');
+      // Swing baissier construit à la main : sommet en bougie 20, creux en 40.
+      const sb = [];
+      for (let i = 0; i < 60; i++) {
+        const haut = i < 20 ? 100 + i : i < 40 ? 120 - (i - 20) * 2 : 80 + (i - 40) * 0.2;
+        sb.push({ t: i * 3600e3, o: haut, h: haut + 0.3, l: haut - 0.3, c: haut, v: 500, closed: true });
+      }
+      const fibB = St.fibLevels(sb);
+      ok('fibonacci : sur un swing baissier les niveaux sont AU-DESSUS du creux',
+        fibB && fibB.sens.startsWith('baissier') && Object.values(fibB.levels).every(v => v >= fibB.from - 1e-6),
+        fibB ? `${fibB.sens} · min ${Math.min(...Object.values(fibB.levels))} / creux ${fibB.from}` : 'non calculé');
+    }
+
+    // — FVG : « mitigé » (entré dans la zone) distinct de « comblé »
+    {
+      const g = [
+        { t: 1, o: 99, h: 100, l: 98, c: 99.5, v: 10, closed: true },
+        { t: 2, o: 101, h: 112, l: 101, c: 111, v: 10, closed: true },
+        { t: 3, o: 112, h: 113, l: 110, c: 112, v: 10, closed: true },
+        { t: 4, o: 112, h: 112, l: 105, c: 106, v: 10, closed: true }
+      ];
+      const f = St.fvgs(g);
+      ok('fvg : un gap partiellement rempli est marqué « mitigé »',
+        f.length === 1 && f[0].mitigated === true, JSON.stringify(f[0] || {}).slice(0, 90));
+    }
+
+    // — Volume profile : rien ne se perd, rien ne s'invente
+    {
+      const vp = VP.volumeProfile(C);
+      const entree = C.reduce((a, c) => a + c.v, 0);
+      const sortie = vp.profile.reduce((a, b) => a + b.volume, 0);
+      ok('volume profile : le volume total est conservé',
+        Math.abs(entree - sortie) < 0.01, `${entree.toFixed(0)} → ${sortie.toFixed(0)}`);
+      const gros = [
+        { t: 1, o: 100, h: 101, l: 99, c: 100, v: 1, closed: true },
+        { t: 2, o: 100, h: 101, l: 99, c: 100, v: 1, closed: true },
+        { t: 3, o: 100, h: 120, l: 100, c: 119, v: 10000, closed: true },
+        { t: 4, o: 119, h: 120, l: 118, c: 119, v: 1, closed: true }
+      ];
+      const vp2 = VP.volumeProfile(gros);
+      ok('volume profile : le POC tombe dans l\'amplitude de la grosse bougie',
+        vp2.poc >= 100 && vp2.poc <= 120, `POC ${vp2.poc}`);
+    }
+
+    // — Force des devises : jambes + vraie corrélation
+    {
+      const forces = CS.forceDevises({ frxXAUUSD: C, frxEURUSD: C.map(c => ({ ...c, c: c.c * 1.1 })) });
+      ok('force des devises : frxXAUUSD est reconnu (XAU ≠ 0)',
+        Number.isFinite(forces.XAU) && forces.XAU !== 0, `XAU ${forces.XAU}`);
+      const m = CS.correlationEntrePaires({ A: C, B: C.map(c => ({ ...c, c: c.c * 1.1 })) });
+      ok('corrélation entre paires : Pearson réel, proche de 1 sur deux séries proportionnelles',
+        Math.abs(m.A.B - 1) < 0.05, `r = ${m.A.B}`);
+      const inv = CS.correlationEntrePaires({ A: C, B: C.slice().reverse() });
+      ok('corrélation entre paires : change de signe quand le sens s\'inverse',
+        inv.A.B !== null && inv.A.B < m.A.B, `r inversé = ${inv.A.B}`);
+    }
+
+    // — Pearson : jamais NaN, null si non mesurable
+    {
+      ok('pearson : série constante → null (non mesurable)',
+        Cor.pearson([5, 5, 5, 5], [1, 2, 3, 4]) === null);
+      const r = Cor.pearson([1, 2, 3, 4], [4, 3, 2, 1]);
+      ok('pearson : rend −1 exactement sur deux séries opposées, jamais NaN',
+        Number.isFinite(r) && Math.abs(r + 1) < 1e-9, `r = ${r}`);
+    }
+
+    // — Divergences cachées : définition inverse des régulières
+    {
+      const src = fs.readFileSync(path.join(__dirname, 'engine/divergences.js'), 'utf8');
+      ok('divergence cachée baissière = prix plus BAS + indicateur plus HAUT',
+        /cachee_baissiere/.test(src) && /cur\.prix < prev\.prix && cur\.rsi > prev\.rsi/.test(src));
+      ok('divergence cachée haussière = prix plus HAUT + indicateur plus BAS',
+        /cachee_haussiere/.test(src) && /cur\.prix > prev\.prix && cur\.rsi < prev\.rsi/.test(src));
+      const ds = require('./engine/divergences').detecterDivergences(C);
+      ok('chaque divergence produite décrit ce qu\'elle mesure',
+        ds.every(d => d.detail && d.detail.length > 20 && !/NaN/.test(d.detail)),
+        `${ds.length} divergence(s)`);
+    }
+
+    // — Anomalies : pas d'Infinity sur une cotation nulle
+    {
+      const troue = C.map((c, i) => (i === 40 ? { ...c, c: 0, o: 0 } : c));
+      const toutes = [
+        ...An.anomaliesPrix(troue), ...An.anomaliesVolume(troue),
+        ...An.anomaliesVolatilite(troue), ...An.anomaliesSpread(troue)
+      ];
+      ok('anomalies : aucune valeur infinie ou NaN dans les libellés',
+        toutes.every(a => !/Infinity|NaN/.test(a.detail) && Number.isFinite(a.force)),
+        `${toutes.length} anomalie(s)`);
+      const sansVol = C.map(c => ({ ...c, v: 0 }));
+      ok('anomalies : volume moyen nul → aucune anomalie inventée',
+        An.anomaliesVolume(sansVol).length === 0);
+      ok('anomalies : « spread » est annoncé comme une amplitude',
+        An.anomaliesSpread(C).every(a => /amplitude/.test(a.detail)));
+    }
+
+    // — Patterns : une seule implémentation, les deux API d'accord
+    {
+      const api = PR.patternsChandeliers(C).map(p => p.type).sort();
+      const moteur = Pat.analyse(C).motifs.filter(m => m.ok && m.famille === 'bougie').map(m => m.id).sort();
+      ok('patterns : /api/patterns et le moteur renvoient les MÊMES motifs',
+        JSON.stringify(api) === JSON.stringify(moteur), `${api.join(',') || 'aucun'} / ${moteur.join(',') || 'aucun'}`);
+      ok('patterns : plus de seconde implémentation (adaptateur sur patterns.js)',
+        /require\('\.\/patterns'\)/.test(fs.readFileSync(path.join(__dirname, 'engine/patternRecognition.js'), 'utf8')));
+      ok('patterns : head & shoulders ne dépend plus de fenêtres fixes [0-10/10-20/20-30]',
+        !/slice\(0, 10\)/.test(fs.readFileSync(path.join(__dirname, 'engine/patternRecognition.js'), 'utf8')));
+      const pr = PR.detecterPatterns(C);
+      ok('patterns : chaque motif publié a un type, un nom et une direction',
+        pr.every(p => p.type && p.nom && ['BUY', 'SELL', 'NEUTRE'].includes(p.direction)),
+        `${pr.length} motif(s)`);
+    }
+
+    // — Saisie française des prix
+    {
+      ok('trades : « 1.234,56 » se lit 1234,56 (et non 1,234)',
+        Tr.num('1.234,56') === 1234.56, String(Tr.num('1.234,56')));
+      ok('trades : « 3 861,25 » (espaces + virgule) se lit 3861,25',
+        Tr.num('3 861,25') === 3861.25, String(Tr.num('3 861,25')));
+      ok('trades : « 3861.253698 » reste un prix à 6 décimales',
+        Tr.num('3861.253698') === 3861.253698);
+      ok('trades : paire suffixée ≠ paire nue (XAUUSD_LONG vs XAUUSD)',
+        Tr.pairesCorrelees('XAUUSD_LONG', 'XAUUSD') === true
+        && Tr.pairesCorrelees('XAUUSD_LONG', 'EURUSD') === false
+        && Tr.pairesCorrelees('EURUSD', 'GBPUSD') === true);
+    }
+
+    // — Backtest : statistiques réelles, capital cohérent, positions multiples
+    {
+      const B = Tr.backtest({
+        candles: C,
+        signalFn: () => null
+      });
+      ok('backtest : le capital de départ vient de la configuration de risque',
+        Number.isFinite(B.initialCapital) && B.initialCapital <= 10000,
+        `départ ${B.initialCapital}`);
+      const toujours = Tr.backtest({
+        candles: C,
+        maxPositions: 1,
+        signalFn: f => ({ action: 'BUY', entry: f[f.length - 1].c, sl: f[f.length - 1].c - 0.5, tp: f[f.length - 1].c + 1.5 })
+      });
+      ok('backtest : les trades simulés sont COMPTÉS (status « closed »)',
+        toujours.total > 0, `${toujours.total} trade(s), winRate ${toujours.winRate}`);
+      const plusieurs = Tr.backtest({
+        candles: C,
+        maxPositions: 3,
+        signalFn: f => ({ action: 'BUY', entry: f[f.length - 1].c, sl: f[f.length - 1].c - 0.5, tp: f[f.length - 1].c + 1.5 })
+      });
+      ok('backtest : plusieurs positions simultanées sont possibles',
+        plusieurs.maxPositions === 3 && plusieurs.total >= toujours.total,
+        `${plusieurs.total} vs ${toujours.total} trade(s)`);
+    }
+
+    // — Risque de portefeuille : une position non chiffrée n'est pas un zéro
+    {
+      const Pf = require('./risk/portfolioRisk');
+      const melange = Pf.risqueTotal([
+        { pair: 'EURUSD', direction: 'BUY', risk: 10, size: 1 },
+        { pair: 'XAUUSD', direction: 'BUY', risk: null, size: null }
+      ], 1000);
+      ok('risque : une position non chiffrée est EXCLUE du total, pas comptée à zéro',
+        melange.nonChiffrees === 1 && melange.risqueTotalPct === 1,
+        `total ${melange.risqueTotalPct} % · ${melange.nonChiffrees} non chiffrée(s)`);
+      const aucune = Pf.risqueTotal([{ pair: 'EURUSD', direction: 'BUY', risk: null, size: null }], 1000);
+      ok('risque : aucune position chiffrée → total null (non mesurable), pas 0 %',
+        aucune.risqueTotalPct === null && !!aucune.raison, String(aucune.risqueTotalPct));
+      const refus = Pf.peutOuvrirPosition({
+        positionsExistantes: [{ pair: 'EURUSD', direction: 'BUY', risk: null, size: null }],
+        capital: 1000, nouvelleRisquePct: 1
+      });
+      ok('risque : ouvrir est REFUSÉ quand le risque du portefeuille est inconnu',
+        refus.ok === false, refus.raison);
+    }
+
+    // — Versions sémantiques avec suffixe
+    {
+      ok('registry : « 1.0.0-beta » n\'empoisonne plus la comparaison',
+        Reg.comparerVersions('1.0.0-beta', '0.9.0') > 0
+        && Reg.comparerVersions('1.0.0', '1.0.0-beta') > 0
+        && Reg.comparerVersions('1.0.0', '1.0.0') === 0
+        && Number.isFinite(Reg.comparerVersions('2.0.0-rc1', '1.9.9')));
+    }
+
+    // — Scoring ML : features normalisées, régularisation, hyperparamètres
+    {
+      const Sc = require('./engine/signalScoring');
+      const trades = [];
+      for (let i = 0; i < 40; i++) {
+        trades.push({
+          status: 'closed', result: i % 2 ? 'win' : 'loss',
+          closedAt: new Date(1700000000000 + i * 86400e3).toISOString(),
+          signalStrength: 0.5 + (i % 5) / 10, signalStatus: i % 2 ? 'confirme' : 'surveille',
+          trend: i % 3 ? 'bullish' : 'range', position: i % 2 ? 'premium' : 'discount',
+          session: i % 4 ? 'london' : 'asie', atrRel: 0.5 + (i % 7) * 0.5
+        });
+      }
+      const m = Sc.entrainerModele(trades);
+      ok('scoring : le modèle entraîné stocke l\'échelle des features',
+        m.entraine && Array.isArray(m.moyenne) && Array.isArray(m.ecartType),
+        m.entraine ? `moyenne atrRel ${m.moyenne[5].toFixed(2)}` : m.avertissement);
+      ok('scoring : la régularisation L2 et les hyperparamètres sont exposés',
+        m.hyperparametres && m.hyperparametres.regularisation > 0 && m.hyperparametres.epochs > 100,
+        JSON.stringify(m.hyperparametres || {}));
+      const p = Sc.predireSucces({ signalStrength: 0.8, signalStatus: 'confirme', trend: 'bullish', position: 'premium', session: 'london', atrRel: 3.5 }, m);
+      ok('scoring : la prédiction applique la même échelle (probabilité dans [0,1])',
+        Number.isFinite(p) && p >= 0 && p <= 1, `p = ${p.toFixed(3)}`);
+    }
+
+    // — Qualité des données : tolérance de retard proportionnée à l'unité
+    {
+      const d1 = Q.analyser(C, { timeframe: '1d' });
+      ok('qualité : le contrôle de retard connaît l\'unité de temps demandée',
+        d1.mesures && d1.mesures.timeframe === '1d' && d1.mesures.intervalle === 86400000,
+        `${d1.mesures.timeframe} / ${d1.mesures.intervalle} ms`);
+    }
   }
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);

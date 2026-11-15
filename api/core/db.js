@@ -47,7 +47,14 @@ async function init() {
   if (url) {
     try {
       const postgres = require('postgres');
-      sql = postgres(url, { onnotice: () => {}, max: 5 });
+      // `max: 5` en dur bridait le pool : sous charge (scan + dashboard +
+      // surveillance), les requêtes faisaient la queue sur cinq connexions.
+      // Réglable par DB_MAX sans toucher au code, plafonné à 50 (au-delà, un
+      // PaaS gratuit coupe de toute façon).
+      const max = Number(process.env.DB_MAX) > 0
+        ? Math.min(50, Math.round(Number(process.env.DB_MAX)))
+        : 5;
+      sql = postgres(url, { onnotice: () => {}, max });
       await sql`select 1`;
       await sql`
         create table if not exists kv (

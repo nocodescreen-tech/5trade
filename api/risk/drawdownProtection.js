@@ -111,8 +111,13 @@ function ajusterRisque({ trades, drawdownPct = 0, risqueNormalPct = 1 }) {
     };
   }
 
-  // RÉCUPÉRATION : 2 gains consécutifs après des pertes
-  if (gainsConsecutifs >= 2 && pertesConsecutives > 0) {
+  // RÉCUPÉRATION : deux gains consécutifs suffisent à rétablir le risque normal.
+  // L'ancienne condition exigeait EN PLUS `pertesConsecutives > 0`, alors que les
+  // deux compteurs sont calculés depuis la même liste (du plus récent au plus
+  // ancien) : si elle commence par deux gains, le compteur de pertes vaut 0, et
+  // la branche n'était JAMAIS atteinte. La réduction de risque, elle, est déjà
+  // traitée plus haut (3 et 5 pertes) : ici les pertes ne peuvent plus être >= 3.
+  if (gainsConsecutifs >= 2) {
     return {
       risquePct: risqueNormalPct,
       bloque: false,

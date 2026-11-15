@@ -58,7 +58,13 @@ function ratios(trades) {
   return {
     sharpe: ecart > 0 ? Math.round((moyenne / ecart) * 1000) / 1000 : null,
     sortino: ecartBaisse > 0 ? Math.round((moyenne / ecartBaisse) * 1000) / 1000 : null,
-    calmar: dd > 0 ? Math.round((m.rTotal / dd) * 100) / 100 : null,
+    // Calmar et recovery factor avaient la MÊME formule (rTotal / drawdown) sous
+    // deux noms : l'écran affichait deux métriques censées différer et qui ne
+    // différaient jamais. Le Calmar exige une annualisation qu'on ne peut pas
+    // calculer en R par trade — il est donc rendu null, avec sa raison, au lieu
+    // d'un chiffre déguisé.
+    calmar: null,
+    calmarMotif: 'non calculable en R par trade : le Calmar exige un rendement annualisé',
     recoveryFactor: dd > 0 ? Math.round((m.rTotal / dd) * 100) / 100 : null,
     pertesConsecutives: pire,
     note: n < 30 ? `seulement ${n} trade(s) : ratios indicatifs, pas démonstratifs` : ''
@@ -105,7 +111,10 @@ function monteCarlo(trades, options = {}) {
     dds.push(dd);
   }
   dds.sort((a, b) => a - b);
-  const centile = p => Math.round(dds[Math.min(dds.length - 1, Math.floor(p * dds.length))] * 100) / 100;
+  // `Math.floor(p * length)` envoyait p=1.0 et p=0.999 sur le MÊME index (le
+  // maximum) : le 99,9e centile ne se distinguait pas du pire cas. On indexe sur
+  // length-1, ce qui rend les deux distincts et p=1.0 exactement le maximum.
+  const centile = p => Math.round(dds[Math.min(dds.length - 1, Math.floor(p * (dds.length - 1)))] * 100) / 100;
 
   const seuil = Number.isFinite(options.seuilDouleur) ? options.seuilDouleur : Math.max(maxDDreel, 1);
   const auDela = dds.filter(d => d > seuil * 2).length;

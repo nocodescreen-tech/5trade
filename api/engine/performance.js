@@ -12,7 +12,17 @@ function exploitables(trades) {
   return (trades || [])
     .filter(t => t && Number.isFinite(Number(t.r)))
     .map(t => ({ ...t, r: Number(t.r), at: t.at || t.closAt || t.emissionAt || null }))
-    .sort((a, b) => (new Date(a.at || 0) - new Date(b.at || 0)));
+    // Un trade sans date n'est pas « le 1er janvier 1970 » : il n'a pas de place
+    // dans l'ordre. On le met en fin de liste, sans inventer d'horodatage.
+    .sort((a, b) => {
+      const ta = a.at ? Date.parse(a.at) : NaN;
+      const tb = b.at ? Date.parse(b.at) : NaN;
+      const va = Number.isFinite(ta), vb = Number.isFinite(tb);
+      if (!va && !vb) return 0;
+      if (!va) return 1;
+      if (!vb) return -1;
+      return ta - tb;
+    });
 }
 
 /**
@@ -50,10 +60,11 @@ function metriques(trades) {
     n,
     gagnants, perdants, neutres,
     winRate: tranches ? Math.round((gagnants / tranches) * 1000) / 10 : null,
-    // Profit factor : gains bruts / pertes brutes. Infini si aucune perte — on le
-    // dit au lieu de renvoyer un nombre trompeur.
-    profitFactor: pertes > 0 ? Math.round((gains / pertes) * 100) / 100
-      : (gains > 0 ? 'infini' : null),
+    // Profit factor : gains bruts / pertes brutes. Un type à trois formes
+    // (nombre, 'infini', null) obligeait chaque appelant à gérer la chaîne — et
+    // `pf * capital` cassait. Le cas « aucune perte » devient un drapeau séparé.
+    profitFactor: pertes > 0 ? Math.round((gains / pertes) * 100) / 100 : null,
+    sansPerte: pertes === 0 && gains > 0,
     expectancyR: Math.round((rTotal / n) * 1000) / 1000,
     gainMoyen: gagnants ? Math.round((gains / gagnants) * 1000) / 1000 : null,
     perteMoyenne: perdants ? Math.round((pertes / perdants) * 1000) / 1000 : null,
@@ -173,7 +184,13 @@ function verifierChronologie(trades) {
 function appliquerCout(trades, coutR) {
   const cout = Number(coutR);
   if (!Number.isFinite(cout) || cout <= 0) return (trades || []).slice();
-  return (trades || []).map(t => ({ ...t, rBrut: Number(t.r), r: Number(t.r) - cout }));
+  // Un trade peut DÉJÀ porter son R brut (journal-signaux). Réécrire `rBrut`
+  // avec `t.r` — qui est net — puis soustraire encore le coût appliquait les
+  // frais deux fois. Le brut existant est conservé, et le net repart de lui.
+  return (trades || []).map(t => {
+    const brut = Number.isFinite(Number(t.rBrut)) ? Number(t.rBrut) : Number(t.r);
+    return { ...t, rBrut: brut, r: Number.isFinite(brut) ? +(brut - cout).toFixed(4) : t.r };
+  });
 }
 
 module.exports = { metriques, decouper, verdict, verdictDepuisMetriques, appliquerCout, parDimension, verifierChronologie, exploitables };

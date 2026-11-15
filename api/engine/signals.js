@@ -628,16 +628,14 @@ function ruleExtension(candles) {
 }
 
 /** ATR local, sans dépendre de la structure (évite un couplage inutile). */
+// Même définition que partout ailleurs (structure.atr, lissage de Wilder).
+// La moyenne simple donnait un ATR différent de celui affiché sur le graphique
+// et de celui utilisé pour dimensionner le stop : deux chiffres pour la même
+// volatilité, donc deux décisions possibles au même instant.
 function atrLocal(candles, periode = 14) {
   if (!Array.isArray(candles) || candles.length < periode + 2) return null;
-  const vrais = [];
-  for (let i = candles.length - periode; i < candles.length; i++) {
-    const b = candles[i], p = candles[i - 1];
-    if (!b || !p) continue;
-    vrais.push(Math.max(b.h - b.l, Math.abs(b.h - p.c), Math.abs(b.l - p.c)));
-  }
-  if (!vrais.length) return null;
-  return vrais.reduce((a, b) => a + b, 0) / vrais.length;
+  const v = S.atr(candles, periode);
+  return Number.isFinite(v) && v > 0 ? v : null;
 }
 
 const TOUTES_REGLES = {

@@ -21,9 +21,14 @@
  */
 
 const MOYENNE = xs => xs.reduce((a, b) => a + b, 0) / xs.length;
+// Écart-type d'ÉCHANTILLON : diviser par n sous-estime la dispersion dès que
+// l'échantillon est petit (1,7 % à n=30, 5 % à n=10) — et cette dispersion sert
+// au z-score et au seuil de sauts, donc l'erreur se propageait aux verdicts.
 const ECART = xs => {
+  if (!xs.length) return 0;
   const m = MOYENNE(xs);
-  return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length);
+  const somme = xs.reduce((a, b) => a + (b - m) ** 2, 0);
+  return Math.sqrt(xs.length > 1 ? somme / (xs.length - 1) : 0);
 };
 
 /** Rendements logarithmiques successifs. */
@@ -46,7 +51,10 @@ function autocorrelation1(xs) {
     den += (xs[i] - m) ** 2;
     if (i) num += (xs[i] - m) * (xs[i - 1] - m);
   }
-  return den > 0 ? num / den : null;
+  // num porte n-1 termes, den en porte n : le rapport brut sous-estime l'AC1 de
+  // (n-1)/n. Sur 30 rendements, l'erreur atteignait 3,3 % — assez pour changer un
+  // verdict de « série exploitable » à « marche aléatoire ».
+  return den > 0 ? (num * n) / (den * (n - 1)) : null;
 }
 
 /**
@@ -140,7 +148,12 @@ function analyser(closes, meta = {}) {
     refus.push(`produit à sauts : ${(poidsSauts * 100).toFixed(0)} % de la variance vient de quelques bougies — `
       + "une structure de prix n'y décrit pas le résultat");
   }
-  if (ac1 !== null && Math.abs(ac1) > 0.25) {
+  // Seuil statistique, pas un 0,25 arbitraire : sur un bruit blanc, l'AC1 a un
+  // écart-type de ~1/racine(n), donc 0,25 est DANS le bruit normal pour n≈30
+  // (IC 95 % ≈ ±0,36). On refuse à partir de 1,96 σ, avec un plancher à 0,25
+  // pour ne pas déclencher sur des séries très longues où tout écart est significatif.
+  const seuilAC1 = Math.max(0.25, 1.96 / Math.sqrt(Math.max(2, r.length)));
+  if (ac1 !== null && Math.abs(ac1) > seuilAC1) {
     // Une marche aléatoire donne ~0. Un |ac1| élevé signale une série
     // exploitable en statistique — et rend le motif chartiste trompeur.
     refus.push(`autocorrélation ${ac1.toFixed(2)} : série non conforme à une marche sans mémoire`);

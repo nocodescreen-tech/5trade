@@ -16,7 +16,7 @@ const API_BASE = window.location.port === '5173' || window.location.protocol ===
 
 // Version de l'interface (affichée en en-tête) : permet de voir d'un coup d'œil
 // si la page ouverte est bien la dernière, ou une version restée en cache.
-const UI_VERSION = 'r2026-10-12a';
+const UI_VERSION = 'r2026-11-14d';
 const api = (path, opts = {}) => fetch(`${API_BASE}${path}`, {
   credentials: 'include',
   ...opts
@@ -5100,8 +5100,514 @@ function SignalHistory({
   }))));
 }
 
+/* ══════════════ PLANS D'ATTENTE + CERVEAU ══════════════ */
+// Trois choses que le système calculait sans jamais les montrer à l'écran :
+//   - les plans d'attente (« SI le prix revient à X ET confirme, ALORS … ») ;
+//   - l'alignement H4 + D1 qui autorise ou interdit un plan ;
+//   - les seuils appris et les shadow runs en cours.
+// Lecture seule : aucun plan n'est exécuté ici.
+const PLAN_DIR = {
+  long: 'ACHAT',
+  short: 'VENTE'
+};
+function PlansAttente({
+  symbol
+}) {
+  const [plans, setPlans] = useState([]);
+  const [alig, setAlig] = useState(null);
+  const [cerveau, setCerveau] = useState(null);
+  const [err, setErr] = useState('');
+  const [ouvert, setOuvert] = useState(true);
+  useEffect(() => {
+    let vivant = true;
+    const charger = async () => {
+      try {
+        const appels = [api('/scenarios?statut=en_attente&limite=10'), api('/apprentissage/shadow')];
+        if (symbol) appels.push(api('/alignement?symbol=' + encodeURIComponent(symbol)));
+        const rep = await Promise.all(appels);
+        const dPlans = await rep[0].json();
+        const dCer = await rep[1].json();
+        if (!vivant) return;
+        if (dPlans.success) setPlans(Array.isArray(dPlans.scenarios) ? dPlans.scenarios : []);
+        if (dCer.success) setCerveau(dCer);
+        if (rep[2]) {
+          const dAl = await rep[2].json();
+          if (vivant && dAl.success) setAlig(dAl);else if (vivant) setAlig(null);
+        } else setAlig(null);
+        setErr('');
+      } catch (e) {
+        if (vivant) setErr(e.message || 'lecture impossible');
+      }
+    };
+    charger();
+    const t = setInterval(charger, 60000);
+    return () => {
+      vivant = false;
+      clearInterval(t);
+    };
+  }, [symbol]);
+  const reste = iso => {
+    const ms = Date.parse(iso) - Date.now();
+    if (!Number.isFinite(ms)) return '—';
+    if (ms <= 0) return 'échu';
+    const m = Math.round(ms / 60000);
+    return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${m} min`;
+  };
+  const enR = (s, niveau) => {
+    const risque = Math.abs(Number(s.niveauEntree) - Number(s.stop));
+    if (!(risque > 0) || !Number.isFinite(Number(niveau))) return '—';
+    const r = (Number(niveau) - Number(s.niveauEntree)) * (s.direction === 'long' ? 1 : -1) / risque;
+    return `${r >= 0 ? '+' : ''}${r.toFixed(2)} R`;
+  };
+  const seuils = cerveau && cerveau.seuils || {};
+  const shadow = cerveau && cerveau.shadow || [];
+  const aligne = alig && alig.aligne === true;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "panel",
+    style: {
+      padding: 0,
+      marginBottom: 12,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      padding: '11px 15px',
+      borderBottom: ouvert ? '1px solid ' + TT.line : 'none',
+      flexWrap: 'wrap',
+      cursor: 'pointer'
+    },
+    onClick: () => setOuvert(v => !v)
+  }, /*#__PURE__*/React.createElement(TtLabel, {
+    style: {
+      margin: 0
+    }
+  }, "Plans d'attente"), /*#__PURE__*/React.createElement(TtPill, {
+    tone: plans.length ? 'info' : 'neu'
+  }, plans.length, " en attente"), alig && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11.5,
+      color: 'var(--muted)'
+    }
+  }, "Biais H4/D1 : ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: aligne ? TT.ok : TT.neu
+    }
+  }, "H4 ", alig.H4, " \xB7 D1 ", alig.D1), aligne ? ' — aligné ' + alig.direction : ' — aucun trade autorisé'), /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: 'auto',
+      fontSize: 11,
+      color: 'var(--dim)'
+    }
+  }, "seuils v", seuils.version || '?', " \xB7 TP1 ", seuils.tp1_r ?? 1.27, " R / TP2 ", seuils.tp2_r ?? 2, " R", shadow.length ? ` · ${shadow.length} shadow` : '', ' · ', /*#__PURE__*/React.createElement("i", {
+    className: `fas fa-chevron-${ouvert ? 'up' : 'down'}`
+  }))), ouvert && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '10px 15px 12px'
+    }
+  }, err && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: TT.bad,
+      marginBottom: 8
+    }
+  }, err), plans.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: 'var(--dim)'
+    }
+  }, "Aucun plan conditionnel en attente. Le g\xE9n\xE9rateur n'en produit que si la structure mesur\xE9e le permet : zone intacte, ATR disponible, sens compatible avec l'alignement H4/D1.") : /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gap: 3
+    }
+  }, plans.map(s => {
+    const achat = s.direction === 'long';
+    return /*#__PURE__*/React.createElement("div", {
+      key: s.id,
+      style: {
+        display: 'grid',
+        gridTemplateColumns: '58px 84px repeat(4, minmax(64px, 1fr)) 62px',
+        gap: 6,
+        alignItems: 'center',
+        fontSize: 11.5,
+        padding: '4px 0',
+        borderBottom: '1px solid ' + TT.line
+      }
+    }, /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: achat ? TT.ok : TT.bad
+      }
+    }, PLAN_DIR[s.direction] || s.direction), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#dbe4f0'
+      }
+    }, s.instrument), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--muted)'
+      },
+      title: "niveau d'entr\xE9e"
+    }, ttFmt(s.niveauEntree)), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: TT.bad,
+        fontVariantNumeric: 'tabular-nums'
+      },
+      title: "stop"
+    }, ttFmt(s.stop)), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: TT.ok,
+        fontVariantNumeric: 'tabular-nums'
+      },
+      title: "objectif 1"
+    }, ttFmt(s.tp1), " ", /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--dim)'
+      }
+    }, enR(s, s.tp1))), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: TT.ok,
+        fontVariantNumeric: 'tabular-nums'
+      },
+      title: "objectif 2"
+    }, ttFmt(s.tp2), " ", /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--dim)'
+      }
+    }, enR(s, s.tp2))), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--dim)',
+        textAlign: 'right'
+      },
+      title: "expiration"
+    }, reste(s.expireAt)));
+  }), plans[0] && Array.isArray(plans[0].preuves) && plans[0].preuves.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--dim)',
+      marginTop: 6
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-circle-info",
+    style: {
+      marginRight: 6
+    }
+  }), "Pourquoi : ", plans[0].preuves.join(' · '))), shadowsListe(shadow)));
+}
+function shadowsListe(shadow) {
+  if (!shadow || !shadow.length) return null;
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 9,
+      borderTop: '1px solid ' + TT.line,
+      paddingTop: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--muted)',
+      marginBottom: 4
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-flask",
+    style: {
+      marginRight: 6,
+      color: TT.info
+    }
+  }), "R\xE9glages en shadow run (test\xE9s 3 jours avant promotion)"), shadow.map(c => /*#__PURE__*/React.createElement("div", {
+    key: c.id,
+    style: {
+      display: 'flex',
+      gap: 8,
+      fontSize: 11,
+      color: 'var(--dim)'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#93c5fd',
+      minWidth: 210
+    }
+  }, c.parametre), /*#__PURE__*/React.createElement("span", null, "\u2192 ", String(c.valeur)), /*#__PURE__*/React.createElement("span", null, "\xB7 promotion possible le ", String(c.applicable_at).slice(0, 10)))));
+}
+
 /* ══════════════════════════ ÉCRAN DIRECT ══════════════════════════ */
 
+/* ══════════════ GESTION DES POSITIONS (couche L6) ══════════════ */
+// Ce que le système ne montrait nulle part : les positions OUVERTES et ce qu'il
+// faudrait en faire, chiffré — où déplacer le stop, quelle part fermer à quel
+// niveau, depuis combien de temps la position traîne sans atteindre TP1.
+// Lecture seule : rien n'est appliqué ici, aucune position n'est fermée.
+function PositionsGestion() {
+  const [etat, setEtat] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const charger = useCallback(async () => {
+    setBusy(true);
+    try {
+      const r = await api('/positions');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setEtat(d);
+      setErr('');
+    } catch (e) {
+      setErr(e.message || 'lecture impossible');
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+  useEffect(() => {
+    charger();
+    const t = setInterval(charger, 30000);
+    return () => clearInterval(t);
+  }, [charger]);
+  const positions = etat && etat.positions || [];
+  const total = etat ? etat.total : null;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "panel",
+    style: {
+      padding: 0,
+      marginBottom: 12,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      padding: '12px 15px',
+      borderBottom: '1px solid ' + TT.line,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement(TtLabel, {
+    style: {
+      margin: 0
+    }
+  }, "Gestion des positions"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11.5,
+      color: 'var(--muted)'
+    }
+  }, total === null ? 'lecture…' : total === 0 ? 'aucune position ouverte' : `${total} position${total > 1 ? 's' : ''} ouverte${total > 1 ? 's' : ''}`), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: '1 1 auto'
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost sm",
+    onClick: charger,
+    disabled: busy
+  }, /*#__PURE__*/React.createElement("i", {
+    className: `fas ${busy ? 'fa-circle-notch fa-spin' : 'fa-rotate'}`
+  }), "Rafra\xEEchir")), err && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '10px 15px',
+      fontSize: 12.5,
+      color: TT.bad
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-triangle-exclamation",
+    style: {
+      marginRight: 8
+    }
+  }), err), !err && total === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '14px 15px',
+      fontSize: 12.5,
+      color: 'var(--muted)',
+      lineHeight: 1.55
+    }
+  }, "Rien \xE0 g\xE9rer : aucune position ouverte. D\xE8s qu'un signal du journal passe en position, son plan appara\xEEt ici \u2014 stop cible (breakeven puis trailing 1,5 ATR), partiels TP1 50 % / TP2 30 % / runner 20 %, et invalidation temporelle \xE0 3 h sans TP1."), !err && positions.map((p, i) => {
+    const plan = p.plan || null;
+    const long = p.sens === 'long';
+    const col = !p.evaluable ? TT.neu : (p.rEnCours || 0) >= 0 ? TT.ok : TT.bad;
+    const stopChange = plan && plan.stopCible !== null && plan.stopCible !== plan.stopActuel;
+    return /*#__PURE__*/React.createElement("div", {
+      key: (p.cle || '') + i,
+      style: {
+        padding: '12px 15px',
+        borderTop: i ? '1px solid ' + TT.line : 'none'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        flexWrap: 'wrap'
+      }
+    }, /*#__PURE__*/React.createElement(TtPill, {
+      tone: long ? 'ok' : 'bad'
+    }, long ? 'ACHAT' : 'VENTE'), /*#__PURE__*/React.createElement("b", {
+      style: {
+        fontSize: 13.5
+      }
+    }, p.symbol || '—', " ", /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--dim)',
+        fontWeight: 500
+      }
+    }, "\xB7 ", p.timeframe || '—')), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        color: 'var(--muted)'
+      }
+    }, "entr\xE9e ", ttFmt(p.entree), " \xB7 stop ", ttFmt(p.stop)), /*#__PURE__*/React.createElement("span", {
+      style: {
+        flex: '1 1 auto'
+      }
+    }), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 14,
+        fontWeight: 800,
+        color: col,
+        fontVariantNumeric: 'tabular-nums'
+      }
+    }, p.evaluable ? `${p.rEnCours > 0 ? '+' : ''}${p.rEnCours} R` : 'non évaluable')), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11.5,
+        color: 'var(--muted)',
+        marginTop: 5
+      }
+    }, /*#__PURE__*/React.createElement("i", {
+      className: "fas fa-code-branch",
+      style: {
+        marginRight: 6,
+        opacity: .7
+      }
+    }), p.nom || 'signal sans nom', ' · ', p.strategie ? /*#__PURE__*/React.createElement(React.Fragment, null, "strat\xE9gie ", /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: 'var(--txt)'
+      }
+    }, p.strategie)) : /*#__PURE__*/React.createElement(React.Fragment, null, "aucune strat\xE9gie enregistr\xE9e \u2014 moteur ", /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: 'var(--txt)'
+      }
+    }, p.source === 'motif' ? 'patterns graphiques' : p.source === 'structure' ? 'structure de marché' : p.source || 'inconnu')), p.concept && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--dim)'
+      }
+    }, " \xB7 ", p.concept)), !p.evaluable && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: 'var(--dim)',
+        marginTop: 6
+      }
+    }, p.motif || 'position non évaluable', " \u2014 aucune consigne invent\xE9e."), p.evaluable && plan && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'grid',
+        gap: 6,
+        marginTop: 9,
+        gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        border: '1px solid ' + TT.line,
+        borderRadius: 10,
+        padding: '8px 10px'
+      }
+    }, /*#__PURE__*/React.createElement(TtLabel, {
+      style: {
+        margin: 0
+      }
+    }, "Stop"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        marginTop: 2,
+        fontVariantNumeric: 'tabular-nums'
+      }
+    }, ttFmt(plan.stopActuel), stopChange && /*#__PURE__*/React.createElement(React.Fragment, null, " ", /*#__PURE__*/React.createElement("i", {
+      className: "fas fa-arrow-right",
+      style: {
+        fontSize: 10,
+        margin: '0 4px'
+      }
+    }), /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: TT.warn
+      }
+    }, ttFmt(plan.stopCible)))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: 'var(--dim)',
+        marginTop: 2
+      }
+    }, plan.motifStop)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        border: '1px solid ' + TT.line,
+        borderRadius: 10,
+        padding: '8px 10px'
+      }
+    }, /*#__PURE__*/React.createElement(TtLabel, {
+      style: {
+        margin: 0
+      }
+    }, "Partiels"), (plan.partiels || []).map((x, k) => /*#__PURE__*/React.createElement("div", {
+      key: k,
+      style: {
+        fontSize: 11.5,
+        marginTop: 2,
+        color: x.atteint ? TT.ok : 'var(--muted)',
+        fontVariantNumeric: 'tabular-nums'
+      }
+    }, /*#__PURE__*/React.createElement("i", {
+      className: `fas ${x.atteint ? 'fa-circle-check' : 'fa-circle'}`,
+      style: {
+        fontSize: 9,
+        marginRight: 5
+      }
+    }), x.niveau, " ", x.pct, " %", x.prix ? ` @ ${ttFmt(x.prix)}${x.r !== null ? ` (${x.r} R)` : ''}` : ''))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        border: '1px solid ' + TT.line,
+        borderRadius: 10,
+        padding: '8px 10px'
+      }
+    }, /*#__PURE__*/React.createElement(TtLabel, {
+      style: {
+        margin: 0
+      }
+    }, "Invalidation"), plan.invalidationTemporelle ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        marginTop: 2,
+        color: plan.invalidationTemporelle.depassee ? TT.bad : 'var(--txt)',
+        fontWeight: plan.invalidationTemporelle.depassee ? 800 : 500
+      }
+    }, plan.invalidationTemporelle.ageHeures === null ? 'âge inconnu' : `${plan.invalidationTemporelle.ageHeures} h / ${plan.invalidationTemporelle.limiteHeures} h`), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: 'var(--dim)',
+        marginTop: 2
+      }
+    }, plan.invalidationTemporelle.motif)) : /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11.5,
+        color: 'var(--dim)'
+      }
+    }, "\u2014"))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 8,
+        display: 'grid',
+        gap: 4
+      }
+    }, (p.recommandations || []).map((r, k) => /*#__PURE__*/React.createElement("div", {
+      key: k,
+      style: {
+        fontSize: 12,
+        color: 'var(--muted)'
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "tag",
+      style: {
+        marginRight: 7
+      }
+    }, r.action), r.motif)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10.5,
+        color: 'var(--dim)',
+        marginTop: 2
+      }
+    }, "Lecture seule : le stop n'est jamais d\xE9plac\xE9 et aucune position n'est ferm\xE9e par cette page."))));
+  }));
+}
 function LiveMarket({
   onToJournal
 }) {
@@ -5716,7 +6222,7 @@ function LiveMarket({
     tf: tf,
     provider: provider,
     providerLabel: providerLabel
-  }), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement(PositionsGestion, null), /*#__PURE__*/React.createElement("div", {
     className: "panel",
     style: {
       padding: 14,
@@ -5772,6 +6278,8 @@ function LiveMarket({
     setTypeTrade: setTypeTrade
   }), /*#__PURE__*/React.createElement(MultiTimeframeMatrix, {
     confluence: confluence
+  }), /*#__PURE__*/React.createElement(PlansAttente, {
+    symbol: symbol
   }), /*#__PURE__*/React.createElement(SignalExplanation, {
     trace: decision && decision.trace || sse && sse.trace,
     decision: decision,
@@ -11585,6 +12093,456 @@ function Outils() {
     }
   }, "\xAB Mes trades \xBB = ce que vous avez saisi. \xAB Signaux \xBB = ce que le moteur a d\xE9tect\xE9, avec une ligne par signal et une colonne par mesure (24 colonnes).")));
 }
+
+/* ══════════════ PILOTE IA — chat qui pilote le système ══════════════ */
+// Une seule page de conversation, avec des bulles, qui exécute réellement les
+// commandes du chat-crud : lecture (trades, stratégies, scénarios, paramètres,
+// mémoire, apprentissage, état), et écriture (créer, modifier, activer,
+// désactiver, supprimer) avec confirmation « oui/non » avant toute action
+// destructive. Rien n'est simulé ici : chaque bulle vient de /api/chat.
+
+const PILOTE_RACCOURCIS = [{
+  l: "État du système",
+  t: "montre l'état du système"
+}, {
+  l: 'Trades',
+  t: 'montre les trades'
+}, {
+  l: 'Stratégies',
+  t: 'montre les stratégies'
+}, {
+  l: 'Scénarios',
+  t: 'montre les scénarios en attente'
+}, {
+  l: 'Paramètres',
+  t: 'montre les paramètres'
+}, {
+  l: 'Mémoire',
+  t: "qu'est-ce que tu sais"
+}, {
+  l: 'Apprentissage',
+  t: "qu'est-ce que tu as appris cette semaine ?"
+}, {
+  l: 'Aide',
+  t: 'aide'
+}];
+const piloteHeure = iso => {
+  const d = iso ? new Date(iso) : new Date();
+  return d.toLocaleTimeString('fr-FR', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+function Pilote() {
+  const [messages, setMessages] = useState([]);
+  const [saisie, setSaisie] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [etat, setEtat] = useState('connexion'); // connexion | en ligne | hors ligne
+  const [erreur, setErreur] = useState('');
+  const filRef = useRef(null);
+  const champRef = useRef(null);
+  const descendre = () => {
+    const el = filRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  };
+  const vusRef = useRef(new Set()); // ids déjà affichés : aucun doublon
+
+  // Une seule lecture, utilisée au montage ET par la veille périodique. Les
+  // événements du système (stop touché, TP atteint, retournement de biais,
+  // scénario expiré) arrivent donc ici comme des messages, sans recharger.
+  const chargerFil = useCallback(async ({
+    silencieux = false
+  } = {}) => {
+    try {
+      const r = await api('/chat/historique?limite=80');
+      if (r.status === 401) {
+        setEtat('hors ligne');
+        return;
+      }
+      const d = await r.json();
+      const liste = (d.messages || []).map(m => ({
+        id: m.id,
+        role: m.role,
+        texte: m.texte,
+        heure: piloteHeure(m.creeAt),
+        action: m.action,
+        evenement: m.verbe === 'ÉVÉNEMENT'
+      }));
+      if (!liste.length) {
+        if (!silencieux) setMessages([{
+          role: 'assistant',
+          texte: "Bonjour. Je pilote le système : je lis l'état, les trades, les stratégies, " + 'les scénarios, les paramètres, la mémoire et l\'apprentissage — et je te préviens ' + 'ici quand un stop est touché, un objectif atteint ou un biais se retourne.\n' + 'Tape « aide » pour la liste des commandes.',
+          heure: piloteHeure()
+        }]);
+      } else {
+        const nouveaux = liste.filter(m => m.id !== undefined && !vusRef.current.has(m.id));
+        for (const m of nouveaux) vusRef.current.add(m.id);
+        // Au premier passage on remplace tout ; ensuite on n'ajoute que le neuf.
+        setMessages(prev => prev.length && silencieux ? [...prev, ...nouveaux] : liste);
+      }
+      setEtat('en ligne');
+    } catch (e) {
+      setEtat('hors ligne');
+    }
+  }, []);
+  useEffect(() => {
+    chargerFil();
+    // Toutes les 10 s : le fil se met à jour tout seul quand le moteur publie.
+    const t = setInterval(() => chargerFil({
+      silencieux: true
+    }), 10000);
+    return () => clearInterval(t);
+  }, [chargerFil]);
+  useEffect(descendre, [messages, busy]);
+  const envoyer = async texte => {
+    const t = String(texte || '').trim();
+    if (!t || busy) return;
+    setErreur('');
+    setSaisie('');
+    setMessages(m => [...m, {
+      role: 'user',
+      texte: t,
+      heure: piloteHeure()
+    }]);
+    setBusy(true);
+    try {
+      const r = await api('/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          message: t
+        })
+      });
+      const d = await r.json();
+      const reponse = d.texte || d.resultat && d.resultat.texte || d.error || (d.success ? 'Action exécutée.' : 'Réponse vide.');
+      setMessages(m => [...m, {
+        role: 'assistant',
+        texte: reponse,
+        heure: piloteHeure(),
+        action: d.action
+      }]);
+      // Une écriture a réussi : les autres onglets doivent relire leurs données.
+      if (d.success && d.action && !/Confirmer \? \(oui\/non\)/i.test(reponse)) {
+        window.dispatchEvent(new Event('5trade-refresh'));
+      }
+      setEtat('en ligne');
+    } catch (e) {
+      setMessages(m => [...m, {
+        role: 'assistant',
+        texte: 'Erreur réseau : ' + e.message,
+        heure: piloteHeure()
+      }]);
+      setEtat('hors ligne');
+    } finally {
+      setBusy(false);
+      if (champRef.current) champRef.current.focus();
+    }
+  };
+  const effacer = async () => {
+    if (busy) return;
+    if (!window.confirm('Effacer tout l’historique de conversation ?')) return;
+    try {
+      await api('/chat/historique', {
+        method: 'DELETE'
+      });
+      setMessages([{
+        role: 'assistant',
+        texte: 'Historique effacé.',
+        heure: piloteHeure()
+      }]);
+      setErreur('');
+    } catch (e) {
+      setErreur('Effacement impossible : ' + e.message);
+    }
+  };
+  const point = etat === 'en ligne' ? 'var(--ok)' : etat === 'hors ligne' ? 'var(--bad)' : 'var(--warn)';
+  return /*#__PURE__*/React.createElement("div", {
+    className: "panel",
+    style: {
+      padding: 0,
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 12,
+      padding: '14px 18px',
+      borderBottom: '1px solid var(--border)',
+      background: 'var(--panel2)',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 34,
+      height: 34,
+      borderRadius: 10,
+      background: 'var(--accent)',
+      color: '#fff',
+      display: 'grid',
+      placeItems: 'center',
+      fontWeight: 800,
+      fontSize: 14
+    }
+  }, "5"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 650,
+      letterSpacing: '-.01em'
+    }
+  }, "Pilote IA"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--muted)'
+    }
+  }, "Supervision \xB7 diagnostic \xB7 administration \u2014 commandes en langage naturel")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginLeft: 'auto',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 7,
+      fontSize: 12,
+      color: 'var(--muted)'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 7,
+      height: 7,
+      borderRadius: '50%',
+      background: point
+    }
+  }), etat), /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost sm",
+    onClick: effacer,
+    disabled: busy
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-eraser"
+  }), "Effacer"))), /*#__PURE__*/React.createElement("div", {
+    ref: filRef,
+    "aria-live": "polite",
+    style: {
+      flex: 1,
+      minHeight: 380,
+      maxHeight: 'calc(100vh - 330px)',
+      overflowY: 'auto',
+      padding: '20px 18px 10px',
+      background: 'var(--bg)'
+    }
+  }, messages.map((m, i) => {
+    const moi = m.role === 'user';
+    const confirmation = !moi && /Confirmer \? \(oui\/non\)/i.test(m.texte || '');
+    return /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        display: 'flex',
+        gap: 10,
+        marginBottom: 14,
+        flexDirection: moi ? 'row-reverse' : 'row',
+        alignItems: 'flex-start'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 28,
+        height: 28,
+        borderRadius: 8,
+        flex: '0 0 auto',
+        display: 'grid',
+        placeItems: 'center',
+        fontSize: 12,
+        fontWeight: 700,
+        background: moi ? 'var(--accent)' : 'var(--panel2)',
+        color: moi ? '#fff' : 'var(--muted)',
+        border: moi ? '1px solid transparent' : '1px solid var(--border)'
+      }
+    }, moi ? 'M' : '5'), /*#__PURE__*/React.createElement("div", {
+      style: {
+        maxWidth: 'min(720px, 80%)'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        padding: '11px 14px',
+        borderRadius: 14,
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        fontSize: 14,
+        lineHeight: 1.5,
+        background: moi ? 'var(--accent)' : 'var(--panel2)',
+        color: moi ? '#fff' : 'var(--txt)',
+        border: moi ? '1px solid transparent' : '1px solid var(--border)',
+        borderBottomRightRadius: moi ? 5 : 14,
+        borderBottomLeftRadius: moi ? 14 : 5
+      }
+    }, m.evenement && (() => {
+      const g = m.action && m.action.gravite || 'info';
+      const c = g === 'bad' ? 'var(--bad)' : g === 'ok' ? 'var(--ok)' : g === 'warn' ? 'var(--warn)' : 'var(--accent2)';
+      return /*#__PURE__*/React.createElement("span", {
+        style: {
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+          marginBottom: 6,
+          fontSize: 10.5,
+          fontWeight: 700,
+          letterSpacing: '.06em',
+          textTransform: 'uppercase',
+          color: c
+        }
+      }, /*#__PURE__*/React.createElement("i", {
+        className: "fas fa-bolt",
+        style: {
+          fontSize: 10
+        }
+      }), "\xE9v\xE9nement");
+    })(), m.evenement && /*#__PURE__*/React.createElement("br", null), m.texte), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: 'var(--dim)',
+        marginTop: 5,
+        textAlign: moi ? 'right' : 'left'
+      }
+    }, m.heure, m.action && m.action.verbe && /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: 8,
+        opacity: .85
+      }
+    }, "\xB7 ", m.action.verbe, m.action.sujet ? ` ${m.action.sujet}` : '')), confirmation && /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        gap: 8,
+        marginTop: 8
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "btn sm",
+      onClick: () => envoyer('oui'),
+      disabled: busy
+    }, /*#__PURE__*/React.createElement("i", {
+      className: "fas fa-check"
+    }), "Oui"), /*#__PURE__*/React.createElement("button", {
+      className: "btn ghost sm",
+      onClick: () => envoyer('non'),
+      disabled: busy
+    }, /*#__PURE__*/React.createElement("i", {
+      className: "fas fa-xmark"
+    }), "Non"))));
+  }), busy && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      marginBottom: 14,
+      alignItems: 'flex-start'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 28,
+      height: 28,
+      borderRadius: 8,
+      flex: '0 0 auto',
+      display: 'grid',
+      placeItems: 'center',
+      fontSize: 12,
+      fontWeight: 700,
+      background: 'var(--panel2)',
+      color: 'var(--muted)',
+      border: '1px solid var(--border)'
+    }
+  }, "5"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '14px 16px',
+      borderRadius: 14,
+      background: 'var(--panel2)',
+      border: '1px solid var(--border)',
+      color: 'var(--muted)',
+      fontSize: 13
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-circle-notch fa-spin"
+  }), " analyse\u2026"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      borderTop: '1px solid var(--border)',
+      background: 'var(--panel)',
+      padding: '10px 18px 14px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      flexWrap: 'wrap',
+      marginBottom: 10
+    }
+  }, PILOTE_RACCOURCIS.map((r, i) => /*#__PURE__*/React.createElement("button", {
+    key: i,
+    className: "btn ghost sm",
+    style: {
+      padding: '5px 11px',
+      fontSize: 12
+    },
+    onClick: () => envoyer(r.t),
+    disabled: busy
+  }, r.l))), erreur && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--bad)',
+      marginBottom: 8
+    }
+  }, erreur), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      alignItems: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement("textarea", {
+    ref: champRef,
+    className: "fld",
+    rows: 1,
+    value: saisie,
+    placeholder: "\xC9cris une commande\u2026 (\xAB montre les sc\xE9narios \xBB, \xAB d\xE9sactive strategy_trend \xBB)",
+    style: {
+      flex: 1,
+      minHeight: 46,
+      maxHeight: 150,
+      resize: 'none',
+      margin: 0
+    },
+    onChange: e => setSaisie(e.target.value),
+    onKeyDown: e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        envoyer(saisie);
+      }
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn",
+    onClick: () => envoyer(saisie),
+    disabled: busy || !saisie.trim(),
+    style: {
+      minHeight: 46
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    className: `fas ${busy ? 'fa-circle-notch fa-spin' : 'fa-paper-plane'}`
+  }), "Envoyer")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      gap: 10,
+      marginTop: 8,
+      fontSize: 11.5,
+      color: 'var(--dim)'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "Entr\xE9e pour envoyer \xB7 Maj+Entr\xE9e pour un retour \xE0 la ligne"), /*#__PURE__*/React.createElement("span", null, messages.length, " message", messages.length > 1 ? 's' : ''))));
+}
 function Dashboard({
   user,
   onLogout
@@ -11652,7 +12610,7 @@ function Dashboard({
 
   // Onglets toujours visibles sur mobile, et ceux ranges dans « Plus ».
   const NAV_PRINCIPAL = ['live', 'analyze', 'strategies', 'journal'];
-  const NAV_SECONDAIRE = ['add', 'history', 'news', 'termes', 'alerts', 'outils', 'systeme'];
+  const NAV_SECONDAIRE = ['pilote', 'add', 'history', 'news', 'termes', 'alerts', 'outils', 'systeme'];
   const NAV = [{
     id: 'live',
     label: 'Direct',
@@ -11661,6 +12619,14 @@ function Dashboard({
     id: 'analyze',
     label: 'Analyse',
     icon: 'fa-crosshairs'
+  },
+  // Le pilote conversationnel est une entrée de premier niveau : c'est le seul
+  // endroit où l'on pilote réellement le système (CRUD complet) sans chercher
+  // un bouton dans six onglets.
+  {
+    id: 'pilote',
+    label: 'Pilote IA',
+    icon: 'fa-comments'
   }, {
     id: 'add',
     label: 'Ajouter',
@@ -11872,7 +12838,7 @@ function Dashboard({
     onToJournal: sendToJournal
   })), /*#__PURE__*/React.createElement(Garde, null, tab === 'live' && /*#__PURE__*/React.createElement(LiveMarket, {
     onToJournal: sendToJournal
-  }), tab === 'add' && /*#__PURE__*/React.createElement(AddKnowledge, {
+  }), tab === 'pilote' && /*#__PURE__*/React.createElement(Pilote, null), tab === 'add' && /*#__PURE__*/React.createElement(AddKnowledge, {
     refresh: load
   }), tab === 'strategies' && /*#__PURE__*/React.createElement(Strategies, {
     strategies: strategies,

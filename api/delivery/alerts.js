@@ -303,22 +303,75 @@ function blocContexte(multi) {
   return morceaux.length ? `\nContexte : ${morceaux.join(' · ')}` : '';
 }
 
-async function envoyerTelegram(c, v, m, qualite = {}) {
+function messageTelegram(v, m, qualite = {}) {
   const L = v.levels || {};
   const sens = v.direction === 'BUY' ? 'ACHAT' : 'VENTE';
+  const prix = Number.isFinite(Number(v.price)) ? Number(v.price) : null;
   const pct = v.strength ? ` · force ${Math.round(v.strength * 100)} %` : '';
-  const al = qualite.confluence
-    ? `\nAlignement : ${qualite.confluence.nbAlignes}/${qualite.confluence.detail.length} unités d'accord`
-    : '';
-  const rr = Number.isFinite(qualite.rr) ? `\nGain/risque : ${qualite.rr.toFixed(2)} pour 1` : '';
-  const texte = [
+  const nbRegles = Number.isFinite(v.confirmations) ? v.confirmations : (v.rules || []).length;
+
+  // Niveaux : on affiche le prix ET l'écart, en R, parce qu'un prix seul ne dit
+  // pas si le stop est à 3 pips ou 30. Un niveau absent est dit absent — la
+  // version précédente affichait « — » sans expliquer pourquoi.
+  const num = x => (Number.isFinite(Number(x)) ? Number(x) : null);
+  // Prix lisibles : « 3861.253698 » sur l'or n'aide personne. Les décimales
+  // suivent l'ordre de grandeur (2 sur l'or, 5 sur EURUSD, 3 sur USDJPY).
+  const prixTxt = x => {
+    const v = Number(x);
+    if (!Number.isFinite(v)) return String(x);
+    const a = Math.abs(v);
+    const d = a >= 1000 ? 2 : a >= 100 ? 3 : a >= 10 ? 3 : 5;
+    return v.toFixed(d);
+  };
+  const entree = num(L.entry) ?? prix;
+  const stop = num(L.stop);
+  const tp1 = num(L.target1);
+  const tp2 = num(L.target2);
+  const risque = entree !== null && stop !== null ? Math.abs(entree - stop) : null;
+  const enR = cible => (risque && cible !== null ? ` (${((Math.abs(cible - entree)) / risque).toFixed(2)} R)` : '');
+
+  const lignes = [
     `<b>${sens} confirmé — ${m.symbol} ${m.tf}</b>${pct}`,
-    `Entrée : ${L.entry ?? '—'}`,
-    `Invalidation : ${L.stop ?? '—'}`,
-    `Objectifs : ${L.target1 ?? '—'} puis ${L.target2 ?? '—'}`,
-    `${(v.rules || []).map(r => r.name).join(' + ')}${al}${rr}`,
-    '5trade — outil d\'analyse, pas un conseil en investissement.'
-  ].join('\n') + blocContexte(qualite.multi) + blocSignaux(qualite.multi);
+    '',
+    entree !== null ? `Entrée : <b>${prixTxt(entree)}</b>` : 'Entrée : <b>non chiffrée</b>',
+    stop !== null ? `Invalidation : <b>${prixTxt(stop)}</b>${risque ? ` (risque ${risque.toFixed(risque < 1 ? 5 : 2)})` : ''}`
+      : 'Invalidation : <b>non chiffrée</b>',
+    tp1 !== null ? `Objectif 1 : <b>${prixTxt(tp1)}</b>${enR(tp1)}` : null,
+    tp2 !== null ? `Objectif 2 : <b>${prixTxt(tp2)}</b>${enR(tp2)}` : null,
+    Number.isFinite(qualite.rr) ? `Gain/risque : ${qualite.rr.toFixed(2)} pour 1` : null,
+    nbRegles ? `Règles : ${(v.rules || []).map(r => r.name).filter(Boolean).join(' + ') || nbRegles + ' confirmée(s)'}` : null,
+    qualite.confluence
+      ? `Alignement : ${qualite.confluence.nbAlignes}/${qualite.confluence.detail.length} unités d'accord`
+      : null
+  ].filter(x => x !== null);
+
+  // Les conditions vérifiées : c'est ce qui permet de juger le signal, pas
+  // seulement de le recevoir.
+  if (Array.isArray(v.checklist) && v.checklist.length) {
+    const cochees = v.checklist.map(x => `${x.ok ? '✓' : '✗'} ${x.label || ''}`).join(' · ');
+    lignes.push('', `<b>Conditions</b>\n${cochees}`.slice(0, 900));
+  }
+  // Le détail des règles (2 lignes max, tronquées) : la raison du signal.
+  const details = (v.rules || []).filter(r => r && r.detail).slice(0, 3)
+    .map(r => `• ${r.name} : ${String(r.detail).slice(0, 140)}`);
+  if (details.length) lignes.push('', `<b>Pourquoi</b>\n${details.join('\n')}`);
+  // Alignement, unité par unité.
+  if (qualite.confluence && Array.isArray(qualite.confluence.detail)) {
+    lignes.push('', qualite.confluence.detail
+      .map(t => `${t.tf} : ${t.tendance || '?'} · ${t.status || '?'}${t.direction && t.direction !== 'NEUTRE' ? ' ' + t.direction : ''}`)
+      .join('\n'));
+  }
+
+  lignes.push('', `<i>${new Date().toLocaleString('fr-FR', { timeZone: 'UTC' })} UTC</i>`);
+  lignes.push('5trade — outil d\'analyse, pas un conseil en investissement.');
+
+  let texte = lignes.join('\n') + blocContexte(qualite.multi) + blocSignaux(qualite.multi);
+  if (texte.length > 3900) texte = texte.slice(0, 3900) + '\n… (tronqué)';
+  return texte;
+}
+
+async function envoyerTelegram(c, v, m, qualite = {}) {
+  const texte = messageTelegram(v, m, qualite);
 
   const r = await fetchAvecReprise(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
     method: 'POST',
@@ -462,6 +515,13 @@ async function verifierBrut(force = false) {
 
   for (const m of c.marches) {
     try {
+      // Indice synthétique = générateur aléatoire cryptographique. Aucun avantage
+      // n'y est possible par construction : alerter dessus revient à alerter sur
+      // un tirage au sort. On refuse, et on le dit dans le résultat du tour.
+      if (require('../core/instruments').synthetique(m.symbol)) {
+        resultats.push({ ...m, verdict: 'indice synthétique (RNG) : aucun avantage possible — non surveillé' });
+        continue;
+      }
       const r = await deps.market.getCandles(m.symbol, m.tf, 300, m.provider);
       const closes = (r.candles || []).filter(x => x.closed !== false);
       if (closes.length < 20) {
@@ -960,7 +1020,7 @@ function retirerAbonnement(endpoint) {
 
 module.exports = {
   etatCycle,
-  load, save, get, update, resetDedup, verifier, start, stop, compose, DEFAUT,
+  load, save, get, update, resetDedup, verifier, start, stop, compose, messageTelegram, DEFAUT,
   hydrater, diagnostic,
   listerAbonnements, ajouterAbonnement, retirerAbonnement
 };

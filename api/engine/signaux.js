@@ -112,28 +112,36 @@ function niveauxMotifBrut(motif, candles, atr) {
     case 'pin-bar':
     case 'avalement':
     case 'harami': {
-      // L'invalidation est l'extrême bas (achat) ou haut (vente) de la bougie.
-      const stop = long ? dernier.l - 0.2 * atr : dernier.h + 0.2 * atr;
+      // Stop = extrême de la bougie + 1 ATR. Il était à 0,2 ATR : le bruit normal
+      // du marché touchait ce stop presque à chaque fois, d'où un taux de réussite
+      // de 30 % sur ces motifs (mesuré dans ANALYSE-5TRADE-2026-11-12.md).
+      // Les objectifs sont désormais des MULTIPLES DU RISQUE, comme le générateur
+      // de scénarios : TP1 1,27 R, TP2 2 R. Avant, un stop à 0,2 ATR et un TP à
+      // 1 ATR affichaient un 5:1 théorique que le marché ne rendait jamais.
+      const stop = long ? dernier.l - atr : dernier.h + atr;
+      const risque = Math.abs(close - stop);
       return {
         entree: arrondiPrix(close), stop: arrondiPrix(stop),
-        objectifs: [arrondiPrix(close + sens * atr), arrondiPrix(close + sens * 2 * atr)],
-        base: `extrême de la bougie ${long ? arrondiPrix(dernier.l) : arrondiPrix(dernier.h)} ± 0,2× ATR`
+        objectifs: [arrondiPrix(close + sens * risque * 1.27), arrondiPrix(close + sens * risque * 2)],
+        base: `extrême de la bougie ${long ? arrondiPrix(dernier.l) : arrondiPrix(dernier.h)} ± 1 ATR`
       };
     }
     case 'etoile-filante':
     case 'avalement-baissier': {
-      const stop = dernier.h + 0.2 * atr;
+      const stop = dernier.h + atr;
+      const risque = Math.abs(stop - close);
       return {
         entree: arrondiPrix(close), stop: arrondiPrix(stop),
-        objectifs: [arrondiPrix(close - atr), arrondiPrix(close - 2 * atr)],
-        base: `extrême haut ${arrondiPrix(dernier.h)} ± 0,2× ATR`
+        objectifs: [arrondiPrix(close - risque * 1.27), arrondiPrix(close - risque * 2)],
+        base: `extrême haut ${arrondiPrix(dernier.h)} ± 1 ATR`
       };
     }
     case 'marubozu': {
-      const stop = long ? dernier.l - 0.2 * atr : dernier.h + 0.2 * atr;
+      const stop = long ? dernier.l - atr : dernier.h + atr;
+      const risque = Math.abs(close - stop);
       return {
         entree: arrondiPrix(close), stop: arrondiPrix(stop),
-        objectifs: [arrondiPrix(close + sens * atr), arrondiPrix(close + sens * 2 * atr)],
+        objectifs: [arrondiPrix(close + sens * risque * 1.27), arrondiPrix(close + sens * risque * 2)],
         base: `momentum : corps ${c.corpsRatio} du range`
       };
     }

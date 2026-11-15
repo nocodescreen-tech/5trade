@@ -13,6 +13,8 @@
 /** Bougie attendue : { t, o, h, l, c, v }. */
 const isCandle = c => c && Number.isFinite(c.h) && Number.isFinite(c.l) && Number.isFinite(c.c);
 
+const Killzones = require('../gestion/killzones');
+
 /**
  * Vrai ATR de Wilder — sert à dimensionner SL/TP.
  *
@@ -25,13 +27,19 @@ const isCandle = c => c && Number.isFinite(c.h) && Number.isFinite(c.l) && Numbe
  * par le bruit normal du marché.
  */
 function atr(candles, period = 14) {
-  if (candles.length < 2) return null;
+  // Un ATR(14) se calcule sur 14 VRAIS intervalles, donc au moins 15 bougies.
+  // L'ancienne version rabotait la période (`Math.min(period, trs.length)`) :
+  // avec 3 bougies elle rendait un « ATR 14 » qui était en réalité un ATR de 2
+  // intervalles, sans le dire. Les stops se retrouvaient dimensionnés sur deux
+  // bougies, et le régime comparé à une référence qui n'existait pas.
+  // Mieux vaut ne rien rendre : les appelants ont tous un chemin de repli.
+  if (!Array.isArray(candles) || candles.length < period + 1) return null;
   const trs = [];
   for (let i = 1; i < candles.length; i++) {
     const p = candles[i - 1], c = candles[i];
     trs.push(Math.max(c.h - c.l, Math.abs(c.h - p.c), Math.abs(c.l - p.c)));
   }
-  const n = Math.min(period, trs.length);
+  const n = period;
   // Amorce : moyenne simple des n premiers TR (c'est ainsi que Wilder démarre).
   let valeur = trs.slice(0, n).reduce((a, x) => a + x, 0) / n;
   // Puis lissage exponentiel de Wilder sur le reste.
@@ -68,16 +76,25 @@ function marketStructure(candles, w = 2) {
   const highs = sw.filter(s => s.type === 'high');
   const lows = sw.filter(s => s.type === 'low');
 
+  // Un HH se compare à un SOMMET précédent, un HL à un CREUX précédent.
+  // L'ancienne version passait la liste mélangée des sommets et des creux :
+  // `prev` pouvait être un creux, donc « cur.price > prev.price » était presque
+  // toujours vrai pour un sommet — tout était étiqueté HH, et la lecture de la
+  // structure ne valait rien. On étiquette chaque famille séparément.
   const label = (arr) => {
     const seq = [];
     for (let i = 1; i < arr.length; i++) {
       const prev = arr[i - 1], cur = arr[i];
-      if (cur.type === 'high') seq.push({ ...cur, label: cur.price > prev.price ? 'HH' : 'LH' });
-      else seq.push({ ...cur, label: cur.price > prev.price ? 'HL' : 'LL' });
+      seq.push({ ...cur, label: cur.price > prev.price
+        ? (cur.type === 'high' ? 'HH' : 'HL')
+        : (cur.type === 'high' ? 'LH' : 'LL') });
     }
     return seq;
   };
-  const labelled = label([...sw].sort((a, b) => a.i - b.i));
+  const labelled = [
+    ...label(highs.slice().sort((a, b) => a.i - b.i)),
+    ...label(lows.slice().sort((a, b) => a.i - b.i))
+  ].sort((a, b) => a.i - b.i);
   const last = candles[candles.length - 1];
 
   // Tendance : on regarde les 2 derniers sommets et les 2 derniers creux.
@@ -124,12 +141,22 @@ function fvgs(candles) {
     const a = candles[i - 2], c = candles[i];
     if (a.h < c.l) {                          // gap haussier
       const zone = { type: 'bullish', low: a.h, high: c.l, i: i - 1, t: candles[i - 1].t };
-      const filled = candles.slice(i + 1).some(x => x.l <= zone.low);
-      if (!filled) out.push(zone);
+      // Deux états différents, longtemps confondus :
+      //   • `mitigated` — le prix est ENTRÉ dans la zone (l'écart a été travaillé) ;
+      //   • `filled`    — le prix a TRAVERSÉ la zone de part en part.
+      // L'ancienne version ne testait que `x.l <= zone.low` et appelait cela
+      // « comblé » : un gap à moitié rempli restait annoncé « ouvert, non
+      // comblé », donc traité comme une zone vierge par les stratégies.
+      const apres = candles.slice(i + 1);
+      const filled = apres.some(x => x.l <= zone.low);
+      const mitigated = apres.some(x => x.l <= zone.high);
+      if (!filled) out.push({ ...zone, mitigated });
     } else if (a.l > c.h) {                    // gap baissier
       const zone = { type: 'bearish', low: c.h, high: a.l, i: i - 1, t: candles[i - 1].t };
-      const filled = candles.slice(i + 1).some(x => x.h >= zone.high);
-      if (!filled) out.push(zone);
+      const apres = candles.slice(i + 1);
+      const filled = apres.some(x => x.h >= zone.high);
+      const mitigated = apres.some(x => x.h >= zone.low);
+      if (!filled) out.push({ ...zone, mitigated });
     }
   }
   return out.slice(-6);
@@ -172,20 +199,32 @@ function orderBlocks(candles, impulse = 3, forceMinAtr = 0.3) {
 function liquidityPools(candles, tol = 0.0008, w = 2) {
   const sw = swings(candles, w);
   const pools = [];
+  // Deux corrections ici :
+  //  • le `break` après la première correspondance ignorait le 3e sommet égal :
+  //    un amas à trois touches était annoncé « 2 touches » ;
+  //  • la division se protégeait mal d'un prix nul (Infinity → amas fantôme).
+  // On regroupe donc TOUS les swings équivalents, et on compte les touches.
+  const equivalent = (a, b) =>
+    Math.abs(a.price - b.price) / Math.max(Math.abs(a.price), 1e-9) <= tol;
   for (const type of ['high', 'low']) {
     const arr = sw.filter(s => s.type === type);
+    const vus = new Set();
     for (let i = 0; i < arr.length; i++) {
+      if (vus.has(i)) continue;
+      const groupe = [i];
       for (let j = i + 1; j < arr.length; j++) {
-        const a = arr[i], b = arr[j];
-        if (Math.abs(a.price - b.price) / a.price <= tol) {
-          pools.push({
-            type: type === 'high' ? 'EQH' : 'EQL',
-            price: +((a.price + b.price) / 2).toFixed(6),
-            touches: 2,
-            t: b.t
-          });
-          break;
-        }
+        if (vus.has(j)) continue;
+        if (equivalent(arr[i], arr[j])) groupe.push(j);
+      }
+      if (groupe.length >= 2) {
+        for (const k of groupe) vus.add(k);
+        const prix = groupe.reduce((t, k) => t + arr[k].price, 0) / groupe.length;
+        pools.push({
+          type: type === 'high' ? 'EQH' : 'EQL',
+          price: +prix.toFixed(6),
+          touches: groupe.length,
+          t: arr[groupe[groupe.length - 1]].t
+        });
       }
     }
   }
@@ -242,16 +281,19 @@ function sweeps(candles, w = 2) {
   const sw = swings(candles, w);
   const out = [];
   for (const s of sw) {
+    // Un prix de swing nul rendrait la profondeur infinie : on l'écarte plutôt
+    // que de publier « profondeur : Infinity % ».
+    const ref = Math.max(Math.abs(s.price), 1e-9);
     for (let i = s.i + 1; i < candles.length; i++) {
       const c = candles[i];
       if (s.type === 'high' && c.h > s.price && c.c < s.price) {
         out.push({ type: 'balayage haut', level: +s.price.toFixed(6), extreme: +c.h.toFixed(6),
-          at: c.t, reclaimed: true, depth: +((c.h - s.price) / s.price * 100).toFixed(3) });
+          at: c.t, reclaimed: true, depth: +(((c.h - s.price) / ref) * 100).toFixed(3) });
         break;
       }
       if (s.type === 'low' && c.l < s.price && c.c > s.price) {
         out.push({ type: 'balayage bas', level: +s.price.toFixed(6), extreme: +c.l.toFixed(6),
-          at: c.t, reclaimed: true, depth: +((s.price - c.l) / s.price * 100).toFixed(3) });
+          at: c.t, reclaimed: true, depth: +(((s.price - c.l) / ref) * 100).toFixed(3) });
         break;
       }
     }
@@ -293,15 +335,27 @@ function breakers(candles, impulse = 3, forceMinAtr = 0.3) {
  * Déplacement : bougie dont le corps dépasse k × ATR. C'est la signature d'une
  * entrée institutionnelle — sans déplacement, une cassure est suspecte.
  */
-function displacements(candles, k = 1.5) {
-  const a = atr(candles, 14);
-  if (!a) return [];
+function displacements(candles, k = 1.5, periode = 14) {
+  if (!Array.isArray(candles) || candles.length < periode + 2) return [];
+  // L'ATR est celui du MOMENT de la bougie, pas celui d'aujourd'hui. Comparer
+  // une bougie d'il y a deux jours à l'ATR actuel faisait rater les déplacements
+  // d'une période calme devenue volatile (et inventer des déplacements
+  // ordinaires quand la volatilité a chuté). On lisse donc au fil de la série.
+  const trs = [];
+  for (let i = 1; i < candles.length; i++) {
+    const p = candles[i - 1], c = candles[i];
+    trs.push(Math.max(c.h - c.l, Math.abs(c.h - p.c), Math.abs(c.l - p.c)));
+  }
+  let courant = trs.slice(0, periode).reduce((a, x) => a + x, 0) / periode;
   const out = [];
-  for (const c of candles) {
+  for (let i = 1; i < candles.length; i++) {
+    if (i > periode) courant = (courant * (periode - 1) + trs[i - 1]) / periode;
+    if (i < periode || !(courant > 0)) continue;   // pas d'ATR fiable avant
+    const c = candles[i];
     const body = Math.abs(c.c - c.o);
-    if (body >= a * k) {
+    if (body >= courant * k) {
       out.push({ at: c.t, direction: c.c > c.o ? 'haussier' : 'baissier',
-        from: c.o, to: c.c, multiple: +(body / a).toFixed(2) });
+        from: c.o, to: c.c, multiple: +(body / courant).toFixed(2) });
     }
   }
   return out.slice(-5);
@@ -315,7 +369,10 @@ function previousLevels(candles) {
   const before = candles.filter(c => c.t < todayStart);
   if (!before.length) return null;                       // historique trop court
   const prevDayStart = Math.floor(before[before.length - 1].t / day) * day;
-  const prevDay = before.filter(c => c.t >= prevDayStart);
+  // Borne HAUTE explicite : sans elle, un historique contenant plusieurs jours
+  // avant `todayStart` faisait calculer PDH/PDL sur plusieurs sessions.
+  const prevDay = before.filter(c => c.t >= prevDayStart && c.t < prevDayStart + day);
+  if (!prevDay.length) return null;
   const r = {
     PDH: +Math.max(...prevDay.map(c => c.h)).toFixed(6),
     PDL: +Math.min(...prevDay.map(c => c.l)).toFixed(6)
@@ -338,16 +395,31 @@ function fibLevels(candles, w = 2) {
   const top = Math.max(hi.price, lo.price), bot = Math.min(hi.price, lo.price);
   const d = top - bot;
   if (!d) return null;
+  // Le sens du swing décide du SENS de lecture du retracement.
+  // L'ancienne version faisait toujours `top − d × ratio` : sur un swing
+  // baissier (sommet puis creux), les niveaux étaient donc placés du mauvais
+  // côté du marché, et un retracement de 0,618 se retrouvait sous le creux.
+  const haussier = hi.i > lo.i;   // dernier point = sommet → swing montant
+  const niveau = r => (haussier ? top - d * r : bot + d * r);
   const levels = {};
-  for (const [k, ratio] of [['0,236', 0.236], ['0,382', 0.382], ['0,5', 0.5],
-    ['0,618', 0.618], ['0,705', 0.705], ['0,786', 0.786]]) {
-    levels[k] = +(top - d * ratio).toFixed(6);
+  // Ratios standards uniquement. « 0,705 » n'existe pas dans la suite de
+  // Fibonacci : c'était une valeur inventée, intercalée entre 0,618 et 0,786.
+  // Les clés sont en notation pointée (« 0.618 ») : « 0,618 » se lisait comme
+  // une chaîne à deux éléments pour tout appelant qui découpait sur la virgule.
+  for (const [k, ratio] of [['0.236', 0.236], ['0.382', 0.382], ['0.5', 0.5],
+    ['0.618', 0.618], ['0.786', 0.786]]) {
+    levels[k] = +niveau(ratio).toFixed(6);
   }
+  // Zone OTE (61,8 % – 78,6 % du retracement), toujours du côté d'où vient le
+  // mouvement : sous le sommet pour un swing haussier, au-dessus du creux sinon.
+  const ote = haussier
+    ? [+(top - d * 0.786).toFixed(6), +(top - d * 0.618).toFixed(6)]
+    : [+(bot + d * 0.618).toFixed(6), +(bot + d * 0.786).toFixed(6)];
   return {
     from: +bot.toFixed(6), to: +top.toFixed(6),
-    sens: hi.i > lo.i ? 'haussier (dernier point bas → dernier point haut)' : 'baissier (dernier point haut → dernier point bas)',
+    sens: haussier ? 'haussier (dernier point bas → dernier point haut)' : 'baissier (dernier point haut → dernier point bas)',
     levels,
-    ote: [+(bot + d * 0.618).toFixed(6), +(bot + d * 0.786).toFixed(6)]
+    ote
   };
 }
 
@@ -371,10 +443,14 @@ function sessions(candles) {
   }
   const now = new Date(candles[candles.length - 1].t).getUTCHours();
   const actives = SESSIONS.filter(s => (s.from <= s.to ? now >= s.from && now < s.to : now >= s.from || now < s.to));
+  // La killzone vient de `gestion/killzones` : une seule définition dans le
+  // dépôt. Deux fenêtres différentes (7-10 ici, 8-11 dans le rejeu) faisaient
+  // apprendre le système sur des heures qu'il ne trade pas.
+  const kz = Killzones.pour(candles[candles.length - 1].t);
   return {
     sessionCourante: actives.map(s => s.label).join(' + ') || 'hors séance',
-    killZone: (now >= 7 && now < 10) ? 'Londres (7 h–10 h UTC)'
-      : (now >= 12 && now < 15) ? 'New York (12 h–15 h UTC)' : 'aucune en ce moment',
+    killZone: kz ? Killzones.libelle(kz) : 'aucune en ce moment',
+    killZoneId: kz,
     compteParSession: counts
   };
 }
@@ -393,7 +469,9 @@ function inventory(r) {
     r.structure.event.level, 'cassure confirmée par la clôture');
 
   for (const f of r.fvgs) add('Imbalance', `FVG ${f.type === 'bullish' ? 'haussier' : 'baissier'}`,
-    (f.low + f.high) / 2, 'ouvert (non comblé)', { zone: [f.low, f.high] });
+    (f.low + f.high) / 2,
+    f.mitigated ? 'ouvert, déjà partiellement comblé' : 'ouvert (non comblé)',
+    { zone: [f.low, f.high], mitigated: !!f.mitigated });
   for (const o of r.orderBlocks) add('Order block', `OB ${o.type === 'bullish' ? 'haussier' : 'baissier'}`,
     (o.low + o.high) / 2, 'valide', { zone: [o.low, o.high] });
   for (const b of r.breakers) add('Breaker', b.type, (b.low + b.high) / 2, 'cassé — a changé de camp', { zone: [b.low, b.high] });
@@ -406,7 +484,7 @@ function inventory(r) {
     add('Range', 'OTE 0,618', r.premiumDiscount.ote.deep, 'zone d\'entrée privilégiée');
   }
   if (r.fibLevels) {
-    for (const [k, v] of Object.entries(r.fibLevels.levels)) add('Fibonacci', `Retracement ${k}`, v, 'du dernier swing');
+    for (const [k, v] of Object.entries(r.fibLevels.levels)) add('Fibonacci', `Retracement ${k.replace('.', ',')}`, v, 'du dernier swing');
   }
   if (r.previousLevels) {
     for (const [k, v] of Object.entries(r.previousLevels)) {
@@ -512,7 +590,7 @@ function analyze(candles, meta = {}, options = {}) {
     r.sweeps.length ? `Balayages : ${r.sweeps.map(x => `${x.type} à ${x.level}`).join(' | ')}` : '',
     r.displacements.length ? `Déplacements : ${r.displacements.map(d => `${d.direction} ${d.multiple}×ATR`).join(' | ')}` : '',
     r.previousLevels ? `Période précédente : ${Object.entries(r.previousLevels).map(([k, v]) => `${k} ${v}`).join(' | ')}` : '',
-    r.fibLevels ? `Fibonacci du dernier swing (${r.fibLevels.sens}) : ${Object.entries(r.fibLevels.levels).map(([k, v]) => `${k} ${v}`).join(' | ')}` : '',
+    r.fibLevels ? `Fibonacci du dernier swing (${r.fibLevels.sens}) : ${Object.entries(r.fibLevels.levels).map(([k, v]) => `${k.replace('.', ',')} ${v}`).join(' | ')}` : '',
     r.sessions ? `Session en cours : ${r.sessions.sessionCourante} · kill zone ${r.sessions.killZone}` : '',
     `Dernière bougie : ${r.lastCandle.direction}, mèche haute ${r.lastCandle.wick.upper} / basse ${r.lastCandle.wick.lower}`,
     `Inventaire : ${r.inventory.total} éléments identifiés (${Object.entries(r.inventory.parFamille).map(([k, v]) => `${k} ${v}`).join(', ')})`

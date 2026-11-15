@@ -75,21 +75,50 @@ function assainirNiveaux(niv, sens, atr, risqueMini = 0.5) {
   if (!(atr > 0)) return ecartes ? { ...niv, objectifs: valides } : niv;
   const ecart = Math.abs(niv.entree - niv.stop);
   const mini = atr * risqueMini;
-  if (ecart >= mini) return ecartes ? { ...niv, objectifs: valides } : niv;
 
   // Le plancher doit tenir sur le prix PUBLIÉ, pas sur la valeur avant arrondi :
   // arrondir 2045.410000 à 2 décimales ramenait le stop à 0,4999 ATR, donc sous
   // le plancher qu'on vient d'imposer. On éloigne d'un pas tant que nécessaire.
-  let stop = arrondiPrix(long ? niv.entree - mini : niv.entree + mini);
-  for (let i = 0; i < 5 && Math.abs(niv.entree - stop) < mini; i++) {
-    stop = arrondiPrix(long ? stop - pasPrix(stop) : stop + pasPrix(stop));
+  let stop = niv.stop;
+  if (ecart < mini) {
+    stop = arrondiPrix(long ? niv.entree - mini : niv.entree + mini);
+    for (let i = 0; i < 5 && Math.abs(niv.entree - stop) < mini; i++) {
+      stop = arrondiPrix(long ? stop - pasPrix(stop) : stop + pasPrix(stop));
+    }
+    // Garantie finale : `pasPrix(stop)` change quand le stop traverse un seuil de
+    // décimales (99,99 → 100,00 fait passer le pas de 0,0001 à 0,01). La boucle
+    // pouvait donc sortir encore sous le plancher. On mesure le dernier pas sur le
+    // PRIX d'entrée, stable, et on impose la distance minimale.
+    if (Math.abs(niv.entree - stop) < mini) {
+      const pas = pasPrix(niv.entree);
+      stop = arrondiPrix(long ? niv.entree - mini - pas : niv.entree + mini + pas);
+    }
   }
+
+  // ── Objectifs : un multiple du risque, pas seulement « du bon côté » ───────
+  // Mesuré en direct : XAUUSD vendu 3873,46 avec un stop à 17,30 et un TP1 à
+  // 12,20 — soit 0,71 R. Un signal dont le premier objectif rapporte moins que
+  // le risque n'est pas un signal, c'est une perte probable. On impose donc :
+  //   TP1 ≥ max(1,27 × risque, 1 ATR)   (le palier de sécurisation du système)
+  //   TP2 ≥ max(2 × risque, TP1 + 0,5 × risque)
+  // Une cible structurelle PLUS LOIN que ces planchers est conservée : on ne
+  // rapproche jamais un objectif réel, on refuse seulement les cibles trop courtes.
+  const risque = Math.abs(niv.entree - stop);
+  const signe = long ? 1 : -1;
+  const assezLoin = (v, plancher) => Number.isFinite(v) && Math.abs(v - niv.entree) >= plancher;
+  const plancherTP1 = Math.max(risque * 1.27, atr);
+  const tp1 = assezLoin(valides[0], plancherTP1) ? valides[0] : arrondiPrix(niv.entree + signe * plancherTP1);
+  const plancherTP2 = Math.max(risque * 2, Math.abs(tp1 - niv.entree) + risque * 0.5);
+  const tp2 = assezLoin(valides[1], plancherTP2) ? valides[1] : arrondiPrix(niv.entree + signe * plancherTP2);
+
   return {
     ...niv,
-    objectifs: valides,
+    objectifs: [tp1, tp2, ...valides.slice(2)],
     stop,
-    stopElargi: true,
-    base: [niv.base, `stop élargi à ${risqueMini}× ATR (le niveau était à ${arrondiPrix(ecart)} du prix)`,
+    stopElargi: ecart < mini,
+    rrForce: tp1 !== valides[0] || tp2 !== valides[1] || undefined,
+    base: [niv.base, ecart < mini ? `stop élargi à ${risqueMini}× ATR (le niveau était à ${arrondiPrix(ecart)} du prix)` : null,
+      tp1 !== valides[0] || tp2 !== valides[1] ? 'objectifs ramenés au minimum de 1,27 R / 2 R' : null,
       ecartes ? `${ecartes} objectif(s) écarté(s) : du mauvais côté de l'entrée` : null]
       .filter(Boolean).join(' · ')
   };

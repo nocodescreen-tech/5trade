@@ -115,7 +115,11 @@ function versContrat(verdict, meta = {}) {
     strategie: v.strategie ? (v.strategie.titre || null) : null,
     concept: 'règles SMC',
     tf: meta.timeframe || v.timeframe || null,
-    sens: v.direction === 'BUY' ? 'long' : v.direction === 'SELL' ? 'short' : 'neutre',
+    // NEUTRAL (avis sans biais) et UNKNOWN (aucun avis) sont deux choses
+    // différentes : les fondre en « neutre » contredisait la doctrine écrite plus
+    // haut (ligne 29 : 'inconnu' est une valeur du contrat, pas un synonyme).
+    sens: v.direction === 'BUY' ? 'long' : v.direction === 'SELL' ? 'short'
+      : v.direction === 'NEUTRAL' ? 'neutre' : 'inconnu',
     status: CONTRAT.statuts.includes(v.status) ? v.status : 'rejete',
     force: estNombre(v.strength) ? +Math.max(0, Math.min(1, v.strength)).toFixed(2) : 0,
     conditions: Array.isArray(v.checklist) ? v.checklist : [],
@@ -123,9 +127,12 @@ function versContrat(verdict, meta = {}) {
     entree: l && estNombre(l.entry) ? l.entry : null,
     stop: l && estNombre(l.stop) ? l.stop : null,
     objectifs: l ? [l.target1, l.target2].filter(estNombre) : [],
+    // Le Math.abs portait sur TOUTE la fraction : un objectif placé du mauvais
+    // côté de l'entrée affichait un RR positif. Il porte désormais sur chaque
+    // distance — un RR ne peut plus cacher une cible incohérente.
     rr: l && estNombre(l.target1) && estNombre(l.stop) && estNombre(l.entry)
       && l.stop !== l.entry
-      ? +Math.abs((l.target1 - l.entry) / (l.entry - l.stop)).toFixed(2) : null,
+      ? +(Math.abs(l.target1 - l.entry) / Math.abs(l.entry - l.stop)).toFixed(2) : null,
     // Deux notions que le mot « confirmé » confondait :
     //   reglesAlignees    = les règles R1–R8 sont d'accord (constat technique) ;
     //   executablePossible = des niveaux cohérents existent (rien à exécuter sinon).

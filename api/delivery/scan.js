@@ -88,8 +88,11 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
   const unitesVues = new Set([tf]);
 
   for (const s of symboles) {
-    const symbole = s.symbol || s.provider || s;
-    const provider = s.provider || undefined;
+    // `s.provider` n'est pas un symbole : le prendre comme tel demandait des
+    // bougies pour « deriv » et l'instrument disparaissait du scan en silence.
+    const symbole = (s && s.symbol) || (typeof s === 'string' ? s : null);
+    if (!symbole) { erreurs.push(`entrée de scan sans symbole : ${JSON.stringify(s)}`); continue; }
+    const provider = (s && s.provider) || undefined;
     for (const unite of unitesDe(symbole)) {
       unitesVues.add(unite);
       try {

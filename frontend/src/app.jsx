@@ -7,7 +7,7 @@ const API_BASE = (window.location.port === '5173' || window.location.protocol ==
 
 // Version de l'interface (affichée en en-tête) : permet de voir d'un coup d'œil
 // si la page ouverte est bien la dernière, ou une version restée en cache.
-const UI_VERSION = 'r2026-10-12a';
+const UI_VERSION = 'r2026-11-14d';
 const api = (path, opts = {}) =>
   fetch(`${API_BASE}${path}`, { credentials: 'include', ...opts });
 
@@ -2749,7 +2749,326 @@ function SignalHistory({ journal }) {
   );
 }
 
+/* ══════════════ PLANS D'ATTENTE + CERVEAU ══════════════ */
+// Trois choses que le système calculait sans jamais les montrer à l'écran :
+//   - les plans d'attente (« SI le prix revient à X ET confirme, ALORS … ») ;
+//   - l'alignement H4 + D1 qui autorise ou interdit un plan ;
+//   - les seuils appris et les shadow runs en cours.
+// Lecture seule : aucun plan n'est exécuté ici.
+const PLAN_DIR = { long: 'ACHAT', short: 'VENTE' };
+
+function PlansAttente({ symbol }) {
+  const [plans, setPlans] = useState([]);
+  const [alig, setAlig] = useState(null);
+  const [cerveau, setCerveau] = useState(null);
+  const [err, setErr] = useState('');
+  const [ouvert, setOuvert] = useState(true);
+
+  useEffect(() => {
+    let vivant = true;
+    const charger = async () => {
+      try {
+        const appels = [api('/scenarios?statut=en_attente&limite=10'), api('/apprentissage/shadow')];
+        if (symbol) appels.push(api('/alignement?symbol=' + encodeURIComponent(symbol)));
+        const rep = await Promise.all(appels);
+        const dPlans = await rep[0].json();
+        const dCer = await rep[1].json();
+        if (!vivant) return;
+        if (dPlans.success) setPlans(Array.isArray(dPlans.scenarios) ? dPlans.scenarios : []);
+        if (dCer.success) setCerveau(dCer);
+        if (rep[2]) {
+          const dAl = await rep[2].json();
+          if (vivant && dAl.success) setAlig(dAl); else if (vivant) setAlig(null);
+        } else setAlig(null);
+        setErr('');
+      } catch (e) { if (vivant) setErr(e.message || 'lecture impossible'); }
+    };
+    charger();
+    const t = setInterval(charger, 60000);
+    return () => { vivant = false; clearInterval(t); };
+  }, [symbol]);
+
+  const reste = iso => {
+    const ms = Date.parse(iso) - Date.now();
+    if (!Number.isFinite(ms)) return '—';
+    if (ms <= 0) return 'échu';
+    const m = Math.round(ms / 60000);
+    return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${m} min`;
+  };
+  const enR = (s, niveau) => {
+    const risque = Math.abs(Number(s.niveauEntree) - Number(s.stop));
+    if (!(risque > 0) || !Number.isFinite(Number(niveau))) return '—';
+    const r = ((Number(niveau) - Number(s.niveauEntree)) * (s.direction === 'long' ? 1 : -1)) / risque;
+    return `${r >= 0 ? '+' : ''}${r.toFixed(2)} R`;
+  };
+
+  const seuils = (cerveau && cerveau.seuils) || {};
+  const shadow = (cerveau && cerveau.shadow) || [];
+  const aligne = alig && alig.aligne === true;
+
+  return (
+    <div className="panel" style={{ padding: 0, marginBottom: 12, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 15px',
+        borderBottom: ouvert ? '1px solid ' + TT.line : 'none', flexWrap: 'wrap', cursor: 'pointer' }}
+        onClick={() => setOuvert(v => !v)}>
+        <TtLabel style={{ margin: 0 }}>Plans d'attente</TtLabel>
+        <TtPill tone={plans.length ? 'info' : 'neu'}>{plans.length} en attente</TtPill>
+        {alig && (
+          <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+            Biais H4/D1 : <b style={{ color: aligne ? TT.ok : TT.neu }}>
+              H4 {alig.H4} · D1 {alig.D1}
+            </b>
+            {aligne ? ' — aligné ' + alig.direction : ' — aucun trade autorisé'}
+          </span>
+        )}
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--dim)' }}>
+          seuils v{seuils.version || '?'} · TP1 {seuils.tp1_r ?? 1.27} R / TP2 {seuils.tp2_r ?? 2} R
+          {shadow.length ? ` · ${shadow.length} shadow` : ''}
+          {' · '}<i className={`fas fa-chevron-${ouvert ? 'up' : 'down'}`}></i>
+        </span>
+      </div>
+
+      {ouvert && (
+        <div style={{ padding: '10px 15px 12px' }}>
+          {err && <div style={{ fontSize: 11.5, color: TT.bad, marginBottom: 8 }}>{err}</div>}
+          {plans.length === 0 ? (
+            <div style={{ fontSize: 11.5, color: 'var(--dim)' }}>
+              Aucun plan conditionnel en attente. Le générateur n'en produit que si la
+              structure mesurée le permet : zone intacte, ATR disponible, sens compatible
+              avec l'alignement H4/D1.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: 3 }}>
+              {plans.map(s => {
+                const achat = s.direction === 'long';
+                return (
+                  <div key={s.id} style={{ display: 'grid',
+                    gridTemplateColumns: '58px 84px repeat(4, minmax(64px, 1fr)) 62px',
+                    gap: 6, alignItems: 'center', fontSize: 11.5, padding: '4px 0',
+                    borderBottom: '1px solid ' + TT.line }}>
+                    <b style={{ color: achat ? TT.ok : TT.bad }}>{PLAN_DIR[s.direction] || s.direction}</b>
+                    <span style={{ color: '#dbe4f0' }}>{s.instrument}</span>
+                    <span style={{ color: 'var(--muted)' }} title="niveau d'entrée">
+                      {ttFmt(s.niveauEntree)}
+                    </span>
+                    <span style={{ color: TT.bad, fontVariantNumeric: 'tabular-nums' }} title="stop">
+                      {ttFmt(s.stop)}
+                    </span>
+                    <span style={{ color: TT.ok, fontVariantNumeric: 'tabular-nums' }} title="objectif 1">
+                      {ttFmt(s.tp1)} <span style={{ color: 'var(--dim)' }}>{enR(s, s.tp1)}</span>
+                    </span>
+                    <span style={{ color: TT.ok, fontVariantNumeric: 'tabular-nums' }} title="objectif 2">
+                      {ttFmt(s.tp2)} <span style={{ color: 'var(--dim)' }}>{enR(s, s.tp2)}</span>
+                    </span>
+                    <span style={{ color: 'var(--dim)', textAlign: 'right' }} title="expiration">
+                      {reste(s.expireAt)}
+                    </span>
+                  </div>
+                );
+              })}
+              {plans[0] && Array.isArray(plans[0].preuves) && plans[0].preuves.length > 0 && (
+                <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 6 }}>
+                  <i className="fas fa-circle-info" style={{ marginRight: 6 }}></i>
+                  Pourquoi : {plans[0].preuves.join(' · ')}
+                </div>
+              )}
+            </div>
+          )}
+
+          {shadowsListe(shadow)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function shadowsListe(shadow) {
+  if (!shadow || !shadow.length) return null;
+  return (
+    <div style={{ marginTop: 9, borderTop: '1px solid ' + TT.line, paddingTop: 8 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
+        <i className="fas fa-flask" style={{ marginRight: 6, color: TT.info }}></i>
+        Réglages en shadow run (testés 3 jours avant promotion)
+      </div>
+      {shadow.map(c => (
+        <div key={c.id} style={{ display: 'flex', gap: 8, fontSize: 11, color: 'var(--dim)' }}>
+          <span style={{ color: '#93c5fd', minWidth: 210 }}>{c.parametre}</span>
+          <span>→ {String(c.valeur)}</span>
+          <span>· promotion possible le {String(c.applicable_at).slice(0, 10)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ══════════════════════════ ÉCRAN DIRECT ══════════════════════════ */
+
+/* ══════════════ GESTION DES POSITIONS (couche L6) ══════════════ */
+// Ce que le système ne montrait nulle part : les positions OUVERTES et ce qu'il
+// faudrait en faire, chiffré — où déplacer le stop, quelle part fermer à quel
+// niveau, depuis combien de temps la position traîne sans atteindre TP1.
+// Lecture seule : rien n'est appliqué ici, aucune position n'est fermée.
+function PositionsGestion() {
+  const [etat, setEtat] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const charger = useCallback(async () => {
+    setBusy(true);
+    try {
+      const r = await api('/positions');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setEtat(d); setErr('');
+    } catch (e) { setErr(e.message || 'lecture impossible'); }
+    finally { setBusy(false); }
+  }, []);
+
+  useEffect(() => {
+    charger();
+    const t = setInterval(charger, 30000);
+    return () => clearInterval(t);
+  }, [charger]);
+
+  const positions = (etat && etat.positions) || [];
+  const total = etat ? etat.total : null;
+
+  return (
+    <div className="panel" style={{ padding: 0, marginBottom: 12, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 15px',
+        borderBottom: '1px solid ' + TT.line, flexWrap: 'wrap' }}>
+        <TtLabel style={{ margin: 0 }}>Gestion des positions</TtLabel>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+          {total === null ? 'lecture…' : total === 0 ? 'aucune position ouverte'
+            : `${total} position${total > 1 ? 's' : ''} ouverte${total > 1 ? 's' : ''}`}
+        </span>
+        <span style={{ flex: '1 1 auto' }}></span>
+        <button className="btn ghost sm" onClick={charger} disabled={busy}>
+          <i className={`fas ${busy ? 'fa-circle-notch fa-spin' : 'fa-rotate'}`}></i>Rafraîchir
+        </button>
+      </div>
+
+      {err && (
+        <div style={{ padding: '10px 15px', fontSize: 12.5, color: TT.bad }}>
+          <i className="fas fa-triangle-exclamation" style={{ marginRight: 8 }}></i>{err}
+        </div>
+      )}
+
+      {!err && total === 0 && (
+        <div style={{ padding: '14px 15px', fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.55 }}>
+          Rien à gérer : aucune position ouverte. Dès qu'un signal du journal passe en position,
+          son plan apparaît ici — stop cible (breakeven puis trailing 1,5 ATR), partiels
+          TP1 50 % / TP2 30 % / runner 20 %, et invalidation temporelle à 3 h sans TP1.
+        </div>
+      )}
+
+      {!err && positions.map((p, i) => {
+        const plan = p.plan || null;
+        const long = p.sens === 'long';
+        const col = !p.evaluable ? TT.neu : (p.rEnCours || 0) >= 0 ? TT.ok : TT.bad;
+        const stopChange = plan && plan.stopCible !== null && plan.stopCible !== plan.stopActuel;
+        return (
+          <div key={(p.cle || '') + i} style={{ padding: '12px 15px',
+            borderTop: i ? '1px solid ' + TT.line : 'none' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <TtPill tone={long ? 'ok' : 'bad'}>{long ? 'ACHAT' : 'VENTE'}</TtPill>
+              <b style={{ fontSize: 13.5 }}>{p.symbol || '—'} <span style={{ color: 'var(--dim)', fontWeight: 500 }}>
+                · {p.timeframe || '—'}</span></b>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                entrée {ttFmt(p.entree)} · stop {ttFmt(p.stop)}
+              </span>
+              <span style={{ flex: '1 1 auto' }}></span>
+              <span style={{ fontSize: 14, fontWeight: 800, color: col, fontVariantNumeric: 'tabular-nums' }}>
+                {p.evaluable ? `${p.rEnCours > 0 ? '+' : ''}${p.rEnCours} R` : 'non évaluable'}
+              </span>
+            </div>
+
+            {/* D'où vient la position : stratégie enregistrée, structure ou pattern.
+                Un terminal qui cache l'origine d'un trade ne permet pas de juger. */}
+            <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 5 }}>
+              <i className="fas fa-code-branch" style={{ marginRight: 6, opacity: .7 }}></i>
+              {p.nom || 'signal sans nom'}
+              {' · '}
+              {p.strategie
+                ? <>stratégie <b style={{ color: 'var(--txt)' }}>{p.strategie}</b></>
+                : <>aucune stratégie enregistrée — moteur <b style={{ color: 'var(--txt)' }}>
+                    {p.source === 'motif' ? 'patterns graphiques' : p.source === 'structure' ? 'structure de marché' : (p.source || 'inconnu')}
+                  </b></>}
+              {p.concept && <span style={{ color: 'var(--dim)' }}> · {p.concept}</span>}
+            </div>
+
+            {!p.evaluable && (
+              <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 6 }}>
+                {p.motif || 'position non évaluable'} — aucune consigne inventée.
+              </div>
+            )}
+
+            {p.evaluable && plan && (
+              <>
+                <div style={{ display: 'grid', gap: 6, marginTop: 9,
+                  gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))' }}>
+                  {/* Stop cible */}
+                  <div style={{ border: '1px solid ' + TT.line, borderRadius: 10, padding: '8px 10px' }}>
+                    <TtLabel style={{ margin: 0 }}>Stop</TtLabel>
+                    <div style={{ fontSize: 13, marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+                      {ttFmt(plan.stopActuel)}
+                      {stopChange && <> <i className="fas fa-arrow-right" style={{ fontSize: 10, margin: '0 4px' }}></i>
+                        <b style={{ color: TT.warn }}>{ttFmt(plan.stopCible)}</b></>}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>{plan.motifStop}</div>
+                  </div>
+
+                  {/* Partiels */}
+                  <div style={{ border: '1px solid ' + TT.line, borderRadius: 10, padding: '8px 10px' }}>
+                    <TtLabel style={{ margin: 0 }}>Partiels</TtLabel>
+                    {(plan.partiels || []).map((x, k) => (
+                      <div key={k} style={{ fontSize: 11.5, marginTop: 2, color: x.atteint ? TT.ok : 'var(--muted)',
+                        fontVariantNumeric: 'tabular-nums' }}>
+                        <i className={`fas ${x.atteint ? 'fa-circle-check' : 'fa-circle'}`}
+                          style={{ fontSize: 9, marginRight: 5 }}></i>
+                        {x.niveau} {x.pct} %{x.prix ? ` @ ${ttFmt(x.prix)}${x.r !== null ? ` (${x.r} R)` : ''}` : ''}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Invalidation temporelle */}
+                  <div style={{ border: '1px solid ' + TT.line, borderRadius: 10, padding: '8px 10px' }}>
+                    <TtLabel style={{ margin: 0 }}>Invalidation</TtLabel>
+                    {plan.invalidationTemporelle ? (
+                      <>
+                        <div style={{ fontSize: 13, marginTop: 2,
+                          color: plan.invalidationTemporelle.depassee ? TT.bad : 'var(--txt)',
+                          fontWeight: plan.invalidationTemporelle.depassee ? 800 : 500 }}>
+                          {plan.invalidationTemporelle.ageHeures === null ? 'âge inconnu'
+                            : `${plan.invalidationTemporelle.ageHeures} h / ${plan.invalidationTemporelle.limiteHeures} h`}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
+                          {plan.invalidationTemporelle.motif}
+                        </div>
+                      </>
+                    ) : <div style={{ fontSize: 11.5, color: 'var(--dim)' }}>—</div>}
+                  </div>
+                </div>
+
+                {/* Ce qu'il serait raisonnable de faire — jamais appliqué */}
+                <div style={{ marginTop: 8, display: 'grid', gap: 4 }}>
+                  {(p.recommandations || []).map((r, k) => (
+                    <div key={k} style={{ fontSize: 12, color: 'var(--muted)' }}>
+                      <span className="tag" style={{ marginRight: 7 }}>{r.action}</span>{r.motif}
+                    </div>
+                  ))}
+                  <div style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 2 }}>
+                    Lecture seule : le stop n'est jamais déplacé et aucune position n'est fermée par cette page.
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function LiveMarket({ onToJournal }) {
   const [meta, setMeta] = useState({ symbols: [], timeframes: ['1m', '5m', '15m', '1h'] });
@@ -3164,6 +3483,10 @@ function LiveMarket({ onToJournal }) {
         sens={sensAffiche} onToJournal={onToJournal} symbol={symbol} tf={tf}
         provider={provider} providerLabel={providerLabel} />
 
+      {/* Couche L6 — les positions ouvertes et leur plan de gestion chiffré.
+          Un radar qui ne dit pas quoi faire d'une position ouverte n'est qu'un radar. */}
+      <PositionsGestion />
+
       {/* Graphique : accessible tôt, sans écraser la décision */}
       <div className="panel" style={{ padding: 14, marginBottom: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
@@ -3200,6 +3523,9 @@ function LiveMarket({ onToJournal }) {
 
       {/* Alignement MTF */}
       <MultiTimeframeMatrix confluence={confluence} />
+
+      {/* Plans d'attente + cerveau : ce que le système prépare, et pourquoi */}
+      <PlansAttente symbol={symbol} />
 
       {/* Pourquoi cette décision */}
       <SignalExplanation trace={(decision && decision.trace) || (sse && sse.trace)}
@@ -6304,6 +6630,269 @@ function Outils() {
   );
 }
 
+/* ══════════════ PILOTE IA — chat qui pilote le système ══════════════ */
+// Une seule page de conversation, avec des bulles, qui exécute réellement les
+// commandes du chat-crud : lecture (trades, stratégies, scénarios, paramètres,
+// mémoire, apprentissage, état), et écriture (créer, modifier, activer,
+// désactiver, supprimer) avec confirmation « oui/non » avant toute action
+// destructive. Rien n'est simulé ici : chaque bulle vient de /api/chat.
+
+const PILOTE_RACCOURCIS = [
+  { l: "État du système", t: "montre l'état du système" },
+  { l: 'Trades',          t: 'montre les trades' },
+  { l: 'Stratégies',      t: 'montre les stratégies' },
+  { l: 'Scénarios',       t: 'montre les scénarios en attente' },
+  { l: 'Paramètres',      t: 'montre les paramètres' },
+  { l: 'Mémoire',         t: "qu'est-ce que tu sais" },
+  { l: 'Apprentissage',   t: "qu'est-ce que tu as appris cette semaine ?" },
+  { l: 'Aide',            t: 'aide' },
+];
+
+const piloteHeure = (iso) => {
+  const d = iso ? new Date(iso) : new Date();
+  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+};
+
+function Pilote() {
+  const [messages, setMessages] = useState([]);
+  const [saisie, setSaisie] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [etat, setEtat] = useState('connexion');   // connexion | en ligne | hors ligne
+  const [erreur, setErreur] = useState('');
+  const filRef = useRef(null);
+  const champRef = useRef(null);
+
+  const descendre = () => {
+    const el = filRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  };
+
+  const vusRef = useRef(new Set());   // ids déjà affichés : aucun doublon
+
+  // Une seule lecture, utilisée au montage ET par la veille périodique. Les
+  // événements du système (stop touché, TP atteint, retournement de biais,
+  // scénario expiré) arrivent donc ici comme des messages, sans recharger.
+  const chargerFil = useCallback(async ({ silencieux = false } = {}) => {
+    try {
+      const r = await api('/chat/historique?limite=80');
+      if (r.status === 401) { setEtat('hors ligne'); return; }
+      const d = await r.json();
+      const liste = (d.messages || []).map(m => ({
+        id: m.id, role: m.role, texte: m.texte, heure: piloteHeure(m.creeAt),
+        action: m.action, evenement: m.verbe === 'ÉVÉNEMENT'
+      }));
+      if (!liste.length) {
+        if (!silencieux) setMessages([{
+          role: 'assistant',
+          texte: "Bonjour. Je pilote le système : je lis l'état, les trades, les stratégies, "
+            + 'les scénarios, les paramètres, la mémoire et l\'apprentissage — et je te préviens '
+            + 'ici quand un stop est touché, un objectif atteint ou un biais se retourne.\n'
+            + 'Tape « aide » pour la liste des commandes.',
+          heure: piloteHeure()
+        }]);
+      } else {
+        const nouveaux = liste.filter(m => m.id !== undefined && !vusRef.current.has(m.id));
+        for (const m of nouveaux) vusRef.current.add(m.id);
+        // Au premier passage on remplace tout ; ensuite on n'ajoute que le neuf.
+        setMessages(prev => (prev.length && silencieux ? [...prev, ...nouveaux] : liste));
+      }
+      setEtat('en ligne');
+    } catch (e) {
+      setEtat('hors ligne');
+    }
+  }, []);
+
+  useEffect(() => {
+    chargerFil();
+    // Toutes les 10 s : le fil se met à jour tout seul quand le moteur publie.
+    const t = setInterval(() => chargerFil({ silencieux: true }), 10000);
+    return () => clearInterval(t);
+  }, [chargerFil]);
+
+  useEffect(descendre, [messages, busy]);
+
+  const envoyer = async (texte) => {
+    const t = String(texte || '').trim();
+    if (!t || busy) return;
+    setErreur('');
+    setSaisie('');
+    setMessages(m => [...m, { role: 'user', texte: t, heure: piloteHeure() }]);
+    setBusy(true);
+    try {
+      const r = await api('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: t })
+      });
+      const d = await r.json();
+      const reponse = d.texte || (d.resultat && d.resultat.texte) || d.error
+        || (d.success ? 'Action exécutée.' : 'Réponse vide.');
+      setMessages(m => [...m, {
+        role: 'assistant', texte: reponse, heure: piloteHeure(), action: d.action
+      }]);
+      // Une écriture a réussi : les autres onglets doivent relire leurs données.
+      if (d.success && d.action && !/Confirmer \? \(oui\/non\)/i.test(reponse)) {
+        window.dispatchEvent(new Event('5trade-refresh'));
+      }
+      setEtat('en ligne');
+    } catch (e) {
+      setMessages(m => [...m, {
+        role: 'assistant', texte: 'Erreur réseau : ' + e.message, heure: piloteHeure()
+      }]);
+      setEtat('hors ligne');
+    } finally {
+      setBusy(false);
+      if (champRef.current) champRef.current.focus();
+    }
+  };
+
+  const effacer = async () => {
+    if (busy) return;
+    if (!window.confirm('Effacer tout l’historique de conversation ?')) return;
+    try {
+      await api('/chat/historique', { method: 'DELETE' });
+      setMessages([{ role: 'assistant', texte: 'Historique effacé.', heure: piloteHeure() }]);
+      setErreur('');
+    } catch (e) { setErreur('Effacement impossible : ' + e.message); }
+  };
+
+  const point = etat === 'en ligne' ? 'var(--ok)' : etat === 'hors ligne' ? 'var(--bad)' : 'var(--warn)';
+
+  return (
+    <div className="panel" style={{ padding:0, overflow:'hidden', display:'flex', flexDirection:'column' }}>
+      {/* En-tête */}
+      <div style={{ display:'flex', alignItems:'center', gap:12, padding:'14px 18px',
+        borderBottom:'1px solid var(--border)', background:'var(--panel2)', flexWrap:'wrap' }}>
+        <div style={{ width:34, height:34, borderRadius:10, background:'var(--accent)', color:'#fff',
+          display:'grid', placeItems:'center', fontWeight:800, fontSize:14 }}>5</div>
+        <div style={{ minWidth:0 }}>
+          <div style={{ fontWeight:650, letterSpacing:'-.01em' }}>Pilote IA</div>
+          <div style={{ fontSize:12, color:'var(--muted)' }}>
+            Supervision · diagnostic · administration — commandes en langage naturel
+          </div>
+        </div>
+        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:10 }}>
+          <span style={{ display:'inline-flex', alignItems:'center', gap:7, fontSize:12, color:'var(--muted)' }}>
+            <span style={{ width:7, height:7, borderRadius:'50%', background:point }}></span>
+            {etat}
+          </span>
+          <button className="btn ghost sm" onClick={effacer} disabled={busy}>
+            <i className="fas fa-eraser"></i>Effacer
+          </button>
+        </div>
+      </div>
+
+      {/* Fil de conversation */}
+      <div ref={filRef} aria-live="polite"
+        style={{ flex:1, minHeight:380, maxHeight:'calc(100vh - 330px)', overflowY:'auto',
+          padding:'20px 18px 10px', background:'var(--bg)' }}>
+        {messages.map((m, i) => {
+          const moi = m.role === 'user';
+          const confirmation = !moi && /Confirmer \? \(oui\/non\)/i.test(m.texte || '');
+          return (
+            <div key={i} style={{ display:'flex', gap:10, marginBottom:14,
+              flexDirection: moi ? 'row-reverse' : 'row', alignItems:'flex-start' }}>
+              <div style={{ width:28, height:28, borderRadius:8, flex:'0 0 auto', display:'grid',
+                placeItems:'center', fontSize:12, fontWeight:700,
+                background: moi ? 'var(--accent)' : 'var(--panel2)',
+                color: moi ? '#fff' : 'var(--muted)',
+                border: moi ? '1px solid transparent' : '1px solid var(--border)' }}>
+                {moi ? 'M' : '5'}
+              </div>
+              <div style={{ maxWidth:'min(720px, 80%)' }}>
+                <div style={{
+                  padding:'11px 14px', borderRadius:14, whiteSpace:'pre-wrap', wordBreak:'break-word',
+                  fontSize:14, lineHeight:1.5,
+                  background: moi ? 'var(--accent)' : 'var(--panel2)',
+                  color: moi ? '#fff' : 'var(--txt)',
+                  border: moi ? '1px solid transparent' : '1px solid var(--border)',
+                  borderBottomRightRadius: moi ? 5 : 14,
+                  borderBottomLeftRadius: moi ? 14 : 5 }}>
+                  {/* Événement du moteur : ce n'est pas une phrase de l'assistant,
+                      c'est un fait constaté (stop touché, objectif, retournement).
+                      La pastille le dit, la couleur suit la gravité. */}
+                  {m.evenement && (() => {
+                    const g = (m.action && m.action.gravite) || 'info';
+                    const c = g === 'bad' ? 'var(--bad)' : g === 'ok' ? 'var(--ok)'
+                      : g === 'warn' ? 'var(--warn)' : 'var(--accent2)';
+                    return (
+                      <span style={{ display:'inline-flex', alignItems:'center', gap:5, marginBottom:6,
+                        fontSize:10.5, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase',
+                        color:c }}>
+                        <i className="fas fa-bolt" style={{ fontSize:10 }}></i>événement
+                      </span>
+                    );
+                  })()}
+                  {m.evenement && <br />}
+                  {m.texte}
+                </div>
+                <div style={{ fontSize:11, color:'var(--dim)', marginTop:5, textAlign: moi ? 'right' : 'left' }}>
+                  {m.heure}
+                  {m.action && m.action.verbe && (
+                    <span style={{ marginLeft:8, opacity:.85 }}>
+                      · {m.action.verbe}{m.action.sujet ? ` ${m.action.sujet}` : ''}
+                    </span>
+                  )}
+                </div>
+                {confirmation && (
+                  <div style={{ display:'flex', gap:8, marginTop:8 }}>
+                    <button className="btn sm" onClick={() => envoyer('oui')} disabled={busy}>
+                      <i className="fas fa-check"></i>Oui
+                    </button>
+                    <button className="btn ghost sm" onClick={() => envoyer('non')} disabled={busy}>
+                      <i className="fas fa-xmark"></i>Non
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {busy && (
+          <div style={{ display:'flex', gap:10, marginBottom:14, alignItems:'flex-start' }}>
+            <div style={{ width:28, height:28, borderRadius:8, flex:'0 0 auto', display:'grid',
+              placeItems:'center', fontSize:12, fontWeight:700, background:'var(--panel2)',
+              color:'var(--muted)', border:'1px solid var(--border)' }}>5</div>
+            <div style={{ padding:'14px 16px', borderRadius:14, background:'var(--panel2)',
+              border:'1px solid var(--border)', color:'var(--muted)', fontSize:13 }}>
+              <i className="fas fa-circle-notch fa-spin"></i> analyse…
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Raccourcis + saisie */}
+      <div style={{ borderTop:'1px solid var(--border)', background:'var(--panel)', padding:'10px 18px 14px' }}>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:10 }}>
+          {PILOTE_RACCOURCIS.map((r, i) => (
+            <button key={i} className="btn ghost sm" style={{ padding:'5px 11px', fontSize:12 }}
+              onClick={() => envoyer(r.t)} disabled={busy}>{r.l}</button>
+          ))}
+        </div>
+        {erreur && <div style={{ fontSize:12, color:'var(--bad)', marginBottom:8 }}>{erreur}</div>}
+        <div style={{ display:'flex', gap:10, alignItems:'flex-end' }}>
+          <textarea ref={champRef} className="fld" rows={1} value={saisie}
+            placeholder="Écris une commande… (« montre les scénarios », « désactive strategy_trend »)"
+            style={{ flex:1, minHeight:46, maxHeight:150, resize:'none', margin:0 }}
+            onChange={e => setSaisie(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); envoyer(saisie); }
+            }} />
+          <button className="btn" onClick={() => envoyer(saisie)} disabled={busy || !saisie.trim()}
+            style={{ minHeight:46 }}>
+            <i className={`fas ${busy ? 'fa-circle-notch fa-spin' : 'fa-paper-plane'}`}></i>Envoyer
+          </button>
+        </div>
+        <div style={{ display:'flex', justifyContent:'space-between', gap:10, marginTop:8,
+          fontSize:11.5, color:'var(--dim)' }}>
+          <span>Entrée pour envoyer · Maj+Entrée pour un retour à la ligne</span>
+          <span>{messages.length} message{messages.length > 1 ? 's' : ''}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ user, onLogout }) {
   const [tab, setTab] = useState('live');
   // Sur mobile, la barre du bas ne garde que l'essentiel ; le reste s'ouvre ici.
@@ -6365,11 +6954,15 @@ function Dashboard({ user, onLogout }) {
 
   // Onglets toujours visibles sur mobile, et ceux ranges dans « Plus ».
   const NAV_PRINCIPAL = ['live', 'analyze', 'strategies', 'journal'];
-  const NAV_SECONDAIRE = ['add', 'history', 'news', 'termes', 'alerts', 'outils', 'systeme'];
+  const NAV_SECONDAIRE = ['pilote', 'add', 'history', 'news', 'termes', 'alerts', 'outils', 'systeme'];
 
   const NAV = [
     { id:'live',       label:'Direct',    icon:'fa-satellite-dish' },
     { id:'analyze',    label:'Analyse',   icon:'fa-crosshairs' },
+    // Le pilote conversationnel est une entrée de premier niveau : c'est le seul
+    // endroit où l'on pilote réellement le système (CRUD complet) sans chercher
+    // un bouton dans six onglets.
+    { id:'pilote',     label:'Pilote IA', icon:'fa-comments' },
     { id:'add',        label:'Ajouter',   icon:'fa-circle-plus' },
     { id:'strategies', label:'Stratégies',icon:'fa-book' },
     { id:'journal',    label:'Journal',   icon:'fa-receipt' },
@@ -6460,6 +7053,7 @@ function Dashboard({ user, onLogout }) {
 
           <Garde>
             {tab === 'live' && <LiveMarket onToJournal={sendToJournal} />}
+            {tab === 'pilote' && <Pilote />}
             {tab === 'add' && <AddKnowledge refresh={load} />}
             {tab === 'strategies' && <Strategies strategies={strategies} onDelete={del} onSaved={load} />}
             {tab === 'journal' && <Journal prefill={prefill} onPrefillUsed={()=>setPrefill(null)} strategies={strategies} />}

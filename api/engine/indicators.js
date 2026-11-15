@@ -30,7 +30,11 @@ function rsi(candles, period = 14) {
   avgGain /= period;
   avgLoss /= period;
 
-  out.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
+  // Aucune perte ET aucun gain : le marché n'a pas bougé. Le RSI d'une série
+  // parfaitement plate est 50 (neutre), pas 100 (surachat). La version
+  // précédente renvoyait 100 et fabriquait un faux signal de surachat sur les
+  // marchés plats — exactement là où il ne faut surtout pas entrer.
+  out.push(avgLoss === 0 ? (avgGain === 0 ? 50 : 100) : 100 - (100 / (1 + avgGain / avgLoss)));
 
   // Lissage de Wilder pour les bougies suivantes
   for (let i = period + 1; i < candles.length; i++) {
@@ -41,7 +45,11 @@ function rsi(candles, period = 14) {
     avgGain = (avgGain * (period - 1) + gain) / period;
     avgLoss = (avgLoss * (period - 1) + loss) / period;
 
-    out.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
+    // Aucune perte ET aucun gain : le marché n'a pas bougé. Le RSI d'une série
+  // parfaitement plate est 50 (neutre), pas 100 (surachat). La version
+  // précédente renvoyait 100 et fabriquait un faux signal de surachat sur les
+  // marchés plats — exactement là où il ne faut surtout pas entrer.
+  out.push(avgLoss === 0 ? (avgGain === 0 ? 50 : 100) : 100 - (100 / (1 + avgGain / avgLoss)));
   }
 
   return out.map(v => +v.toFixed(2));
@@ -63,10 +71,16 @@ function macd(candles) {
   const ema12 = ema(candles, 12);
   const ema26 = ema(candles, 26);
 
+  // ALIGNEMENT : `ema(candles, 12)` commence à la bougie 11, `ema(candles, 26)`
+  // à la bougie 25. Les comparer index par index décalait la ligne MACD de
+  // 14 bougies (26 − 12) : le MACD affiché n'était pas celui des mêmes prix.
+  // On aligne donc par la DROITE, ce que fait tout calcul MACD correct.
+  const decalage = 26 - 12;
   const macdLine = [];
   for (let i = 0; i < ema26.length; i++) {
-    if (ema12[i] !== undefined && ema26[i] !== undefined) {
-      macdLine.push(+(ema12[i] - ema26[i]).toFixed(6));
+    const courte = ema12[i + decalage];
+    if (courte !== undefined && ema26[i] !== undefined) {
+      macdLine.push(+(courte - ema26[i]).toFixed(6));
     }
   }
 
@@ -215,13 +229,19 @@ function stochastic(candles, period = 14) {
  */
 function vwap(candles) {
   if (!candles.length) return 0;
-  let pvSum = 0, vSum = 0;
+  let pvSum = 0, vSum = 0, tpSum = 0;
   for (const c of candles) {
     const typicalPrice = (c.h + c.l + c.c) / 3;
+    tpSum += typicalPrice;
     pvSum += typicalPrice * (c.v || 0);
     vSum += c.v || 0;
   }
-  return vSum === 0 ? 0 : +(pvSum / vSum).toFixed(6);
+  // Sans volume (indices synthétiques, flux sans tick volume), un VWAP n'a pas
+  // de sens. Rendre 0 laissait croire à un prix nul — et tout écart calculé
+  // contre lui devenait faux. On rend le prix typique moyen : la meilleure
+  // lecture disponible sur la même échelle que le prix.
+  if (vSum === 0) return +(tpSum / candles.length).toFixed(6);
+  return +(pvSum / vSum).toFixed(6);
 }
 
 module.exports = { rsi, macd, sma, ema, bollinger, stochastic, vwap };

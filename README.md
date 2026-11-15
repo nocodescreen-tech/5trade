@@ -58,8 +58,13 @@ node server.js
 Ouvrir `frontend/index.html` dans le navigateur
 
 ### 3. Connexion
-- Username: `rene`
-- Password: `trading2024`
+Le compte se crée via l'API :
+- POST /api/signup avec un email
+- Un code OTP est envoyé par email (SMTP ou API Brevo/Resend)
+- POST /api/verify-otp avec le code reçu
+
+Le premier compte créé devient le propriétaire. Authentification 100% OTP,
+plus de mot de passe par défaut.
 
 ### 4. Upload de stratégies
 - Allez dans l'onglet "Documents"
@@ -82,10 +87,10 @@ PORT=3001
 NODE_ENV=development
 ```
 
-### Compte utilisateur unique
-- Username: `rene`
-- Password: `trading2024`
-- Configuration sauvegardée dans `data/users/rene/config.json`
+### Compte utilisateur
+- Authentification par OTP email (configurer SMTP_HOST/SMTP_USER/SMTP_PASS
+  dans .env, ou BREVO_API_KEY)
+- Configuration sauvegardée en base PostgreSQL (table `account`)
 
 ## Technologies utilisées
 
