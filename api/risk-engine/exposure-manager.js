@@ -9,7 +9,11 @@
  * déclarées (symbole, direction, risque en devise, entrée, stop).
  */
 
-const nombre = v => (Number.isFinite(Number(v)) ? Number(v) : null);
+// `Number(null)` vaut 0 : un risque ABSENT était donc lu comme un risque NUL.
+// C'est la racine du bug « position sans risque comptée comme 0 » — la corriger
+// ici vaut mieux que rustiner chaque appelant.
+const nombre = v => (v === null || v === undefined || v === '' ? null
+  : (Number.isFinite(Number(v)) ? Number(v) : null));
 
 const LIMITES = {
   risqueCumulePct: 6,        // risque total simultané, en % du capital
@@ -103,6 +107,15 @@ function verifier(p = {}) {
   mesures.risqueCumulePct = Math.round((cumule / capital) * 1000) / 10;
   mesures.plafondPct = limites.risqueCumulePct;
   mesures.positions = ouvertes.length + (nouvelle ? 1 : 0);
+  // Une position dont le risque n'est pas chiffré compte dans le nombre (elle
+  // existe) mais pas dans le risque cumulé. Le dire évite de croire que le
+  // plafond de risque couvre tout ce qui est ouvert.
+  const sansRisque = ouvertes.filter(x => nombre(x.risqueMontant) === null).length
+    + (nouvelle && nombre(nouvelle.risqueMontant) === null ? 1 : 0);
+  if (sansRisque > 0) {
+    mesures.positionsRisqueInconnu = sansRisque;
+    avertissements.push(`${sansRisque} position(s) sans risque chiffré : le risque cumulé les ignore`);
+  }
 
   if (mesures.risqueCumulePct > limites.risqueCumulePct) {
     bloquants.push(`risque cumulé ${mesures.risqueCumulePct} % > plafond ${limites.risqueCumulePct} %`);
@@ -120,7 +133,12 @@ function verifier(p = {}) {
       const c = correlation(series[nouvelle.symbole], series[o.symbole]);
       if (c === null) continue;
       if (Math.abs(c) >= limites.correlationMax) {
-        const memeSens = String(o.direction || '').toUpperCase() === String(nouvelle.direction || '').toUpperCase();
+        // Deux directions inconnues ne sont PAS « le même sens » : comparer deux
+        // chaînes vides déclarait un doublon bloquant sur des positions dont on
+        // ne savait rien. Inconnu reste inconnu.
+        const sensO = String(o.direction || '').toUpperCase();
+        const sensN = String(nouvelle.direction || '').toUpperCase();
+        const memeSens = sensO && sensN ? sensO === sensN : null;
         correlees.push({ symbole: o.symbole, correlation: c, memeSens });
       }
     }

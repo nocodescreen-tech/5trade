@@ -21,7 +21,10 @@ const SEUILS = {
   expiration: 60      // bougies sans confirmation avant expiration
 };
 
-const ETATS = ['NOT_RETURNED', 'APPROACHING', 'IN_ZONE', 'REJECTED', 'BROKEN', 'CONFIRMED', 'EXPIRED'];
+// 'INCONNU' manquait : une zone invalide portait cet état, hors du tableau, donc
+// elle n'était comptée dans aucun résumé — invisible alors qu'elle signale une
+// donnée douteuse.
+const ETATS = ['NOT_RETURNED', 'APPROACHING', 'IN_ZONE', 'REJECTED', 'BROKEN', 'CONFIRMED', 'EXPIRED', 'INCONNU'];
 
 /**
  * @param {object} zone    { type: 'bullish'|'bearish', low, high, ts?, index? }
@@ -37,7 +40,18 @@ function etatZone(zone, candles, opts = {}) {
     return { ...base, etat: 'INCONNU', motif: 'zone invalide (bornes absentes ou inversées)' };
   }
   const bougies = Array.isArray(candles) ? candles : [];
-  const iZone = Number.isFinite(zone.index) ? zone.index : 0;
+  // `zone.index` est l'index dans l'historique d'ORIGINE. Si l'appelant passe un
+  // sous-ensemble (les 300 dernières bougies), cet index pointe au mauvais
+  // endroit. Le timestamp est stable : on le préfère, et on retombe sur l'index
+  // seulement quand il n'y a pas mieux.
+  let iZone = 0;
+  if (Number.isFinite(Number(zone && zone.ts))) {
+    const tZone = Number(zone.ts);
+    iZone = bougies.findIndex(c => Number(c && c.t) >= tZone);
+    if (iZone < 0) iZone = bougies.length;          // zone postérieure à la série
+  } else if (Number.isFinite(Number(zone && zone.index))) {
+    iZone = Number(zone.index);
+  }
   const apres = bougies.slice(iZone + 1);
   if (!apres.length) {
     return { ...base, etat: 'NOT_RETURNED', motif: 'aucune bougie après la création de la zone' };

@@ -2451,10 +2451,31 @@ app.post('/api/trades', requireAuth, async (req, res) => {
 // ─── Dashboard temps réel ───
 app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
-    const capital = Number(req.query.capital) || 10000;
+    // Le capital venait de la requête avec 10 000 par défaut, alors que
+    // data/risque.json dit 1 000 : tout l'écran était 10× trop grand.
+    const Risque = require('./risk/risque');
+    const capital = Number(req.query.capital) > 0 ? Number(req.query.capital) : Risque.configuration().capital;
     const trades = await DB.listTrades();
-    const signals = []; // serait rempli par le moteur de signaux
-    const dashboard = await buildDashboard({ trades, signals, capital });
+
+    // Prix courant des positions ouvertes : sans lui le PnL valait 0 en dur.
+    // Un symbole indisponible laisse le PnL à null avec son motif — pas à zéro.
+    const prixParSymbole = {};
+    for (const t of trades.filter(x => x.status === 'open')) {
+      const pair = t.pair;
+      if (!pair || prixParSymbole[pair] !== undefined) continue;
+      try {
+        const { candles } = await Market.getCandles(pair, '5m', 2);
+        const dernier = candles && candles[candles.length - 1];
+        if (dernier && Number.isFinite(Number(dernier.c))) prixParSymbole[pair] = Number(dernier.c);
+      } catch { /* hors ligne : PnL non calculé, et il le dira */ }
+    }
+
+    // Signaux récents : le dashboard les recevait vides (`signals: []`) depuis
+    // toujours, donc la section « signaux » de l'écran ne montrait rien.
+    let signals = [];
+    try { signals = require('./engine/journal-signaux').lister({ limite: 10 }); } catch { /* journal absent */ }
+
+    const dashboard = await buildDashboard({ trades, signals, capital, prixParSymbole });
     res.json({ success: true, dashboard });
   } catch (e) {
     res.status(500).json({ error: e.message });

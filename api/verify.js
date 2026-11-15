@@ -4408,6 +4408,75 @@ function tinyPng(W = 64, H = 40) {
         delete require.cache[require.resolve('./chat-crud')];
       }
 
+      // ── Deuxième passe d'audit : ce qui était faux et ne l'est plus ────────
+      {
+        const Dash = require('./delivery/dashboard');
+        const trades = [
+          { status: 'open', pair: 'frxEURUSD', direction: 'BUY', entry: 100, size: 2, risk: 1 },
+          { status: 'open', pair: 'frxXAUUSD', direction: 'SELL', entry: 3900, size: 1, risk: 10 },
+          { status: 'closed', result: 'win', pnl: 50, r: 1 },
+          { status: 'closed', result: 'loss', pnl: -20, r: -1 },
+          { status: 'closed', result: 'breakeven', pnl: 0, r: 0 }
+        ];
+        const dash = await Dash.buildDashboard({ trades, capital: null, prixParSymbole: { frxEURUSD: 110 } });
+        ok('dashboard : le capital par défaut vient de data/risque.json, pas de 10 000',
+          dash.capital === 1000, String(dash.capital));
+        const explicite = await Dash.buildDashboard({ trades: [], capital: 500 });
+        ok('dashboard : un capital explicite reste prioritaire', explicite.capital === 500, String(explicite.capital));
+        ok('dashboard : le PnL d’une position ouverte est calculé avec le prix courant',
+          dash.positions.ouvertes[0].pnlActuel === 20, String(dash.positions.ouvertes[0].pnlActuel));
+        ok('dashboard : sans prix courant, le PnL est null AVEC son motif (jamais 0)',
+          dash.positions.ouvertes[1].pnlActuel === null && /indisponible/.test(dash.positions.ouvertes[1].pnlMotif || ''));
+        ok('dashboard : le taux de réussite exclut le BE du dénominateur',
+          dash.stats.wins === 1 && dash.stats.losses === 1 && dash.stats.winRate === 50
+          && dash.stats.sansVerdict === 1, JSON.stringify({ w: dash.stats.wins, l: dash.stats.losses, taux: dash.stats.winRate }));
+        ok('dashboard : le PnL total ne compte que les trades qui en ont un',
+          dash.stats.pnlTotal === 30 && dash.stats.pnlConnus === 3, String(dash.stats.pnlTotal));
+
+        const C = require('./engine/contrat');
+        const inconnu = C.normaliserSignal({
+          id: 'x', source: 'verdict', nom: 'test', tf: '15m', sens: 'inconnu',
+          entree: 100, stop: 99, objectifs: [102]
+        });
+        ok('contrat : UNKNOWN n’est plus confondu avec « neutre »', inconnu.sens === 'inconnu', inconnu.sens);
+        const rrFaux = C.normaliserSignal({
+          id: 'y', source: 'verdict', nom: 'test', tf: '15m', sens: 'long',
+          entree: 100, stop: 99, objectifs: [102], rr: null
+        });
+        ok('contrat : un RR ne masque plus un objectif placé du mauvais côté',
+          rrFaux.rr === null || rrFaux.rr > 0, String(rrFaux.rr));
+
+        const PP = require('./engine/parcours-prix');
+        ok('parcours : l’état INCONNU est déclaré (une zone invalide reste comptée)',
+          PP.ETATS.includes('INCONNU'));
+        const serie = Array.from({ length: 12 }, (_, i) => ({
+          t: 1000 + i * 60000, o: 100, h: 101, l: 99, c: 100, closed: true
+        }));
+        const zone = { type: 'bullish', low: 99.5, high: 100.5, ts: serie[5].t };
+        const etatParTs = PP.etatZone(zone, serie.slice(4), { atr: 1 });
+        ok('parcours : une zone est située par son timestamp, pas par un index d’un autre tableau',
+          etatParTs.motif !== 'aucune bougie après la création de la zone', etatParTs.motif || etatParTs.etat);
+
+        const Perf = require('./engine/performance');
+        const avecCout = Perf.appliquerCout([{ r: 1, rBrut: 1.2 }], 0.2);
+        ok('performance : le coût ne s’applique pas deux fois à un trade déjà net',
+          Math.abs(avecCout[0].r - 1.0) < 1e-9 && avecCout[0].rBrut === 1.2,
+          `r=${avecCout[0].r} rBrut=${avecCout[0].rBrut}`);
+
+        const Exp = require('./risk-engine/exposure-manager');
+        const r = Exp.verifier({
+          capital: 1000,
+          ouvertes: [{ symbole: 'A', direction: null, risqueMontant: null }],
+          nouvelle: { symbole: 'B', direction: null, risqueMontant: 5 },
+          series: { A: [1, 2, 3, 4, 5], B: [1.01, 2.01, 3.01, 4.01, 5.01] }
+        });
+        ok('exposition : deux directions inconnues ne sont pas « le même sens »',
+          !(r.mesures.correlees || []).some(c => c.memeSens === true),
+          JSON.stringify(r.mesures.correeles || r.mesures.correlees || []));
+        ok('exposition : une position sans risque chiffré est signalée',
+          r.mesures.positionsRisqueInconnu === 1);
+      }
+
       // ── Écran : ce que le système calcule doit être visible ───────────────
       // Le plan d'attente, l'alignement H4/D1 et les shadow runs existaient côté
       // API mais n'apparaissaient nulle part : un mécanisme invisible ne se
@@ -6027,10 +6096,13 @@ function tinyPng(W = 64, H = 40) {
     ok('le taux de réussite exclut les trades neutres',
       m.winRate === 50, `${m.winRate} %`);
 
-    // Zéro perte : le PF est infini, et on le dit au lieu de mentir.
+    // Zéro perte : le PF n'a pas de valeur numérique. Il rend null ET un drapeau
+    // séparé — un type à trois formes ('infini', nombre, null) cassait les calculs
+    // qui multipliaient le PF par un capital.
     const sansPerte = P.metriques([{ r: 1, at: '2026-01-01' }, { r: 2, at: '2026-01-02' }]);
-    ok('sans aucune perte, le profit factor est annoncé « infini »',
-      sansPerte.profitFactor === 'infini', String(sansPerte.profitFactor));
+    ok('sans aucune perte, le profit factor est null et signalé par un drapeau',
+      sansPerte.profitFactor === null && sansPerte.sansPerte === true,
+      `${sansPerte.profitFactor} / sansPerte=${sansPerte.sansPerte}`);
 
     // Découpe chronologique : jamais de mélange.
     const long = Array.from({ length: 60 }, (_, i) => ({
@@ -6142,7 +6214,12 @@ function tinyPng(W = 64, H = 40) {
     const r4 = Q.ratios([{ r: 1 }, { r: 1 }, { r: 1 }, { r: -1 }]);
     ok('le Sharpe est calculé par trade, en R', r4.sharpe === 0.5, String(r4.sharpe));
     ok('le Sortino ne pénalise que la volatilité baissière', r4.sortino === 0.5, String(r4.sortino));
-    ok('le Calmar rapporte la performance au drawdown', r4.calmar === 2, String(r4.calmar));
+    // Calmar et recovery factor avaient la même formule sous deux noms. Le
+    // recovery factor reste ; le Calmar exige une annualisation qu'on ne peut pas
+    // faire en R par trade, donc il vaut null avec sa raison.
+    ok('le recovery factor rapporte la performance au drawdown', r4.recoveryFactor === 2, String(r4.recoveryFactor));
+    ok('le Calmar ne recopie pas le recovery factor',
+      r4.calmar === null && /annualis/i.test(r4.calmarMotif || ''), String(r4.calmar));
     ok('les pertes consécutives sont comptées',
       Q.ratios([{ r: 1 }, { r: -1 }, { r: -1 }, { r: -1 }, { r: 1 }]).pertesConsecutives === 3);
     ok('moins de deux trades : aucun ratio',
