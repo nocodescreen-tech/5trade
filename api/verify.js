@@ -7792,6 +7792,27 @@ function tinyPng(W = 64, H = 40) {
         `${plusieurs.total} vs ${toujours.total} trade(s)`);
     }
 
+    // — Risque de portefeuille : une position non chiffrée n'est pas un zéro
+    {
+      const Pf = require('./risk/portfolioRisk');
+      const melange = Pf.risqueTotal([
+        { pair: 'EURUSD', direction: 'BUY', risk: 10, size: 1 },
+        { pair: 'XAUUSD', direction: 'BUY', risk: null, size: null }
+      ], 1000);
+      ok('risque : une position non chiffrée est EXCLUE du total, pas comptée à zéro',
+        melange.nonChiffrees === 1 && melange.risqueTotalPct === 1,
+        `total ${melange.risqueTotalPct} % · ${melange.nonChiffrees} non chiffrée(s)`);
+      const aucune = Pf.risqueTotal([{ pair: 'EURUSD', direction: 'BUY', risk: null, size: null }], 1000);
+      ok('risque : aucune position chiffrée → total null (non mesurable), pas 0 %',
+        aucune.risqueTotalPct === null && !!aucune.raison, String(aucune.risqueTotalPct));
+      const refus = Pf.peutOuvrirPosition({
+        positionsExistantes: [{ pair: 'EURUSD', direction: 'BUY', risk: null, size: null }],
+        capital: 1000, nouvelleRisquePct: 1
+      });
+      ok('risque : ouvrir est REFUSÉ quand le risque du portefeuille est inconnu',
+        refus.ok === false, refus.raison);
+    }
+
     // — Versions sémantiques avec suffixe
     {
       ok('registry : « 1.0.0-beta » n\'empoisonne plus la comparaison',
