@@ -24,8 +24,12 @@ function anomaliesPrix(candles) {
   if (!a) return [];
 
   for (let i = 1; i < candles.length; i++) {
-    const change = Math.abs(candles[i].c - candles[i - 1].c);
-    const changePct = (change / candles[i - 1].c) * 100;
+    const prevC = candles[i - 1].c;
+    // Une cotation nulle (donnée manquante, flux à l'ouverture) rendait le
+    // pourcentage infini : l'anomalie était publiée avec « Infinity % ».
+    if (!(prevC > 0)) continue;
+    const change = Math.abs(candles[i].c - prevC);
+    const changePct = (change / prevC) * 100;
 
     // Anomaly si le mouvement dépasse 3× l'ATR
     if (change > a * 3) {
@@ -54,6 +58,9 @@ function anomaliesVolume(candles) {
   const anomalies = [];
   const volumes = candles.map(c => c.v || 0);
   const avgVolume = volumes.reduce((a, b) => a + b, 0) / volumes.length;
+  // Sans volume moyen (indices synthétiques, flux sans tick volume), le test
+  // « v > moyenne + 3σ » n'a aucun sens et divisait par zéro pour la `force`.
+  if (!(avgVolume > 0)) return [];
   const stdVolume = volumes.length > 1
     ? Math.sqrt(volumes.reduce((a, v) => a + (v - avgVolume) ** 2, 0) / (volumes.length - 1))
     : 0;
@@ -95,6 +102,8 @@ function anomaliesVolatilite(candles) {
   const avgAtr = atrValues.reduce((a, b) => a + b, 0) / atrValues.length;
 
   for (let i = 1; i < atrValues.length; i++) {
+    // ATR précédent nul : la variation en % n'est pas définie (division par 0).
+    if (!(atrValues[i - 1] > 0)) continue;
     const change = Math.abs(atrValues[i] - atrValues[i - 1]);
     const changePct = (change / atrValues[i - 1]) * 100;
 
@@ -113,7 +122,13 @@ function anomaliesVolatilite(candles) {
 }
 
 /**
- * Détecte les anomalies de spread (si disponible).
+ * Détecte les anomalies d'AMPLITUDE (high − low de la bougie).
+ *
+ * ⚠️ Ce n'est pas le spread bid/ask : un OHLCV ne le contient pas. La fonction
+ * garde son nom et sa clé `spread` pour les appelants existants, mais le
+ * libellé publié dit « amplitude » — annoncer un « spread anormal » sur une
+ * bougie de forte amplitude était trompeur (aucun coût de transaction en
+ * découle).
  *
  * @param {Array} candles - Bougies OHLCV
  * @returns {Array<{ index: number, force: number, detail: string }>}
@@ -124,6 +139,7 @@ function anomaliesSpread(candles) {
   const anomalies = [];
   const spreads = candles.map(c => c.h - c.l);
   const avgSpread = spreads.reduce((a, b) => a + b, 0) / spreads.length;
+  if (!(avgSpread > 0)) return [];
 
   for (let i = 0; i < candles.length; i++) {
     const spread = spreads[i];
@@ -131,7 +147,7 @@ function anomaliesSpread(candles) {
       anomalies.push({
         index: i,
         force: Math.min(spread / avgSpread, 10),
-        detail: `spread anormal : ${spread.toFixed(2)} (${(spread / avgSpread).toFixed(1)}× la moyenne)`
+        detail: `amplitude anormale : ${spread.toFixed(2)} (${(spread / avgSpread).toFixed(1)}× la moyenne)`
       });
     }
   }

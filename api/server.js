@@ -428,7 +428,7 @@ const { buildDashboard } = require('./delivery/dashboard');
 const { volumeProfile, niveauxVolume, gapsVolume } = require('./engine/volumeProfile');
 
 // ─── Force des devises — implémentation dans currencyStrength.js ───
-const { forceDevises, classeDevises, paireLaPlusForte, matriceCorrelation } = require('./engine/currencyStrength');
+const { forceDevises, classeDevises, paireLaPlusForte, matriceCorrelation, correlationEntrePaires } = require('./engine/currencyStrength');
 
 // ─── Corrélation dynamique — implémentation dans correlation.js ───
 const { correlationGlissante, ajusterTailleParCorrelation, ruptureCorrelation } = require('./engine/correlation');
@@ -2511,8 +2511,13 @@ app.get('/api/currency-strength', requireAuth, async (req, res) => {
     const forces = forceDevises(parPaire);
     const classees = classeDevises(forces);
     const paireForte = paireLaPlusForte(forces);
-    const matrice = matriceCorrelation(forces);
-    res.json({ success: true, forces, classees, paireForte, matrice });
+    // `matrice` = vraie corrélation de Pearson sur les rendements des paires.
+    // `proximite` = score de proximité de force entre devises (ce n'est PAS une
+    // corrélation : deux devises de force égale sortent à 1 même si elles n'ont
+    // jamais évolué ensemble).
+    const matrice = correlationEntrePaires(parPaire);
+    const proximite = matriceCorrelation(forces);
+    res.json({ success: true, forces, classees, paireForte, matrice, proximite });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -102,7 +102,14 @@ function paireLaPlusForte(forces) {
 }
 
 /**
- * Matrice de corrélation entre devises.
+ * Matrice de PROXIMITÉ de force entre devises (0 = très éloignées, 1 = même force).
+ *
+ * ⚠️ Ce n'est PAS une corrélation : une corrélation se calcule entre deux
+ * séries temporelles, or ici on ne dispose que d'un score par devise. Deux
+ * devises de force identique sortent à 1,0 même si elles n'ont jamais bougé
+ * ensemble. La vraie corrélation (Pearson sur les rendements) est fournie par
+ * `correlationEntrePaires()`. Le nom de la fonction est conservé pour ne pas
+ * casser les appelants ; la valeur exposée est étiquetée « proximité ».
  *
  * @param {Object<string, number>} forces - Résultat de forceDevises()
  * @returns {Object} Matrice { EUR: { USD: 0.8, GBP: 0.3, ... }, ... }
@@ -115,7 +122,6 @@ function matriceCorrelation(forces) {
       if (d1 === d2) {
         matrice[d1][d2] = 1;
       } else {
-        // Corrélation approximative basée sur la force relative
         const diff = forces[d1] - forces[d2];
         matrice[d1][d2] = +((1 - Math.abs(diff) / 200)).toFixed(2);
       }
@@ -124,4 +130,41 @@ function matriceCorrelation(forces) {
   return matrice;
 }
 
-module.exports = { forceDevises, classeDevises, paireLaPlusForte, matriceCorrelation, DEVISES };
+/**
+ * Vraie corrélation de Pearson entre les paires fournies, calculée sur les
+ * rendements (et non sur les prix, dont la tendance commune fabrique une
+ * corrélation artificielle).
+ *
+ * @param {Object<string, Array>} parPaire - { 'EURUSD': [...bougies], ... }
+ * @param {number} [lookback] - Nombre de bougies (défaut: 20)
+ * @returns {Object} { EURUSD: { GBPUSD: 0.87, ... }, ... } ; null = non mesurable
+ */
+function correlationEntrePaires(parPaire, lookback = 20) {
+  const { pearson } = require('./correlation');
+  const rendements = {};
+  for (const [sym, candles] of Object.entries(parPaire || {})) {
+    if (!candles || candles.length < 3) continue;
+    const serie = candles.slice(-lookback - 1);
+    const r = [];
+    for (let i = 1; i < serie.length; i++) {
+      const p = serie[i - 1].c;
+      if (!(p > 0)) { r.push(0); continue; }
+      r.push((serie[i].c - p) / p);
+    }
+    rendements[sym] = r;
+  }
+  const matrice = {};
+  const noms = Object.keys(rendements);
+  for (const a of noms) {
+    matrice[a] = {};
+    for (const b of noms) {
+      matrice[a][b] = a === b ? 1 : pearson(rendements[a], rendements[b]);
+    }
+  }
+  return matrice;
+}
+
+module.exports = {
+  forceDevises, classeDevises, paireLaPlusForte, matriceCorrelation,
+  correlationEntrePaires, DEVISES
+};

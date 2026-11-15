@@ -19,13 +19,25 @@ function delta(candles) {
 
   const deltas = [];
   for (let i = 1; i < candles.length; i++) {
-    const prev = candles[i - 1];
     const cur = candles[i];
 
-    // Delta approximatif : si le prix monte, plus d'acheteurs ; si descend, plus de vendeurs
-    const priceChange = cur.c - prev.c;
+    // Delta estimé à partir de la position de la clôture dans la bougie.
+    // L'ancienne version disait « si le prix monte, 100 % du volume est
+    // acheteur » : une bougie qui ouvre à 100, monte à 130 puis clôture à 101
+    // comptait autant d'achat que si elle avait clôturé à 129. La formule
+    // retenue (volume × part d'achat − volume × part de vente) répartit le
+    // volume selon la clôture dans le range, ce qui est l'estimation standard
+    // quand on ne dispose que d'OHLCV.
     const volume = cur.v || 0;
-    const deltaValue = priceChange > 0 ? volume : priceChange < 0 ? -volume : 0;
+    const range = cur.h - cur.l;
+    let deltaValue;
+    if (range > 0) {
+      const part = (cur.c - cur.l) / range;          // 0 = clôture au plus bas
+      deltaValue = volume * (2 * part - 1);          // −volume … +volume
+    } else {
+      const priceChange = cur.c - candles[i - 1].c;  // bougie sans amplitude
+      deltaValue = priceChange > 0 ? volume : priceChange < 0 ? -volume : 0;
+    }
 
     deltas.push(+deltaValue.toFixed(2));
   }
@@ -128,21 +140,33 @@ function spoofing(candles) {
 
   const spoofs = [];
 
-  // Le spoofing se produit quand un grand volume est suivi d'un mouvement inverse
+  // Un carnet d'ordres est nécessaire pour VOIR un spoofing (un ordre affiché
+  // puis retiré avant exécution). Avec des bougies, on ne peut observer qu'un
+  // PROXY : un pic de volume isolé suivi d'un retournement immédiat — le
+  // schéma qu'un faux ordre laisse derrière lui. L'ancienne version ne
+  // regardait que le pic (`cur.v > prev.v * 3 && cur.v > next.v * 3`), sans
+  // jamais vérifier le retournement, et annonçait donc « spoofing » sur une
+  // simple bougie de news. Le libellé dit maintenant ce qu'il mesure.
   for (let i = 1; i < candles.length - 1; i++) {
     const prev = candles[i - 1];
     const cur = candles[i];
     const next = candles[i + 1];
 
-    // Grand volume suivi d'un mouvement inverse
-    if (cur.v > prev.v * 3 && cur.v > next.v * 3) {
+    const pic = cur.v > prev.v * 3 && cur.v > next.v * 3;
+    const sensCur = Math.sign(cur.c - cur.o);
+    const sensNext = Math.sign(next.c - next.o);
+    const retournement = sensCur !== 0 && sensNext !== 0 && sensNext !== sensCur;
+    if (pic && retournement) {
       const prix = (cur.h + cur.l) / 2;
       const type = cur.c > cur.o ? 'bid' : 'ask';
 
       spoofs.push({
         prix: +prix.toFixed(6),
         type,
-        detail: `spoofing ${type} à ${prix.toFixed(2)} — volume ${cur.v.toFixed(0)} suivi d'un mouvement inverse`
+        proxy: true,
+        detail: `pic de volume isolé à ${prix.toFixed(2)} (${cur.v.toFixed(0)}, `
+          + `${(cur.v / Math.max(prev.v || 1, 1)).toFixed(1)}× la bougie précédente) puis retournement `
+          + `— proxy de spoofing, pas une preuve (il faudrait le carnet d'ordres)`
       });
     }
   }

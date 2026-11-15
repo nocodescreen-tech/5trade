@@ -314,6 +314,15 @@ function messageTelegram(v, m, qualite = {}) {
   // pas si le stop est à 3 pips ou 30. Un niveau absent est dit absent — la
   // version précédente affichait « — » sans expliquer pourquoi.
   const num = x => (Number.isFinite(Number(x)) ? Number(x) : null);
+  // Prix lisibles : « 3861.253698 » sur l'or n'aide personne. Les décimales
+  // suivent l'ordre de grandeur (2 sur l'or, 5 sur EURUSD, 3 sur USDJPY).
+  const prixTxt = x => {
+    const v = Number(x);
+    if (!Number.isFinite(v)) return String(x);
+    const a = Math.abs(v);
+    const d = a >= 1000 ? 2 : a >= 100 ? 3 : a >= 10 ? 3 : 5;
+    return v.toFixed(d);
+  };
   const entree = num(L.entry) ?? prix;
   const stop = num(L.stop);
   const tp1 = num(L.target1);
@@ -324,11 +333,11 @@ function messageTelegram(v, m, qualite = {}) {
   const lignes = [
     `<b>${sens} confirmé — ${m.symbol} ${m.tf}</b>${pct}`,
     '',
-    entree !== null ? `Entrée : <b>${entree}</b>` : 'Entrée : <b>non chiffrée</b>',
-    stop !== null ? `Invalidation : <b>${stop}</b>${risque ? ` (risque ${risque.toFixed(risque < 1 ? 5 : 2)})` : ''}`
+    entree !== null ? `Entrée : <b>${prixTxt(entree)}</b>` : 'Entrée : <b>non chiffrée</b>',
+    stop !== null ? `Invalidation : <b>${prixTxt(stop)}</b>${risque ? ` (risque ${risque.toFixed(risque < 1 ? 5 : 2)})` : ''}`
       : 'Invalidation : <b>non chiffrée</b>',
-    tp1 !== null ? `Objectif 1 : <b>${tp1}</b>${enR(tp1)}` : null,
-    tp2 !== null ? `Objectif 2 : <b>${tp2}</b>${enR(tp2)}` : null,
+    tp1 !== null ? `Objectif 1 : <b>${prixTxt(tp1)}</b>${enR(tp1)}` : null,
+    tp2 !== null ? `Objectif 2 : <b>${prixTxt(tp2)}</b>${enR(tp2)}` : null,
     Number.isFinite(qualite.rr) ? `Gain/risque : ${qualite.rr.toFixed(2)} pour 1` : null,
     nbRegles ? `Règles : ${(v.rules || []).map(r => r.name).filter(Boolean).join(' + ') || nbRegles + ' confirmée(s)'}` : null,
     qualite.confluence

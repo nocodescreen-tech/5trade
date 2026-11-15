@@ -22,15 +22,16 @@ const SEUILS = {
   confianceMin: 0.5
 };
 
+// UN SEUL ATR dans tout le dépôt : `engine/structure.atr` (lissage de Wilder).
+// La version locale faisait une moyenne simple des 14 derniers TR, donc le ratio
+// « ATR récent / ATR de référence » comparait deux formules différentes de la
+// volatilité quand l'un des deux venait d'ailleurs.
+const Structure = require('../engine/structure');
+
 function atr(bougies, periode = 14) {
-  const vrais = [];
-  for (let i = 1; i < bougies.length; i++) {
-    const b = bougies[i], p = bougies[i - 1];
-    vrais.push(Math.max(b.h - b.l, Math.abs(b.h - p.c), Math.abs(b.l - p.c)));
-  }
-  if (vrais.length < periode) return null;
-  const lot = vrais.slice(-periode);
-  return lot.reduce((a, v) => a + v, 0) / lot.length;
+  if (!Array.isArray(bougies) || bougies.length < periode + 1) return null;
+  const v = Structure.atr(bougies, periode);
+  return Number.isFinite(v) && v > 0 ? v : null;
 }
 
 /**

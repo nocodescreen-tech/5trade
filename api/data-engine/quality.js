@@ -28,7 +28,13 @@ function analyser(bougies, options = {}) {
   const tf = options.timeframe || null;
   const intervalle = TF_MS[tf] || null;
   const maintenant = options.maintenant || Date.now();
-  const tolerance = Number.isFinite(options.toleranceRetard) ? options.toleranceRetard : 3;
+  const tolerance = Number.isFinite(options.toleranceRetard)
+    ? options.toleranceRetard
+    // Le retard acceptable ne peut pas être le même sur toutes les unités : trois
+    // bougies valent 45 minutes en M15 et TROIS JOURS en D1. Au-delà de H1 on
+    // n'accepte plus qu'une bougie de retard — une séance entière de retard n'est
+    // pas une donnée fraîche.
+    : (intervalle && intervalle >= 4 * 3600e3 ? 1 : 3);
   const maxTrousPct = Number.isFinite(options.maxTrousPct) ? options.maxTrousPct : 5;
   const rangeAberrant = Number.isFinite(options.rangeAberrant) ? options.rangeAberrant : 8;
 

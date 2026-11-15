@@ -141,12 +141,22 @@ function fvgs(candles) {
     const a = candles[i - 2], c = candles[i];
     if (a.h < c.l) {                          // gap haussier
       const zone = { type: 'bullish', low: a.h, high: c.l, i: i - 1, t: candles[i - 1].t };
-      const filled = candles.slice(i + 1).some(x => x.l <= zone.low);
-      if (!filled) out.push(zone);
+      // Deux états différents, longtemps confondus :
+      //   • `mitigated` — le prix est ENTRÉ dans la zone (l'écart a été travaillé) ;
+      //   • `filled`    — le prix a TRAVERSÉ la zone de part en part.
+      // L'ancienne version ne testait que `x.l <= zone.low` et appelait cela
+      // « comblé » : un gap à moitié rempli restait annoncé « ouvert, non
+      // comblé », donc traité comme une zone vierge par les stratégies.
+      const apres = candles.slice(i + 1);
+      const filled = apres.some(x => x.l <= zone.low);
+      const mitigated = apres.some(x => x.l <= zone.high);
+      if (!filled) out.push({ ...zone, mitigated });
     } else if (a.l > c.h) {                    // gap baissier
       const zone = { type: 'bearish', low: c.h, high: a.l, i: i - 1, t: candles[i - 1].t };
-      const filled = candles.slice(i + 1).some(x => x.h >= zone.high);
-      if (!filled) out.push(zone);
+      const apres = candles.slice(i + 1);
+      const filled = apres.some(x => x.h >= zone.high);
+      const mitigated = apres.some(x => x.h >= zone.low);
+      if (!filled) out.push({ ...zone, mitigated });
     }
   }
   return out.slice(-6);
@@ -385,16 +395,31 @@ function fibLevels(candles, w = 2) {
   const top = Math.max(hi.price, lo.price), bot = Math.min(hi.price, lo.price);
   const d = top - bot;
   if (!d) return null;
+  // Le sens du swing décide du SENS de lecture du retracement.
+  // L'ancienne version faisait toujours `top − d × ratio` : sur un swing
+  // baissier (sommet puis creux), les niveaux étaient donc placés du mauvais
+  // côté du marché, et un retracement de 0,618 se retrouvait sous le creux.
+  const haussier = hi.i > lo.i;   // dernier point = sommet → swing montant
+  const niveau = r => (haussier ? top - d * r : bot + d * r);
   const levels = {};
-  for (const [k, ratio] of [['0,236', 0.236], ['0,382', 0.382], ['0,5', 0.5],
-    ['0,618', 0.618], ['0,705', 0.705], ['0,786', 0.786]]) {
-    levels[k] = +(top - d * ratio).toFixed(6);
+  // Ratios standards uniquement. « 0,705 » n'existe pas dans la suite de
+  // Fibonacci : c'était une valeur inventée, intercalée entre 0,618 et 0,786.
+  // Les clés sont en notation pointée (« 0.618 ») : « 0,618 » se lisait comme
+  // une chaîne à deux éléments pour tout appelant qui découpait sur la virgule.
+  for (const [k, ratio] of [['0.236', 0.236], ['0.382', 0.382], ['0.5', 0.5],
+    ['0.618', 0.618], ['0.786', 0.786]]) {
+    levels[k] = +niveau(ratio).toFixed(6);
   }
+  // Zone OTE (61,8 % – 78,6 % du retracement), toujours du côté d'où vient le
+  // mouvement : sous le sommet pour un swing haussier, au-dessus du creux sinon.
+  const ote = haussier
+    ? [+(top - d * 0.786).toFixed(6), +(top - d * 0.618).toFixed(6)]
+    : [+(bot + d * 0.618).toFixed(6), +(bot + d * 0.786).toFixed(6)];
   return {
     from: +bot.toFixed(6), to: +top.toFixed(6),
-    sens: hi.i > lo.i ? 'haussier (dernier point bas → dernier point haut)' : 'baissier (dernier point haut → dernier point bas)',
+    sens: haussier ? 'haussier (dernier point bas → dernier point haut)' : 'baissier (dernier point haut → dernier point bas)',
     levels,
-    ote: [+(bot + d * 0.618).toFixed(6), +(bot + d * 0.786).toFixed(6)]
+    ote
   };
 }
 
@@ -444,7 +469,9 @@ function inventory(r) {
     r.structure.event.level, 'cassure confirmée par la clôture');
 
   for (const f of r.fvgs) add('Imbalance', `FVG ${f.type === 'bullish' ? 'haussier' : 'baissier'}`,
-    (f.low + f.high) / 2, 'ouvert (non comblé)', { zone: [f.low, f.high] });
+    (f.low + f.high) / 2,
+    f.mitigated ? 'ouvert, déjà partiellement comblé' : 'ouvert (non comblé)',
+    { zone: [f.low, f.high], mitigated: !!f.mitigated });
   for (const o of r.orderBlocks) add('Order block', `OB ${o.type === 'bullish' ? 'haussier' : 'baissier'}`,
     (o.low + o.high) / 2, 'valide', { zone: [o.low, o.high] });
   for (const b of r.breakers) add('Breaker', b.type, (b.low + b.high) / 2, 'cassé — a changé de camp', { zone: [b.low, b.high] });
@@ -457,7 +484,7 @@ function inventory(r) {
     add('Range', 'OTE 0,618', r.premiumDiscount.ote.deep, 'zone d\'entrée privilégiée');
   }
   if (r.fibLevels) {
-    for (const [k, v] of Object.entries(r.fibLevels.levels)) add('Fibonacci', `Retracement ${k}`, v, 'du dernier swing');
+    for (const [k, v] of Object.entries(r.fibLevels.levels)) add('Fibonacci', `Retracement ${k.replace('.', ',')}`, v, 'du dernier swing');
   }
   if (r.previousLevels) {
     for (const [k, v] of Object.entries(r.previousLevels)) {
@@ -563,7 +590,7 @@ function analyze(candles, meta = {}, options = {}) {
     r.sweeps.length ? `Balayages : ${r.sweeps.map(x => `${x.type} à ${x.level}`).join(' | ')}` : '',
     r.displacements.length ? `Déplacements : ${r.displacements.map(d => `${d.direction} ${d.multiple}×ATR`).join(' | ')}` : '',
     r.previousLevels ? `Période précédente : ${Object.entries(r.previousLevels).map(([k, v]) => `${k} ${v}`).join(' | ')}` : '',
-    r.fibLevels ? `Fibonacci du dernier swing (${r.fibLevels.sens}) : ${Object.entries(r.fibLevels.levels).map(([k, v]) => `${k} ${v}`).join(' | ')}` : '',
+    r.fibLevels ? `Fibonacci du dernier swing (${r.fibLevels.sens}) : ${Object.entries(r.fibLevels.levels).map(([k, v]) => `${k.replace('.', ',')} ${v}`).join(' | ')}` : '',
     r.sessions ? `Session en cours : ${r.sessions.sessionCourante} · kill zone ${r.sessions.killZone}` : '',
     `Dernière bougie : ${r.lastCandle.direction}, mèche haute ${r.lastCandle.wick.upper} / basse ${r.lastCandle.wick.lower}`,
     `Inventaire : ${r.inventory.total} éléments identifiés (${Object.entries(r.inventory.parFamille).map(([k, v]) => `${k} ${v}`).join(', ')})`

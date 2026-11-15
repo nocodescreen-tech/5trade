@@ -22,8 +22,17 @@ const { pairesCorrelees } = require('../delivery/trades');
  * @returns {{ risqueTotalPct: number, risqueMaxPct: number, detail: Array }}
  */
 function risqueTotal(positions, capital) {
-  if (!positions || !positions.length) return { risqueTotalPct: 0, risqueMaxPct: 0, detail: [] };
-  if (!capital || capital <= 0) throw new Error('Le capital doit être positif');
+  if (!positions || !positions.length) return { risqueTotalPct: 0, risqueMaxPct: 0, risqueAjustePct: 0, reductionCorrelation: 0, detail: [] };
+  // Capital nul ou négatif : un refus CHIFFRÉ, pas une exception. Le dashboard
+  // reçoit le capital de la configuration de risque ; une exception ici faisait
+  // tomber tout l'écran au lieu d'afficher « risque non mesurable ».
+  if (!capital || capital <= 0) {
+    return {
+      risqueTotalPct: null, risqueMaxPct: null, risqueAjustePct: null,
+      reductionCorrelation: null, detail: [],
+      raison: 'capital nul ou négatif : risque non mesurable'
+    };
+  }
 
   const detail = [];
   let risqueTotal = 0;
@@ -77,6 +86,11 @@ function risqueTotal(positions, capital) {
  */
 function peutOuvrirPosition({ positionsExistantes, capital, nouvelleRisquePct, limitePct = 5 }) {
   const { risqueAjustePct } = risqueTotal(positionsExistantes, capital);
+  // `null + nombre` vaut `nombre` en JavaScript : sans cette garde, un capital
+  // nul laissait passser la position comme si le portefeuille était vide.
+  if (risqueAjustePct === null) {
+    return { ok: false, raison: 'capital nul ou négatif : risque du portefeuille non mesurable', risqueTotalPct: null, limitePct };
+  }
   const risqueFutur = risqueAjustePct + nouvelleRisquePct;
 
   if (risqueFutur > limitePct) {

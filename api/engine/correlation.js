@@ -52,7 +52,12 @@ function pearson(x, y) {
   const num = n * sumXY - sumX * sumY;
   const den = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
 
-  return den === 0 ? null : num / den;
+  // Une série constante donne un déterminant nul, et une erreur d'arrondi peut
+  // le rendre NÉGATIF : `Math.sqrt(-1e-12)` vaut NaN, qui se propageait ensuite
+  // dans le position sizing sans que personne ne le voie. Tout ce qui n'est pas
+  // strictement positif n'est pas mesurable.
+  if (!(den > 0)) return null;
+  return Math.max(-1, Math.min(1, num / den));
 }
 
 /**

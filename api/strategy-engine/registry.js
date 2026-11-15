@@ -79,11 +79,16 @@ async function derniere(strategieId) {
   const sql = DB.client();
   if (!sql) return null;
   try {
-    const [l] = await sql`
+    // Le tri était fait en SQL : `string_to_array(version, '.')::int[]` échoue
+    // dès qu'une version porte un suffixe ('1.0.0-beta' → cast de '0-beta' en
+    // int → erreur), et la fonction renvoyait alors `null` en silence, comme
+    // s'il n'y avait aucune version. On lit les versions (quelques lignes par
+    // stratégie) et on les compare avec la même règle que le reste du module.
+    const lignes = await sql`
       select strategie_id, version, etat, hash, fiche, cree_le
-      from strategy_versions where strategie_id = ${strategieId}
-      order by string_to_array(version, '.')::int[] desc limit 1`;
-    return l || null;
+      from strategy_versions where strategie_id = ${strategieId}`;
+    if (!lignes.length) return null;
+    return lignes.reduce((best, l) => (!best || comparerVersions(l.version, best.version) > 0 ? l : best), null);
   } catch { return null; }
 }
 
@@ -107,12 +112,29 @@ async function carteVersions() {
 
 /** Compare deux semver : > 0 si a est plus récente que b. */
 function comparerVersions(a, b) {
-  const x = String(a).split('.').map(Number);
-  const y = String(b).split('.').map(Number);
-  for (let i = 0; i < 3; i++) {
-    if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0);
+  // Un suffixe de pré-version ('1.0.0-beta') donnait Number('0-beta') = NaN :
+  // la comparaison renvoyait NaN, donc « ni plus récente ni plus ancienne », et
+  // le tri gardait la première version lue au hasard. On sépare le cœur
+  // numérique du suffixe : le cœur décide, et à cœur égal une version stable
+  // ('1.0.0') passe devant une pré-version ('1.0.0-beta').
+  const decouper = v => {
+    const [coeur, ...reste] = String(v == null ? '' : v).trim().split('-');
+    const chiffres = coeur.split('.').map(x => {
+      const n = parseInt(x, 10);
+      return Number.isFinite(n) ? n : 0;
+    });
+    return { chiffres, prerelease: reste.join('-') };
+  };
+  const x = decouper(a), y = decouper(b);
+  const n = Math.max(x.chiffres.length, y.chiffres.length, 3);
+  for (let i = 0; i < n; i++) {
+    const dx = x.chiffres[i] || 0, dy = y.chiffres[i] || 0;
+    if (dx !== dy) return dx - dy;
   }
-  return 0;
+  if (x.prerelease === y.prerelease) return 0;
+  if (!x.prerelease) return 1;    // a stable > b pré-version
+  if (!y.prerelease) return -1;
+  return x.prerelease < y.prerelease ? -1 : 1;
 }
 
 /** Carte { strategieId: version } des versions validées — pour les traces. */

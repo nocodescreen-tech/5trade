@@ -229,13 +229,19 @@ function stochastic(candles, period = 14) {
  */
 function vwap(candles) {
   if (!candles.length) return 0;
-  let pvSum = 0, vSum = 0;
+  let pvSum = 0, vSum = 0, tpSum = 0;
   for (const c of candles) {
     const typicalPrice = (c.h + c.l + c.c) / 3;
+    tpSum += typicalPrice;
     pvSum += typicalPrice * (c.v || 0);
     vSum += c.v || 0;
   }
-  return vSum === 0 ? 0 : +(pvSum / vSum).toFixed(6);
+  // Sans volume (indices synthétiques, flux sans tick volume), un VWAP n'a pas
+  // de sens. Rendre 0 laissait croire à un prix nul — et tout écart calculé
+  // contre lui devenait faux. On rend le prix typique moyen : la meilleure
+  // lecture disponible sur la même échelle que le prix.
+  if (vSum === 0) return +(tpSum / candles.length).toFixed(6);
+  return +(pvSum / vSum).toFixed(6);
 }
 
 module.exports = { rsi, macd, sma, ema, bollinger, stochastic, vwap };

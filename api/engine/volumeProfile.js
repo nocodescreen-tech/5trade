@@ -38,23 +38,42 @@ function volumeProfile(candles, { nbBuckets = 30, valueAreaPct = 70 } = {}) {
     });
   }
 
-  // Répartir le volume dans les buckets
+  // Répartir le volume dans les buckets.
+  // Le volume d'une bougie ne vient pas de son PLUS BAS : il s'est échangé sur
+  // toute son amplitude [low, high]. Tout attribuer au bucket du low tassait le
+  // profil vers le bas et décalait le POC d'un cran à chaque bougie de grande
+  // amplitude — sur une tendance, le POC finissait par désigner un niveau que le
+  // prix n'avait fait que traverser. On répartit donc au prorata du recouvrement
+  // de chaque bucket avec l'amplitude de la bougie.
   for (const c of candles) {
-    const bucketIndex = Math.min(
-      Math.floor((c.l - low) / bucketSize),
-      nbBuckets - 1
-    );
-    if (bucketIndex >= 0 && bucketIndex < nbBuckets) {
-      buckets[bucketIndex].volume += c.v || 0;
+    const v = c.v || 0;
+    if (!(v > 0)) continue;
+    const bas = c.l, haut = c.h;
+    if (!(haut > bas)) {                       // bougie sans amplitude (doji plat)
+      const idx = Math.min(Math.max(Math.floor((bas - low) / bucketSize), 0), nbBuckets - 1);
+      buckets[idx].volume += v;
+      continue;
     }
+    const premier = Math.min(Math.max(Math.floor((bas - low) / bucketSize), 0), nbBuckets - 1);
+    const dernier = Math.min(Math.max(Math.floor((haut - low) / bucketSize), 0), nbBuckets - 1);
+    const parts = [];
+    let total = 0;
+    for (let k = premier; k <= dernier; k++) {
+      const recouvrement = Math.min(haut, buckets[k].high) - Math.max(bas, buckets[k].low);
+      if (recouvrement > 0) { parts.push([k, recouvrement]); total += recouvrement; }
+    }
+    if (!total) { buckets[premier].volume += v; continue; }
+    for (const [k, poids] of parts) buckets[k].volume += v * (poids / total);
   }
 
-  // POC = bucket avec le plus de volume
-  let poc = 0, maxVolume = 0;
-  for (const b of buckets) {
-    if (b.volume > maxVolume) {
-      maxVolume = b.volume;
-      poc = (b.low + b.high) / 2;
+  // POC = bucket avec le plus de volume (on garde son INDEX : le retrouver
+  // ensuite en comparant des milieux arrondis échouait une fois sur deux).
+  let poc = 0, maxVolume = 0, pocIndex = 0;
+  for (let i = 0; i < buckets.length; i++) {
+    if (buckets[i].volume > maxVolume) {
+      maxVolume = buckets[i].volume;
+      pocIndex = i;
+      poc = (buckets[i].low + buckets[i].high) / 2;
     }
   }
 
@@ -63,7 +82,8 @@ function volumeProfile(candles, { nbBuckets = 30, valueAreaPct = 70 } = {}) {
   const targetVolume = totalVolume * (valueAreaPct / 100);
 
   // Trouver le POC bucket
-  const pocIndex = buckets.findIndex(b => (b.low + b.high) / 2 === poc);
+  // (l'index est mémorisé pendant la recherche du maximum — plus fiable que de
+  //  réidentifier le bucket par comparaison de milieux)
 
   // Étendre la value area autour du POC
   let vah = buckets[pocIndex] ? buckets[pocIndex].high : high;

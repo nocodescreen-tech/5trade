@@ -42,14 +42,17 @@ function ecartType(valeurs, moy) {
   return Math.sqrt(variance);
 }
 
+// UN SEUL ATR dans tout le dépôt : `engine/structure.atr` (lissage de Wilder).
+// La version locale faisait une moyenne SIMPLE des 14 derniers TR : la même
+// volatilité valait un chiffre ici, un autre dans la structure et un troisième
+// sur le graphique, donc deux stratégies pouvaient dimensionner le même stop
+// différemment au même instant.
+const Structure = require('../engine/structure');
+
 function atr(bougies, periode = 14) {
-  if (bougies.length < periode + 2) return null;
-  const vrais = [];
-  for (let i = bougies.length - periode; i < bougies.length; i++) {
-    const b = bougies[i], p = bougies[i - 1];
-    vrais.push(Math.max(b.h - b.l, Math.abs(b.h - p.c), Math.abs(b.l - p.c)));
-  }
-  return moyenne(vrais);
+  if (!bougies || bougies.length < periode + 2) return null;
+  const v = Structure.atr(bougies, periode);
+  return Number.isFinite(v) && v > 0 ? v : null;
 }
 
 /**

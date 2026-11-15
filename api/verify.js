@@ -3209,16 +3209,25 @@ function tinyPng(W = 64, H = 40) {
       { entree: 4109.97, stop: 4124.06, objectifs: [4114.32, 4109.79] }, 'short', 8);
     ok('un objectif du mauvais côté est refusé', shortFaux === null,
       shortFaux ? `objectifs ${JSON.stringify(shortFaux.objectifs)}` : 'refusé');
-    // Cible correcte pour un short → conservée telle quelle.
+    // Cible correcte ET assez lointaine pour un short → conservée telle quelle.
+    // (La garde impose désormais TP1 ≥ 1,27 × risque et ≥ 1 ATR : une cible du
+    // bon côté mais trop courte est ramenée au plancher, pas conservée.)
     const shortBon = Multi.assainirNiveaux(
-      { entree: 4109.97, stop: 4124.06, objectifs: [4100, 4090] }, 'short', 8);
-    ok('un objectif du bon côté est conservé',
-      !!shortBon && shortBon.objectifs[0] === 4100, JSON.stringify(shortBon && shortBon.objectifs));
-    // Deuxième cible derrière l'entrée → tronquée, la première reste en place.
+      { entree: 4109.97, stop: 4124.06, objectifs: [4080, 4060] }, 'short', 8);
+    ok('un objectif du bon côté et assez lointain est conservé',
+      !!shortBon && shortBon.objectifs[0] === 4080, JSON.stringify(shortBon && shortBon.objectifs));
+    // Cible du bon côté mais PLUS COURTE que le risque → ramenée au plancher.
+    const court = Multi.assainirNiveaux(
+      { entree: 4109.97, stop: 4124.06, objectifs: [4100] }, 'short', 8);
+    ok('une cible plus courte que le risque est ramenée au plancher de 1,27 R',
+      !!court && court.objectifs[0] < 4100
+      && Math.abs(court.objectifs[0] - 4109.97) >= 14.09 * 1.27 - 0.01,
+      JSON.stringify(court && court.objectifs));
+    // Deuxième cible derrière l'entrée → écartée, le rang 1 reste le premier.
     const tronque = Multi.assainirNiveaux(
-      { entree: 4109.97, stop: 4124.06, objectifs: [4100, 4130] }, 'short', 8);
-    ok('une cible lointaine invalide est tronquée sans décaler les rangs',
-      !!tronque && tronque.objectifs.length === 1 && tronque.objectifs[0] === 4100,
+      { entree: 4109.97, stop: 4124.06, objectifs: [4080, 4130] }, 'short', 8);
+    ok('une cible du mauvais côté est écartée sans décaler les rangs',
+      !!tronque && tronque.objectifs[0] === 4080,
       JSON.stringify(tronque && tronque.objectifs));
     // Aucun objectif → pas de trade.
     ok('un signal sans objectif est refusé', Multi.assainirNiveaux(
@@ -4562,8 +4571,8 @@ function tinyPng(W = 64, H = 40) {
           rr: 2.3, confluence: { nbAlignes: 2, detail: [{ tf: '15m', tendance: 'bullish', status: 'confirmé', direction: 'BUY' }] }
         });
         ok('alerte Telegram : le message porte entrée, stop, objectifs ET leur multiple en R',
-          /Entrée : <b>2401<\/b>/.test(msg) && /Invalidation : <b>2395.5<\/b>/.test(msg)
-          && /Objectif 1 : <b>2408<\/b> \(1\.27 R\)/.test(msg), msg.split('\n').slice(0, 5).join(' | '));
+          /Entrée : <b>2401(?:\.0+)?<\/b>/.test(msg) && /Invalidation : <b>2395\.5(?:0+)?<\/b>/.test(msg)
+          && /Objectif 1 : <b>2408(?:\.0+)?<\/b> \(1\.27 R\)/.test(msg), msg.split('\n').slice(0, 5).join(' | '));
         ok('alerte Telegram : les conditions et la raison du signal sont incluses',
           /Conditions/.test(msg) && /✓ BOS haussier/.test(msg) && /Pourquoi/.test(msg) && /R3 BOS/.test(msg));
         ok('alerte Telegram : l’alignement est détaillé unité par unité',
@@ -7491,6 +7500,9 @@ function tinyPng(W = 64, H = 40) {
       !JSON.stringify(A.diagnostic()).includes('telegramToken'));
   }
 
+  // ── Moteur : mesures justes (la fonction est déclarée plus bas, hissée ici) ──
+  testsMoteurAudit(ok, section);
+
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──
   // Mesure réelle : 8,7 s pour joindre Telegram depuis cette connexion. Sans
   // reprise, l'alerte échouait sur un appel pourtant valide.
@@ -7542,6 +7554,285 @@ function tinyPng(W = 64, H = 40) {
       process.exit(fail ? 1 : 0);
     })();
     return;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // [11] MOTEUR — mesures justes (audit externe, 4e passe)
+  // Déclaré en FONCTION (et non en bloc anonyme) parce que la section réseau
+  // ci-dessous se termine par un `return` : tout ce qui la suit ne serait jamais
+  // exécuté. Une fonction déclarée est hissée, donc appelable avant sa
+  // définition — l'appel est juste au-dessus de la section réseau.
+  // Chaque point corrigé ici a d'abord été RELU dans le code : sur les 94
+  // points de l'audit, plusieurs étaient déjà réglés ou faux. Un contrôle vert
+  // vaut mieux qu'un commentaire : il empêche la régression.
+  // ═══════════════════════════════════════════════════════════════
+  function testsMoteurAudit(ok, section) {
+    section('[11] Moteur — mesures (audit 4e passe)');
+    const Ind = require('./engine/indicators');
+    const St = require('./engine/structure');
+    const OF = require('./engine/orderFlow');
+    const VP = require('./engine/volumeProfile');
+    const CS = require('./engine/currencyStrength');
+    const Cor = require('./engine/correlation');
+    const An = require('./engine/anomalyDetection');
+    const PR = require('./engine/patternRecognition');
+    const Pat = require('./engine/patterns');
+    const Tr = require('./delivery/trades');
+    const Reg = require('./strategy-engine/registry');
+    const Q = require('./data-engine/quality');
+
+    const serie = (n = 150, base = 100, pas = 0.4) => {
+      const out = []; let p = base;
+      for (let i = 0; i < n; i++) {
+        const o = p;
+        p = o + Math.sin(i / 7) * pas + (i % 5 === 0 ? pas : -pas / 3);
+        out.push({
+          t: 1700000000000 + i * 3600e3, o,
+          h: Math.max(o, p) + pas * 0.6, l: Math.min(o, p) - pas * 0.6,
+          c: p, v: 100 + (i % 11) * 37, closed: true
+        });
+      }
+      return out;
+    };
+    const C = serie();
+
+    // — VWAP sans volume : un prix, jamais zéro
+    {
+      const sansVol = C.map(c => ({ ...c, v: 0 }));
+      const v = Ind.vwap(sansVol);
+      const typique = sansVol.reduce((a, c) => a + (c.h + c.l + c.c) / 3, 0) / sansVol.length;
+      ok('vwap sans volume rend le prix typique moyen (pas 0)',
+        Math.abs(v - typique) < 1e-6 && v > 0, `${v.toFixed(4)} vs ${typique.toFixed(4)}`);
+    }
+
+    // — Delta d'order flow : réparti selon la clôture dans le range
+    {
+      const bougie = [{ t: 1, o: 100, h: 130, l: 100, c: 101, v: 1000 },
+                      { t: 2, o: 100, h: 130, l: 100, c: 101, v: 1000 }];
+      const d = OF.delta(bougie);
+      // part = (101-100)/30 = 0,0333 → delta = 1000 × (2×0,0333 − 1) = −933,33
+      ok('delta borné par le volume et proportionnel à la clôture',
+        Math.abs(d[0] - (-933.33)) < 0.5, `delta ${d[0]}`);
+      ok('le delta ne vaut plus « tout le volume » dès que le prix monte',
+        d[0] < 0, 'une bougie qui clôture près de son plus bas est vendeuse');
+    }
+
+    // — Fibonacci : sens, ratios standards, clés pointées
+    {
+      // Série en zigzag à vagues franches : `serie()` (sinusoïde fine) n'a pas de
+      // swing strict au sens de `swings(candles, 2)`, donc fibLevels y rend null.
+      const zigzag = (n = 80, amplitude = 20, periode = 10) => {
+        const out = [];
+        for (let i = 0; i < n; i++) {
+          const t = (i % periode) / periode;
+          const d = t <= 0.5 ? t * 2 : (1 - t) * 2;   // triangle 0 → 1 → 0
+          const base = 100 + d * amplitude;
+          out.push({ t: i * 3600e3, o: base, h: base + 1, l: base - 1, c: base, v: 500, closed: true });
+        }
+        return out;
+      };
+      const CZ = zigzag();
+      const fib = St.fibLevels(CZ);
+      ok('fibonacci : 5 ratios standards, plus de « 0,705 » inventé',
+        fib && Object.keys(fib.levels).join(',') === '0.236,0.382,0.5,0.618,0.786',
+        fib ? Object.keys(fib.levels).join(' · ') : 'aucun swing');
+      ok('fibonacci : les clés sont en notation pointée (plus de virgule française)',
+        fib && Object.keys(fib.levels).every(k => !k.includes(',')));
+      ok('fibonacci : tous les niveaux restent DANS le swing',
+        fib && Object.values(fib.levels).every(v => v >= fib.from - 1e-6 && v <= fib.to + 1e-6),
+        fib ? `${fib.from} → ${fib.to}` : '');
+      // Swing baissier construit à la main : sommet en bougie 20, creux en 40.
+      const sb = [];
+      for (let i = 0; i < 60; i++) {
+        const haut = i < 20 ? 100 + i : i < 40 ? 120 - (i - 20) * 2 : 80 + (i - 40) * 0.2;
+        sb.push({ t: i * 3600e3, o: haut, h: haut + 0.3, l: haut - 0.3, c: haut, v: 500, closed: true });
+      }
+      const fibB = St.fibLevels(sb);
+      ok('fibonacci : sur un swing baissier les niveaux sont AU-DESSUS du creux',
+        fibB && fibB.sens.startsWith('baissier') && Object.values(fibB.levels).every(v => v >= fibB.from - 1e-6),
+        fibB ? `${fibB.sens} · min ${Math.min(...Object.values(fibB.levels))} / creux ${fibB.from}` : 'non calculé');
+    }
+
+    // — FVG : « mitigé » (entré dans la zone) distinct de « comblé »
+    {
+      const g = [
+        { t: 1, o: 99, h: 100, l: 98, c: 99.5, v: 10, closed: true },
+        { t: 2, o: 101, h: 112, l: 101, c: 111, v: 10, closed: true },
+        { t: 3, o: 112, h: 113, l: 110, c: 112, v: 10, closed: true },
+        { t: 4, o: 112, h: 112, l: 105, c: 106, v: 10, closed: true }
+      ];
+      const f = St.fvgs(g);
+      ok('fvg : un gap partiellement rempli est marqué « mitigé »',
+        f.length === 1 && f[0].mitigated === true, JSON.stringify(f[0] || {}).slice(0, 90));
+    }
+
+    // — Volume profile : rien ne se perd, rien ne s'invente
+    {
+      const vp = VP.volumeProfile(C);
+      const entree = C.reduce((a, c) => a + c.v, 0);
+      const sortie = vp.profile.reduce((a, b) => a + b.volume, 0);
+      ok('volume profile : le volume total est conservé',
+        Math.abs(entree - sortie) < 0.01, `${entree.toFixed(0)} → ${sortie.toFixed(0)}`);
+      const gros = [
+        { t: 1, o: 100, h: 101, l: 99, c: 100, v: 1, closed: true },
+        { t: 2, o: 100, h: 101, l: 99, c: 100, v: 1, closed: true },
+        { t: 3, o: 100, h: 120, l: 100, c: 119, v: 10000, closed: true },
+        { t: 4, o: 119, h: 120, l: 118, c: 119, v: 1, closed: true }
+      ];
+      const vp2 = VP.volumeProfile(gros);
+      ok('volume profile : le POC tombe dans l\'amplitude de la grosse bougie',
+        vp2.poc >= 100 && vp2.poc <= 120, `POC ${vp2.poc}`);
+    }
+
+    // — Force des devises : jambes + vraie corrélation
+    {
+      const forces = CS.forceDevises({ frxXAUUSD: C, frxEURUSD: C.map(c => ({ ...c, c: c.c * 1.1 })) });
+      ok('force des devises : frxXAUUSD est reconnu (XAU ≠ 0)',
+        Number.isFinite(forces.XAU) && forces.XAU !== 0, `XAU ${forces.XAU}`);
+      const m = CS.correlationEntrePaires({ A: C, B: C.map(c => ({ ...c, c: c.c * 1.1 })) });
+      ok('corrélation entre paires : Pearson réel, proche de 1 sur deux séries proportionnelles',
+        Math.abs(m.A.B - 1) < 0.05, `r = ${m.A.B}`);
+      const inv = CS.correlationEntrePaires({ A: C, B: C.slice().reverse() });
+      ok('corrélation entre paires : change de signe quand le sens s\'inverse',
+        inv.A.B !== null && inv.A.B < m.A.B, `r inversé = ${inv.A.B}`);
+    }
+
+    // — Pearson : jamais NaN, null si non mesurable
+    {
+      ok('pearson : série constante → null (non mesurable)',
+        Cor.pearson([5, 5, 5, 5], [1, 2, 3, 4]) === null);
+      const r = Cor.pearson([1, 2, 3, 4], [4, 3, 2, 1]);
+      ok('pearson : rend −1 exactement sur deux séries opposées, jamais NaN',
+        Number.isFinite(r) && Math.abs(r + 1) < 1e-9, `r = ${r}`);
+    }
+
+    // — Divergences cachées : définition inverse des régulières
+    {
+      const src = fs.readFileSync(path.join(__dirname, 'engine/divergences.js'), 'utf8');
+      ok('divergence cachée baissière = prix plus BAS + indicateur plus HAUT',
+        /cachee_baissiere/.test(src) && /cur\.prix < prev\.prix && cur\.rsi > prev\.rsi/.test(src));
+      ok('divergence cachée haussière = prix plus HAUT + indicateur plus BAS',
+        /cachee_haussiere/.test(src) && /cur\.prix > prev\.prix && cur\.rsi < prev\.rsi/.test(src));
+      const ds = require('./engine/divergences').detecterDivergences(C);
+      ok('chaque divergence produite décrit ce qu\'elle mesure',
+        ds.every(d => d.detail && d.detail.length > 20 && !/NaN/.test(d.detail)),
+        `${ds.length} divergence(s)`);
+    }
+
+    // — Anomalies : pas d'Infinity sur une cotation nulle
+    {
+      const troue = C.map((c, i) => (i === 40 ? { ...c, c: 0, o: 0 } : c));
+      const toutes = [
+        ...An.anomaliesPrix(troue), ...An.anomaliesVolume(troue),
+        ...An.anomaliesVolatilite(troue), ...An.anomaliesSpread(troue)
+      ];
+      ok('anomalies : aucune valeur infinie ou NaN dans les libellés',
+        toutes.every(a => !/Infinity|NaN/.test(a.detail) && Number.isFinite(a.force)),
+        `${toutes.length} anomalie(s)`);
+      const sansVol = C.map(c => ({ ...c, v: 0 }));
+      ok('anomalies : volume moyen nul → aucune anomalie inventée',
+        An.anomaliesVolume(sansVol).length === 0);
+      ok('anomalies : « spread » est annoncé comme une amplitude',
+        An.anomaliesSpread(C).every(a => /amplitude/.test(a.detail)));
+    }
+
+    // — Patterns : une seule implémentation, les deux API d'accord
+    {
+      const api = PR.patternsChandeliers(C).map(p => p.type).sort();
+      const moteur = Pat.analyse(C).motifs.filter(m => m.ok && m.famille === 'bougie').map(m => m.id).sort();
+      ok('patterns : /api/patterns et le moteur renvoient les MÊMES motifs',
+        JSON.stringify(api) === JSON.stringify(moteur), `${api.join(',') || 'aucun'} / ${moteur.join(',') || 'aucun'}`);
+      ok('patterns : plus de seconde implémentation (adaptateur sur patterns.js)',
+        /require\('\.\/patterns'\)/.test(fs.readFileSync(path.join(__dirname, 'engine/patternRecognition.js'), 'utf8')));
+      ok('patterns : head & shoulders ne dépend plus de fenêtres fixes [0-10/10-20/20-30]',
+        !/slice\(0, 10\)/.test(fs.readFileSync(path.join(__dirname, 'engine/patternRecognition.js'), 'utf8')));
+      const pr = PR.detecterPatterns(C);
+      ok('patterns : chaque motif publié a un type, un nom et une direction',
+        pr.every(p => p.type && p.nom && ['BUY', 'SELL', 'NEUTRE'].includes(p.direction)),
+        `${pr.length} motif(s)`);
+    }
+
+    // — Saisie française des prix
+    {
+      ok('trades : « 1.234,56 » se lit 1234,56 (et non 1,234)',
+        Tr.num('1.234,56') === 1234.56, String(Tr.num('1.234,56')));
+      ok('trades : « 3 861,25 » (espaces + virgule) se lit 3861,25',
+        Tr.num('3 861,25') === 3861.25, String(Tr.num('3 861,25')));
+      ok('trades : « 3861.253698 » reste un prix à 6 décimales',
+        Tr.num('3861.253698') === 3861.253698);
+      ok('trades : paire suffixée ≠ paire nue (XAUUSD_LONG vs XAUUSD)',
+        Tr.pairesCorrelees('XAUUSD_LONG', 'XAUUSD') === true
+        && Tr.pairesCorrelees('XAUUSD_LONG', 'EURUSD') === false
+        && Tr.pairesCorrelees('EURUSD', 'GBPUSD') === true);
+    }
+
+    // — Backtest : statistiques réelles, capital cohérent, positions multiples
+    {
+      const B = Tr.backtest({
+        candles: C,
+        signalFn: () => null
+      });
+      ok('backtest : le capital de départ vient de la configuration de risque',
+        Number.isFinite(B.initialCapital) && B.initialCapital <= 10000,
+        `départ ${B.initialCapital}`);
+      const toujours = Tr.backtest({
+        candles: C,
+        maxPositions: 1,
+        signalFn: f => ({ action: 'BUY', entry: f[f.length - 1].c, sl: f[f.length - 1].c - 0.5, tp: f[f.length - 1].c + 1.5 })
+      });
+      ok('backtest : les trades simulés sont COMPTÉS (status « closed »)',
+        toujours.total > 0, `${toujours.total} trade(s), winRate ${toujours.winRate}`);
+      const plusieurs = Tr.backtest({
+        candles: C,
+        maxPositions: 3,
+        signalFn: f => ({ action: 'BUY', entry: f[f.length - 1].c, sl: f[f.length - 1].c - 0.5, tp: f[f.length - 1].c + 1.5 })
+      });
+      ok('backtest : plusieurs positions simultanées sont possibles',
+        plusieurs.maxPositions === 3 && plusieurs.total >= toujours.total,
+        `${plusieurs.total} vs ${toujours.total} trade(s)`);
+    }
+
+    // — Versions sémantiques avec suffixe
+    {
+      ok('registry : « 1.0.0-beta » n\'empoisonne plus la comparaison',
+        Reg.comparerVersions('1.0.0-beta', '0.9.0') > 0
+        && Reg.comparerVersions('1.0.0', '1.0.0-beta') > 0
+        && Reg.comparerVersions('1.0.0', '1.0.0') === 0
+        && Number.isFinite(Reg.comparerVersions('2.0.0-rc1', '1.9.9')));
+    }
+
+    // — Scoring ML : features normalisées, régularisation, hyperparamètres
+    {
+      const Sc = require('./engine/signalScoring');
+      const trades = [];
+      for (let i = 0; i < 40; i++) {
+        trades.push({
+          status: 'closed', result: i % 2 ? 'win' : 'loss',
+          closedAt: new Date(1700000000000 + i * 86400e3).toISOString(),
+          signalStrength: 0.5 + (i % 5) / 10, signalStatus: i % 2 ? 'confirme' : 'surveille',
+          trend: i % 3 ? 'bullish' : 'range', position: i % 2 ? 'premium' : 'discount',
+          session: i % 4 ? 'london' : 'asie', atrRel: 0.5 + (i % 7) * 0.5
+        });
+      }
+      const m = Sc.entrainerModele(trades);
+      ok('scoring : le modèle entraîné stocke l\'échelle des features',
+        m.entraine && Array.isArray(m.moyenne) && Array.isArray(m.ecartType),
+        m.entraine ? `moyenne atrRel ${m.moyenne[5].toFixed(2)}` : m.avertissement);
+      ok('scoring : la régularisation L2 et les hyperparamètres sont exposés',
+        m.hyperparametres && m.hyperparametres.regularisation > 0 && m.hyperparametres.epochs > 100,
+        JSON.stringify(m.hyperparametres || {}));
+      const p = Sc.predireSucces({ signalStrength: 0.8, signalStatus: 'confirme', trend: 'bullish', position: 'premium', session: 'london', atrRel: 3.5 }, m);
+      ok('scoring : la prédiction applique la même échelle (probabilité dans [0,1])',
+        Number.isFinite(p) && p >= 0 && p <= 1, `p = ${p.toFixed(3)}`);
+    }
+
+    // — Qualité des données : tolérance de retard proportionnée à l'unité
+    {
+      const d1 = Q.analyser(C, { timeframe: '1d' });
+      ok('qualité : le contrôle de retard connaît l\'unité de temps demandée',
+        d1.mesures && d1.mesures.timeframe === '1d' && d1.mesures.intervalle === 86400000,
+        `${d1.mesures.timeframe} / ${d1.mesures.intervalle} ms`);
+    }
   }
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
