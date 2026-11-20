@@ -16,11 +16,35 @@
  */
 function correlationGlissante(candles1, candles2, period = 20) {
   if (!candles1 || !candles2) return [];
-  const len = Math.min(candles1.length, candles2.length);
+
+  // Synchronisation temporelle stricte par horodatage (time / t)
+  const map2 = new Map();
+  for (const c of candles2) {
+    const t = c.time ?? c.t;
+    if (t !== undefined) map2.set(t, c.c);
+  }
+
+  const pairesCommunes = [];
+  for (const c of candles1) {
+    const t = c.time ?? c.t;
+    if (t !== undefined && map2.has(t)) {
+      pairesCommunes.push({ c1: c.c, c2: map2.get(t) });
+    }
+  }
+
+  // Fallback si pas de timestamps : alignement par index
+  const paires = pairesCommunes.length >= period + 1
+    ? pairesCommunes
+    : Array.from({ length: Math.min(candles1.length, candles2.length) }, (_, i) => ({
+        c1: candles1[i].c,
+        c2: candles2[i].c
+      }));
+
+  const len = paires.length;
   if (len < period + 1) return [];
 
-  const closes1 = candles1.slice(0, len).map(c => c.c);
-  const closes2 = candles2.slice(0, len).map(c => c.c);
+  const closes1 = paires.map(p => p.c1);
+  const closes2 = paires.map(p => p.c2);
   const out = [];
 
   for (let i = period; i < len; i++) {

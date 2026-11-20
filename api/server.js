@@ -4157,11 +4157,11 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
         });
       } catch (e) { decision = null; }
 
-      // Journal : on persiste les signaux RETENUS par l'arbitrage
-      if (decision && decision.signaux) {
+      // Journal : on persiste UNIQUEMENT les signaux RETENUS par l'arbitrage
+      if (decision && Array.isArray(decision.signauxRetenus) && decision.signauxRetenus.length) {
         try {
           JournalSignaux.enregistrer(
-            decision.signaux.filter(s => s.status === 'confirme' || s.status === 'surveiller'),
+            decision.signauxRetenus.filter(s => s.statusFinal === 'confirme' || s.status === 'confirme' || s.executable === true),
             { symbol, timeframe: tf, provider, at: verdict.at }
           );
         } catch { /* le journal ne doit jamais casser le flux */ }

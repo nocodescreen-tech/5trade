@@ -614,6 +614,13 @@ function niveauRisque(arbitrage, options = {}) {
   }
 
   if (typeof options.verificateurRisque !== 'function') {
+    if (options.exigerVerificateurRisque === true) {
+      return {
+        etat: { consulte: false, ok: false, verifie: false, refus: ['vérificateur de risque absent'] },
+        decision: 'ATTENTE',
+        raison: "Risque NON vérifié : aucun vérificateur de risque fourni au moteur — décision suspendue"
+      };
+    }
     return { etat: { ...etat, motif: 'aucun vérificateur de risque fourni' }, decision: null };
   }
 
