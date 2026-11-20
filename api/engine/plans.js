@@ -72,20 +72,23 @@ function planBalayage(candles, sens) {
     objectifs: [arrondi(entree - 2 * distance, entree), arrondi(entree - 3 * distance, entree)] }, sens);
 }
 
-/** Déplacement : le stop se place à 1 ATR derrière la bougie d'impulsion. */
+/** Déplacement : le stop se place sur l'extrême de la bougie d'impulsion (avec marge 0.1 ATR). */
 function planDeplacement(candles, sens) {
   const a = atr(candles);
   const last = candles[candles.length - 1];
   if (!a || !last) return null;
   const entree = last.c;
-  const stop = sens === 'BUY' ? entree - a : entree + a;
+  // Stop basé sur l'extrême réel de la bougie d'impulsion, pas sur 1 ATR abstrait
+  const stop = sens === 'BUY'
+    ? Math.min(last.l - 0.1 * a, entree - 0.5 * a)
+    : Math.max(last.h + 0.1 * a, entree + 0.5 * a);
   const distance = Math.abs(entree - stop);
   const cible = sens === 'BUY' ? entree + 2 * distance : entree - 2 * distance;
   return valide({ entree: arrondi(entree, entree), stop: arrondi(stop, entree),
     objectifs: [arrondi(cible, entree)] }, sens);
 }
 
-/** Zone : entrée au contact, stop juste au-delà, objectif à 2 fois la zone. */
+/** Zone : entrée au contact, stop au-delà de la zone calibré sur sa hauteur réelle. */
 function planZone(candles, sens, zone) {
   const a = atr(candles);
   const last = candles[candles.length - 1];
@@ -95,8 +98,10 @@ function planZone(candles, sens, zone) {
   const bordBas = Number.isFinite(zone && zone.bas) ? zone.bas : last.l;
   const bordHaut = Number.isFinite(zone && zone.haut) ? zone.haut : last.h;
   const hauteur = Math.max(bordHaut - bordBas, 0.3 * a);
-  const stop = sens === 'BUY' ? bordBas - 0.2 * a : bordHaut + 0.2 * a;
-  const distance = Math.abs(entree - stop);
+  // Le stop et l'objectif utilisent explicitement la hauteur de zone réelle
+  const marge = Math.min(0.2 * a, hauteur * 0.25);
+  const stop = sens === 'BUY' ? bordBas - marge : bordHaut + marge;
+  const distance = Math.max(Math.abs(entree - stop), hauteur);
   if (!(distance > 0)) return null;
   const cible = sens === 'BUY' ? entree + 2 * distance : entree - 2 * distance;
   return valide({ entree: arrondi(entree, entree), stop: arrondi(stop, entree),
@@ -112,7 +117,9 @@ function construire(candles, sens, mode = 'deplacement', options = {}) {
   if (!Array.isArray(candles) || candles.length < 20) return null;
   if (mode === 'balayage') return planBalayage(candles, sens);
   if (mode === 'zone') return planZone(candles, sens, options.zone);
-  return planDeplacement(candles, sens);
+  if (mode === 'deplacement') return planDeplacement(candles, sens);
+  // Mode inconnu : refuse explicitement au lieu de basculer silencieusement
+  return null;
 }
 
 module.exports = { construire, planBalayage, planDeplacement, planZone, atr, valide };

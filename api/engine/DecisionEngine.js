@@ -376,7 +376,7 @@ function niveauExecution(signaux, meta, options = {}) {
     const target1 = c.objectifs[0];
     const target2 = c.objectifs[1];
 
-    // 1. Niveaux valides (entrée, stop, objectifs du bon côté)
+    // 1. Niveaux valides (entrée, stop, objectifs du bon côté et ordonnés)
     if (!Number.isFinite(entry) || !Number.isFinite(stop)) {
       blocages.push('niveaux absents ou invalides');
     } else {
@@ -385,12 +385,19 @@ function niveauExecution(signaux, meta, options = {}) {
       if (!long && stop <= entry) blocages.push('stop EN-DESSOUS de l\'entrée (vente)');
       if (target1 && long && target1 <= entry) blocages.push('objectif 1 du mauvais côté (achat)');
       if (target1 && !long && target1 >= entry) blocages.push('objectif 1 du mauvais côté (vente)');
+      if (target2 && long && target2 <= entry) blocages.push('objectif 2 du mauvais côté (achat)');
+      if (target2 && !long && target2 >= entry) blocages.push('objectif 2 du mauvais côté (vente)');
+      if (target1 && target2) {
+        if (long && target2 <= target1) blocages.push('objectif 2 doit être supérieur à objectif 1 (achat)');
+        if (!long && target2 >= target1) blocages.push('objectif 2 doit être inférieur à objectif 1 (vente)');
+      }
     }
 
-    // 2. RR minimum
-    const rr = s.rr || (Number.isFinite(entry) && Number.isFinite(stop) && Number.isFinite(target1)
+    // 2. RR minimum recalculé systématiquement sur les niveaux normalisés
+    const rrCalcule = (Number.isFinite(entry) && Number.isFinite(stop) && Number.isFinite(target1) && Math.abs(entry - stop) > 0)
       ? Math.abs(target1 - entry) / Math.abs(entry - stop)
-      : null);
+      : null;
+    const rr = rrCalcule !== null ? rrCalcule : (s.rr || null);
     if (rrMin > 0 && rr !== null && Number.isFinite(rr)) {
       if (rr < rrMin) {
         blocages.push(`RR ${rr.toFixed(2)} < ${rrMin} minimum`);
@@ -614,17 +621,18 @@ function niveauRisque(arbitrage, options = {}) {
     if (!v || typeof v !== 'object') {
       // Réponse inexploitable : ce n'est pas une autorisation.
       return {
-        etat: { consulte: true, ok: null, verifie: false, refus: [], erreur: 'réponse vide' },
+        etat: { consulte: true, ok: false, verifie: false, refus: [], erreur: 'réponse vide' },
         decision: 'ATTENTE',
         raison: "Risque NON vérifié : le vérificateur n'a rien renvoyé — aucune exécution autorisée"
       };
     }
-    if (v.ok === false) {
+    // Exigence stricte : v.ok === true obligatoire
+    if (v.ok !== true) {
       const refus = v.refus || [v.raison].filter(Boolean);
       return {
         etat: { consulte: true, ok: false, verifie: true, refus },
         decision: 'ATTENTE',
-        raison: 'Risque refusé : ' + (refus.join(' · ') || 'plafond atteint')
+        raison: 'Risque refusé : ' + (refus.join(' · ') || 'plafond atteint ou autorisation non explicite')
       };
     }
     return { etat: { consulte: true, ok: true, verifie: true, refus: [] }, decision: null };

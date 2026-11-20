@@ -108,12 +108,13 @@ function verifier(p = {}) {
   mesures.plafondPct = limites.risqueCumulePct;
   mesures.positions = ouvertes.length + (nouvelle ? 1 : 0);
   // Une position dont le risque n'est pas chiffré compte dans le nombre (elle
-  // existe) mais pas dans le risque cumulé. Le dire évite de croire que le
-  // plafond de risque couvre tout ce qui est ouvert.
+  // existe) mais ne peut pas être mesurée : pour la sécurité du capital, un
+  // risque inconnu est un blocage immédiat (P0), pas un simple avertissement ignoré.
   const sansRisque = ouvertes.filter(x => nombre(x.risqueMontant) === null).length
     + (nouvelle && nombre(nouvelle.risqueMontant) === null ? 1 : 0);
   if (sansRisque > 0) {
     mesures.positionsRisqueInconnu = sansRisque;
+    bloquants.push(`${sansRisque} position(s) sans risque chiffré : calcul de risque impossible`);
     avertissements.push(`${sansRisque} position(s) sans risque chiffré : le risque cumulé les ignore`);
   }
 

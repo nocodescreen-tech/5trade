@@ -113,7 +113,23 @@ function selectionner({ candles, meta, strategies, regime = null, max = 3 } = {}
 
     if (nonDeclare) motif += ' · marché non déclaré par la fiche';
 
-    const score = +(force * (POIDS[statut] !== undefined ? POIDS[statut] : 0)).toFixed(3);
+    // Rôle réel du régime : si la stratégie déclare un ou plusieurs régimes et que
+    // le marché a un régime détecté, un alignement donne un bonus (+25%), une inadéquation
+    // divise le score par 2.
+    let multiplicateurRegime = 1.0;
+    if (regime && profil && Array.isArray(profil.regimes) && profil.regimes.length) {
+      const regimeNormalise = String(regime).toLowerCase();
+      const correspond = profil.regimes.some(r => String(r).toLowerCase() === regimeNormalise);
+      if (correspond) {
+        multiplicateurRegime = 1.25;
+        motif += ` · adapté au régime ${regime}`;
+      } else {
+        multiplicateurRegime = 0.5;
+        motif += ` · régime discordant (${regime} vs ${profil.regimes.join(',')})`;
+      }
+    }
+
+    const score = +(force * (POIDS[statut] !== undefined ? POIDS[statut] : 0) * multiplicateurRegime).toFixed(3);
     return {
       ...base,
       compatible: declare,
