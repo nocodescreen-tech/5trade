@@ -203,6 +203,42 @@ module.exports = function monterAlertes(app, deps) {
             }).catch(() => {});
           }
         }
+      } else if (update.message && update.message.text) {
+        // Dialogue en langage naturel direct avec l'IA copilote depuis Telegram
+        const msg = update.message;
+        const chatId = msg.chat && msg.chat.id;
+        const texteUtilisateur = String(msg.text || '').trim();
+
+        if (chatId && texteUtilisateur && c.telegramToken) {
+          const fetchRef = globalThis.fetch || require('node-fetch');
+          try {
+            const ChatCRUD = require('../chat-crud');
+            const rIA = await ChatCRUD.executer(texteUtilisateur, {
+              utilisateur: msg.from && (msg.from.username || msg.from.first_name) || 'telegram_user'
+            });
+
+            const reponseChat = (rIA && (rIA.texte || (rIA.ia && rIA.ia.texte))) || 'Je suis votre copilote 5trade. Comment puis-je vous aider sur vos positions et analyses ?';
+
+            await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: chatId,
+                text: `🤖 <b>5trade Copilote</b> :\n\n${reponseChat}`,
+                parse_mode: 'HTML'
+              })
+            }).catch(() => {});
+          } catch (eChat) {
+            await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: chatId,
+                text: `⚠️ Copilote momentanément indisponible : ${eChat.message}`
+              })
+            }).catch(() => {});
+          }
+        }
       }
       res.json({ ok: true });
     } catch (e) {
