@@ -4415,12 +4415,38 @@ async function executerBacktest(src = {}) {
 
   const { candles } = await Market.getCandles(symbol, tf, bougies, provider);
   const options = await optionsAnalyse(src);
-  const r = Backtest.lancer(candles, { symbol, timeframe: tf }, {
-    profils: options.profils || [],
-    pas,
-    maxBougies: bougies,
-    demandees: bougies
-  });
+
+  // Mode fidèle : utilise le rejeu direct engageant le moteur réel par défaut,
+  // ou l'ancien simulateur si explicitement demandé (fidele: false).
+  const estFidele = src.fidele !== false && src.fidele !== 'false';
+  let r;
+  if (estFidele) {
+    const rf = Backtest.lancerFidele(candles, { symbol, timeframe: tf }, {
+      moteur: { profils: options.profils || [] },
+      pas,
+      decision: { exigerAlignement: false }
+    });
+    r = {
+      fidele: true,
+      trades: rf.trades || [],
+      total: (rf.trades || []).length,
+      gagnants: ((rf.stats && rf.stats.nbGagnants) || 0),
+      perdants: ((rf.stats && rf.stats.nbPerdants) || 0),
+      winRate: (rf.stats && rf.stats.tauxReussite) || 0,
+      rTotal: (rf.stats && rf.stats.rTotal) || 0,
+      expectancy: (rf.stats && rf.stats.esperance) || 0,
+      stats: rf.stats || {},
+      courbeR: (rf.trades || []).map(t => Number(t.rNet || t.r || 0)),
+      note: rf.note
+    };
+  } else {
+    r = Backtest.lancer(candles, { symbol, timeframe: tf }, {
+      profils: options.profils || [],
+      pas,
+      maxBougies: bougies,
+      demandees: bougies
+    });
+  }
 
   const resultat = {
     success: true,

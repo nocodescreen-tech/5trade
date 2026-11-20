@@ -393,13 +393,16 @@ function niveauExecution(signaux, meta, options = {}) {
       }
     }
 
-    // 2. RR minimum recalculé systématiquement sur les niveaux normalisés
+    // 2. RR minimum recalculé exclusivement sur les niveaux normalisés réels.
+    // L'ancien s.rr hérité ne peut JAMAIS remplacer un calcul sur les niveaux définitifs.
     const rrCalcule = (Number.isFinite(entry) && Number.isFinite(stop) && Number.isFinite(target1) && Math.abs(entry - stop) > 0)
       ? Math.abs(target1 - entry) / Math.abs(entry - stop)
       : null;
-    const rr = rrCalcule !== null ? rrCalcule : (s.rr || null);
-    if (rrMin > 0 && rr !== null && Number.isFinite(rr)) {
-      if (rr < rrMin) {
+    const rr = rrCalcule;
+    if (rrMin > 0) {
+      if (rr === null || !Number.isFinite(rr)) {
+        blocages.push('RR indéterminable sur les niveaux normalisés : exécution refusée');
+      } else if (rr < rrMin) {
         blocages.push(`RR ${rr.toFixed(2)} < ${rrMin} minimum`);
       }
     }
