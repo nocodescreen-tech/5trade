@@ -748,6 +748,19 @@ async function verifierBrut(force = false) {
           dire({ verdict: `décision : ${decision.decision} — ${decision.raison}` });
           continue;
         }
+
+        // GARDE-FOU P0 : une alerte exécutable NE DOIT PAS continuer sans validation explicite du risque
+        if (!decision.risque || decision.risque.ok !== true) {
+          dire({ verdict: `alerte suspendue — risque non validé (${(decision.risque && decision.risque.refus && decision.risque.refus.join(', ')) || decision.risque?.motif || 'autorisation non explicite'})` });
+          continue;
+        }
+
+        // Aucun signal ne doit être publié sans executable === true
+        const signauxExec = (decision.signauxRetenus || []).filter(x => x.executable === true);
+        if (!signauxExec.length) {
+          dire({ verdict: 'alerte suspendue — aucun signal retenu portant executable === true' });
+          continue;
+        }
         // Meilleur signal retenu par l'arbitrage = celui qu'on alerte
         const s = decision.signal;
         // Un motif publie `entree/stop/objectifs`, une fiche publie
