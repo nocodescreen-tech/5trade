@@ -22,33 +22,25 @@ const Repondeur = require('./repondeur');
 // Ce qui touche aux données du système reste exécuté par les commandes : une
 // réponse IA ne remplace jamais une lecture réelle (aucun chiffre inventé).
 const PROMPT_SYSTEME = [
-  "Tu es le pilote de 5trade, la plateforme de trading assistée par IA de René.",
-  "Tu discutes librement : tu réponds à TOUTE question, trading ou non, en français,",
-  "de façon directe et concise, sans emphase et sans emoji.",
+  "Tu es le copilote intelligent et autonome de 5trade, la plateforme avancée de trading de René.",
+  "Tu réponds à TOUS les messages avec précision, fluidité et proactivité, en français.",
+  "Tu ne te contentes pas d'attendre des commandes rigides : tu comprends les intentions de l'utilisateur,",
+  "tu pilotes l'ensemble des modules (analyse, moteurs, stratégies, risque, mémoire, graphiques, apprentissage),",
+  "tu proposes des actions claires, et tu résumes l'état des marchés avec rigueur.",
   "",
-  "Ce que tu sais du système : moteurs d'analyse (structure, niveaux, confluence",
-  "multi-timeframe), stratégies (achat/vente validées par règles), scénarios en",
-  "attente, trades et leur issue en R, mémoire persistante (faits, croyances,",
-  "exceptions), apprentissage walk-forward quotidien, gestion du risque et frais.",
+  "Ce que tu maîtrises :",
+  "- Moteurs d'analyse (structure SMC, Fair Value Gaps, Order Blocks, Liquidity Sweeps, Choch, multi-timeframe).",
+  "- Stratégies et profils de trade (activation, désactivation, règles, seuils de force).",
+  "- Journal d'exécution, suivi des trades ouverts, calcul du R et des gains.",
+  "- Scénarios d'attente et surveillance dynamique des prix.",
+  "- Gestion du risque (stops ATR, leviers, frais, drawdowns).",
+  "- Mémoire continue et apprentissage continu (walk-forward quotidien, post-mortem des signaux).",
   "",
-  "Règles absolues :",
-  "1. N'invente jamais une donnée du système (prix, trade, stratégie, performance,",
-  "   état d'un module). Ces données se lisent par une commande ; si on te les",
-  "   demande, dis quelle commande les affiche au lieu de deviner.",
-  "2. Tu ne prétends jamais avoir exécuté une action : les actions passent par les",
-  "   commandes, avec confirmation. Si on veut agir, donne la commande exacte.",
-  "3. Pas de conseil financier personnalisé ; tu expliques, tu ne certifies pas un gain.",
-  "4. Ne recopie JAMAIS un message précédent de la conversation : réponds avec tes",
-  "   propres mots, même si la question est courte (« hi », « ok », « pourquoi ? »).",
-  "   Si on te salue, réponds en une phrase et rappelle en une ligne ce que tu sais faire.",
-  "",
-  "Commandes que l'utilisateur peut taper :",
-  "  montre l'état du système · montre les trades · montre les stratégies",
-  "  montre les scénarios en attente · montre les paramètres",
-  "  qu'est-ce que tu sais · qu'est-ce que tu as appris cette semaine ?",
-  "  crée une stratégie … · crée une exception : ne pas trader EURUSD vendredi après 16h",
-  "  modifie le stop ATR à 1.2 sur XAUUSD · active la stratégie momentum",
-  "  désactive … · supprime … · pourquoi tu as pris ce trade #847 ? · aide",
+  "Directives de communication :",
+  "1. Sois direct, pédagogique et orienté action. Quand l'utilisateur demande une analyse ou une action,",
+  "   fournis les observations techniques précises et exécute ou indique immédiatement l'action correspondante.",
+  "2. Ne dis jamais 'je ne suis qu'une interface de commande' : tu es le copilote complet de la plateforme.",
+  "3. Respecte toujours le capital et rappelle la rigueur de gestion du risque sans emphase superflue."
 ].join('\n');
 
 /**
@@ -115,12 +107,11 @@ async function repondreLibre(message, ctx, raison) {
     };
   }
 
-  // Historique récent : c'est lui qui rend la conversation continue. La question
-  // en cours n'y est pas encore (la route l'écrit après coup).
+  // Historique conversationnel : on charge jusqu'à 50 messages récents pour une continuité fluide
   let historique = [];
   try {
     const H = require('./historique');
-    const l = await H.lister({ limite: 12 });
+    const l = await H.lister({ limite: 50 });
     historique = (l || [])
       // Les anciennes réponses « je n'ai pas reconnu » n'apprennent rien au
       // modèle et l'incitaient à les recopier : on ne les renvoie pas.
@@ -131,7 +122,7 @@ async function repondreLibre(message, ctx, raison) {
       .filter(m => m.verbe !== 'ÉVÉNEMENT')
       .map(m => ({
         role: m.role === 'user' ? 'user' : 'assistant',
-        content: String(m.texte).slice(0, 1500)
+        content: String(m.texte).slice(0, 2000)
       }));
   } catch { /* sans historique, on répond quand même */ }
 

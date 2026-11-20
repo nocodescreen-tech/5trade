@@ -115,9 +115,9 @@ function niveauValidation(signaux, options = {}) {
 
     // Conditions du motif (pour les signaux de type 'motif')
     if (source === 'motif' && Array.isArray(s.conditions)) {
-      const nonRemplies = s.conditions.filter(c => c.ok === false);
-      if (nonRemplies.length) {
-        blocages.push(`${nonRemplies.length} condition(s) du motif non remplie(s)`);
+      const exigees = s.conditions.filter(c => c && (c.obligatoire === true || c.bloquant === true) && c.ok === false);
+      if (exigees.length) {
+        blocages.push(`${exigees.length} condition(s) obligatoire(s) du motif non remplie(s) : ${exigees.map(c => c.nom).join(', ')}`);
       }
     }
 
@@ -263,11 +263,18 @@ function niveauConfirmation(signaux, options = {}) {
       confirmes++;
       statusFinal = 'confirme';
     } else if (s.status === 'surveiller') {
-      surveiller++;
-      // Sans ce motif, un signal restait non confirmé avec une liste de
-      // blocages VIDE : l'écran ne pouvait pas dire pourquoi. Trois signaux sur
-      // quinze tombaient dans ce trou lors de la mesure sur R_75.
-      blocages.push("statut « à surveiller » : la source ne le donne pas comme confirmé");
+      const forceVal = Number(s.strength || s.force || 0);
+      const seuilPromotion = Number.isFinite(options.seuilForceMotif) ? options.seuilForceMotif : 0.60;
+      // Pour les signaux issus de motifs ou de structures validés sans aucun blocage,
+      // s'ils disposent d'une force suffisante, ils peuvent être promus en statut confirmé
+      // au lieu d'être bloqués perpétuellement en simple "à surveiller".
+      if ((source === 'motif' || source === 'structure') && forceVal >= seuilPromotion && s.sens && s.sens !== 'inconnu' && s.sens !== 'neutre') {
+        confirmes++;
+        statusFinal = 'confirme';
+      } else {
+        surveiller++;
+        blocages.push("statut « à surveiller » : la source ne le donne pas comme confirmé");
+      }
     } else {
       nonConfirmes++;
       blocages.push(`statut « ${s.status} » : signal non confirmé`);
@@ -353,7 +360,7 @@ function niveauExecution(signaux, meta, options = {}) {
     }
 
     // Seuls les signaux "confirme" au niveau 3 peuvent être exécutables
-    if (s.status !== 'confirme') {
+    if (s.confirme === false || (s.status !== 'confirme' && s.confirme !== true)) {
       blocages.push(`statut ${s.status} : pas candidat à l'exécution`);
       details.push({ source, nom, ok: false, blocages, sens: s.sens });
       nonExecutables++;
@@ -681,7 +688,13 @@ function decider(candles, meta, options = {}) {
     meta, options
   );
   const arbitrage = niveauArbitrage(
-    signauxEnrichis.map((s, i) => ({ ...s, valide: validation.details[i]?.ok, confirme: confirmation.details[i]?.ok, executable: execution.details[i]?.ok })),
+    signauxEnrichis.map((s, i) => ({
+      ...s,
+      valide: validation.details[i]?.ok,
+      confirme: confirmation.details[i]?.ok,
+      status: confirmation.details[i]?.statusFinal || s.status,
+      executable: execution.details[i]?.ok
+    })),
     meta,
     options
   );
@@ -722,7 +735,11 @@ function decider(candles, meta, options = {}) {
     // liste brute contient des signaux « confirme » d'avant les filtres.
     signauxRetenus: (arbitrage.signauxRetenus || []).map(x => ({ ...x, statusFinal: x.status })),
     idsRetenus: (arbitrage.signauxRetenus || []).map(x => x.id || x.nom),
-    synthese: multi.synthese,
+    synthese: {
+      ...multi.synthese,
+      confirmes: confirmation.confirmes,
+      aSurveiller: confirmation.surveiller
+    },
 
     // Contexte de marché (carte)
     carte: multi.carte,

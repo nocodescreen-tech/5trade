@@ -399,8 +399,13 @@ function loadCache() {
     if (!fs.existsSync(CACHE_FILE)) return 0;
     const data = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
     let n = 0;
+    const now = Date.now();
     for (const [k, v] of Object.entries(data)) {
-      if (Array.isArray(v) && v.length) { buffers.set(k, v); n++; }
+      if (Array.isArray(v) && v.length) {
+        buffers.set(k, v);
+        bufferMaj.set(k, now);
+        n++;
+      }
     }
     return n;
   } catch { return 0; }
@@ -642,8 +647,14 @@ function reopenStream(p, symbols, tf) {
     if (subscribers.size && wsProvider === p.id && wsTf === tf) {
       essaisFlux += 1;
       if (essaisFlux > MAX_ESSAIS_FLUX) {
-        console.error(`   Marché     : flux ${p.id} ${tf} abandonné après ${MAX_ESSAIS_FLUX} tentatives`
-          + ' — les bougies seront servies par l\'historique REST (moins fraîches).');
+        console.error(`   Marché     : flux ${p.id} ${tf} pause après ${MAX_ESSAIS_FLUX} tentatives`
+          + ' — repli temporaire sur REST/cache. Prochaine tentative dans 60s.');
+        setTimeout(() => {
+          if (subscribers.size) {
+            essaisFlux = 0;
+            reopenStream(p, wsSymbols, wsTf);
+          }
+        }, 60000);
         return;
       }
       const attente = Math.min(3000 * essaisFlux, 30000);

@@ -77,15 +77,41 @@ async function tick() {
       const suite = status === 'confirme'
         ? 'signal confirmé par les règles'
         : 'à confirmer sur la clôture suivante';
+      const msgTexte = `Retournement — ${m.symbol} ${m.tf} : le biais passe de `
+        + `${libelle(avant.direction)} à ${libelle(direction)} (${suite}).`
+        + (sens ? ` Direction de travail : ${sens === 'long' ? 'achat' : 'vente'}.` : '');
+
       await Flux.publier({
         type: 'retournement',
         gravite: status === 'confirme' ? 'warn' : 'info',
         meta: { symbol: m.symbol, timeframe: m.tf, avant: avant.direction,
           apres: direction, status },
-        texte: `Retournement — ${m.symbol} ${m.tf} : le biais passe de `
-          + `${libelle(avant.direction)} à ${libelle(direction)} (${suite}).`
-          + (sens ? ` Direction de travail : ${sens === 'long' ? 'achat' : 'vente'}.` : '')
+        texte: msgTexte
       });
+
+      // Notification immédiate sur Telegram si le canal est actif
+      try {
+        const { Alerts } = etatParDefaut();
+        const cfg = (Alerts.get && Alerts.get()) || {};
+        if (cfg.telegramToken && cfg.telegramChat) {
+          const fetchRef = globalThis.fetch || require('node-fetch');
+          await fetchRef(`https://api.telegram.org/bot${cfg.telegramToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: cfg.telegramChat,
+              text: `⚠️ <b>Alerte Retournement — ${m.symbol} (${m.tf})</b>\n\n`
+                + `Le biais de marché s'est inversé : <b>${libelle(avant.direction)} → ${libelle(direction)}</b>\n`
+                + `Statut : ${suite}\n`
+                + `Action conseillée : vérifier les positions ouvertes et ajuster le stop loss.`,
+              parse_mode: 'HTML'
+            })
+          });
+        }
+      } catch (eTel) {
+        console.error('[veille] erreur notification telegram retournement :', eTel.message);
+      }
+
       evenements++;
       continue;
     }
@@ -106,6 +132,75 @@ async function tick() {
   }
 
   premierTour = false;
+
+  // 3. Sentinelle News Économiques à fort impact (CPI, NFP, FOMC, Taux)
+  try {
+    const Fundamentals = require('../sources/fundamentals');
+    const { getCalendarAvecEtat, instantEvenement } = Fundamentals;
+    const { events, sourceDisponible } = await getCalendarAvecEtat();
+    if (sourceDisponible && Array.isArray(events)) {
+      const now = Date.now();
+      const { Alerts } = etatParDefaut();
+      const cfg = (Alerts.get && Alerts.get()) || {};
+      for (const ev of events) {
+        if (ev.impact !== 'high') continue;
+        const t = instantEvenement(ev, new Date(now));
+        if (!t) continue;
+        const diffMin = Math.round((t - now) / 60000);
+        // Alerte sous 45 min
+        const cleNews = `news|${ev.devise}|${ev.titre}|${t}`;
+        if (diffMin >= 0 && diffMin <= 45 && !etat.has(cleNews)) {
+          etat.set(cleNews, { at: now });
+          // Détermination du biais directionnel anticipé selon le titre ou la consigne
+          const titreMin = ev.titre.toLowerCase();
+          let decisionDirectionnelle = 'NEUTRE';
+          let conseil = 'Volatilité extrême attendue : resserrer les stops ou rester en attente';
+          if (titreMin.includes('cpi') || titreMin.includes('inflation')) {
+            decisionDirectionnelle = 'HAUTE VOLATILITÉ (Biais VENTE indices/or si CPI supérieur, ACHAT si ralenti)';
+          } else if (titreMin.includes('rate') || titreMin.includes('fomc') || titreMin.includes('interest')) {
+            decisionDirectionnelle = 'DÉCISION DE TAUX (Biais fort selon politique monétaire)';
+          } else if (titreMin.includes('nfp') || titreMin.includes('nonfarm') || titreMin.includes('payroll')) {
+            decisionDirectionnelle = 'BIAIS DEVISE (ACHAT devise si créations massives, VENTE si décevant)';
+          }
+
+          const dateLisible = new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+          const msgNews = `📅 <b>Alerte Annonce Économique Majeure (${ev.devise})</b>\n\n`
+            + `• <b>Événement</b> : ${ev.titre}\n`
+            + `• <b>Heure prévue</b> : ${dateLisible} (dans ${diffMin} min)\n`
+            + `• <b>Devise impactée</b> : ${ev.devise}\n`
+            + `• <b>Impact</b> : Élevé (3 étoiles / High)\n`
+            + (ev.consigne ? `• <b>Prévision</b> : ${ev.consigne}\n` : '')
+            + (ev.precedent ? `• <b>Précédent</b> : ${ev.precedent}\n` : '')
+            + `• <b>Décision / Biais suggéré</b> : ${decisionDirectionnelle}\n`
+            + `• <b>Consigne de sécurité</b> : ${conseil}`;
+
+          await Flux.publier({
+            type: 'news_impact',
+            gravite: 'warn',
+            meta: { devise: ev.devise, titre: ev.titre, heure: dateLisible, diffMin },
+            texte: `Annonce imminente (${ev.devise}) : ${ev.titre} à ${dateLisible} (dans ${diffMin} min). Biais : ${decisionDirectionnelle}.`
+          });
+
+          if (cfg.telegramToken && cfg.telegramChat) {
+            const fetchRef = globalThis.fetch || require('node-fetch');
+            await fetchRef(`https://api.telegram.org/bot${cfg.telegramToken}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: cfg.telegramChat,
+                text: msgNews,
+                parse_mode: 'HTML'
+              })
+            }).catch(() => {});
+          }
+          evenements++;
+        }
+      }
+    }
+  } catch (eNews) {
+    console.error('[veille] erreur sentinelle news :', eNews.message);
+  }
+
   return { marches: liste.length, changements, evenements };
 }
 

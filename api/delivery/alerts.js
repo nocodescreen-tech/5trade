@@ -926,12 +926,12 @@ async function verifierBrut(force = false) {
           })) || 0;
         } catch { /* le mail déjà parti reste valide */ }
       }
-      if (!emailOk && pushOk <= 0) {
+      const aUnCanal = !!c.email || pushOk > 0 || !!(c.telegramToken && c.telegramChat);
+      if (!aUnCanal) {
         dire({ verdict: 'aucun canal disponible' });
         continue;
       }
-      // Telegram en plus : l'email peut attendre, le telephone non. Un echec
-      // Telegram ne remet pas en cause l'alerte email deja partie.
+      // Telegram : priorité directe sur téléphone
       if (c.telegramToken && c.telegramChat) {
         try { await envoyerTelegram(c, v, m, { confluence, rr, multi }); }
         catch (e) { dire({ verdict: 'alerte envoyée, Telegram en échec : ' + e.message }); }
