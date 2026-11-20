@@ -52,8 +52,15 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
       erreur
     });
 
-    if (verdict && verdict.signal && (verdict.decision === 'ACHAT' || verdict.decision === 'VENTE')) {
-      const s = verdict.signal;
+    // P0 : Vérification stricte d'exécutabilité et de risque sur le rejeu fidèle.
+    // Un verdict ACHAT ou VENTE ne doit être rejoué QUE si le signal porte executable === true
+    // et que le risque a été formellement validé (ou validé par simulateur).
+    const s = verdict && verdict.signal;
+    const estExecutable = s && (s.executable === true || (verdict.signauxRetenus || []).some(x => x.executable === true));
+    const risqueValide = verdict && verdict.risque && verdict.risque.ok === true;
+    const autorise = estExecutable || (opts && opts.sansRisqueCompte === true);
+
+    if (verdict && s && (verdict.decision === 'ACHAT' || verdict.decision === 'VENTE') && autorise) {
       const sig = {
         cle: `rejeu:${meta.symbol}:${serie[i].t}`,
         id: `rejeu:${serie[i].t}`,

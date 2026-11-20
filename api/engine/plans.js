@@ -112,11 +112,22 @@ function planZone(candles, sens, zone) {
   const bordHaut = Number.isFinite(zone && zone.haut) ? zone.haut : last.h;
   const hauteur = Math.max(bordHaut - bordBas, 0.3 * a);
 
-  // Entrée au contact de la zone (haut de zone pour un BUY en pullback, bas pour SELL)
-  // ou prix actuel si déjà à l'intérieur.
-  const entreeContact = sens === 'BUY'
-    ? (last.c >= bordBas && last.c <= bordHaut ? last.c : bordHaut)
-    : (last.c >= bordBas && last.c <= bordHaut ? last.c : bordBas);
+  // Pour entrer sur une zone, le marché doit avoir touché la zone (contact ou retest réel).
+  // Si le marché est trop loin de la zone (au-delà de 0.5 ATR), aucun ordre direct artificiel.
+  const dansZone = last.c >= bordBas && last.c <= bordHaut;
+  const aTouche = last.l <= bordHaut && last.h >= bordBas;
+  const distanceZone = sens === 'BUY'
+    ? Math.max(0, bordBas - last.h, last.l - bordHaut)
+    : Math.max(0, last.l - bordHaut, bordBas - last.h);
+
+  if (!dansZone && !aTouche && distanceZone > 0.5 * a) {
+    // Le prix n'est pas encore au contact de la zone : pas d'entrée artificielle inventée
+    return null;
+  }
+
+  const entreeContact = dansZone
+    ? last.c
+    : (sens === 'BUY' ? bordHaut : bordBas);
   const entree = Number.isFinite(entreeContact) ? entreeContact : last.c;
 
   // Le stop et l'objectif utilisent explicitement la hauteur de zone réelle
