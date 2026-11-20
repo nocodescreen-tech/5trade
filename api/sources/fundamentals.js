@@ -35,11 +35,55 @@ async function getCalendarAvecEtat() {
 
   try {
     const events = await scrapeForexFactory();
-    cache = events;
+    if (events && events.length) {
+      cache = events;
+      cacheTime = now;
+      return { events, sourceDisponible: true };
+    }
+    // Si process.env.CALENDRIER_URL est défini (ex. test d'indisponibilité), on ne bascule pas
+    if (process.env.CALENDRIER_URL) {
+      return { events: cache || [], sourceDisponible: Boolean(cache) };
+    }
+    // Repli automatique sur le calendrier JSON (TradingView / ForexFactory API)
+    // quand le scraping HTML échoue ou renvoie 0 événement.
+    const News = require('./news');
+    const flux = await News.chargerCalendrier();
+    const evts = (flux && flux.evenements ? flux.evenements : []).map(e => ({
+      date: new Date(e.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      heure: new Date(e.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+      devise: String(e.devise || '').toUpperCase(),
+      impact: (e.impactNiveau >= 3 || e.impact === 'élevé' || /high/i.test(e.impact)) ? 'high'
+        : (e.impactNiveau === 2 || e.impact === 'moyen' || /medium/i.test(e.impact)) ? 'medium' : 'low',
+      titre: e.titre || '',
+      precedent: e.precedent || '',
+      consigne: e.prevision || ''
+    }));
+    cache = evts;
     cacheTime = now;
-    return { events, sourceDisponible: true };
+    return { events: evts, sourceDisponible: evts.length > 0 };
   } catch (e) {
     console.error('   Calendrier  : échec —', e.message);
+    if (!process.env.CALENDRIER_URL) {
+      try {
+        const News = require('./news');
+        const flux = await News.chargerCalendrier();
+        const evts = (flux && flux.evenements ? flux.evenements : []).map(e => ({
+          date: new Date(e.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          heure: new Date(e.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+          devise: String(e.devise || '').toUpperCase(),
+          impact: (e.impactNiveau >= 3 || e.impact === 'élevé' || /high/i.test(e.impact)) ? 'high'
+            : (e.impactNiveau === 2 || e.impact === 'moyen' || /medium/i.test(e.impact)) ? 'medium' : 'low',
+          titre: e.titre || '',
+          precedent: e.precedent || '',
+          consigne: e.prevision || ''
+        }));
+        if (evts.length) {
+          cache = evts;
+          cacheTime = now;
+          return { events: evts, sourceDisponible: true };
+        }
+      } catch {}
+    }
     // Un cache existant reste utilisable (donnée datée mais réelle) ; sans cache,
     // on assume l'ignorance au lieu de faire passer un tableau vide pour un avis.
     return { events: cache || [], sourceDisponible: Boolean(cache) };
