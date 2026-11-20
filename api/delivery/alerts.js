@@ -330,6 +330,37 @@ function messageTelegram(v, m, qualite = {}) {
   const risque = entree !== null && stop !== null ? Math.abs(entree - stop) : null;
   const enR = cible => (risque && cible !== null ? ` (${((Math.abs(cible - entree)) / risque).toFixed(2)} R)` : '');
 
+  // Dimensionnement dynamique du lot selon capital et risque réel configuré
+  let lotTexte = null;
+  try {
+    const Risque = require('../risk/risque');
+    const cfgRisque = Risque.charger();
+    const capital = cfgRisque.capital || 1000;
+    const risquePct = cfgRisque.risquePct || 1;
+    const montantRisque = (capital * risquePct) / 100;
+    if (risque && risque > 0) {
+      let tickVal = 1;
+      let tickTaille = 0.01;
+      const s = String(m.symbol || '').toUpperCase();
+      if (s.includes('XAU') || s.includes('GOLD')) {
+        tickVal = 10;
+        tickTaille = 0.1;
+      } else if (s.includes('BTC') || s.includes('CRY')) {
+        tickVal = 1;
+        tickTaille = 1;
+      } else if (s.includes('JPY')) {
+        tickVal = 1000;
+        tickTaille = 0.01;
+      } else if (s.startsWith('FRX') || s.includes('EUR') || s.includes('GBP')) {
+        tickVal = 100000;
+        tickTaille = 0.0001;
+      }
+      const distanceTicks = Math.max(1, risque / tickTaille);
+      const lotsEstimes = Math.max(0.01, Math.min(50, Number((montantRisque / (distanceTicks * (tickVal * tickTaille))).toFixed(2))));
+      lotTexte = `Taille conseillée : <b>${lotsEstimes} lot(s)</b> (risque ${risquePct}% = $${montantRisque.toFixed(1)} sur $${capital})`;
+    }
+  } catch { /* si indisponible on omet */ }
+
   const lignes = [
     `<b>${sens} confirmé — ${m.symbol} ${m.tf}</b>${pct}`,
     '',
@@ -338,6 +369,7 @@ function messageTelegram(v, m, qualite = {}) {
       : 'Invalidation : <b>non chiffrée</b>',
     tp1 !== null ? `Objectif 1 : <b>${prixTxt(tp1)}</b>${enR(tp1)}` : null,
     tp2 !== null ? `Objectif 2 : <b>${prixTxt(tp2)}</b>${enR(tp2)}` : null,
+    lotTexte,
     Number.isFinite(qualite.rr) ? `Gain/risque : ${qualite.rr.toFixed(2)} pour 1` : null,
     nbRegles ? `Règles : ${(v.rules || []).map(r => r.name).filter(Boolean).join(' + ') || nbRegles + ' confirmée(s)'}` : null,
     qualite.confluence
