@@ -4424,10 +4424,14 @@ async function executerBacktest(src = {}) {
     const rf = Backtest.lancerFidele(candles, { symbol, timeframe: tf }, {
       moteur: { profils: options.profils || [] },
       pas,
-      decision: { exigerAlignement: false }
+      decision: {
+        exigerAlignement: src.exigerAlignement === true || src.exigerAlignement === 'true',
+        verificateurRisque: verificateurRisqueCompte
+      }
     });
     r = {
       fidele: true,
+      mode: 'rejeu_fidele',
       trades: rf.trades || [],
       total: (rf.trades || []).length,
       gagnants: ((rf.stats && rf.stats.nbGagnants) || 0),

@@ -751,7 +751,12 @@ function decider(candles, meta, options = {}) {
     // Ceux qui ont passé les SIX niveaux, avec leur statut final. C'est cette
     // liste, et elle seule, que le journal et le flux doivent consommer : la
     // liste brute contient des signaux « confirme » d'avant les filtres.
-    signauxRetenus: (arbitrage.signauxRetenus || []).map(x => ({ ...x, statusFinal: x.status })),
+    // L'autorisation d'exécution sur chaque signal retenu dépend strictement du risque.
+    signauxRetenus: (arbitrage.signauxRetenus || []).map(x => ({
+      ...x,
+      statusFinal: x.status,
+      executable: (arbitrage.decision === 'ACHAT' || arbitrage.decision === 'VENTE') && (risque.ok === true || options.sansRisqueCompte === true)
+    })),
     idsRetenus: (arbitrage.signauxRetenus || []).map(x => x.id || x.nom),
     synthese: {
       ...multi.synthese,
