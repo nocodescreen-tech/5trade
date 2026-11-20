@@ -8,8 +8,6 @@ PROMPT='Analyse technique BTC/USD H1. Reponds UNIQUEMENT un JSON: {"biais":"haus
 MODELS="
 deepseek-ai/deepseek-v4.1-flash
 z-ai/glm-5.3-flash
-openai/gpt-oss-20b
-minimaxai/minimax-m3.1-flash
 meta/muse-glimmer-30b
 mistralai/mistral-large-4-1t-a52b
 mistralai/mistral-large-2-instruct
