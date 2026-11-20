@@ -52,13 +52,26 @@ function valide(plan, sens) {
  * Le stop se place derrière l'extrême qui vient d'être balayé (plus une marge de
  * 0,2 ATR pour ne pas être sorti par un simple spread élargi).
  */
-function planBalayage(candles, sens) {
+function planBalayage(candles, sens, options = {}) {
   const a = atr(candles);
   const last = candles[candles.length - 1];
   if (!a || !last) return null;
+
+  // Si l'appelant fournit le niveau précis de sweep ou la mèche de balayage, on l'utilise directement
+  const extremeBalaye = Number.isFinite(options.niveauSweep)
+    ? options.niveauSweep
+    : Number.isFinite(options.extreme)
+      ? options.extreme
+      : null;
+
   const fenetre = candles.slice(-20);
-  const plusBas = Math.min(...fenetre.map(c => c.l));
-  const plusHaut = Math.max(...fenetre.map(c => c.h));
+  const plusBas = extremeBalaye !== null && sens === 'BUY'
+    ? Math.min(extremeBalaye, ...candles.slice(-5).map(c => c.l))
+    : Math.min(...fenetre.map(c => c.l));
+  const plusHaut = extremeBalaye !== null && sens === 'SELL'
+    ? Math.max(extremeBalaye, ...candles.slice(-5).map(c => c.h))
+    : Math.max(...fenetre.map(c => c.h));
+
   const entree = last.c;
   if (sens === 'BUY') {
     const stop = plusBas - 0.2 * a;
@@ -88,16 +101,24 @@ function planDeplacement(candles, sens) {
     objectifs: [arrondi(cible, entree)] }, sens);
 }
 
-/** Zone : entrée au contact, stop au-delà de la zone calibré sur sa hauteur réelle. */
+/** Zone : entrée au contact réel de la zone (ou retest), stop au-delà calibré sur sa hauteur réelle. */
 function planZone(candles, sens, zone) {
   const a = atr(candles);
   const last = candles[candles.length - 1];
   if (!a || !last) return null;
-  const entree = last.c;
+
   // Zone fournie par l'appelant (bord bas et haut) sinon on prend la bougie.
   const bordBas = Number.isFinite(zone && zone.bas) ? zone.bas : last.l;
   const bordHaut = Number.isFinite(zone && zone.haut) ? zone.haut : last.h;
   const hauteur = Math.max(bordHaut - bordBas, 0.3 * a);
+
+  // Entrée au contact de la zone (haut de zone pour un BUY en pullback, bas pour SELL)
+  // ou prix actuel si déjà à l'intérieur.
+  const entreeContact = sens === 'BUY'
+    ? (last.c >= bordBas && last.c <= bordHaut ? last.c : bordHaut)
+    : (last.c >= bordBas && last.c <= bordHaut ? last.c : bordBas);
+  const entree = Number.isFinite(entreeContact) ? entreeContact : last.c;
+
   // Le stop et l'objectif utilisent explicitement la hauteur de zone réelle
   const marge = Math.min(0.2 * a, hauteur * 0.25);
   const stop = sens === 'BUY' ? bordBas - marge : bordHaut + marge;
