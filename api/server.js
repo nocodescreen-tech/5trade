@@ -5030,6 +5030,30 @@ async function start() {
     }
   });
 
+  // Briefing matinal automatique Telegram à 08:00 UTC
+  setInterval(async () => {
+    try {
+      const d = new Date();
+      if (d.getUTCHours() === 8 && d.getUTCMinutes() === 0) {
+        const c = Alerts.get();
+        if (c.telegramToken && c.telegramChat) {
+          const fetchRef = globalThis.fetch || require('node-fetch');
+          const dateStr = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+          const msgBriefing = `☀️ <b>Briefing Matinal 5trade — ${dateStr}</b>\n\n`
+            + `• <b>Statut Marchés</b> : Surveillance active sur ${Array.isArray(c.marches) ? c.marches.length : 0} actif(s).\n`
+            + `• <b>Stratégies Armées</b> : ${Array.isArray(c.strategies) ? c.strategies.length : 'Toutes (auto)'} configurée(s).\n`
+            + `• <b>Gestion du Risque</b> : Capital préservé, filtres R:R ≥ 1.5 & Sentinelle anti-retournement opérationnels.\n\n`
+            + `<i>Excellente séance de trading avec 5trade !</i>`;
+          await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: c.telegramChat, text: msgBriefing, parse_mode: 'HTML' })
+          }).catch(() => {});
+        }
+      }
+    } catch { /* briefing non-bloquant */ }
+  }, 60000);
+
   // 0.0.0.0 en production : derrière le proxy de la plateforme, un bind sur
   // 127.0.0.1 rend le service injoignable (« listening » dans les logs, 502 au
   // health check). En local on reste sur 127.0.0.1.

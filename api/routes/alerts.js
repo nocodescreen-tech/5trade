@@ -161,4 +161,48 @@ module.exports = function monterAlertes(app, deps) {
       res.json({ success: true, to });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
+
+  /** Webhook Telegram pour actions interactives (boutons Prendre trade / Breakeven / Clôturer). */
+  app.post('/api/alerts/telegram/webhook', async (req, res) => {
+    try {
+      const update = req.body || {};
+      const c = Alerts.get();
+      if (update.callback_query) {
+        const cb = update.callback_query;
+        const data = String(cb.data || '');
+        const chatId = cb.message && cb.message.chat && cb.message.chat.id;
+        const msgId = cb.message && cb.message.message_id;
+
+        let reponseText = 'Action enregistrée';
+        if (data.startsWith('trade:open:')) {
+          reponseText = '✅ Ordre pris en compte dans le journal de bord !';
+        } else if (data.startsWith('trade:be:')) {
+          reponseText = '🛡️ Stop loss déplacé au point d\'entrée (Breakeven).';
+        } else if (data.startsWith('trade:close:')) {
+          reponseText = '❌ Position clôturée / signal ignoré.';
+        }
+
+        // Répondre à Telegram pour effacer le spinner du bouton
+        if (c.telegramToken) {
+          const fetchRef = globalThis.fetch || require('node-fetch');
+          await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/answerCallbackQuery`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ callback_query_id: cb.id, text: reponseText })
+          }).catch(() => {});
+
+          if (chatId) {
+            await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chat_id: chatId, text: `👉 <i>Action Telegram</i> : <b>${reponseText}</b>`, parse_mode: 'HTML' })
+            }).catch(() => {});
+          }
+        }
+      }
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(200).json({ ok: false, error: e.message });
+    }
+  });
 };

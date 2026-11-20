@@ -405,11 +405,25 @@ function messageTelegram(v, m, qualite = {}) {
 async function envoyerTelegram(c, v, m, qualite = {}) {
   const texte = messageTelegram(v, m, qualite);
 
+  // Boutons interactifs sous le message Telegram
+  const sigId = [m.symbol, v.direction, v.at || Date.now()].join(':').slice(0, 48);
+  const reply_markup = {
+    inline_keyboard: [
+      [
+        { text: '✅ Prendre le Trade', callback_data: `trade:open:${sigId}` },
+        { text: '🛡️ Breakeven', callback_data: `trade:be:${sigId}` }
+      ],
+      [
+        { text: '❌ Ignorer / Clôturer', callback_data: `trade:close:${sigId}` }
+      ]
+    ]
+  };
+
   const r = await fetchAvecReprise(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: c.telegramChat, text: texte, parse_mode: 'HTML',
-      disable_web_page_preview: true })
+      disable_web_page_preview: true, reply_markup })
   });
   if (!r.ok) {
     const corps = await r.text().catch(() => '');
