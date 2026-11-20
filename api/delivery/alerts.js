@@ -405,16 +405,20 @@ function messageTelegram(v, m, qualite = {}) {
 async function envoyerTelegram(c, v, m, qualite = {}) {
   const texte = messageTelegram(v, m, qualite);
 
-  // Boutons interactifs sous le message Telegram
+  // Boutons interactifs optimisés sous le message Telegram
   const sigId = [m.symbol, v.direction, v.at || Date.now()].join(':').slice(0, 48);
   const reply_markup = {
     inline_keyboard: [
       [
-        { text: '✅ Prendre le Trade', callback_data: `trade:open:${sigId}` },
-        { text: '🛡️ Breakeven', callback_data: `trade:be:${sigId}` }
+        { text: '⚡ Exécuter Ordre', callback_data: `trade:open:${sigId}` },
+        { text: '🛡️ Stop Breakeven', callback_data: `trade:be:${sigId}` }
       ],
       [
-        { text: '❌ Ignorer / Clôturer', callback_data: `trade:close:${sigId}` }
+        { text: '🎯 Sécuriser 50% (TP1)', callback_data: `trade:tp1:${sigId}` },
+        { text: '❌ Clôturer Position', callback_data: `trade:close:${sigId}` }
+      ],
+      [
+        { text: '📊 État du Compte & Risque', callback_data: 'account:status' }
       ]
     ]
   };

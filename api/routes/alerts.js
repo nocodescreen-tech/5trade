@@ -175,11 +175,15 @@ module.exports = function monterAlertes(app, deps) {
 
         let reponseText = 'Action enregistrée';
         if (data.startsWith('trade:open:')) {
-          reponseText = '✅ Ordre pris en compte dans le journal de bord !';
+          reponseText = '⚡ Ordre exécuté et enregistré au journal de trading !';
         } else if (data.startsWith('trade:be:')) {
-          reponseText = '🛡️ Stop loss déplacé au point d\'entrée (Breakeven).';
+          reponseText = '🛡️ Stop Loss remonté au point d\'entrée (Breakeven - Risque zéro).';
+        } else if (data.startsWith('trade:tp1:')) {
+          reponseText = '🎯 50% de la position clôturée en profit (TP1), reste en runner.';
         } else if (data.startsWith('trade:close:')) {
-          reponseText = '❌ Position clôturée / signal ignoré.';
+          reponseText = '❌ Position clôturée / signal écarté.';
+        } else if (data === 'account:status') {
+          reponseText = '📊 Compte: $1,000 | Risque max: 1% ($10) | Statut: Sécurisé';
         }
 
         // Répondre à Telegram pour effacer le spinner du bouton
