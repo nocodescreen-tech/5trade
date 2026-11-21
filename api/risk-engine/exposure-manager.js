@@ -114,11 +114,13 @@ function verifier(p = {}) {
     + (nouvelle && nombre(nouvelle.risqueMontant) === null ? 1 : 0);
   if (sansRisque > 0) {
     mesures.positionsRisqueInconnu = sansRisque;
+    mesures.risqueOuvertPct = null;
+    mesures.risqueCumulePct = null;
     bloquants.push(`${sansRisque} position(s) sans risque chiffré : calcul de risque impossible`);
-    avertissements.push(`${sansRisque} position(s) sans risque chiffré : le risque cumulé les ignore`);
+    avertissements.push(`${sansRisque} position(s) sans risque chiffré : risque cumulé non mesurable`);
   }
 
-  if (mesures.risqueCumulePct > limites.risqueCumulePct) {
+  if (mesures.risqueCumulePct !== null && mesures.risqueCumulePct > limites.risqueCumulePct) {
     bloquants.push(`risque cumulé ${mesures.risqueCumulePct} % > plafond ${limites.risqueCumulePct} %`);
   }
   if (mesures.positions > limites.positionsMax) {
