@@ -72,22 +72,25 @@ const NVIDIA_TIMEOUT_MS = Number(process.env.NVIDIA_TIMEOUT_MS || 45000);
 // modèle lent mais fiable a droit à plus de temps. Sans cela, un seul délai
 // global condamne soit les rapides (trop court), soit les lents (trop long).
 const DELAIS_NVIDIA = {
-  // Mesurés : 3,2 s et 9,2 s. On laisse ~3× la marge, et la somme des deux
-  // délais (12 + 18) tient dans l'échéance globale de 30 s.
-  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning': 12000,
-  'nvidia/nemotron-3.5-lightning-30b-a3b': 18000,
-  // Hors cascade par défaut : joignables si on les réclame explicitement.
-  'nvidia/nemotron-3-ultra-550b-a55b': 90000,
+  // Mesurés : 2,5 s (nano-omni-30b) et 5,8 s (lightning-30b). On laisse une marge
+  // adaptée et raisonnable pour ne jamais bloquer la cascade.
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning': 15000,
+  'nvidia/nemotron-3.5-lightning-30b-a3b': 20000,
+  'nvidia/nemotron-3.5-super-vl-120b-a12b': 25000,
+  'nvidia/nemotron-3-ultra-550b-a55b': 30000,
   'mistralai/mistral-large-4-1t-a52b': 20000
 };
 // Échéance GLOBALE : au-delà, on arrête d'attendre et l'appelant reçoit une
 // erreur — la route d'analyse bascule alors sur le plan calculé par le moteur.
 // Sans ce plafond, quatre modèles à 45 s font une requête de trois minutes.
-const NVIDIA_BUDGET_TOTAL_MS = Number(process.env.NVIDIA_BUDGET_TOTAL_MS || 30000);
+const NVIDIA_BUDGET_TOTAL_MS = Number(process.env.NVIDIA_BUDGET_TOTAL_MS || 50000);
 
-function delaiPour(modele) {
-  if (process.env.NVIDIA_TIMEOUT_MS) return Number(process.env.NVIDIA_TIMEOUT_MS);
-  return DELAIS_NVIDIA[modele] || NVIDIA_TIMEOUT_MS;
+function delaiPour(modele, restant) {
+  const base = DELAIS_NVIDIA[modele] || Number(process.env.NVIDIA_TIMEOUT_MS || 15000);
+  if (restant && Number.isFinite(restant)) {
+    return Math.max(3000, Math.min(base, restant - 2000));
+  }
+  return base;
 }
 
 // ─── Budget IA : moins de tokens, et pas deux fois le même appel ───
@@ -719,7 +722,7 @@ function appendHistory(entry) {
 // DeepSeek a été retiré du chemin d'analyse : il n'y a plus d'appel payant.
 // Le nettoyage JSON vit dans json-ia.js.
 
-async function appelNvidia(modele, messages, { maxTokens = 2000, json = false } = {}) {
+async function appelNvidia(modele, messages, { maxTokens = 2000, json = false, timeoutMs } = {}) {
   const key = process.env.NVIDIA_API_KEY;
   if (!key) {
     const e = new Error('NVIDIA_API_KEY non configurée dans .env');
@@ -755,9 +758,9 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false } 
   // Budget de tokens : ces modèles RAISONNENT avant d'écrire. Avec un budget
   // juste, le raisonnement mange tout et `content` revient vide avec
   // finish=length (mesuré sur les 4 modèles de la cascade). On donne une marge
-  // large — l'appel est gratuit — et on REJOUE une fois avec trois fois plus
+  // adaptée — l'appel est gratuit — et on REJOUE une fois avec trois fois plus
   // si le budget a malgré tout été épuisé.
-  const budget = () => maxTokens + Number(process.env.NVIDIA_MARGE_TOKENS || 6000);
+  const budget = () => maxTokens + Number(process.env.NVIDIA_MARGE_TOKENS || 2000);
 
   async function envoyer(tokens) {
     const res = await fetch(NVIDIA_URL, {
@@ -772,7 +775,7 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false } 
         max_tokens: tokens,
         temperature: 0.3
       }),
-      signal: AbortSignal.timeout(delaiPour(modele))
+      signal: AbortSignal.timeout(delaiPour(modele, timeoutMs))
     });
 
     const brut = await res.text();
@@ -788,7 +791,7 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false } 
   let data = await envoyer(budget());
   let choix = (data.choices || [])[0] || {};
   let msg = choix.message || {};
-  let contenu = msg.content;
+  let contenu = msg.content || msg.reasoning_content;
 
   if ((!contenu || !String(contenu).trim()) && choix.finish_reason === 'length') {
     const elargi = budget() * 3;
@@ -796,7 +799,7 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false } 
     data = await envoyer(elargi);
     choix = (data.choices || [])[0] || {};
     msg = choix.message || {};
-    contenu = msg.content;
+    contenu = msg.content || msg.reasoning_content;
   }
 
   if (!contenu || !String(contenu).trim()) {
@@ -835,7 +838,7 @@ async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'i
       break;
     }
     try {
-      const r = await appelNvidia(modele, messages, { maxTokens, json });
+      const r = await appelNvidia(modele, messages, { maxTokens, json, timeoutMs: restant });
       try {
         Couts.enregistrer({
           route,
