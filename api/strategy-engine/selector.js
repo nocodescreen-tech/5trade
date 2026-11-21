@@ -114,9 +114,11 @@ function selectionner({ candles, meta, strategies, regime = null, max = 3 } = {}
     if (nonDeclare) motif += ' · marché non déclaré par la fiche';
 
     // Rôle réel du régime : si la stratégie déclare un ou plusieurs régimes et que
-    // le marché a un régime détecté, un alignement donne un bonus (+25%), une inadéquation
-    // divise le score par 2.
+    // le marché a un régime détecté, un alignement donne un bonus (+25%).
+    // Si la stratégie déclare des régimes et que le régime actuel est clairement discordant,
+    // la stratégie est jugée incompatible avec le marché actuel et ne peut pas être retenue.
     let multiplicateurRegime = 1.0;
+    let regimeIncompatible = false;
     if (regime && profil && Array.isArray(profil.regimes) && profil.regimes.length) {
       const regimeNormalise = String(regime).toLowerCase();
       const correspond = profil.regimes.some(r => String(r).toLowerCase() === regimeNormalise);
@@ -125,19 +127,21 @@ function selectionner({ candles, meta, strategies, regime = null, max = 3 } = {}
         motif += ` · adapté au régime ${regime}`;
       } else {
         multiplicateurRegime = 0.5;
-        motif += ` · régime discordant (${regime} vs ${profil.regimes.join(',')})`;
+        regimeIncompatible = true;
+        motif += ` · régime incompatible (${regime} vs ${profil.regimes.join(',')})`;
       }
     }
 
     const score = +(force * (POIDS[statut] !== undefined ? POIDS[statut] : 0) * multiplicateurRegime).toFixed(3);
     return {
       ...base,
-      compatible: declare,
+      compatible: declare && !regimeIncompatible,
       marcheNonDeclare: nonDeclare,
+      regimeIncompatible,
       statut, direction: (verdict && verdict.direction) || null,
       force: +force.toFixed(3), score,
       reglesActives, seuilRegles: profil.seuilRegles || null,
-      retenue: statut === 'confirme' && declare,
+      retenue: statut === 'confirme' && declare && !regimeIncompatible,
       motif
     };
   });

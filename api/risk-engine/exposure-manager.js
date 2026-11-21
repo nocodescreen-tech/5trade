@@ -10,10 +10,14 @@
  */
 
 // `Number(null)` vaut 0 : un risque ABSENT était donc lu comme un risque NUL.
-// C'est la racine du bug « position sans risque comptée comme 0 » — la corriger
-// ici vaut mieux que rustiner chaque appelant.
-const nombre = v => (v === null || v === undefined || v === '' ? null
-  : (Number.isFinite(Number(v)) ? Number(v) : null));
+// De plus, un risque STRICTEMENT NÉGATIF est une anomalie mathématique dangereuse
+// qui réduirait le risque cumulé : il doit être rejeté (retourne null).
+const nombre = v => {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+};
 
 const LIMITES = {
   risqueCumulePct: 6,        // risque total simultané, en % du capital
