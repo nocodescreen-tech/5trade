@@ -29,8 +29,9 @@ const POIDS = { confirme: 1, surveiller: 0.5, rejete: 0, inconnu: 0 };
  * @param {Array} p.strategies fiches brutes (documents)
  * @param {string} [p.regime] régime de marché détecté, s'il est connu
  * @param {number} [p.max]    nombre de candidates retenues (défaut 3)
+ * @param {object} [p.performances] statistiques réelles hors échantillon par stratégie (journal/stats)
  */
-function selectionner({ candles, meta, strategies, regime = null, max = 3 } = {}) {
+function selectionner({ candles, meta, strategies, regime = null, max = 3, performances = null } = {}) {
   const fiches = Array.isArray(strategies) ? strategies : [];
   const symbole = (meta && meta.symbol) || null;
   if (!fiches.length) {
@@ -132,7 +133,30 @@ function selectionner({ candles, meta, strategies, regime = null, max = 3 } = {}
       }
     }
 
-    const score = +(force * (POIDS[statut] !== undefined ? POIDS[statut] : 0) * multiplicateurRegime).toFixed(3);
+    // Apprentissage adaptatif basé sur les performances réelles hors échantillon (journal / stats).
+    // Règle de prudence statistique : AUCUNE adaptation si le nombre de trades réels fermés
+    // est inférieur à 15 (seuil de significativité minimale pour éviter le surapprentissage).
+    let multiplicateurPerformance = 1.0;
+    const statsStrat = performances && (performances[doc.id] || performances[doc.name] || performances[doc.title]);
+    if (statsStrat && Number.isFinite(statsStrat.total)) {
+      const SEUIL_MIN_TRADES = 15;
+      if (statsStrat.total < SEUIL_MIN_TRADES) {
+        motif += ` · données réelles insuffisantes pour adaptation (${statsStrat.total}/${SEUIL_MIN_TRADES} trades)`;
+      } else {
+        const esp = statsStrat.total > 0 ? ((Number(statsStrat.r) || 0) / statsStrat.total) : 0;
+        if (esp >= 0.15) {
+          multiplicateurPerformance = 1.20;
+          motif += ` · performance validée hors échantillon (+${esp.toFixed(2)} R/trade sur ${statsStrat.total} prises)`;
+        } else if (esp < -0.10) {
+          multiplicateurPerformance = 0.50;
+          motif += ` · performance défavorable sur historique (${esp.toFixed(2)} R/trade sur ${statsStrat.total} prises)`;
+        } else {
+          motif += ` · performance neutre mesurée (${esp.toFixed(2)} R/trade)`;
+        }
+      }
+    }
+
+    const score = +(force * (POIDS[statut] !== undefined ? POIDS[statut] : 0) * multiplicateurRegime * multiplicateurPerformance).toFixed(3);
     return {
       ...base,
       compatible: declare && !regimeIncompatible,

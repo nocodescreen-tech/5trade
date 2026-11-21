@@ -391,7 +391,10 @@ function resumer(trades, meta = {}) {
     // mesurer une courbe de capital sur les 200 trades les plus récents ne dit
     // rien de la période. `limiteTrades` (défaut 200) lève le plafond.
     trades: trades.slice().sort((a, b) => b.at - a.at)
-      .slice(0, Math.max(1, Math.round(Number(meta.limiteTrades) || 200)))
+      .slice(0, Math.max(1, Math.round(Number(meta.limiteTrades) || 200))),
+    fidele: false,
+    mode: 'exploratoire',
+    avertissement: "Simulation exploratoire (détecteur simplifié sans validation MTF ni moteur de décision complet). Pour un résultat fidèle à la production, utiliser lancerFidele()."
   };
 }
 

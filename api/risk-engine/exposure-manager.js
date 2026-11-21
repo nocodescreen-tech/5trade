@@ -37,12 +37,57 @@ function rendements(closes) {
 }
 
 /**
- * Corrélation de Pearson entre deux séries de clôtures, sur la fenêtre commune.
+ * Synchronise deux séries temporelles par horodatage (time / t) avant calcul de corrélation.
+ * Évite d'aligner aveuglément des positions d'index dont les timestamps ne correspondent pas.
+ */
+function synchroniserSeries(serieA, serieB) {
+  if (!Array.isArray(serieA) || !Array.isArray(serieB)) return { a: [], b: [] };
+  const aObjets = serieA.some(x => x && typeof x === 'object' && (x.t !== undefined || x.time !== undefined));
+  const bObjets = serieB.some(x => x && typeof x === 'object' && (x.t !== undefined || x.time !== undefined));
+
+  if (aObjets || bObjets) {
+    const mapB = new Map();
+    for (const item of serieB) {
+      if (!item) continue;
+      const t = item.t !== undefined ? item.t : item.time;
+      const c = Number(item.c !== undefined ? item.c : item.close);
+      if (t !== undefined && Number.isFinite(c)) mapB.set(t, c);
+    }
+    const a = [], b = [];
+    for (const item of serieA) {
+      if (!item) continue;
+      const t = item.t !== undefined ? item.t : item.time;
+      const c = Number(item.c !== undefined ? item.c : item.close);
+      if (t !== undefined && Number.isFinite(c) && mapB.has(t)) {
+        a.push(c);
+        b.push(mapB.get(t));
+      }
+    }
+    return { a, b };
+  }
+
+  const val = x => {
+    if (x === null || x === undefined) return null;
+    if (typeof x === 'object') {
+      const v = x.c !== undefined ? x.c : x.close;
+      return Number.isFinite(Number(v)) ? Number(v) : null;
+    }
+    const n = Number(x);
+    return Number.isFinite(n) ? n : null;
+  };
+  const aPropre = serieA.map(val).filter(x => x !== null);
+  const bPropre = serieB.map(val).filter(x => x !== null);
+  return { a: aPropre, b: bPropre };
+}
+
+/**
+ * Corrélation de Pearson entre deux séries de clôtures, sur la fenêtre commune synchronisée.
  * @returns {number|null} null si le calcul n'a pas de sens (séries trop courtes)
  */
 function correlation(closesA, closesB) {
-  const a = rendements((closesA || []).filter(Number.isFinite));
-  const b = rendements((closesB || []).filter(Number.isFinite));
+  const sync = synchroniserSeries(closesA, closesB);
+  const a = rendements(sync.a);
+  const b = rendements(sync.b);
   const n = Math.min(a.length, b.length);
   if (n < 20) return null;
   const A = a.slice(-n), B = b.slice(-n);

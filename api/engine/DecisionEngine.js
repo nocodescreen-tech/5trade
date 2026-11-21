@@ -383,8 +383,15 @@ function niveauExecution(signaux, meta, options = {}) {
       const long = c.sens === 'long';
       if (long && stop >= entry) blocages.push('stop AU-DESSUS de l\'entrée (achat)');
       if (!long && stop <= entry) blocages.push('stop EN-DESSOUS de l\'entrée (vente)');
-      if (target1 && long && target1 <= entry) blocages.push('objectif 1 du mauvais côté (achat)');
-      if (target1 && !long && target1 >= entry) blocages.push('objectif 1 du mauvais côté (vente)');
+
+      // TP1 obligatoire pour toute exécution, indépendamment du seuil RR
+      if (!Number.isFinite(target1)) {
+        blocages.push('objectif 1 absent : exécution refusée sans cible');
+      } else {
+        if (long && target1 <= entry) blocages.push('objectif 1 du mauvais côté (achat)');
+        if (!long && target1 >= entry) blocages.push('objectif 1 du mauvais côté (vente)');
+      }
+
       if (target2 && long && target2 <= entry) blocages.push('objectif 2 du mauvais côté (achat)');
       if (target2 && !long && target2 >= entry) blocages.push('objectif 2 du mauvais côté (vente)');
       if (target1 && target2) {
@@ -399,12 +406,10 @@ function niveauExecution(signaux, meta, options = {}) {
       ? Math.abs(target1 - entry) / Math.abs(entry - stop)
       : null;
     const rr = rrCalcule;
-    if (rrMin > 0) {
-      if (rr === null || !Number.isFinite(rr)) {
-        blocages.push('RR indéterminable sur les niveaux normalisés : exécution refusée');
-      } else if (rr < rrMin) {
-        blocages.push(`RR ${rr.toFixed(2)} < ${rrMin} minimum`);
-      }
+    if (rr === null || !Number.isFinite(rr)) {
+      blocages.push('RR indéterminable sur les niveaux normalisés : exécution refusée');
+    } else if (rrMin > 0 && rr < rrMin) {
+      blocages.push(`RR ${rr.toFixed(2)} < ${rrMin} minimum`);
     }
 
     // 3. Frais de transaction (plafond de coût)
@@ -414,11 +419,11 @@ function niveauExecution(signaux, meta, options = {}) {
         blocages.push(`coût trop élevé : ${verdictFrais.raison} (part ${(verdictFrais.part * 100).toFixed(1)}% > ${(verdictFrais.partMax * 100).toFixed(1)}%)`);
         s.ecarteFrais = verdictFrais;
       }
-      // Coût JAMAIS renseigné : ce n'est pas « gratuit ». En mode strict, on
-      // refuse d'exécuter ce qu'on ne sait pas chiffrer ; sinon on l'écrit.
+      // Coût JAMAIS renseigné : ce n'est pas « gratuit ». En mode strict (ou imposé par l'environnement),
+      // on refuse d'exécuter ce qu'on ne sait pas chiffrer ; sinon on l'écrit.
       if (verdictFrais && verdictFrais.statut === 'COUT_INCONNU') {
         s.fraisNonVerifies = true;
-        if (options.verifierFrais === 'strict') {
+        if (options.verifierFrais === 'strict' || process.env.FRAIS_STRICT === '1') {
           blocages.push(`frais NON VÉRIFIÉS : ${verdictFrais.raison} — exécution refusée en mode strict`);
         }
       }

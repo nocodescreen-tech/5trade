@@ -7890,6 +7890,69 @@ function tinyPng(W = 64, H = 40) {
         !/Backtest\.lancerFidele\([^)]*verificateurRisque:\s*verifRisque/.test(srvCode),
         'aucune injection du journal présent dans lancerFidele');
     }
+
+    // — Sécurité d'exécution : TP1 strictement obligatoire même si rrMin = 0
+    {
+      const DE = require('./engine/DecisionEngine');
+      const sigSansTP1 = [{
+        id: 'strat_test', nom: 'Sans TP1', sens: 'long', force: 0.8,
+        status: 'confirme', confirme: true,
+        entree: 100, stop: 98, objectifs: [], levels: { entry: 100, stop: 98 }
+      }];
+      const ex = DE.niveauExecution(sigSansTP1, { symbol: 'TEST' }, { rrMin: 0, verifierFrais: false });
+      ok('exécution : un signal sans TP1 est rejeté même avec rrMin nul',
+        ex.ok === false && ex.executables === 0
+        && ex.details.some(d => d.blocages.some(b => /objectif 1 absent/.test(b))),
+        JSON.stringify(ex));
+    }
+
+    // — Corrélation temporelle : synchronisation stricte par timestamp
+    {
+      const Exp = require('./risk-engine/exposure-manager');
+      // Séries décalées dans le temps sans chevauchement : corrélation impossible
+      const s1 = Array.from({ length: 30 }, (_, i) => ({ t: 1000 + i * 10, c: 100 + i }));
+      const s2 = Array.from({ length: 30 }, (_, i) => ({ t: 5000 + i * 10, c: 100 + i }));
+      const cDecalee = Exp.correlation(s1, s2);
+      ok('corrélation : deux séries temporelles sans timestamps communs rendent null',
+        cDecalee === null, String(cDecalee));
+
+      // Séries parfaitement alignées dans le temps
+      const s3 = Array.from({ length: 30 }, (_, i) => ({ t: 1000 + i * 10, c: 200 + i * 2 }));
+      const cSynchro = Exp.correlation(s1, s3);
+      ok('corrélation : deux séries synchronisées sur timestamps calculent Pearson',
+        cSynchro === 1, String(cSynchro));
+    }
+
+    // — Apprentissage adaptatif : régulation statistique hors échantillon
+    {
+      const Sel = require('./strategy-engine/selector');
+      const candles = Array.from({ length: 50 }, (_, i) => ({
+        t: 1700000000000 + i * 60000, o: 100, h: 101, l: 99, c: 100.5, closed: true
+      }));
+      const fiches = [{
+        id: 'ict_test', name: 'ICT Test', version: '1.0.0', actif: true,
+        type: 'strategy', content: 'balayage et rupture de structure',
+        marches: ['forex'],
+        supportedMarkets: ['forex']
+      }];
+      // Échantillon < 15 trades : pas d'adaptation
+      const selPeu = Sel.selectionner({
+        candles, meta: { symbol: 'EURUSD', timeframe: '15m' }, strategies: fiches,
+        performances: { ict_test: { total: 5, r: 10 } }
+      });
+      ok('sélecteur adaptatif : refuse d\'adapter si échantillon < 15 trades',
+        selPeu.candidates[0] && /données réelles insuffisantes/.test(selPeu.candidates[0].motif),
+        selPeu.candidates[0] && selPeu.candidates[0].motif);
+
+      // Échantillon >= 15 trades avec espérance positive : bonus adaptatif
+      const selValide = Sel.selectionner({
+        candles, meta: { symbol: 'EURUSD', timeframe: '15m' }, strategies: fiches,
+        performances: { ict_test: { total: 20, r: 6 } }
+      });
+      ok('sélecteur adaptatif : valide et amplifie une performance prouvée sur historique',
+        selValide.candidates[0] && /performance validée hors échantillon/.test(selValide.candidates[0].motif),
+        selValide.candidates[0] && selValide.candidates[0].motif);
+    }
   }
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);

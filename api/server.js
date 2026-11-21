@@ -3820,8 +3820,23 @@ app.get('/api/decision', requireAuth, async (req, res) => {
     if (options.mode === 'auto') {
       try {
         const fiches = await loadAllStrategies();
+        let statsPerformances = null;
+        try {
+          const js = JournalSignaux.stats();
+          statsPerformances = js && js.parStrategie ? js.parStrategie : null;
+        } catch {}
+        let regDetecte = null;
+        try {
+          const Regime = require('./market-intelligence/regime-detector');
+          const det = Regime.detecter(closed);
+          if (det && det.regime && det.regime !== 'UNKNOWN') regDetecte = det.regime;
+        } catch {}
         selection = Selector.selectionner({
-          candles: closed, meta: { symbol, timeframe: tf }, strategies: fiches || []
+          candles: closed,
+          meta: { symbol, timeframe: tf },
+          strategies: fiches || [],
+          regime: regDetecte,
+          performances: statsPerformances
         });
         if (selection.retenues.length) {
           const retenues = (fiches || []).filter(d => selection.retenues.includes(d.id));
@@ -3886,8 +3901,9 @@ app.get('/api/decision', requireAuth, async (req, res) => {
       exigerAlignement: true,
       refuserDesaccord: true,
       refuserContreTendance: true,
-      // FRAIS_STRICT=1 : un coût inconnu devient un refus, pas une hypothèse.
-      verifierFrais: process.env.FRAIS_STRICT === '1' ? 'strict' : true,
+      // Mode strict par défaut sur les chemins de production (refus des frais inconnus),
+      // sauf si explicitement désactivé par FRAIS_STRICT=0.
+      verifierFrais: process.env.FRAIS_STRICT === '0' ? true : 'strict',
       verifierModele: true
     });
 
@@ -4163,8 +4179,9 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
           exigerAlignement: true,
           refuserDesaccord: true,
           refuserContreTendance: true,
-          // FRAIS_STRICT=1 : un coût inconnu devient un refus, pas une hypothèse.
-      verifierFrais: process.env.FRAIS_STRICT === '1' ? 'strict' : true,
+          // Mode strict par défaut sur les chemins de production (refus des frais inconnus),
+      // sauf si explicitement désactivé par FRAIS_STRICT=0.
+      verifierFrais: process.env.FRAIS_STRICT === '0' ? true : 'strict',
           verifierModele: true
         });
       } catch (e) { decision = null; }
@@ -4466,6 +4483,9 @@ async function executerBacktest(src = {}) {
       maxBougies: bougies,
       demandees: bougies
     });
+    r.fidele = false;
+    r.mode = 'exploratoire';
+    r.avertissement = "Résultats exploratoires (détection brute sans validation MTF ni moteur de décision complet). Pour un résultat fidèle à la production, utilisez le mode fidèle.";
   }
 
   const resultat = {

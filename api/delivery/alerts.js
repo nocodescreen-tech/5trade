@@ -716,7 +716,7 @@ async function verifierBrut(force = false) {
             exigerAlignement: c.exigerAlignement,
             refuserDesaccord: c.refuserDesaccord,
             refuserContreTendance: c.refuserContreTendance,
-            verifierFrais: true,
+            verifierFrais: process.env.FRAIS_STRICT === '0' ? true : 'strict',
             verifierModele: true,
             confluence: confluenceSurveillance,
             verificateurRisque,
