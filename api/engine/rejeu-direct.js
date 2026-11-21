@@ -54,11 +54,12 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
 
     // P0 : Vérification stricte d'exécutabilité et de risque sur le rejeu fidèle.
     // Un verdict ACHAT ou VENTE ne doit être rejoué QUE si le signal porte executable === true
-    // et que le risque a été formellement validé (ou validé par simulateur).
+    // ET que le risque a été formellement validé (ou simulation avec garde-fou simulé).
     const s = verdict && verdict.signal;
     const estExecutable = s && (s.executable === true || (verdict.signauxRetenus || []).some(x => x.executable === true));
     const risqueValide = verdict && verdict.risque && verdict.risque.ok === true;
-    const autorise = estExecutable || (opts && opts.sansRisqueCompte === true);
+    const modeSansRisque = opts && opts.sansRisqueCompte === true;
+    const autorise = estExecutable && (risqueValide || modeSansRisque);
 
     if (verdict && s && (verdict.decision === 'ACHAT' || verdict.decision === 'VENTE') && autorise) {
       const sig = {
@@ -110,9 +111,13 @@ function statistiques(trades) {
     n: trades.length,
     avecR: avecR.length,
     gagnants,
+    nbGagnants: gagnants,
+    nbPerdants: avecR.length - gagnants,
     tauxReussite: avecR.length ? +(100 * gagnants / avecR.length).toFixed(1) : null,
     rBrut: brut.length ? somme(brut, 'rBrut') : null,
     rNet: avecR.length ? somme(avecR, 'rNet') : null,
+    rTotal: avecR.length ? somme(avecR, 'rNet') : null,
+    esperance: avecR.length ? +(somme(avecR, 'rNet') / avecR.length).toFixed(3) : null,
     esperanceBrute: brut.length ? +(somme(brut, 'rBrut') / brut.length).toFixed(3) : null,
     esperanceNette: avecR.length ? +(somme(avecR, 'rNet') / avecR.length).toFixed(3) : null,
     coutTotalR: somme(avecR, 'coutR'),

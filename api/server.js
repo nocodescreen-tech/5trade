@@ -4429,17 +4429,18 @@ async function executerBacktest(src = {}) {
         verificateurRisque: verificateurRisqueCompte
       }
     });
+    const st = rf.stats || {};
     r = {
       fidele: true,
       mode: 'rejeu_fidele',
       trades: rf.trades || [],
       total: (rf.trades || []).length,
-      gagnants: ((rf.stats && rf.stats.nbGagnants) || 0),
-      perdants: ((rf.stats && rf.stats.nbPerdants) || 0),
-      winRate: (rf.stats && rf.stats.tauxReussite) || 0,
-      rTotal: (rf.stats && rf.stats.rTotal) || 0,
-      expectancy: (rf.stats && rf.stats.esperance) || 0,
-      stats: rf.stats || {},
+      gagnants: st.nbGagnants ?? st.gagnants ?? 0,
+      perdants: st.nbPerdants ?? (st.avecR ? st.avecR - (st.gagnants || 0) : 0),
+      winRate: st.tauxReussite ?? 0,
+      rTotal: st.rTotal ?? st.rNet ?? 0,
+      expectancy: st.esperance ?? st.esperanceNette ?? 0,
+      stats: st,
       courbeR: (rf.trades || []).map(t => Number(t.rNet || t.r || 0)),
       note: rf.note
     };
