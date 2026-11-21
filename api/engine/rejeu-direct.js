@@ -37,15 +37,46 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
   let n = 0;
 
   // SIMULATION HISTORIQUE STRICTE DU RISQUE & DU CAPITAL
-  // On ne lit pas l'état du journal présent : on reconstruit le capital
-  // et les positions ouvertes au fil de l'eau pour chaque pas historique.
+  // On ne lit pas l'état du journal présent : on reconstruit le capital,
+  // l'exposition cumulée et les positions ouvertes au fil de l'eau pour chaque pas historique.
   const Risque = require('../risk/risque');
   const cfgRisque = Risque.configuration();
-  let capitalHistorique = Number(reglages.initialCapital || opts.capital || cfgRisque.capital) || 1000;
+  const capitalDepart = Number(reglages.initialCapital || opts.capital || cfgRisque.capital) || 1000;
+  let capitalHistorique = capitalDepart;
   const risquePct = Number(reglages.riskPct || opts.risquePct || cfgRisque.risquePct) || 1;
+  const plafondRisquePct = Number(reglages.plafondRisquePct || cfgRisque.plafondRisquePct || 6);
+  const maxPositionsSimultanees = Number(reglages.maxPositions || cfgRisque.positionsMax || 3);
+
+  let positionsActives = []; // { id, symbol, sens, risquePct, montantRisque, clotureAt, evalue }
+  let expositionMaxPct = 0;
+  let positionsMaxSimultanees = 0;
+  let peakCapital = capitalDepart;
+  let maxDrawdownPct = 0;
 
   while (i < serie.length - 1 && n < maxEtapes) {
     n++;
+    const tempsActuel = serie[i].t;
+
+    // Dénouement au fil de l'eau des positions arrivées à terme avant ou à tempsActuel
+    const encoreOuvertes = [];
+    for (const pos of positionsActives) {
+      if (pos.clotureAt <= tempsActuel) {
+        const pnlMontant = (Number(pos.evalue.r) || 0) * pos.montantRisque;
+        capitalHistorique = Math.max(0, +(capitalHistorique + pnlMontant).toFixed(2));
+        if (capitalHistorique > peakCapital) peakCapital = capitalHistorique;
+        const dd = peakCapital > 0 ? ((peakCapital - capitalHistorique) / peakCapital) * 100 : 0;
+        if (dd > maxDrawdownPct) maxDrawdownPct = +dd.toFixed(2);
+      } else {
+        encoreOuvertes.push(pos);
+      }
+    }
+    positionsActives = encoreOuvertes;
+
+    // Calcul de l'exposition cumulée en cours
+    const risqueCumuleOuvert = positionsActives.reduce((s, p) => s + p.risquePct, 0);
+    if (risqueCumuleOuvert > expositionMaxPct) expositionMaxPct = +risqueCumuleOuvert.toFixed(2);
+    if (positionsActives.length > positionsMaxSimultanees) positionsMaxSimultanees = positionsActives.length;
+
     const fen = serie.slice(Math.max(0, i - fenetre + 1), i + 1);
 
     // Vérificateur de risque dynamique recalculé sur l'état HISTORIQUE exact à l'instant t
@@ -60,6 +91,17 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
         }
         if (capitalHistorique <= 0) {
           return { ok: false, refus: ['capital historique épuisé (drawdown maximal)'] };
+        }
+        if (positionsActives.length >= maxPositionsSimultanees) {
+          return { ok: false, refus: [`nombre maximal de positions simultanées atteint (${maxPositionsSimultanees})`] };
+        }
+        if ((risqueCumuleOuvert + risquePct) > plafondRisquePct) {
+          return { ok: false, refus: [`plafond d'exposition du portefeuille dépassé (${(risqueCumuleOuvert + risquePct).toFixed(1)}% > ${plafondRisquePct}%)`] };
+        }
+        // Pas de cumul non maîtrisé sur le même marché
+        const memeMarche = positionsActives.filter(p => p.symbol === meta.symbol);
+        if (memeMarche.length > 0) {
+          return { ok: false, refus: [`position déjà active sur ${meta.symbol} : cumul non autorisé`] };
         }
         return { ok: true, taille: +(montantRisqueTrade / dist).toFixed(2), montant: montantRisqueTrade };
       };
@@ -103,8 +145,24 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
       // La sortie est évaluée par la MÊME fonction que le suivi réel : pas de
       // second simulateur, donc pas de seconde vérité.
       const evalue = JournalSignaux.evaluer(sig, serie);
+      const bougiesSuivies = Math.max(1, Number(evalue.bougiesSuivies) || 1);
+      const idxCloture = Math.min(serie.length - 1, i + bougiesSuivies);
+      const clotureAt = serie[idxCloture].t;
+      const montantRisqueTrade = (capitalHistorique * risquePct) / 100;
+
+      positionsActives.push({
+        id: sig.id,
+        symbol: meta.symbol,
+        sens: sig.sens,
+        risquePct,
+        montantRisque: montantRisqueTrade,
+        clotureAt,
+        evalue
+      });
+
       trades.push({
         at: sig.at,
+        clotureAt,
         sens: sig.sens,
         entree: sig.entree,
         stop: sig.stop,
@@ -118,9 +176,12 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
         source: 'DecisionEngine.decider'
       });
 
-      // Mise à jour continue du capital historique après dénouement de la position
-      const pnlMontant = (Number(evalue.r) || 0) * ((capitalHistorique * risquePct) / 100);
+      // Mise à jour immédiate du capital historique pour la position
+      const pnlMontant = (Number(evalue.r) || 0) * montantRisqueTrade;
       capitalHistorique = Math.max(0, +(capitalHistorique + pnlMontant).toFixed(2));
+      if (capitalHistorique > peakCapital) peakCapital = capitalHistorique;
+      const dd = peakCapital > 0 ? ((peakCapital - capitalHistorique) / peakCapital) * 100 : 0;
+      if (dd > maxDrawdownPct) maxDrawdownPct = +dd.toFixed(2);
 
       // On avance après la sortie : le direct ne cumule pas deux positions sur
       // le même marché. Sans ce saut, un même mouvement produisait 10 trades.
@@ -130,7 +191,22 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
     i += pas;
   }
 
-  return { trades, etapes, stats: statistiques(trades) };
+  // Dénouement de toute position active restante au dernier cours
+  for (const pos of positionsActives) {
+    const pnlMontant = (Number(pos.evalue.r) || 0) * pos.montantRisque;
+    capitalHistorique = Math.max(0, +(capitalHistorique + pnlMontant).toFixed(2));
+  }
+
+  const baseStats = statistiques(trades);
+  const statsFinales = Object.assign(baseStats, {
+    capitalInitial: capitalDepart,
+    capitalFinal: capitalHistorique,
+    maxDrawdownPct,
+    expositionMaxPct,
+    positionsMaxSimultanees
+  });
+
+  return { trades, etapes, stats: statsFinales };
 }
 
 function statistiques(trades) {

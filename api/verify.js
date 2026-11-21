@@ -5066,6 +5066,9 @@ function tinyPng(W = 64, H = 40) {
         fidele.fidele === true && fidele.trades.length === 0
         && /DecisionEngine\.decider/.test(fidele.note || ''),
         `${fidele.etapes} étapes · ${fidele.trades.length} trade(s)`);
+      ok('le rejeu fidèle calcule les métriques de portefeuille et d\'exposition cumulée',
+        rejeuPlat.stats.capitalInitial === 1000 && Number.isFinite(rejeuPlat.stats.maxDrawdownPct)
+        && Number.isFinite(rejeuPlat.stats.expositionMaxPct));
     }
 
     // ── INVARIANT : toute route qui DÉCIDE fournit les deux garde-fous ────
@@ -6172,11 +6175,21 @@ function tinyPng(W = 64, H = 40) {
     ok('un trade dont les coûts mangent le gain est refusé',
       netKO.ok === false && /après coûts/.test(netKO.raison), netKO.raison);
 
+    // Distinction stricte entre valeur absente (null) et valeur nulle (0)
+    const sansCap = PS.dimensionner({ capital: null, risquePct: 1, entree: 100, stop: 99.5, instrument: specOK });
+    ok('un capital null ou absent est rejeté explicitement (pas converti en 0)',
+      sansCap.ok === false && /capital inconnu/.test(sansCap.raison), sansCap.raison);
+    const sansEntree = PS.dimensionner({ capital: 10000, risquePct: 1, entree: null, stop: 99.5, instrument: specOK });
+    ok('une entrée absente est rejetée sans conversion en 0',
+      sansEntree.ok === false && /entrée ou stop manquant/.test(sansEntree.raison), sansEntree.raison);
+
     const srvP2 = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
     ok('le dimensionnement est exposé par une route protégée',
       /app\.get\('\/api\/risk\/position', requireAuth/.test(srvP2));
     ok('les spécifications du contrat peuvent être renseignées',
       /app\.put\('\/api\/risk\/instruments\/:symbol', requireAuth/.test(srvP2));
+    ok('la limite upload multer est bornée à 15 Mo avec filtre d\'extensions',
+      /fileSize:\s*15\s*\*\s*1024\s*\*\s*1024/.test(srvP2) && /EXTENSIONS_UPLOAD_AUTORISEES/.test(srvP2));
   }
 
   // ── Performance : métriques honnêtes, hors échantillon ──

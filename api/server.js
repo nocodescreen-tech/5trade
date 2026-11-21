@@ -247,9 +247,18 @@ app.use(express.static(path.join(ROOT, 'frontend'), {
   }
 }));
 
+const EXTENSIONS_UPLOAD_AUTORISEES = new Set(['.pdf', '.docx', '.txt', '.md', '.png', '.jpg', '.jpeg', '.webp']);
+
 const upload = multer({
   dest: UPLOADS_DIR,
-  limits: { fileSize: 50 * 1024 * 1024 }
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15 Mo max (cohérent avec la limite globale de 12 Mo)
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    if (!EXTENSIONS_UPLOAD_AUTORISEES.has(ext)) {
+      return cb(new Error(`Format ${ext || 'inconnu'} refusé : seuls PDF, DOCX, TXT, MD, PNG, JPG, WEBP sont autorisés.`));
+    }
+    cb(null, true);
+  }
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -1572,6 +1581,7 @@ app.post('/api/upload-strategies', requireAuth, upload.array('documents'), async
             + (path.extname(file.originalname).toLowerCase() === '.docx'
               ? ' (pandoc est-il installé ?)' : '')
         });
+        await fs.unlink(filePath).catch(() => {});
         continue;
       }
 

@@ -238,7 +238,11 @@ function semerReferences() {
   let ecrits = 0, ignores = 0;
   for (const [sym, ref] of Object.entries(REFERENCES_A_VERIFIER)) {
     if (parSymbole[sym]) { ignores++; continue; }   // une valeur saisie prime toujours
-    parSymbole[sym] = { spread: ref.spread, commissionPct: ref.commissionPct };
+    parSymbole[sym] = {
+      spread: ref.spread,
+      commissionPct: ref.commissionPct,
+      glissement: ref.glissement || 0
+    };
     ecrits++;
   }
   if (ecrits) configurer({ parSymbole });

@@ -12,7 +12,13 @@
 
 const DEFAUT = { lotMin: 0.01, lotStep: 0.01, lotMax: 100, risqueMaxPct: 5 };
 
-const nombre = v => (Number.isFinite(Number(v)) ? Number(v) : null);
+// `Number(null)` et `Number("")` valent 0 : une valeur ABSENTE était lue comme nulle.
+// On distingue explicitement l'absence de valeur (null) d'une valeur chiffrée.
+const nombre = v => {
+  if (v === null || v === undefined || v === '' || typeof v === 'boolean' || Array.isArray(v)) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
 
 /**
  * @param {object} p { capital, risquePct, entree, stop, instrument }
@@ -32,8 +38,8 @@ function dimensionner(p, options = {}) {
   const inst = (p && p.instrument) || {};
 
   const manques = [];
-  if (inst.tickSize === null || inst.tickSize === undefined) manques.push('tick size');
-  if (inst.tickValue === null || inst.tickValue === undefined) manques.push('tick value');
+  if (inst.tickSize === null || inst.tickSize === undefined || inst.tickSize === '') manques.push('tick size');
+  if (inst.tickValue === null || inst.tickValue === undefined || inst.tickValue === '') manques.push('tick value');
   if (manques.length) {
     return { ok: false, avertissements,
       raison: `spécifications du contrat manquantes (${manques.join(', ')}) : ` +
@@ -42,17 +48,17 @@ function dimensionner(p, options = {}) {
 
   const tickSize = nombre(inst.tickSize);
   const tickValue = nombre(inst.tickValue);
-  if (!tickSize || tickSize <= 0) return { ok: false, raison: 'tick size invalide', avertissements };
-  if (!tickValue || tickValue <= 0) {
+  if (tickSize === null || tickSize <= 0) return { ok: false, raison: 'tick size invalide', avertissements };
+  if (tickValue === null || tickValue <= 0) {
     return { ok: false, raison: 'tick value nulle ou invalide : risque par lot inconnu', avertissements };
   }
 
-  if (!capital || capital <= 0) return { ok: false, raison: 'capital inconnu ou nul', avertissements };
-  if (!risquePct || risquePct <= 0) return { ok: false, raison: 'risque par trade non défini', avertissements };
+  if (capital === null || capital <= 0) return { ok: false, raison: 'capital inconnu ou nul', avertissements };
+  if (risquePct === null || risquePct <= 0) return { ok: false, raison: 'risque par trade non défini', avertissements };
   if (risquePct > o.risqueMaxPct) {
     return { ok: false, raison: `risque ${risquePct}% au-delà du plafond de sécurité (${o.risqueMaxPct}%)`, avertissements };
   }
-  if (!entree || !stop) return { ok: false, raison: 'entrée ou stop manquant', avertissements };
+  if (entree === null || stop === null) return { ok: false, raison: 'entrée ou stop manquant', avertissements };
 
   const distance = Math.abs(entree - stop);
   if (distance <= 0) return { ok: false, raison: 'stop confondu avec l\'entrée', avertissements };
@@ -110,26 +116,28 @@ function rentableApresFrais(p) {
   const entree = nombre(p && p.entree);
   const stop = nombre(p && p.stop);
   const objectif = nombre(p && p.objectif);
-  const cout = nombre(p && p.cout) || 0;
-  const rrMin = nombre(p && p.rrMin) || 0;
-  if (!entree || !stop || !objectif) return { ok: false, raison: 'niveaux incomplets' };
+  const cout = nombre(p && p.cout);
+  const rrMin = nombre(p && p.rrMin);
+  if (entree === null || stop === null || objectif === null) return { ok: false, raison: 'niveaux incomplets' };
 
   const risque = Math.abs(entree - stop);
   const gain = Math.abs(objectif - entree);
   if (risque <= 0) return { ok: false, raison: 'risque nul' };
 
+  const coutEffectif = cout !== null ? cout : 0;
+  const rrMinEffectif = rrMin !== null ? rrMin : 0;
   // Le coût est payé à l'entrée et à la sortie : il rogne le gain et gonfle le
   // risque effectif.
-  const gainNet = gain - cout;
-  const risqueNet = risque + cout;
+  const gainNet = gain - coutEffectif;
+  const risqueNet = risque + coutEffectif;
   if (gainNet <= 0) return { ok: false, rrNet: 0, raison: 'coûts supérieurs au gain visé' };
 
   const rrBrut = gain / risque;
   const rrNet = gainNet / risqueNet;
   return {
-    ok: rrNet >= rrMin, rrBrut: Math.round(rrBrut * 100) / 100,
-    rrNet: Math.round(rrNet * 100) / 100, rrMin,
-    raison: rrNet >= rrMin ? '' : `gain/risque net ${rrNet.toFixed(2)} < ${rrMin} après coûts`
+    ok: rrNet >= rrMinEffectif, rrBrut: Math.round(rrBrut * 100) / 100,
+    rrNet: Math.round(rrNet * 100) / 100, rrMin: rrMinEffectif,
+    raison: rrNet >= rrMinEffectif ? '' : `gain/risque net ${rrNet.toFixed(2)} < ${rrMinEffectif} après coûts`
   };
 }
 
