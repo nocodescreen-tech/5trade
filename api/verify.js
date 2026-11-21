@@ -643,6 +643,7 @@ function tinyPng(W = 64, H = 40) {
           signal: { sens: 'long', force: 0.8, id: 'test',
             levels: { entry: dernier.c, stop: dernier.c - 2, objectifs: [dernier.c + 2, dernier.c + 4] } },
           signauxRetenus: [{ id: 'test', statut: 'confirme', executable: true }],
+          risque: { ok: true, motif: 'test ok' },
           confluence: null
         };
       }
