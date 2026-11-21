@@ -4438,7 +4438,7 @@ async function executerBacktest(src = {}) {
       moteur: { profils: options.profils || [] },
       pas,
       decision: {
-        exigerAlignement: src.exigerAlignement === true || src.exigerAlignement === 'true',
+        exigerAlignement: src.exigerAlignement !== false && src.exigerAlignement !== 'false',
         verificateurRisque: verifRisque
       }
     });

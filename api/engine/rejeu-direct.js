@@ -36,13 +36,39 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
   let i = fenetre - 1;
   let n = 0;
 
+  // SIMULATION HISTORIQUE STRICTE DU RISQUE & DU CAPITAL
+  // On ne lit pas l'état du journal présent : on reconstruit le capital
+  // et les positions ouvertes au fil de l'eau pour chaque pas historique.
+  const Risque = require('../risk/risque');
+  const cfgRisque = Risque.configuration();
+  let capitalHistorique = Number(reglages.initialCapital || opts.capital || cfgRisque.capital) || 1000;
+  const risquePct = Number(reglages.riskPct || opts.risquePct || cfgRisque.risquePct) || 1;
+
   while (i < serie.length - 1 && n < maxEtapes) {
     n++;
     const fen = serie.slice(Math.max(0, i - fenetre + 1), i + 1);
+
+    // Vérificateur de risque dynamique recalculé sur l'état HISTORIQUE exact à l'instant t
+    const optionsPas = Object.assign({}, reglages.optionsDecision || opts);
+    if (!optionsPas.verificateurRisque && !optionsPas.sansRisqueCompte) {
+      optionsPas.verificateurRisque = (contrat) => {
+        const montantRisqueTrade = (capitalHistorique * risquePct) / 100;
+        const e = Number(contrat.entree), s = Number(contrat.stop);
+        const dist = Math.abs(e - s);
+        if (!Number.isFinite(dist) || dist <= 0) {
+          return { ok: false, refus: ['distance stop loss invalide ou nulle'] };
+        }
+        if (capitalHistorique <= 0) {
+          return { ok: false, refus: ['capital historique épuisé (drawdown maximal)'] };
+        }
+        return { ok: true, taille: +(montantRisqueTrade / dist).toFixed(2), montant: montantRisqueTrade };
+      };
+    }
+
     let verdict = null;
     let erreur = null;
     try {
-      verdict = DecisionEngine.decider(fen, meta, reglages.optionsDecision || opts);
+      verdict = DecisionEngine.decider(fen, meta, optionsPas);
     } catch (e) { erreur = e.message; }
 
     etapes.push({
@@ -91,6 +117,11 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
         // Fidélité : ce trade vient du moteur, pas d'un détecteur parallèle.
         source: 'DecisionEngine.decider'
       });
+
+      // Mise à jour continue du capital historique après dénouement de la position
+      const pnlMontant = (Number(evalue.r) || 0) * ((capitalHistorique * risquePct) / 100);
+      capitalHistorique = Math.max(0, +(capitalHistorique + pnlMontant).toFixed(2));
+
       // On avance après la sortie : le direct ne cumule pas deux positions sur
       // le même marché. Sans ce saut, un même mouvement produisait 10 trades.
       i += Math.max(pas, Number(evalue.bougiesSuivies) || pas);

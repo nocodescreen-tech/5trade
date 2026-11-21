@@ -16,7 +16,7 @@ const TF_MS = {
 
 const GRAVITE = { critique: 'critique', avertissement: 'avertissement' };
 
-const nombre = v => Number.isFinite(Number(v));
+const nombre = v => v !== null && v !== undefined && v !== '' && typeof v !== 'boolean' && Number.isFinite(Number(v));
 
 /**
  * @param {Array<{t,o,h,l,c,v,closed}>} bougies
