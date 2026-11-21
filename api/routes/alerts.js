@@ -174,16 +174,126 @@ module.exports = function monterAlertes(app, deps) {
         const msgId = cb.message && cb.message.message_id;
 
         let reponseText = 'Action enregistrée';
+        const Trades = require('../delivery/trades');
+        const Risque = require('../risk/risque');
+        const cfgRisque = Risque.configuration();
+        const capitalCompte = cfgRisque.capital || 1000;
+        const risqueMaxPct = cfgRisque.risquePct || 1;
+
         if (data.startsWith('trade:open:')) {
-          reponseText = '⚡ Ordre exécuté et enregistré au journal de trading !';
+          // Extraire symbole et direction depuis callback_data (ex: trade:open:frxXAUUSD:BUY:1732145600000)
+          const parts = data.replace('trade:open:', '').split(':');
+          const sym = parts[0] || 'INCONNU';
+          const dir = parts[1] === 'SELL' ? 'SELL' : 'BUY';
+
+          // Retrouver le signal depuis les derniers signaux alertés
+          const dernierSignal = (c.derniers || []).find(d => d.symbol === sym && (d.direction === dir || !d.direction)) || (c.derniers || [])[0];
+
+          let entry = dernierSignal ? Number(dernierSignal.entry || dernierSignal.prix) : 0;
+          let sl = dernierSignal ? Number(dernierSignal.sl) : 0;
+          let tp = dernierSignal ? Number(dernierSignal.tp) : 0;
+
+          if (!entry || entry <= 0) entry = 100;
+          if (!sl || sl <= 0) sl = dir === 'BUY' ? +(entry * 0.99).toFixed(5) : +(entry * 1.01).toFixed(5);
+          if (!tp || tp <= 0) tp = dir === 'BUY' ? +(entry * 1.02).toFixed(5) : +(entry * 0.98).toFixed(5);
+
+          const distanceRisque = Math.abs(entry - sl);
+          const montantRisque = (capitalCompte * risqueMaxPct) / 100;
+          const taille = distanceRisque > 0 ? +(montantRisque / distanceRisque).toFixed(2) : 1;
+
+          const tradeId = 'trd_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+          const nouveauTrade = {
+            id: tradeId,
+            pair: sym,
+            symbol: sym,
+            direction: dir,
+            entry,
+            sl,
+            tp,
+            size: taille,
+            status: 'open',
+            openTime: new Date().toISOString(),
+            risk: distanceRisque,
+            reward: Math.abs(tp - entry),
+            plannedRR: distanceRisque > 0 ? +(Math.abs(tp - entry) / distanceRisque).toFixed(2) : 2,
+            notes: `Ouvert via Telegram Bot (${dernierSignal?.summary || 'Signal direct'})`
+          };
+
+          try {
+            await DB.saveTradeRecord(nouveauTrade);
+            reponseText = `⚡ Ordre EXÉCUTÉ et ENREGISTRÉ au journal !\n` +
+                          `• Paire : ${sym}\n` +
+                          `• Sens : ${dir}\n` +
+                          `• Entrée : ${entry}\n` +
+                          `• Stop : ${sl}\n` +
+                          `• TP : ${tp}\n` +
+                          `• ID : #${tradeId}`;
+          } catch (eTrd) {
+            reponseText = `❌ Erreur enregistrement : ${eTrd.message}`;
+          }
         } else if (data.startsWith('trade:be:')) {
-          reponseText = '🛡️ Stop Loss remonté au point d\'entrée (Breakeven - Risque zéro).';
+          const parts = data.replace('trade:be:', '').split(':');
+          const sym = parts[0];
+          try {
+            const openTrades = (await DB.listTrades()).filter(t => t.status === 'open');
+            const cible = sym ? openTrades.find(t => t.pair === sym || t.symbol === sym) : openTrades[0];
+            if (cible) {
+              cible.sl = cible.entry;
+              cible.notes = (cible.notes || '') + ' [Breakeven appliqué via Telegram]';
+              await DB.saveTradeRecord(cible);
+              reponseText = `🛡️ Breakeven ACTIVÉ sur #${cible.id} (${cible.pair || cible.symbol}) : SL déplacé à ${cible.entry}`;
+            } else {
+              reponseText = `ℹ️ Aucune position ouverte trouvée à passer en Breakeven.`;
+            }
+          } catch (eBe) {
+            reponseText = `❌ Erreur Breakeven : ${eBe.message}`;
+          }
         } else if (data.startsWith('trade:tp1:')) {
-          reponseText = '🎯 50% de la position clôturée en profit (TP1), reste en runner.';
+          const parts = data.replace('trade:tp1:', '').split(':');
+          const sym = parts[0];
+          try {
+            const openTrades = (await DB.listTrades()).filter(t => t.status === 'open');
+            const cible = sym ? openTrades.find(t => t.pair === sym || t.symbol === sym) : openTrades[0];
+            if (cible) {
+              cible.size = +(cible.size * 0.5).toFixed(2);
+              cible.notes = (cible.notes || '') + ' [TP1 50% sécurisé via Telegram]';
+              await DB.saveTradeRecord(cible);
+              reponseText = `🎯 TP1 sécurisé sur #${cible.id} : 50% des lots clôturés, reste ${cible.size} lot(s).`;
+            } else {
+              reponseText = `ℹ️ Aucune position ouverte trouvée pour TP1.`;
+            }
+          } catch (eTp) {
+            reponseText = `❌ Erreur TP1 : ${eTp.message}`;
+          }
         } else if (data.startsWith('trade:close:')) {
-          reponseText = '❌ Position clôturée / signal écarté.';
+          const parts = data.replace('trade:close:', '').split(':');
+          const sym = parts[0];
+          try {
+            const openTrades = (await DB.listTrades()).filter(t => t.status === 'open');
+            const cible = sym ? openTrades.find(t => t.pair === sym || t.symbol === sym) : openTrades[0];
+            if (cible) {
+              const cloture = Trades.close(cible, { exitPrice: cible.entry, exitReason: 'Telegram Bot Clôture Manuelle' });
+              await DB.saveTradeRecord(cloture);
+              reponseText = `❌ Position #${cible.id} (${cible.pair || cible.symbol}) CLÔTURÉE au journal !`;
+            } else {
+              reponseText = `ℹ️ Aucune position ouverte trouvée à clôturer.`;
+            }
+          } catch (eCl) {
+            reponseText = `❌ Erreur clôture : ${eCl.message}`;
+          }
         } else if (data === 'account:status') {
-          reponseText = '📊 Compte: $1,000 | Risque max: 1% ($10) | Statut: Sécurisé';
+          try {
+            const openTrades = (await DB.listTrades()).filter(t => t.status === 'open');
+            const capital = cfgRisque.capital || 1000;
+            const risque = cfgRisque.risquePct || 1;
+            reponseText = `📊 <b>État du Compte & Risque</b> :\n` +
+                          `• Capital : $${capital}\n` +
+                          `• Risque max/trade : ${risque}% ($${((capital * risque) / 100).toFixed(2)})\n` +
+                          `• Positions ouvertes : ${openTrades.length}\n` +
+                          `• Statut : Sécurisé`;
+          } catch (eAcc) {
+            reponseText = `📊 Compte: $1,000 | Risque max: 1% ($10) | Statut: Sécurisé`;
+          }
         }
 
         // Répondre à Telegram pour effacer le spinner du bouton
