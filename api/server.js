@@ -5096,29 +5096,35 @@ async function start() {
     }
   });
 
-  // Briefing matinal automatique Telegram à 08:00 UTC
+  // Briefing matinal automatique Telegram avec fenêtre horaire tolérante (06:00 à 10:00 UTC)
+  // et données statistiques réelles (recap journal, positions, risque).
+  let dernierJourBriefing = null;
   setInterval(async () => {
     try {
       const d = new Date();
-      if (d.getUTCHours() === 8 && d.getUTCMinutes() === 0) {
+      const jourStr = d.toISOString().slice(0, 10);
+      const heureUTC = d.getUTCHours();
+      if (heureUTC >= 6 && heureUTC <= 10 && dernierJourBriefing !== jourStr) {
         const c = Alerts.get();
         if (c.telegramToken && c.telegramChat) {
+          dernierJourBriefing = jourStr;
+          const { genererBriefingTelegram } = require('./routes/alerts');
+          const briefing = await genererBriefingTelegram(c, { DB });
           const fetchRef = globalThis.fetch || require('node-fetch');
-          const dateStr = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-          const msgBriefing = `☀️ <b>Briefing Matinal 5trade — ${dateStr}</b>\n\n`
-            + `• <b>Statut Marchés</b> : Surveillance active sur ${Array.isArray(c.marches) ? c.marches.length : 0} actif(s).\n`
-            + `• <b>Stratégies Armées</b> : ${Array.isArray(c.strategies) ? c.strategies.length : 'Toutes (auto)'} configurée(s).\n`
-            + `• <b>Gestion du Risque</b> : Capital préservé, filtres R:R ≥ 1.5 & Sentinelle anti-retournement opérationnels.\n\n`
-            + `<i>Excellente séance de trading avec 5trade !</i>`;
           await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: c.telegramChat, text: msgBriefing, parse_mode: 'HTML' })
+            body: JSON.stringify({
+              chat_id: c.telegramChat,
+              text: briefing.texte,
+              parse_mode: 'HTML',
+              reply_markup: { inline_keyboard: briefing.inline_keyboard }
+            })
           }).catch(() => {});
         }
       }
     } catch { /* briefing non-bloquant */ }
-  }, 60000);
+  }, 30000);
 
   // 0.0.0.0 en production : derrière le proxy de la plateforme, un bind sur
   // 127.0.0.1 rend le service injoignable (« listening » dans les logs, 502 au

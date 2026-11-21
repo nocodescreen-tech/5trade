@@ -294,6 +294,22 @@ module.exports = function monterAlertes(app, deps) {
           } catch (eAcc) {
             reponseText = `📊 Compte: $1,000 | Risque max: 1% ($10) | Statut: Sécurisé`;
           }
+        } else if (data === 'recap:refresh') {
+          const briefing = await genererBriefingTelegram(c, { DB });
+          if (c.telegramToken && chatId) {
+            const fetchRef = globalThis.fetch || require('node-fetch');
+            await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: chatId,
+                text: briefing.texte,
+                parse_mode: 'HTML',
+                reply_markup: { inline_keyboard: briefing.inline_keyboard }
+              })
+            }).catch(() => {});
+          }
+          reponseText = 'Récapitulatif actualisé';
         }
 
         // Répondre à Telegram pour effacer le spinner du bouton
@@ -321,6 +337,24 @@ module.exports = function monterAlertes(app, deps) {
 
         if (chatId && texteUtilisateur && c.telegramToken) {
           const fetchRef = globalThis.fetch || require('node-fetch');
+
+          // Commande de récapitulatif / briefing matinal demandée par l'utilisateur
+          const cmd = texteUtilisateur.toLowerCase();
+          if (/^\/(recap|briefing|matin|journal|resume|start)|^(recap|briefing|matin|résumé|bilan)/i.test(cmd)) {
+            const briefing = await genererBriefingTelegram(c, { DB });
+            await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: chatId,
+                text: briefing.texte,
+                parse_mode: 'HTML',
+                reply_markup: { inline_keyboard: briefing.inline_keyboard }
+              })
+            }).catch(() => {});
+            return res.json({ ok: true });
+          }
+
           try {
             const ChatCRUD = require('../chat-crud');
             const rIA = await ChatCRUD.executer(texteUtilisateur, {
@@ -356,4 +390,98 @@ module.exports = function monterAlertes(app, deps) {
       res.status(200).json({ ok: false, error: e.message });
     }
   });
+
+  /**
+   * Déclenchement manuel ou planifié du briefing matinal Telegram
+   */
+  app.all('/api/alerts/telegram/briefing', async (req, res) => {
+    try {
+      const c = Alerts.get();
+      if (!c.telegramToken || !c.telegramChat) {
+        return res.status(400).json({ success: false, error: 'Telegram non configuré (jeton ou chat_id manquant)' });
+      }
+      const briefing = await genererBriefingTelegram(c, { DB });
+      const fetchRef = globalThis.fetch || require('node-fetch');
+      const r = await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: c.telegramChat,
+          text: briefing.texte,
+          parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: briefing.inline_keyboard }
+        })
+      });
+      const data = await r.json().catch(() => ({}));
+      res.json({ success: true, envoye: r.ok, telegram: data });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
 };
+
+/**
+ * Génère le contenu complet du briefing matinal avec statistiques réelles du journal et du compte
+ */
+async function genererBriefingTelegram(c, depsRef = {}) {
+  const Risque = require('../risk/risque');
+  const JournalSignaux = require('../engine/journal-signaux');
+  const cfgRisque = Risque.configuration();
+  const capital = cfgRisque.capital || 1000;
+  const risqueMax = cfgRisque.risquePct || 1;
+
+  const dbRef = depsRef.DB;
+  let openTrades = [];
+  try {
+    if (dbRef && typeof dbRef.listTrades === 'function') {
+      const list = await dbRef.listTrades();
+      openTrades = (list || []).filter(t => t.status === 'open');
+    }
+  } catch {}
+
+  let statsJournal = { gagnes: 0, perdus: 0, total: 0, rTotal: 0 };
+  try {
+    const st = JournalSignaux.stats();
+    if (st) {
+      statsJournal.gagnes = st.nbGagnants ?? st.gagnants ?? 0;
+      statsJournal.perdus = st.nbPerdants ?? 0;
+      statsJournal.total = st.clos ?? st.total ?? 0;
+      statsJournal.rTotal = Number(st.rNet ?? st.rTotal ?? 0);
+    }
+  } catch {}
+
+  const d = new Date();
+  const dateStr = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const heureStr = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const marches = Array.isArray(c.marches) && c.marches.length
+    ? c.marches.map(m => typeof m === 'object' ? (m.symbol || m.symbole) : m).join(', ')
+    : 'Forex, Synthétiques, Métaux';
+
+  const rSigne = statsJournal.rTotal >= 0 ? `+${statsJournal.rTotal.toFixed(2)}` : statsJournal.rTotal.toFixed(2);
+  const pnlEmoji = statsJournal.rTotal >= 0 ? '📈' : '📉';
+
+  const texte = `☀️ <b>Briefing Matinal & Récapitulatif 5trade</b>\n`
+    + `📅 <i>${dateStr} (${heureStr})</i>\n\n`
+    + `💼 <b>Positions en cours</b> : <b>${openTrades.length}</b> ouverte(s)\n`
+    + (openTrades.length ? openTrades.map(t => `   • <code>${t.pair || t.symbol}</code> (${t.direction}) — Entrée: ${t.entry} | SL: ${t.sl}`).join('\n') + '\n' : '   • Aucune position active — Capital 100% disponible\n')
+    + `\n📊 <b>Bilan du Journal Récent</b> :\n`
+    + `   • Prises clôturées : <b>${statsJournal.total}</b> (✅ ${statsJournal.gagnes} W / ❌ ${statsJournal.perdus} L)\n`
+    + `   • Performance nette cumulée : ${pnlEmoji} <b>${rSigne} R</b>\n\n`
+    + `🛡️ <b>Gestion du Risque</b> :\n`
+    + `   • Capital de référence : <b>$${capital.toLocaleString('fr-FR')}</b>\n`
+    + `   • Risque max/trade : <b>${risqueMax}%</b> ($${((capital * risqueMax) / 100).toFixed(2)})\n`
+    + `   • Filtres Sentinelle & RR ≥ 1.5 : <b>Actifs</b>\n\n`
+    + `🎯 <b>Marchés Surveillés</b> : <code>${marches}</code>\n\n`
+    + `<i>Tapez /recap à tout moment ou posez une question au copilote !</i>`;
+
+  const inline_keyboard = [
+    [
+      { text: '📊 Statut Compte', callback_data: 'account:status' },
+      { text: '🔄 Actualiser Récap', callback_data: 'recap:refresh' }
+    ]
+  ];
+
+  return { texte, inline_keyboard };
+}
+
+module.exports.genererBriefingTelegram = genererBriefingTelegram;
