@@ -2905,7 +2905,17 @@ app.get('/api/market/ticks', requireAuth, (req, res) => {
 
 // Routes d'alertes : extraites dans api/routes/alerts.js (découpage progressif
 // de server.js en domaines). Les dépendances sont injectées, pas globales.
-require('./routes/alerts')(app, { requireAuth, Alerts, sendMail, DB, Audit });
+require('./routes/alerts')(app, {
+  requireAuth,
+  Alerts,
+  sendMail,
+  DB,
+  Audit,
+  ia: (messages, opts = {}) => analyserIA(messages, {
+    maxTokens: opts.maxTokens || 900,
+    route: opts.route || 'telegram-chat'
+  })
+});
 
 // ─── Market Intelligence (phase 1) : profil d'un instrument ───
 // Lecture seule : classe l'instrument, mesure le régime, décrit la session et la

@@ -8,7 +8,7 @@
  *   require('./routes/alerts')(app, { requireAuth, Alerts, sendMail, DB })
  */
 module.exports = function monterAlertes(app, deps) {
-  const { requireAuth, Alerts, sendMail, DB } = deps;
+  const { requireAuth, Alerts, sendMail, DB, Audit, ia } = deps;
 
   /**
    * Alertes : prévenir HORS de la page quand un signal se confirme.
@@ -214,7 +214,8 @@ module.exports = function monterAlertes(app, deps) {
           try {
             const ChatCRUD = require('../chat-crud');
             const rIA = await ChatCRUD.executer(texteUtilisateur, {
-              utilisateur: msg.from && (msg.from.username || msg.from.first_name) || 'telegram_user'
+              utilisateur: msg.from && (msg.from.username || msg.from.first_name) || 'telegram_user',
+              ia: typeof ia === 'function' ? ia : null
             });
 
             const reponseChat = (rIA && (rIA.texte || (rIA.ia && rIA.ia.texte))) || 'Je suis votre copilote 5trade. Comment puis-je vous aider sur vos positions et analyses ?';
