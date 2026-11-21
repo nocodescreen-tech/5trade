@@ -59,11 +59,8 @@ const NVIDIA_URL = process.env.NVIDIA_URL || 'https://integrate.api.nvidia.com/v
 // celui qui répond en 3 s.
 const NVIDIA_MODELS = String(
   process.env.NVIDIA_MODELS ||
-  // Les deux modèles qui répondent RÉELLEMENT, dans l'ordre de latence mesurée.
-  // ultra-550b (54 s) et mistral-large-4-1t (jamais de réponse) restent
-  // joignables via NVIDIA_MODELS, mais hors cascade par défaut : les garder ici
-  // faisait attendre 165 s pour un plan que le moteur sait calculer sans IA.
   'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning,' +
+  'nvidia/nemotron-3-ultra-550b-a55b,' +
   'nvidia/nemotron-3.5-lightning-30b-a3b'
 ).split(',').map(m => m.trim()).filter(Boolean);
 const NVIDIA_TIMEOUT_MS = Number(process.env.NVIDIA_TIMEOUT_MS || 45000);
@@ -72,12 +69,11 @@ const NVIDIA_TIMEOUT_MS = Number(process.env.NVIDIA_TIMEOUT_MS || 45000);
 // modèle lent mais fiable a droit à plus de temps. Sans cela, un seul délai
 // global condamne soit les rapides (trop court), soit les lents (trop long).
 const DELAIS_NVIDIA = {
-  // Mesurés : 2,5 s (nano-omni-30b) et 5,8 s (lightning-30b). On laisse une marge
-  // adaptée et raisonnable pour ne jamais bloquer la cascade.
+  // Mesurés : 2,3 s (nano-omni-30b), 2,3 à 7 s (ultra-550b) et 5,8 s (lightning-30b).
   'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning': 15000,
+  'nvidia/nemotron-3-ultra-550b-a55b': 20000,
   'nvidia/nemotron-3.5-lightning-30b-a3b': 20000,
   'nvidia/nemotron-3.5-super-vl-120b-a12b': 25000,
-  'nvidia/nemotron-3-ultra-550b-a55b': 30000,
   'mistralai/mistral-large-4-1t-a52b': 20000
 };
 // Échéance GLOBALE : au-delà, on arrête d'attendre et l'appelant reçoit une
