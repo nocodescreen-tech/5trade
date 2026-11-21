@@ -41,7 +41,12 @@ function detecterDomaine(sujet) {
 // Verbes qui n'existent que dans UN domaine : ils suffisent à router quand le
 // sujet ne porte aucun mot-clé. « active <titre de stratégie> » ne peut viser
 // qu'une stratégie — le routeur n'a pas à exiger un vocabulaire particulier.
-const DOMAINE_PAR_VERBE = { ACTIVE: 'strategies', DÉSACTIVE: 'strategies', CRÉE: 'strategies' };
+const DOMAINE_PAR_VERBE = {
+  ACTIVE: 'strategies',
+  DÉSACTIVE: 'strategies',
+  CRÉE: 'strategies',
+  APPRENDS: 'memoire'
+};
 
 /**
  * @param {{verbe:string, sujet:string, type?:string}} action
@@ -95,6 +100,7 @@ function router(action) {
       MONTRE: cmdMemoire.lister,
       CRÉE: cmdMemoire.creerException,
       SUPPRIME: cmdMemoire.supprimerException,
+      APPRENDS: cmdMemoire.apprendre,
     },
     systeme: {
       MONTRE: cmdSysteme.etat,

@@ -669,6 +669,31 @@ function niveauRisque(arbitrage, options = {}) {
  * Prend la sortie de detecterTout() et renvoie le verdict global + traçabilité
  */
 function decider(candles, meta, options = {}) {
+  // Garde-fou temporel de session : si la vérification de session est demandée (ou en direct),
+  // refuser toute prise sur un marché fermé (ex: Forex le week-end, métaux en pause).
+  if ((options.verifierSession === true || (meta && meta.verifierSession === true)) && meta && meta.symbol) {
+    try {
+      const Sessions = require('../temporal/sessions');
+      const horodatage = options.date || (candles && candles.length ? (candles[candles.length - 1].time || candles[candles.length - 1].epoch * 1000) : Date.now());
+      const session = Sessions.statutMarche(meta.symbol, horodatage);
+      if (session && !session.ouvert) {
+        return {
+          decision: 'NO_TRADE',
+          raison: `Marché fermé : ${session.raison}`,
+          biais: 'neutre',
+          statutSession: session,
+          detection: { ok: false, details: [], resume: `Session fermée (${session.statut})` },
+          validation: { ok: false, details: [], resume: 'Session fermée' },
+          confirmation: { ok: false, details: [] },
+          execution: { ok: false, details: [] },
+          arbitrage: { decision: 'NO_TRADE', raison: `Marché fermé : ${session.raison}`, biais: 'neutre', signauxRetenus: [] },
+          risque: { etat: { consulte: false, motif: 'marché fermé' } },
+          traçabilite: { detection: 0, validation: 0, confirmation: 0, execution: 0, arbitrage: 'NO_TRADE', risque: 'ignore' }
+        };
+      }
+    } catch { /* session non-bloquante si indisponible */ }
+  }
+
   // 0. On récupère TOUS les signaux (stratégies + motifs + structure)
   const multi = require('./signaux').detecterTout(candles, meta, options);
   const signaux = multi.signaux || [];

@@ -13,12 +13,14 @@
 const faits = require('./faits');
 const croyances = require('./croyances');
 const exceptions = require('./exceptions');
+const preferences = require('./preferences');
 
 async function init() {
   const a = await faits.init();
   const b = await croyances.init();
   const c = await exceptions.init();
-  return { faits: a, croyances: b, exceptions: c };
+  const d = await preferences.init();
+  return { faits: a, croyances: b, exceptions: c, preferences: d };
 }
 
 /** Résumé global pour le dashboard et le chat CRUD. */
@@ -26,6 +28,7 @@ async function etat() {
   const f = await faits.stats();
   const c = await croyances.lister({ limit: 1000 });
   const e = await exceptions.lister({ activesSeulement: true });
+  const p = await preferences.lister({ activesSeulement: true });
   const competent = c.filter(x => Number(x.confiance) >= 0.6 && Number(x.expectancy) > 0.15).length;
   const incompetent = c.filter(x => Number(x.confiance) < 0.3 || Number(x.expectancy) < 0).length;
   const moyen = c.length - competent - incompetent;
@@ -35,7 +38,8 @@ async function etat() {
     croyances: c.length,
     competence: { competent, moyen, incompetent, inconnu: c.filter(x => x.trades < 5).length },
     exceptions: e.length,
+    preferences: p.length
   };
 }
 
-module.exports = { init, etat, faits, croyances, exceptions };
+module.exports = { init, etat, faits, croyances, exceptions, preferences };

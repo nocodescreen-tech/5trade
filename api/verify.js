@@ -7515,7 +7515,7 @@ function tinyPng(W = 64, H = 40) {
   }
 
   // ── Moteur : mesures justes (la fonction est déclarée plus bas, hissée ici) ──
-  testsMoteurAudit(ok, section);
+  await testsMoteurAudit(ok, section);
 
   // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──
   // Mesure réelle : 8,7 s pour joindre Telegram depuis cette connexion. Sans
@@ -7580,7 +7580,7 @@ function tinyPng(W = 64, H = 40) {
   // points de l'audit, plusieurs étaient déjà réglés ou faux. Un contrôle vert
   // vaut mieux qu'un commentaire : il empêche la régression.
   // ═══════════════════════════════════════════════════════════════
-  function testsMoteurAudit(ok, section) {
+  async function testsMoteurAudit(ok, section) {
     section('[11] Moteur — mesures (audit 4e passe)');
     const Ind = require('./engine/indicators');
     const St = require('./engine/structure');
@@ -7966,6 +7966,111 @@ function tinyPng(W = 64, H = 40) {
         selValide.candidates[0] && /performance validée hors échantillon/.test(selValide.candidates[0].motif),
         selValide.candidates[0] && selValide.candidates[0].motif);
     }
+
+    // — Architecture Cognitive Agent Autonome : Temporalité, Sessions & Mémoire permanente
+    await (async () => {
+      const Sessions = require('./temporal/sessions');
+      // 1. Forex le samedi (fermé)
+      const dateSamedi = new Date('2026-11-21T12:00:00Z');
+      const stForexSamedi = Sessions.statutMarche('EURUSD', dateSamedi);
+      ok('session Forex samedi : marché fermé avec détection weekend',
+        stForexSamedi.ouvert === false && stForexSamedi.weekend === true && stForexSamedi.statut === 'ferme',
+        JSON.stringify(stForexSamedi));
+
+      // 2. Forex le mercredi à 14h UTC (ouvert)
+      const dateMercredi = new Date('2026-11-18T14:00:00Z');
+      const stForexMercredi = Sessions.statutMarche('EURUSD', dateMercredi);
+      ok('session Forex mercredi : marché ouvert',
+        stForexMercredi.ouvert === true && stForexMercredi.statut === 'ouvert');
+
+      // 3. Forex vendredi 21h30 UTC (pré-fermeture)
+      const dateVendrediSoir = new Date('2026-11-20T21:30:00Z');
+      const stForexPre = Sessions.statutMarche('EURUSD', dateVendrediSoir);
+      ok('session Forex vendredi soir : statut pré-fermeture détecté',
+        stForexPre.statut === 'pre_fermeture' && stForexPre.prochaineFermeture !== null);
+
+      // 4. Métaux jeudi 21h30 UTC (pause maintenance)
+      const dateJeudiPause = new Date('2026-11-19T21:30:00Z');
+      const stMetauxPause = Sessions.statutMarche('XAUUSD', dateJeudiPause);
+      ok('session Métaux : pause quotidienne détectée',
+        stMetauxPause.statut === 'pause' && stMetauxPause.ouvert === false);
+
+      // 5. Synthétiques Deriv & Crypto : 24/7 même le samedi
+      const stSynthSamedi = Sessions.statutMarche('R_75', dateSamedi);
+      const stCryptoSamedi = Sessions.statutMarche('BTCUSD', dateSamedi);
+      ok('session Synthétiques & Crypto : cotation continue 24/7 le samedi',
+        stSynthSamedi.ouvert === true && stSynthSamedi.continu === true
+        && stCryptoSamedi.ouvert === true && stCryptoSamedi.continu === true);
+
+      // 6. Mémoire cognitive permanente : Préférences & Consignes utilisateur
+      const Memoire = require('./memoire');
+      const resPref = await Memoire.preferences.enregistrer({
+        cle: 'test_consigne_forex_weekend',
+        contenu: 'Ne pas analyser le Forex le samedi car le marché est fermé',
+        categorie: 'session'
+      });
+      ok('mémoire cognitive : enregistrement réussi d\'une consigne permanente',
+        resPref.ok === true && resPref.cle === 'test_consigne_forex_weekend');
+
+      const listePrefs = await Memoire.preferences.lister({ categorie: 'session' });
+      ok('mémoire cognitive : relecture des consignes permanentes par catégorie',
+        Array.isArray(listePrefs) && listePrefs.some(p => p.cle === 'test_consigne_forex_weekend'));
+
+      // 7. Chat CRUD : Parseur et Routeur pour commande APPRENDS
+      const Parseur = require('./chat-crud/parseur');
+      const Routeur = require('./chat-crud/routeur');
+      const actionApprends = Parseur.parser('Retiens que le Forex est fermé le samedi');
+      ok('chat CRUD parseur : reconnaît l\'instruction « Retiens que » comme APPRENDS',
+        actionApprends.verbe === 'APPRENDS' && actionApprends.sujet.includes('Forex'));
+
+      const routeApprends = Routeur.router(actionApprends);
+      ok('chat CRUD routeur : achemine APPRENDS vers le gestionnaire de mémoire cognitive',
+        routeApprends.domaine === 'memoire' && typeof routeApprends.handler === 'function');
+
+      const execApprends = await routeApprends.handler(actionApprends.sujet, { user: 'testeur' });
+      ok('chat CRUD exécution APPRENDS : consigne persistée et acquittée avec succès',
+        execApprends.ok === true && /enregistré durablement/.test(execApprends.texte));
+
+      // 8. Skill Factory & Registre de compétences
+      const Skills = require('./skills/registry');
+      const Validator = require('./skills/validator');
+      const nbSkills = Skills.charger();
+      ok('skill registry : charge les compétences installées',
+        nbSkills >= 1 && Skills.obtenir('forex-session-monitor') !== null);
+
+      const skillForex = Skills.obtenir('forex-session-monitor');
+      ok('skill forex-session-monitor : expose sa documentation et ses actions',
+        skillForex.nom && skillForex.version && skillForex.actions.includes('bilan_marches'));
+
+      // Invariant de sécurité : tentative de contournement du risque rejetée
+      const skillDangereux = {
+        id: 'hack_risk', nom: 'Danger', version: '1.0.0', description: 'Test de violation',
+        permetContournerRisque: true,
+        executer: () => {}
+      };
+      const validSec = Validator.validerSkill(skillDangereux);
+      ok('skill validator : inviolabilité du noyau de risque (rejette toute tentative de contournement)',
+        validSec.valide === false && validSec.erreurs.some(e => /inviolabilité du noyau de risque/i.test(e)));
+
+      // Exécution sécurisée du skill
+      const resSkill = await Skills.executer('forex-session-monitor', { action: 'bilan_marches', date: dateSamedi });
+      ok('skill execution : forex-session-monitor analyse et retourne le bilan d\'ouverture/fermeture',
+        resSkill.ok === true && resSkill.resultat.forex.ouvert === false && resSkill.resultat.synthetiques.ouvert === true);
+
+      // 9. Decision Engine avec contrôle de session actif
+      const DE = require('./engine/DecisionEngine');
+      const serieF = Array.from({ length: 30 }, (_, i) => ({
+        time: dateSamedi.getTime() - (30 - i) * 60000,
+        o: 1.0850, h: 1.0860, l: 1.0840, c: 1.0855, closed: true
+      }));
+      const decFerme = DE.decider(serieF, { symbol: 'EURUSD', timeframe: '15m' }, {
+        verifierSession: true,
+        date: dateSamedi.getTime()
+      });
+      ok('decision engine : refuse d\'exécuter sur marché fermé (Forex le samedi)',
+        decFerme.decision === 'NO_TRADE' && decFerme.statutSession.statut === 'ferme'
+        && /Marché fermé/.test(decFerme.raison));
+    })();
   }
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);

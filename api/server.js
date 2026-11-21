@@ -3910,6 +3910,7 @@ app.get('/api/decision', requireAuth, async (req, res) => {
       confluenceStrategie,
       verificateurRisque,
       exigerVerificateurRisque: true,
+      verifierSession: true,
       rrMin: Number.isFinite(Number(req.query.rrMin)) ? Number(req.query.rrMin) : undefined,
       exigerAlignement: true,
       refuserDesaccord: true,
@@ -4188,6 +4189,7 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
           confluence,
           verificateurRisque,
           exigerVerificateurRisque: true,
+          verifierSession: true,
           rrMin: Number.isFinite(Number(req.query.rrMin)) ? Number(req.query.rrMin) : undefined,
           exigerAlignement: true,
           refuserDesaccord: true,
@@ -5112,31 +5114,74 @@ async function start() {
   // Briefing matinal automatique Telegram avec fenêtre horaire tolérante (06:00 à 10:00 UTC)
   // et données statistiques réelles (recap journal, positions, risque).
   let dernierJourBriefing = null;
+  let dernierVendrediPreCloture = null;
+  let dernierDimancheReouverture = null;
+
   setInterval(async () => {
     try {
       const d = new Date();
       const jourStr = d.toISOString().slice(0, 10);
       const heureUTC = d.getUTCHours();
+      const minuteUTC = d.getUTCMinutes();
+      const dayUTC = d.getUTCDay(); // 0 = Dimanche, 5 = Vendredi
+
+      const c = Alerts.get();
+      if (!c.telegramToken || !c.telegramChat) return;
+
+      const fetchRef = globalThis.fetch || require('node-fetch');
+      const envoyerTelegramDirect = async (texte) => {
+        return fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: c.telegramChat,
+            text: texte,
+            parse_mode: 'HTML'
+          })
+        }).catch(() => {});
+      };
+
+      // 1. Briefing matinal quotidien (06:00 à 10:00 UTC)
       if (heureUTC >= 6 && heureUTC <= 10 && dernierJourBriefing !== jourStr) {
-        const c = Alerts.get();
-        if (c.telegramToken && c.telegramChat) {
-          dernierJourBriefing = jourStr;
-          const { genererBriefingTelegram } = require('./routes/alerts');
-          const briefing = await genererBriefingTelegram(c, { DB });
-          const fetchRef = globalThis.fetch || require('node-fetch');
-          await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: c.telegramChat,
-              text: briefing.texte,
-              parse_mode: 'HTML',
-              reply_markup: { inline_keyboard: briefing.inline_keyboard }
-            })
-          }).catch(() => {});
-        }
+        dernierJourBriefing = jourStr;
+        const { genererBriefingTelegram } = require('./routes/alerts');
+        const briefing = await genererBriefingTelegram(c, { DB });
+        await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: c.telegramChat,
+            text: briefing.texte,
+            parse_mode: 'HTML',
+            reply_markup: { inline_keyboard: briefing.inline_keyboard }
+          })
+        }).catch(() => {});
       }
-    } catch { /* briefing non-bloquant */ }
+
+      // 2. Alerte pré-clôture Forex du vendredi (21h30 UTC)
+      if (dayUTC === 5 && heureUTC === 21 && minuteUTC >= 30 && dernierVendrediPreCloture !== jourStr) {
+        dernierVendrediPreCloture = jourStr;
+        try {
+          const Skills = require('./skills/registry');
+          const skillRes = await Skills.executer('forex-session-monitor', { action: 'alerte_telegram', type: 'pre_cloture' });
+          if (skillRes.ok && skillRes.resultat?.texte) {
+            await envoyerTelegramDirect(skillRes.resultat.texte);
+          }
+        } catch {}
+      }
+
+      // 3. Alerte réouverture Forex du dimanche (22h00 UTC)
+      if (dayUTC === 0 && heureUTC >= 22 && dernierDimancheReouverture !== jourStr) {
+        dernierDimancheReouverture = jourStr;
+        try {
+          const Skills = require('./skills/registry');
+          const skillRes = await Skills.executer('forex-session-monitor', { action: 'alerte_telegram', type: 'reouverture' });
+          if (skillRes.ok && skillRes.resultat?.texte) {
+            await envoyerTelegramDirect(skillRes.resultat.texte);
+          }
+        } catch {}
+      }
+    } catch { /* surveillance temporelle non-bloquante */ }
   }, 30000);
 
   // 0.0.0.0 en production : derrière le proxy de la plateforme, un bind sur
