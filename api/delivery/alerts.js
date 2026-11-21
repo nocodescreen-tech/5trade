@@ -719,7 +719,8 @@ async function verifierBrut(force = false) {
             verifierFrais: true,
             verifierModele: true,
             confluence: confluenceSurveillance,
-            verificateurRisque
+            verificateurRisque,
+            exigerVerificateurRisque: true
           });
         } catch { decision = null; }
       }

@@ -3881,6 +3881,7 @@ app.get('/api/decision', requireAuth, async (req, res) => {
       // signal de stratégie doit lire SES unités, pas une confluence vide.
       confluenceStrategie,
       verificateurRisque,
+      exigerVerificateurRisque: true,
       rrMin: Number.isFinite(Number(req.query.rrMin)) ? Number(req.query.rrMin) : undefined,
       exigerAlignement: true,
       refuserDesaccord: true,
@@ -4157,6 +4158,7 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
           profils: optionsFlux.profils || [],
           confluence,
           verificateurRisque,
+          exigerVerificateurRisque: true,
           rrMin: Number.isFinite(Number(req.query.rrMin)) ? Number(req.query.rrMin) : undefined,
           exigerAlignement: true,
           refuserDesaccord: true,
