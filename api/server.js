@@ -4421,12 +4421,13 @@ async function executerBacktest(src = {}) {
   const estFidele = src.fidele !== false && src.fidele !== 'false';
   let r;
   if (estFidele) {
+    const verifRisque = verificateurRisqueCompte();
     const rf = Backtest.lancerFidele(candles, { symbol, timeframe: tf }, {
       moteur: { profils: options.profils || [] },
       pas,
       decision: {
         exigerAlignement: src.exigerAlignement === true || src.exigerAlignement === 'true',
-        verificateurRisque: verificateurRisqueCompte
+        verificateurRisque: verifRisque
       }
     });
     const st = rf.stats || {};
