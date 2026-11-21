@@ -98,34 +98,33 @@ function verifier(p = {}) {
       avertissements, mesures };
   }
 
-  const risque = v => {
-    const m = nombre(v);
-    if (m !== null) return m;
-    return 0;
-  };
-  const risqueOuvert = ouvertes.reduce((s, x) => s + risque(x.risqueMontant), 0);
-  const risqueNouveau = nouvelle ? risque(nouvelle.risqueMontant) : 0;
-  const cumule = risqueOuvert + risqueNouveau;
-
-  mesures.risqueOuvertPct = Math.round((risqueOuvert / capital) * 1000) / 10;
-  mesures.risqueCumulePct = Math.round((cumule / capital) * 1000) / 10;
-  mesures.plafondPct = limites.risqueCumulePct;
   mesures.positions = ouvertes.length + (nouvelle ? 1 : 0);
+  mesures.plafondPct = limites.risqueCumulePct;
+
   // Une position dont le risque n'est pas chiffré compte dans le nombre (elle
   // existe) mais ne peut pas être mesurée : pour la sécurité du capital, un
-  // risque inconnu est un blocage immédiat (P0), pas un simple avertissement ignoré.
+  // risque inconnu est un blocage immédiat (P0) et NE DOIT JAMAIS être converti
+  // temporairement en zéro ni agrégé dans le calcul arithmétique.
   const sansRisque = ouvertes.filter(x => nombre(x.risqueMontant) === null).length
     + (nouvelle && nombre(nouvelle.risqueMontant) === null ? 1 : 0);
+
   if (sansRisque > 0) {
     mesures.positionsRisqueInconnu = sansRisque;
     mesures.risqueOuvertPct = null;
     mesures.risqueCumulePct = null;
     bloquants.push(`${sansRisque} position(s) sans risque chiffré : calcul de risque impossible`);
     avertissements.push(`${sansRisque} position(s) sans risque chiffré : risque cumulé non mesurable`);
-  }
+  } else {
+    const risqueOuvert = ouvertes.reduce((s, x) => s + nombre(x.risqueMontant), 0);
+    const risqueNouveau = nouvelle ? nombre(nouvelle.risqueMontant) : 0;
+    const cumule = risqueOuvert + risqueNouveau;
 
-  if (mesures.risqueCumulePct !== null && mesures.risqueCumulePct > limites.risqueCumulePct) {
-    bloquants.push(`risque cumulé ${mesures.risqueCumulePct} % > plafond ${limites.risqueCumulePct} %`);
+    mesures.risqueOuvertPct = Math.round((risqueOuvert / capital) * 1000) / 10;
+    mesures.risqueCumulePct = Math.round((cumule / capital) * 1000) / 10;
+
+    if (mesures.risqueCumulePct > limites.risqueCumulePct) {
+      bloquants.push(`risque cumulé ${mesures.risqueCumulePct} % > plafond ${limites.risqueCumulePct} %`);
+    }
   }
   if (mesures.positions > limites.positionsMax) {
     bloquants.push(`${mesures.positions} positions simultanées > maximum ${limites.positionsMax}`);

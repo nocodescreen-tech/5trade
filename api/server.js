@@ -4433,13 +4433,15 @@ async function executerBacktest(src = {}) {
   const estFidele = src.fidele !== false && src.fidele !== 'false';
   let r;
   if (estFidele) {
-    const verifRisque = verificateurRisqueCompte();
+    // Ne pas injecter verificateurRisque ici : rejeu-direct.js reconstruit un
+    // vérificateur historique à chaque pas (capital au fil de l'eau). Passer
+    // l'état actuel du journal écraserait cette simulation et évaluerait chaque
+    // décision passée avec le compte présent — ce qui n'est pas un backtest fidèle.
     const rf = Backtest.lancerFidele(candles, { symbol, timeframe: tf }, {
       moteur: { profils: options.profils || [] },
       pas,
       decision: {
-        exigerAlignement: src.exigerAlignement !== false && src.exigerAlignement !== 'false',
-        verificateurRisque: verifRisque
+        exigerAlignement: src.exigerAlignement !== false && src.exigerAlignement !== 'false'
       }
     });
     const st = rf.stats || {};

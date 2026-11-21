@@ -7855,6 +7855,41 @@ function tinyPng(W = 64, H = 40) {
         d1.mesures && d1.mesures.timeframe === '1d' && d1.mesures.intervalle === 86400000,
         `${d1.mesures.timeframe} / ${d1.mesures.intervalle} ms`);
     }
+
+    // — Risque et exposition : rejet strict et non-agrégation du risque inconnu
+    {
+      const Exp = require('./risk-engine/exposure-manager');
+      const resInconnu = Exp.verifier({
+        capital: 5000,
+        ouvertes: [{ symbole: 'EURUSD', direction: 'BUY', risqueMontant: null }],
+        nouvelle: { symbole: 'GBPUSD', direction: 'BUY', risqueMontant: 50 }
+      });
+      ok('exposition : un risque inconnu n\'est jamais agrégé en zéro (mesures à null)',
+        resInconnu.ok === false
+        && resInconnu.mesures.risqueOuvertPct === null
+        && resInconnu.mesures.risqueCumulePct === null
+        && resInconnu.bloquants.some(b => /sans risque chiffré/.test(b)),
+        JSON.stringify(resInconnu.mesures));
+
+      const resValide = Exp.verifier({
+        capital: 5000,
+        ouvertes: [{ symbole: 'EURUSD', direction: 'BUY', risqueMontant: 50 }],
+        nouvelle: { symbole: 'GBPUSD', direction: 'BUY', risqueMontant: 50 }
+      });
+      ok('exposition : les risques chiffrés sont calculés fidèlement (cumul 2.0 %)',
+        resValide.ok === true
+        && resValide.mesures.risqueCumulePct === 2
+        && resValide.bloquants.length === 0,
+        `cumul=${resValide.mesures.risqueCumulePct}%`);
+    }
+
+    // — Backtest fidèle : reconstruction historique sans injection du journal présent
+    {
+      const srvCode = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+      ok('backtest fidèle : ne transmet pas l\'état de compte présent (délègue à la simulation historique)',
+        !/Backtest\.lancerFidele\([^)]*verificateurRisque:\s*verifRisque/.test(srvCode),
+        'aucune injection du journal présent dans lancerFidele');
+    }
   }
 
   console.log(`\nRÉSULTAT : ${pass} réussis, ${fail} échoués${skip ? `, ${skip} non testés` : ''}`);
