@@ -8150,6 +8150,74 @@ function tinyPng(W = 64, H = 40) {
       const resTelFaux = await Tracker.envoyerTelegramSecurise('faux_token_123', 'faux_chat', 'test');
       ok('telegram sécurisé : détecte et retourne le refus HTTP/API sans crash ni silence',
         resTelFaux.ok === false && !!resTelFaux.erreur);
+
+      // 15. Audit Approfondi : Architecture Agent, Permissions, Observabilité, Scheduler & Moteurs Spécialisés
+      const PolicyEngine = require('./security/policy-engine');
+      const authLecture = PolicyEngine.validerAction(PolicyEngine.PERMISSIONS.LECTURE);
+      ok('policy engine : lecture et analyse autorisées par défaut', authLecture.autorise === true);
+
+      const modifRisqueIllegale = PolicyEngine.validerAction(PolicyEngine.PERMISSIONS.CONFIG, {
+        modificationsRisque: { stopLossObligatoire: false, risqueMaxParTradePct: 10 }
+      });
+      ok('policy engine : inviolabilité du Stop Loss et rejet de sur-risque',
+        modifRisqueIllegale.autorise === false && modifRisqueIllegale.violations.length >= 2);
+
+      const MemoryManager = require('./memoire/memory-manager');
+      const resMem = await MemoryManager.memoriser({
+        type: MemoryManager.TYPES_MEMOIRE.INSTRUCTION_TACTIQUE,
+        contenu: 'Interdire le trading pendant le CPI US',
+        source: 'utilisateur_audit'
+      });
+      ok('memory manager : typage strict et preuve formelle d\'enregistrement',
+        resMem.ok === true && !!resMem.preuve && resMem.type === 'instruction_tactique');
+
+      const Scheduler = require('./temporal/autonomous-scheduler');
+      const tacheIdTest = `tache_test_${Date.now()}`;
+      Scheduler.enregistrerTache({
+        id: tacheIdTest,
+        description: 'Test briefing persistant',
+        prochaineExecution: new Date(Date.now() - 1000).toISOString()
+      });
+      const enAttente = Scheduler.obtenirTachesEnAttente();
+      ok('autonomous scheduler : détection des tâches en attente avec persistance',
+        enAttente.some(t => t.id === tacheIdTest));
+      Scheduler.acquitterTache(tacheIdTest, null, { traite: true });
+
+      const Observability = require('./delivery/observability');
+      const trace = Observability.tracerAction({
+        action: 'Verification audit',
+        statut: Observability.STATUTS_TRAITEMENT.ENREGISTRE,
+        details: 'Test de traçabilité d\'action',
+        preuve: 'PREUVE_HASH_123'
+      });
+      ok('observabilité agent : distinction formelle et preuve d\'action',
+        trace.statut === 'ENREGISTRE' && trace.preuve === 'PREUVE_HASH_123');
+
+      const MoteursSpec = require('./moteurs/specialises');
+      const dateRollover = new Date('2026-11-25T21:30:00Z'); // Mercredi 21:30 UTC
+      const diagForexRollover = MoteursSpec.analyserForex([], { symbol: 'EURUSD', date: dateRollover });
+      ok('moteur forex spécialisé : détection et refus de la fenêtre de rollover interbancaire',
+        diagForexRollover.convient === false && diagForexRollover.refus.some(r => /rollover/i.test(r)));
+
+      const diagMetauxPause = MoteursSpec.analyserMetaux([], { symbol: 'XAUUSD', date: dateRollover });
+      ok('moteur métaux spécialisé : détection et refus de la pause quotidienne (21h-22h UTC)',
+        diagMetauxPause.convient === false && diagMetauxPause.refus.some(r => /pause/i.test(r)));
+
+      const Scan = require('./delivery/scan');
+      ok('scan livraison : 3 modes distincts (exploration, surveillance, trading_autorise)',
+        Scan.MODES_SCAN.EXPLORATION === 'exploration'
+        && Scan.MODES_SCAN.SURVEILLANCE === 'surveillance'
+        && Scan.MODES_SCAN.TRADING_AUTORISE === 'trading_autorise');
+
+      const ParseurAudit = require('./chat-crud/parseur');
+      const parseNote = ParseurAudit.parser('Note ceci pour toujours : ne jamais trader GBPUSD le vendredi');
+      ok('parseur chat : compréhension des formulations naturelles de consigne',
+        parseNote.verbe === 'APPRENDS');
+
+      const ValidateurAudit = require('./chat-crud/validateur');
+      const valRisque = await ValidateurAudit.evaluer({ verbe: 'APPRENDS', sujet: 'modifier le risque max à 15%' });
+      ok('validateur chat : distinction du niveau système sur consigne touchant au risque',
+        valRisque.niveau === 'système' && valRisque.confirmation_requise === true);
     })();
   }
 

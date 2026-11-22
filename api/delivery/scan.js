@@ -29,6 +29,23 @@ const MIN_BOUGIES = 20;        // en dessous, pas d'évaluation honnête
 // faire durer un cycle pendant lequel les données changent sous les pieds.
 const MAX_STRATEGIES = 8;
 
+const MODES_SCAN = {
+  EXPLORATION: 'exploration',
+  SURVEILLANCE: 'surveillance',
+  TRADING_AUTORISE: 'trading_autorise'
+};
+
+const STATUTS_SIGNAL = {
+  WAITING: 'WAITING',
+  CONFIRMED: 'CONFIRMED',
+  REJECTED: 'REJECTED',
+  ACTIVE: 'ACTIVE',
+  TP1: 'TP1',
+  TP2: 'TP2',
+  SL: 'SL',
+  EXPIRED: 'EXPIRED'
+};
+
 const etat = {
   demarre: false,
   dernier: null,               // { at, tf, marches, signaux, dureeMs }
@@ -38,7 +55,7 @@ const etat = {
 
 /**
  * Parcourt TOUS les symboles connus et rend les verdicts, sans rien envoyer.
- * @param {{market:object, signals:object, tf?:string, intervalleMin?:number}} deps
+ * @param {{market:object, signals:object, tf?:string, intervalleMin?:number, mode?:string, symbolesAutorises?:Array}} deps
  */
 /**
  * Unités à parcourir pour un symbole : l'unité de travail du scan, PLUS celles
@@ -50,10 +67,14 @@ function unitesPour(symbole, tf, tfsPour, TF_MS) {
   return [...new Set([tf, ...sup])];
 }
 
-async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERVALLE_MIN, strategies = null, tfsPour = null } = {}) {
+async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERVALLE_MIN, strategies = null, tfsPour = null, mode = MODES_SCAN.EXPLORATION, symbolesAutorises = null } = {}) {
   if (!market || !signals) throw new Error('scan complet : market et signals sont requis');
   const debut = Date.now();
-  const symboles = market.listSymbols() || [];
+  let symboles = market.listSymbols() || [];
+  if (mode === MODES_SCAN.TRADING_AUTORISE && Array.isArray(symbolesAutorises)) {
+    const autorisesSet = new Set(symbolesAutorises.map(s => String(s.symbol || s).toUpperCase()));
+    symboles = symboles.filter(s => autorisesSet.has(String(s.symbol || s).toUpperCase()));
+  }
   const signaux = [];
   const erreurs = [];
 
@@ -249,4 +270,4 @@ function dernierScan() {
   };
 }
 
-module.exports = { scanComplet, start, stop, dernierScan, unitesPour, INTERVALLE_MIN };
+module.exports = { scanComplet, start, stop, dernierScan, unitesPour, INTERVALLE_MIN, MODES_SCAN, STATUTS_SIGNAL };

@@ -46,7 +46,7 @@ const PATTERNS = [
   { regex: /^et si/i, verbe: 'SIMULE' },
 
   // APPRENDS
-  { regex: /^(?:apprends?|retiens|m[ée]morise)\s+(?:que\s+)?(.+)$/i, verbe: 'APPRENDS' },
+  { regex: /^(?:apprends?|retiens|m[ée]morise|note\s+(?:ceci|bien)?(?:\s+pour\s+toujours)?|souviens-toi\s+(?:de\s+cette\s+r[èe]gle\s+)?|garde\s+en\s+m[ée]moire)\s+(?:que\s+|de\s+)?(.+)$/i, verbe: 'APPRENDS' },
   { regex: /^(?:non|erreur|faux)\s*[:\-]?\s*(.+)$/i, verbe: 'APPRENDS', type: 'correction' },
 
   // AIDE

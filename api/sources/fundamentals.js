@@ -275,7 +275,7 @@ async function newsImminente(devise, fenetreMin = 30) {
  * pu s'appliquer. Un calendrier injoignable ne doit ni bloquer en silence, ni
  * laisser croire que tout va bien.
  */
-async function filtreCalendrier(symbol) {
+async function filtreCalendrier(symbol, { strict = false } = {}) {
   const { devises, applicable, raison } = devisesDuSymbole(symbol);
 
   if (!applicable) {
@@ -289,6 +289,14 @@ async function filtreCalendrier(symbol) {
   for (const devise of devises) {
     const r = await newsImminente(devise, 30);
     if (!r.verifie) {
+      if (strict) {
+        return {
+          ok: false, verifie: false, bloque: true, applicable: true, devises,
+          detail: r.raison,
+          politiquePrudence: true,
+          lecture: 'filtre économique NON vérifié : calendrier indisponible (politique de prudence stricte : signal bloqué)'
+        };
+      }
       return {
         ok: true, verifie: false, bloque: false, applicable: true, devises,
         detail: r.raison,

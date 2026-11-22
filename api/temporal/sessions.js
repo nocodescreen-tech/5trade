@@ -233,4 +233,4 @@ function statutMarche(symbol, dateOuTs = Date.now(), options = {}) {
   };
 }
 
-module.exports = { statutMarche, estHeureEteUS };
+module.exports = { statutMarche, verifierSession: statutMarche, estHeureEteUS };

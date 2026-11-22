@@ -26,13 +26,18 @@ async function evaluer(action) {
   if (['MONTRE', 'EXPLIQUE', 'AIDE'].includes(verbe)) {
     return { niveau: 'lecture', confirmation_requise: false };
   }
+  // APPRENDS : distinguer fait simple, règle d'interdiction et impact sur le risque global
   if (verbe === 'APPRENDS') {
+    if (type === 'correction') {
+      return { niveau: 'mineure', confirmation_requise: false, raison: 'correction humaine enregistrée' };
+    }
+    if (/risque|levier|perte\s+max|drawdown/i.test(sujet)) {
+      return { niveau: 'système', confirmation_requise: true, raison: 'modification des paramètres de risque via consigne' };
+    }
+    if (/interdi|jamais|bloque|refuse|ne\s+pas\s+trader/i.test(sujet)) {
+      return { niveau: 'mineure', confirmation_requise: false, raison: 'règle d\'interdiction enregistrée et active immédiatement' };
+    }
     return { niveau: 'lecture', confirmation_requise: false, raison: 'enregistrement en mémoire' };
-  }
-
-  // APPRENDS correction : pas de danger, juste un enregistrement
-  if (verbe === 'APPRENDS' && type === 'correction') {
-    return { niveau: 'lecture', confirmation_requise: false };
   }
 
   // CRÉE : dépend du domaine
