@@ -5109,9 +5109,7 @@ async function start() {
 
   // Briefing matinal automatique Telegram avec fenêtre horaire tolérante (06:00 à 10:00 UTC)
   // et données statistiques réelles (recap journal, positions, risque).
-  let dernierJourBriefing = null;
-  let dernierVendrediPreCloture = null;
-  let dernierDimancheReouverture = null;
+  const NotificationTracker = require('./delivery/notification-tracker');
 
   setInterval(async () => {
     try {
@@ -5124,58 +5122,68 @@ async function start() {
       const c = Alerts.get();
       if (!c.telegramToken || !c.telegramChat) return;
 
-      const fetchRef = globalThis.fetch || require('node-fetch');
-      const envoyerTelegramDirect = async (texte) => {
-        return fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: c.telegramChat,
-            text: texte,
-            parse_mode: 'HTML'
-          })
-        }).catch(() => {});
-      };
-
       // 1. Briefing matinal quotidien (06:00 à 10:00 UTC)
-      if (heureUTC >= 6 && heureUTC <= 10 && dernierJourBriefing !== jourStr) {
-        dernierJourBriefing = jourStr;
-        const { genererBriefingTelegram } = require('./routes/alerts');
-        const briefing = await genererBriefingTelegram(c, { DB });
-        await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: c.telegramChat,
-            text: briefing.texte,
-            parse_mode: 'HTML',
-            reply_markup: { inline_keyboard: briefing.inline_keyboard }
-          })
-        }).catch(() => {});
+      const cleBriefing = `briefing_matin_${jourStr}`;
+      if (heureUTC >= 6 && heureUTC <= 10 && !NotificationTracker.estDejaEnvoye(cleBriefing)) {
+        try {
+          const { genererBriefingTelegram } = require('./routes/alerts');
+          const briefing = await genererBriefingTelegram(c, { DB });
+          const resBriefing = await NotificationTracker.envoyerTelegramSecurise(
+            c.telegramToken,
+            c.telegramChat,
+            briefing.texte,
+            { parse_mode: 'HTML', reply_markup: { inline_keyboard: briefing.inline_keyboard } }
+          );
+          if (resBriefing.ok) {
+            NotificationTracker.marquerEnvoye(cleBriefing, { type: 'briefing_matinal' });
+          }
+        } catch (e) {
+          console.warn(`[Scheduler] Erreur briefing : ${e.message}`);
+        }
       }
 
       // 2. Alerte pré-clôture Forex du vendredi (21h30 UTC)
-      if (dayUTC === 5 && heureUTC === 21 && minuteUTC >= 30 && dernierVendrediPreCloture !== jourStr) {
-        dernierVendrediPreCloture = jourStr;
+      const cleVendredi = `forex_pre_cloture_${jourStr}`;
+      if (dayUTC === 5 && heureUTC === 21 && minuteUTC >= 30 && !NotificationTracker.estDejaEnvoye(cleVendredi)) {
         try {
           const Skills = require('./skills/registry');
           const skillRes = await Skills.executer('forex-session-monitor', { action: 'alerte_telegram', type: 'pre_cloture' });
           if (skillRes.ok && skillRes.resultat?.texte) {
-            await envoyerTelegramDirect(skillRes.resultat.texte);
+            const resEnvoi = await NotificationTracker.envoyerTelegramSecurise(
+              c.telegramToken,
+              c.telegramChat,
+              skillRes.resultat.texte
+            );
+            if (resEnvoi.ok) {
+              NotificationTracker.marquerEnvoye(cleVendredi, { type: 'pre_cloture_forex' });
+            }
           }
-        } catch {}
+        } catch (e) {
+          console.warn(`[Scheduler] Erreur pré-clôture Forex : ${e.message}`);
+        }
       }
 
-      // 3. Alerte réouverture Forex du dimanche (22h00 UTC)
-      if (dayUTC === 0 && heureUTC >= 22 && dernierDimancheReouverture !== jourStr) {
-        dernierDimancheReouverture = jourStr;
+      // 3. Alerte réouverture Forex du dimanche (synchronisée sur le calendrier réel)
+      const cleDimanche = `forex_reouverture_${jourStr}`;
+      const Sessions = require('./temporal/sessions');
+      const stForexDimanche = Sessions.statutMarche('EURUSD', d);
+      if (dayUTC === 0 && stForexDimanche.ouvert && !NotificationTracker.estDejaEnvoye(cleDimanche)) {
         try {
           const Skills = require('./skills/registry');
           const skillRes = await Skills.executer('forex-session-monitor', { action: 'alerte_telegram', type: 'reouverture' });
           if (skillRes.ok && skillRes.resultat?.texte) {
-            await envoyerTelegramDirect(skillRes.resultat.texte);
+            const resEnvoi = await NotificationTracker.envoyerTelegramSecurise(
+              c.telegramToken,
+              c.telegramChat,
+              skillRes.resultat.texte
+            );
+            if (resEnvoi.ok) {
+              NotificationTracker.marquerEnvoye(cleDimanche, { type: 'reouverture_forex' });
+            }
           }
-        } catch {}
+        } catch (e) {
+          console.warn(`[Scheduler] Erreur réouverture Forex : ${e.message}`);
+        }
       }
     } catch { /* surveillance temporelle non-bloquante */ }
   }, 30000);

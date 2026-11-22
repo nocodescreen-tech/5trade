@@ -72,8 +72,11 @@ function lireRepli() {
 function ecrireRepli(liste) {
   try {
     fs.mkdirSync(path.dirname(FICHIER_REPLI), { recursive: true });
-    fs.writeFileSync(FICHIER_REPLI, JSON.stringify(liste, null, 2));
-  } catch {}
+    fs.writeFileSync(FICHIER_REPLI, JSON.stringify(liste, null, 2), 'utf8');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, raison: e.message };
+  }
 }
 
 /**
@@ -83,7 +86,7 @@ function ecrireRepli(liste) {
  * @param {string} p.contenu    texte explicite de la consigne
  * @param {string} [p.categorie='consigne']  'consigne'|'session'|'risque'|'strategie'
  * @param {string} [p.source='utilisateur']  'utilisateur'|'ia'|'chat'
- * @returns {Promise<{ok:boolean, cle:string}>}
+ * @returns {Promise<{ok:boolean, cle?:string, raison?:string}>}
  */
 async function enregistrer({ cle, contenu, categorie = 'consigne', source = 'utilisateur' }) {
   if (!cle || !contenu) return { ok: false, raison: 'cle et contenu requis' };
@@ -105,7 +108,7 @@ async function enregistrer({ cle, contenu, categorie = 'consigne', source = 'uti
     }
   }
 
-  // Repli JSON
+  // Repli JSON sécurisé avec vérification d'écriture
   const liste = lireRepli();
   const idx = liste.findIndex(x => x.cle === cle);
   const now = new Date().toISOString();
@@ -114,7 +117,10 @@ async function enregistrer({ cle, contenu, categorie = 'consigne', source = 'uti
   } else {
     liste.push({ cle, contenu, categorie, source, active: true, cree_at: now, maj_at: now });
   }
-  ecrireRepli(liste);
+  const resEcriture = ecrireRepli(liste);
+  if (!resEcriture.ok) {
+    return { ok: false, raison: `Échec d'écriture disque persistance : ${resEcriture.raison}` };
+  }
   return { ok: true, cle };
 }
 
@@ -157,9 +163,85 @@ async function desactiver(cle) {
   if (item) {
     item.active = false;
     item.maj_at = new Date().toISOString();
-    ecrireRepli(liste);
+    const resEcriture = ecrireRepli(liste);
+    if (!resEcriture.ok) {
+      return { ok: false, raison: `Échec d'écriture disque persistance : ${resEcriture.raison}` };
+    }
   }
   return { ok: true };
 }
 
-module.exports = { init, enregistrer, lister, desactiver };
+/**
+ * Analyse une liste de préférences et produit un objet de contraintes structurées.
+ */
+function analyserContraintes(prefs) {
+  const symbolesInterdits = new Set();
+  const joursInterdits = new Set();
+  let risqueMaxPct = null;
+  let drawdownMaxPct = null;
+  const reglesTexte = [];
+
+  for (const p of prefs) {
+    if (p.active === false) continue;
+    const txt = String(p.contenu || '').toLowerCase();
+    reglesTexte.push(p.contenu);
+
+    // 1. Détection des symboles interdits
+    const mSymbole = txt.match(/(?:ne pas trader|interdire|bloquer|jamais(?: de)? trade(?:r)? sur)\s+([a-z0-9_]{3,10})/i);
+    if (mSymbole) {
+      symbolesInterdits.add(mSymbole[1].toUpperCase());
+    }
+
+    // 2. Détection des jours interdits
+    if (/(?:ne pas trader|pas de trade|bloquer)\s+(?:le\s+)?vendredi/i.test(txt)) joursInterdits.add(5);
+    if (/(?:ne pas trader|pas de trade|bloquer)\s+(?:le\s+)?samedi/i.test(txt)) joursInterdits.add(6);
+    if (/(?:ne pas trader|pas de trade|bloquer)\s+(?:le\s+)?dimanche/i.test(txt)) joursInterdits.add(0);
+    if (/(?:ne pas trader|pas de trade|bloquer)\s+(?:le\s+)?lundi/i.test(txt)) joursInterdits.add(1);
+
+    // 3. Détection plafond de risque
+    const mRisque = txt.match(/(?:risque max(?:imum)?|ne pas risquer plus de|plafond risque)\s*[:=]?\s*([0-9]+(?:[\.,][0-9]+)?)\s*%/i);
+    if (mRisque) {
+      const v = parseFloat(mRisque[1].replace(',', '.'));
+      if (Number.isFinite(v) && v > 0) {
+        risqueMaxPct = risqueMaxPct !== null ? Math.min(risqueMaxPct, v) : v;
+      }
+    }
+
+    // 4. Détection drawdown max
+    const mDD = txt.match(/drawdown max(?:imum)?\s*[:=]?\s*([0-9]+(?:[\.,][0-9]+)?)\s*%/i);
+    if (mDD) {
+      const v = parseFloat(mDD[1].replace(',', '.'));
+      if (Number.isFinite(v) && v > 0) {
+        drawdownMaxPct = drawdownMaxPct !== null ? Math.min(drawdownMaxPct, v) : v;
+      }
+    }
+  }
+
+  return {
+    total: prefs.length,
+    symbolesInterdits,
+    joursInterdits: Array.from(joursInterdits),
+    risqueMaxPct,
+    drawdownMaxPct,
+    reglesTexte
+  };
+}
+
+/**
+ * Analyse synchrone des contraintes (lecture repli local pour moteurs temps-réel).
+ */
+function obtenirContraintesActivesSync() {
+  const prefs = lireRepli();
+  return analyserContraintes(prefs);
+}
+
+/**
+ * Analyse et synthétise les consignes permanentes actives en contraintes exécutables
+ * pour le DecisionEngine et le RiskEngine.
+ */
+async function obtenirContraintesActives() {
+  const prefs = await lister({ activesSeulement: true });
+  return analyserContraintes(prefs);
+}
+
+module.exports = { init, enregistrer, lister, desactiver, obtenirContraintesActives, obtenirContraintesActivesSync, analyserContraintes };

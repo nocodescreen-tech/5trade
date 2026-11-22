@@ -694,6 +694,52 @@ function decider(candles, meta, options = {}) {
     } catch { /* session non-bloquante si indisponible */ }
   }
 
+  // Garde-fou cognitif : consignes et contraintes permanentes enregistrées par l'utilisateur
+  if (options.ignorerPreferences !== true && meta && meta.symbol) {
+    try {
+      const Prefs = require('../memoire/preferences');
+      const horodatage = options.date || (candles && candles.length ? (candles[candles.length - 1].time || candles[candles.length - 1].epoch * 1000) : Date.now());
+      const d = new Date(horodatage);
+      const jour = d.getUTCDay();
+      const contraintes = options.contraintes || (typeof Prefs.obtenirContraintesActivesSync === 'function' ? Prefs.obtenirContraintesActivesSync() : null);
+
+      if (contraintes) {
+        if (contraintes.symbolesInterdits && contraintes.symbolesInterdits.has(meta.symbol.toUpperCase())) {
+          return {
+            decision: 'NO_TRADE',
+            raison: `Consigne permanente utilisateur : trading interdit sur ${meta.symbol.toUpperCase()}`,
+            biais: 'neutre',
+            consigneBloquante: true,
+            detection: { ok: false, details: [], resume: `Symbole ${meta.symbol} interdit par consigne permanente` },
+            validation: { ok: false, details: [], resume: 'Interdiction utilisateur' },
+            confirmation: { ok: false, details: [] },
+            execution: { ok: false, details: [] },
+            arbitrage: { decision: 'NO_TRADE', raison: `Interdit par consigne permanente sur ${meta.symbol}`, biais: 'neutre', signauxRetenus: [] },
+            risque: { etat: { consulte: false, motif: 'symbole exclu par consigne' } },
+            traçabilite: { detection: 0, validation: 0, confirmation: 0, execution: 0, arbitrage: 'NO_TRADE', risque: 'ignore' }
+          };
+        }
+
+        if (Array.isArray(contraintes.joursInterdits) && contraintes.joursInterdits.includes(jour)) {
+          const nomsJours = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+          return {
+            decision: 'NO_TRADE',
+            raison: `Consigne permanente utilisateur : trading interdit le ${nomsJours[jour]}`,
+            biais: 'neutre',
+            consigneBloquante: true,
+            detection: { ok: false, details: [], resume: `Jour ${nomsJours[jour]} interdit par consigne permanente` },
+            validation: { ok: false, details: [], resume: 'Interdiction utilisateur' },
+            confirmation: { ok: false, details: [] },
+            execution: { ok: false, details: [] },
+            arbitrage: { decision: 'NO_TRADE', raison: `Interdit le ${nomsJours[jour]} par consigne permanente`, biais: 'neutre', signauxRetenus: [] },
+            risque: { etat: { consulte: false, motif: 'jour exclu par consigne' } },
+            traçabilite: { detection: 0, validation: 0, confirmation: 0, execution: 0, arbitrage: 'NO_TRADE', risque: 'ignore' }
+          };
+        }
+      }
+    } catch { /* contraintes non-bloquantes si mémoire indisponible */ }
+  }
+
   // 0. On récupère TOUS les signaux (stratégies + motifs + structure)
   const multi = require('./signaux').detecterTout(candles, meta, options);
   const signaux = multi.signaux || [];

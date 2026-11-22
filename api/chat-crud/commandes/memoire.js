@@ -71,13 +71,35 @@ async function apprendre(sujet, ctx) {
     return { erreur: 'enregistrement échoué', raison: res.raison };
   }
 
+  // Détecter l'impact direct sur le DecisionEngine
+  const contraintesDetectees = typeof Memoire.preferences.analyserContraintes === 'function'
+    ? Memoire.preferences.analyserContraintes([{ contenu: texte, active: true }])
+    : null;
+  let impactMoteur = '';
+  if (contraintesDetectees) {
+    const impacts = [];
+    if (contraintesDetectees.symbolesInterdits && contraintesDetectees.symbolesInterdits.size > 0) {
+      impacts.push(`blocage automatique des signaux sur ${Array.from(contraintesDetectees.symbolesInterdits).join(', ')}`);
+    }
+    if (contraintesDetectees.joursInterdits && contraintesDetectees.joursInterdits.length > 0) {
+      const noms = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+      impacts.push(`interdiction d'exécution le ${contraintesDetectees.joursInterdits.map(j => noms[j]).join(', ')}`);
+    }
+    if (contraintesDetectees.risqueMaxPct !== null) {
+      impacts.push(`plafond de risque ajusté à ${contraintesDetectees.risqueMaxPct} % par prise`);
+    }
+    if (impacts.length > 0) {
+      impactMoteur = `\n• Application active au Decision Engine : ${impacts.join(' · ')}.`;
+    }
+  }
+
   // Si c'est une règle de timing/restriction ("ne pas trader...", "jamais trader...")
   // on crée également une exception active si possible
   const exc = extraireException(texte);
   let detailException = '';
   if (exc) {
     const rExc = await Memoire.exceptions.creer(exc);
-    if (rExc.ok) detailException = ` Une exception technique automatique a été configurée (#${rExc.id}).`;
+    if (rExc.ok) detailException = `\n• Exception technique configurée (#${rExc.id}).`;
   }
 
   return {
@@ -87,7 +109,7 @@ async function apprendre(sujet, ctx) {
     texte: `C'est enregistré durablement dans ma mémoire permanente !\n` +
       `• Consigne active : « ${texte} »\n` +
       `• Catégorie : ${categorie}\n` +
-      `• Clé de référence : ${cle}.${detailException}\n` +
+      `• Clé de référence : ${cle}.${impactMoteur}${detailException}\n` +
       `Cette consigne ne sera pas oubliée et s'applique immédiatement à mes décisions et analyses.`
   };
 }

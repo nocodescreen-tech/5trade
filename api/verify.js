@@ -8070,6 +8070,86 @@ function tinyPng(W = 64, H = 40) {
       ok('decision engine : refuse d\'exécuter sur marché fermé (Forex le samedi)',
         decFerme.decision === 'NO_TRADE' && decFerme.statutSession.statut === 'ferme'
         && /Marché fermé/.test(decFerme.raison));
+
+      // 10. Sessions réelles & Heure d'été (DST) & Rejet strict des classes inconnues
+      const dateEte = new Date('2026-07-15T12:00:00Z');
+      const dateHiver = new Date('2026-12-15T12:00:00Z');
+      ok('sessions : détection heure d\'été américaine (EDT vs EST)',
+        Sessions.estHeureEteUS(dateEte) === true && Sessions.estHeureEteUS(dateHiver) === false);
+
+      const stEte = Sessions.statutMarche('EURUSD', new Date('2026-07-17T20:30:00Z')); // Vendredi été à 20h30 UTC (pré-fermeture car clôture 21h UTC)
+      ok('sessions : en heure d\'été, la clôture Forex a lieu à 21:00 UTC',
+        stEte.statut === 'pre_fermeture' && stEte.dst === true);
+
+      const stInconnuStrict = Sessions.statutMarche('SYMBOL_INCONNU_XYZ', dateMercredi);
+      ok('sessions : un instrument de classe inconnue est refusé par défaut',
+        stInconnuStrict.ouvert === false && stInconnuStrict.statut === 'inconnu');
+
+      // 11. Sandbox sécurisée (node:vm)
+      const Sandbox = require('./skills/sandbox');
+      const codeMalveillant = 'module.exports = { id: "bad", executer: () => { return process.env; } };';
+      const resSandboxMal = Sandbox.chargerDansSandbox(codeMalveillant);
+      ok('skill sandbox : neutralise les tentatives d\'accès aux ressources système hôtes',
+        resSandboxMal.ok === false && /violations de sécurité|interdit/.test(resSandboxMal.erreur));
+
+      const codeSain = 'module.exports = { id: "calculateur", nom: "Calcul", version: "1.0.0", description: "Skill de calcul mathématique pur", actions: ["add"], executer: (p) => ({ resultat: (p.a || 0) + (p.b || 0) }) };';
+      const resSandboxSain = Sandbox.chargerDansSandbox(codeSain);
+      ok('skill sandbox : exécute hermétiquement un skill valide',
+        resSandboxSain.ok === true && resSandboxSain.exports.id === 'calculateur');
+
+      // 12. Skill Factory autonome (Cycle complet création -> test sandbox -> installation -> exécution -> désinstallation)
+      const Factory = require('./skills/factory');
+      const codeGenere = 'module.exports = { id: "pivot_detector", nom: "Détecteur de Pivot", version: "1.0.0", description: "Calculateur de pivot point", actions: ["calcul"], executer: (p) => ({ pivot: (p.h + p.l + p.c) / 3 }) };';
+      const installRes = await Factory.installerNouveauSkill({
+        id: 'pivot_detector',
+        nom: 'Détecteur de Pivot',
+        version: '1.0.0',
+        description: 'Calculateur de pivot point',
+        codeSource: codeGenere,
+        tests: [
+          { params: { h: 10, l: 5, c: 6 }, assertion: (r) => r && r.pivot === 7 }
+        ]
+      });
+      ok('skill factory : test en sandbox et installation atomique réussie',
+        installRes.ok === true && installRes.id === 'pivot_detector');
+
+      const execDyn = await Skills.executer('pivot_detector', { h: 10, l: 5, c: 6 });
+      ok('skill factory : le skill dynamique est immédiatement exécutable par le registre',
+        execDyn.ok === true && execDyn.resultat && execDyn.resultat.pivot === 7);
+
+      const cleanRes = Factory.desinstallerSkill('pivot_detector');
+      ok('skill factory : désinstallation et nettoyage complet du skill',
+        cleanRes.ok === true);
+
+      // 13. Application active des consignes au DecisionEngine
+      const MemoirePref = require('./memoire/preferences');
+      await MemoirePref.enregistrer({
+        cle: 'consigne_interdire_gbpusd',
+        contenu: 'Interdire GBPUSD suite à haute volatilité',
+        categorie: 'consigne'
+      });
+      const contraintesActives = MemoirePref.obtenirContraintesActivesSync();
+      ok('mémoire cognitive : extraction synchrone des symboles et jours interdits',
+        contraintesActives.symbolesInterdits.has('GBPUSD'));
+
+      const decBloque = DE.decider(serieF, { symbol: 'GBPUSD', timeframe: '15m' }, {
+        date: dateMercredi.getTime(),
+        contraintes: contraintesActives
+      });
+      ok('decision engine : applique immédiatement la consigne cognitive utilisateur (trade refusé)',
+        decBloque.decision === 'NO_TRADE' && decBloque.consigneBloquante === true
+        && /Consigne permanente utilisateur/.test(decBloque.raison));
+
+      // 14. Notification Tracker persistant & Telegram sécurisé
+      const Tracker = require('./delivery/notification-tracker');
+      const testCleTracker = `test_notif_${Date.now()}`;
+      ok('notification tracker : clé inconnue non envoyée', Tracker.estDejaEnvoye(testCleTracker) === false);
+      Tracker.marquerEnvoye(testCleTracker, { test: true });
+      ok('notification tracker : clé enregistrée persistante', Tracker.estDejaEnvoye(testCleTracker) === true);
+
+      const resTelFaux = await Tracker.envoyerTelegramSecurise('faux_token_123', 'faux_chat', 'test');
+      ok('telegram sécurisé : détecte et retourne le refus HTTP/API sans crash ni silence',
+        resTelFaux.ok === false && !!resTelFaux.erreur);
     })();
   }
 

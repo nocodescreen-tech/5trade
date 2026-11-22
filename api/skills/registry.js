@@ -12,7 +12,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { validerSkill } = require('./validator');
+const { validerSkill, verifierCodeSource } = require('./validator');
+const { chargerDansSandbox, executerMethodeSecurisee } = require('./sandbox');
 
 const DOSSIER_INSTALLES = path.join(__dirname, 'installed');
 const FICHIER_ETAT = path.join(__dirname, '..', '..', 'data', 'skills-registry.json');
@@ -45,7 +46,7 @@ function sauvegarderEtat() {
 }
 
 /**
- * Enregistre une compétence en mémoire après validation.
+ * Enregistre une compétence en mémoire après validation stricte.
  */
 function enregistrer(skill) {
   const v = validerSkill(skill);
@@ -56,6 +57,47 @@ function enregistrer(skill) {
   if (!etatActif.has(skill.id)) {
     etatActif.set(skill.id, skill.actif !== false);
   }
+  return true;
+}
+
+/**
+ * Charge un skill depuis un dossier de manière sécurisée (analyse préalable).
+ */
+function chargerDossierSkill(dossierSkill, nomDossier) {
+  const indexPath = path.join(dossierSkill, 'index.js');
+  if (!fs.existsSync(indexPath)) return false;
+
+  const codeSource = fs.readFileSync(indexPath, 'utf8');
+  // 1. Analyse statique obligatoire avant toute exécution
+  const verif = verifierCodeSource(codeSource);
+  if (!verif.securise) {
+    console.warn(`[Skills] Rejet du skill ${nomDossier} (code non sécurisé) : ${verif.violations.join(', ')}`);
+    return false;
+  }
+
+  // 2. Chargement : si skill externe/généré, charger via sandbox
+  let skillObj = null;
+  // Si c'est un skill natif contenant des requires relatifs autorisés
+  if (codeSource.includes("require('../../") || codeSource.includes("require('../../../")) {
+    try {
+      const mod = require(indexPath);
+      skillObj = typeof mod === 'function' ? mod() : mod;
+    } catch (e) {
+      console.warn(`[Skills] Échec de chargement natif ${nomDossier} : ${e.message}`);
+      return false;
+    }
+  } else {
+    // Exécution hermétique dans la sandbox
+    const sb = chargerDansSandbox(codeSource);
+    if (!sb.ok) {
+      console.warn(`[Skills] Échec sandbox ${nomDossier} : ${sb.erreur}`);
+      return false;
+    }
+    skillObj = sb.exports;
+  }
+
+  if (skillObj && !skillObj.id) skillObj.id = nomDossier;
+  enregistrer(skillObj);
   return true;
 }
 
@@ -73,16 +115,10 @@ function charger() {
   for (const ent of entrees) {
     if (ent.isDirectory()) {
       const dossierSkill = path.join(DOSSIER_INSTALLES, ent.name);
-      const indexPath = path.join(dossierSkill, 'index.js');
-      if (fs.existsSync(indexPath)) {
-        try {
-          const mod = require(indexPath);
-          const skillObj = typeof mod === 'function' ? mod() : mod;
-          if (skillObj && !skillObj.id) skillObj.id = ent.name;
-          enregistrer(skillObj);
-        } catch (e) {
-          console.warn(`[Skills] Impossible de charger le skill ${ent.name} : ${e.message}`);
-        }
+      try {
+        chargerDossierSkill(dossierSkill, ent.name);
+      } catch (e) {
+        console.warn(`[Skills] Erreur chargement ${ent.name} : ${e.message}`);
       }
     }
   }
@@ -141,7 +177,7 @@ function desactiver(id) {
 }
 
 /**
- * Exécute une compétence de manière sécurisée.
+ * Exécute une compétence de manière sécurisée (avec timeout strict).
  */
 async function executer(id, params = {}, ctx = {}) {
   const skill = obtenir(id);
@@ -152,25 +188,37 @@ async function executer(id, params = {}, ctx = {}) {
     return { ok: false, raison: `La compétence « ${id} » est désactivée` };
   }
 
-  try {
-    const res = await skill.executer(params, ctx);
-    return {
-      ok: true,
-      skillId: id,
-      resultat: res
-    };
-  } catch (e) {
+  // Exécution sécurisée avec protection anti-blocage (timeout 10s)
+  const res = await executerMethodeSecurisee(skill.executer.bind(skill), [params, ctx], 10000);
+  if (!res.ok) {
     return {
       ok: false,
       skillId: id,
-      raison: `Erreur d'exécution du skill ${id} : ${e.message}`
+      raison: `Erreur d'exécution du skill ${id} : ${res.erreur}`
     };
   }
+
+  return {
+    ok: true,
+    skillId: id,
+    resultat: res.resultat
+  };
+}
+
+/**
+ * Supprime une compétence du registre et de l'état persisté.
+ */
+function supprimer(id) {
+  competences.delete(id);
+  etatActif.delete(id);
+  sauvegarderEtat();
+  return true;
 }
 
 module.exports = {
   charger,
   enregistrer,
+  supprimer,
   lister,
   obtenir,
   activer,

@@ -15,25 +15,53 @@
 const { classifier } = require('../market-intelligence/instrument-classifier');
 
 /**
+ * Détermine si une date UTC tombe pendant l'heure d'été américaine (EDT).
+ * Aux États-Unis, l'heure d'été commence le 2e dimanche de mars et se termine le 1er dimanche de novembre.
+ * À 17:00 heure de New York :
+ *   - En été (EDT / UTC-4) : 17:00 NY = 21:00 UTC.
+ *   - En hiver (EST / UTC-5) : 17:00 NY = 22:00 UTC.
+ * @param {Date} date
+ * @returns {boolean}
+ */
+function estHeureEteUS(date) {
+  const annee = date.getUTCFullYear();
+  const mars1 = new Date(Date.UTC(annee, 2, 1));
+  const deuxiemeDimancheMars = ((7 - mars1.getUTCDay()) % 7 + 1) + 7;
+  const debutEDT = new Date(Date.UTC(annee, 2, deuxiemeDimancheMars, 7, 0, 0));
+
+  const nov1 = new Date(Date.UTC(annee, 10, 1));
+  const premierDimancheNov = (7 - nov1.getUTCDay()) % 7 + 1;
+  const finEDT = new Date(Date.UTC(annee, 10, premierDimancheNov, 6, 0, 0));
+
+  return date >= debutEDT && date < finEDT;
+}
+
+/**
  * Calcule l'état de session d'un instrument à un instant t.
  * @param {string} symbol
  * @param {number|Date} [dateOuTs=Date.now()]
+ * @param {object} [options={}]
+ * @param {boolean} [options.autoriserInconnu=false]
+ * @param {number} [options.fermetureVendrediUTC]
+ * @param {number} [options.reouvertureDimancheUTC]
  * @returns {{
  *   ouvert: boolean,
- *   statut: 'ouvert'|'ferme'|'pre_fermeture'|'pause',
+ *   statut: 'ouvert'|'ferme'|'pre_fermeture'|'pause'|'inconnu',
  *   classe: string,
  *   continu: boolean,
  *   weekend: boolean,
  *   raison: string,
  *   prochaineOuverture: Date|null,
- *   prochaineFermeture: Date|null
+ *   prochaineFermeture: Date|null,
+ *   dst: boolean
  * }}
  */
-function statutMarche(symbol, dateOuTs = Date.now()) {
+function statutMarche(symbol, dateOuTs = Date.now(), options = {}) {
   const d = dateOuTs instanceof Date ? dateOuTs : new Date(Number(dateOuTs));
   const ts = d.getTime();
   const info = classifier(symbol);
   const classe = info.classe || 'inconnu';
+  const dst = estHeureEteUS(d);
 
   // 1. Marchés continus 24h/24, 7j/7
   if (classe === 'synthetique' || classe === 'crypto') {
@@ -45,7 +73,8 @@ function statutMarche(symbol, dateOuTs = Date.now()) {
       weekend: false,
       raison: `${info.libelle} ouvert 24h/24, 7j/7 (trading continu)`,
       prochaineOuverture: null,
-      prochaineFermeture: null
+      prochaineFermeture: null,
+      dst
     };
   }
 
@@ -55,11 +84,20 @@ function statutMarche(symbol, dateOuTs = Date.now()) {
   const minute = d.getUTCMinutes();
   const tempsMinutes = heure * 60 + minute;
 
-  // Calcul du prochain dimanche 22:00 UTC (réouverture Forex/Métaux)
-  function getProchainDimanche22h(fromTime) {
+  // Heure de clôture NY : 21:00 UTC en été (EDT), 22:00 UTC en hiver (EST)
+  // Surchargeable par le broker si spécifié
+  const heureFermetureForex = Number.isFinite(options.fermetureVendrediUTC)
+    ? options.fermetureVendrediUTC
+    : (dst ? 21 : 22);
+  const heureOuvertureForex = Number.isFinite(options.reouvertureDimancheUTC)
+    ? options.reouvertureDimancheUTC
+    : (dst ? 21 : 22);
+
+  // Calcul du prochain dimanche à l'heure d'ouverture
+  function getProchainDimancheOuverture(fromTime) {
     const target = new Date(fromTime);
     target.setUTCMinutes(0, 0, 0);
-    target.setUTCHours(22);
+    target.setUTCHours(heureOuvertureForex);
     const day = target.getUTCDay();
     const diff = (7 - day) % 7;
     target.setUTCDate(target.getUTCDate() + diff);
@@ -69,11 +107,11 @@ function statutMarche(symbol, dateOuTs = Date.now()) {
     return target;
   }
 
-  // Calcul du prochain vendredi 22:00 UTC (fermeture Forex/Métaux)
-  function getProchainVendredi22h(fromTime) {
+  // Calcul du prochain vendredi à l'heure de fermeture
+  function getProchainVendrediFermeture(fromTime) {
     const target = new Date(fromTime);
     target.setUTCMinutes(0, 0, 0);
-    target.setUTCHours(22);
+    target.setUTCHours(heureFermetureForex);
     const day = target.getUTCDay();
     let diff = 5 - day;
     if (diff < 0 || (diff === 0 && target.getTime() <= fromTime)) {
@@ -85,51 +123,54 @@ function statutMarche(symbol, dateOuTs = Date.now()) {
 
   // 2. Forex et Métaux
   if (classe === 'forex' || classe === 'metaux' || classe === 'energies') {
-    // Clôture le vendredi à 22:00 UTC (1320 min)
-    const estVendrediApresFermeture = (jour === 5 && tempsMinutes >= 22 * 60);
+    const estVendrediApresFermeture = (jour === 5 && tempsMinutes >= heureFermetureForex * 60);
     const estSamedi = (jour === 6);
-    const estDimancheAvantOuverture = (jour === 0 && tempsMinutes < 22 * 60);
+    const estDimancheAvantOuverture = (jour === 0 && tempsMinutes < heureOuvertureForex * 60);
     const estWeekend = estVendrediApresFermeture || estSamedi || estDimancheAvantOuverture;
 
     if (estWeekend) {
-      const reouverture = getProchainDimanche22h(ts);
+      const reouverture = getProchainDimancheOuverture(ts);
       return {
         ouvert: false,
         statut: 'ferme',
         classe,
         continu: false,
         weekend: true,
-        raison: `Marché ${info.libelle} fermé le week-end (fermeture vendredi 22:00 UTC, réouverture dimanche 22:00 UTC)`,
+        raison: `Marché ${info.libelle} fermé le week-end (fermeture vendredi ${heureFermetureForex}:00 UTC, réouverture dimanche ${heureOuvertureForex}:00 UTC${dst ? ' · heure d\'été EDT' : ''})`,
         prochaineOuverture: reouverture,
-        prochaineFermeture: null
+        prochaineFermeture: null,
+        dst
       };
     }
 
-    // Pré-fermeture du vendredi soir (dernières heures : liquidité faible, spreads accrus)
-    if (jour === 5 && tempsMinutes >= 21 * 60 && tempsMinutes < 22 * 60) {
+    // Pré-fermeture du vendredi soir (dernière heure avant clôture)
+    if (jour === 5 && tempsMinutes >= (heureFermetureForex - 1) * 60 && tempsMinutes < heureFermetureForex * 60) {
       return {
         ouvert: true,
         statut: 'pre_fermeture',
         classe,
         continu: false,
         weekend: false,
-        raison: `Marché ${info.libelle} en phase de pré-fermeture du week-end (clôture à 22:00 UTC) : risque de slippage et spreads élargis`,
+        raison: `Marché ${info.libelle} en phase de pré-fermeture du week-end (clôture à ${heureFermetureForex}:00 UTC) : risque de slippage et spreads élargis`,
         prochaineOuverture: null,
-        prochaineFermeture: new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 22, 0, 0))
+        prochaineFermeture: new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), heureFermetureForex, 0, 0)),
+        dst
       };
     }
 
-    // Pause quotidienne des métaux (21:00 → 22:00 UTC du lundi au jeudi)
-    if (classe === 'metaux' && jour >= 1 && jour <= 4 && tempsMinutes >= 21 * 60 && tempsMinutes < 22 * 60) {
+    // Pause quotidienne des métaux (une heure avant réouverture asiatique)
+    const pauseMetauxHeure = dst ? 20 : 21;
+    if (classe === 'metaux' && jour >= 1 && jour <= 4 && tempsMinutes >= pauseMetauxHeure * 60 && tempsMinutes < (pauseMetauxHeure + 1) * 60) {
       return {
         ouvert: false,
         statut: 'pause',
         classe,
         continu: false,
         weekend: false,
-        raison: `Pause de maintenance quotidienne des métaux (21:00–22:00 UTC)`,
-        prochaineOuverture: new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 22, 0, 0)),
-        prochaineFermeture: null
+        raison: `Pause de maintenance quotidienne des métaux (${pauseMetauxHeure}:00–${pauseMetauxHeure + 1}:00 UTC)`,
+        prochaineOuverture: new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), pauseMetauxHeure + 1, 0, 0)),
+        prochaineFermeture: null,
+        dst
       };
     }
 
@@ -142,7 +183,8 @@ function statutMarche(symbol, dateOuTs = Date.now()) {
       weekend: false,
       raison: `Marché ${info.libelle} ouvert`,
       prochaineOuverture: null,
-      prochaineFermeture: getProchainVendredi22h(ts)
+      prochaineFermeture: getProchainVendrediFermeture(ts),
+      dst
     };
   }
 
@@ -156,8 +198,9 @@ function statutMarche(symbol, dateOuTs = Date.now()) {
         continu: false,
         weekend: true,
         raison: `Bourses d'indices fermées le week-end`,
-        prochaineOuverture: getProchainDimanche22h(ts),
-        prochaineFermeture: null
+        prochaineOuverture: getProchainDimancheOuverture(ts),
+        prochaineFermeture: null,
+        dst
       };
     }
     return {
@@ -168,21 +211,26 @@ function statutMarche(symbol, dateOuTs = Date.now()) {
       weekend: false,
       raison: `Marché indices ouvert`,
       prochaineOuverture: null,
-      prochaineFermeture: null
+      prochaineFermeture: null,
+      dst
     };
   }
 
-  // Classe inconnue : on reste prudent
+  // 4. Classe inconnue : PAR DÉFAUT STRICT, UN ÉTAT INCONNU BLOQUE L'EXÉCUTION
+  const autoriserInconnu = options.autoriserInconnu === true;
   return {
-    ouvert: true,
-    statut: 'ouvert',
+    ouvert: autoriserInconnu,
+    statut: autoriserInconnu ? 'ouvert' : 'inconnu',
     classe: 'inconnu',
     continu: false,
     weekend: (jour === 0 || jour === 6),
-    raison: 'Classe d\'instrument inconnue : session non vérifiée',
+    raison: autoriserInconnu
+      ? 'Classe d\'instrument inconnue : autorisée explicitement'
+      : 'Classe d\'instrument inconnue : session non vérifiée (exécution refusée par sécurité)',
     prochaineOuverture: null,
-    prochaineFermeture: null
+    prochaineFermeture: null,
+    dst
   };
 }
 
-module.exports = { statutMarche };
+module.exports = { statutMarche, estHeureEteUS };
