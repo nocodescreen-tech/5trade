@@ -2118,6 +2118,8 @@ function TempsAnalyse({ depuis }) {
 }
 
 function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provider, providerLabel }) {
+  const [copie, setCopie] = useState(false);
+  const [demoStatus, setDemoStatus] = useState('');
   const lv = signal && signal.levels ? signal.levels : null;
   const ok = lv && Number.isFinite(Number(lv.entry)) && Number.isFinite(Number(lv.stop));
   if (!ok) {
@@ -2189,6 +2191,49 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
             <i className="fas fa-floppy-disk"></i>Journal
           </button>
         )}
+        <button className="btn ghost sm" style={{ padding: '5px 9px', color: '#60a5fa' }}
+          onClick={() => {
+            const texte = `${symbol} ${achat ? 'BUY' : 'SELL'} @ ${lv.entry} | SL: ${lv.stop} | TP1: ${lv.target1} | TP2: ${lv.target2 || '—'}`;
+            navigator.clipboard.writeText(texte);
+            setCopie(true);
+            setTimeout(() => setCopie(false), 2500);
+          }}
+          title="Copier les paramètres du trade pour MetaTrader 5">
+          <i className={`fas ${copie ? 'fa-check' : 'fa-copy'}`}></i>
+          {copie ? 'Copié MT5 !' : 'Copier MT5'}
+        </button>
+        <button className="btn ghost sm" style={{ padding: '5px 9px', color: '#34d399' }}
+          onClick={async () => {
+            try {
+              setDemoStatus('En cours…');
+              const res = await (await api('/trades', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  pair: symbol,
+                  direction: achat ? 'BUY' : 'SELL',
+                  entry: Number(lv.entry),
+                  sl: Number(lv.stop),
+                  tp: Number.isFinite(Number(lv.target1)) ? Number(lv.target1) : null,
+                  status: 'open',
+                  notes: `Trade démo automatique — ${signal.nom || 'moteur'}`
+                })
+              })).json();
+              if (res.success) {
+                setDemoStatus('✅ Pris en démo !');
+              } else {
+                setDemoStatus('⚠️ Erreur');
+              }
+            } catch {
+              setDemoStatus('❌ Erreur');
+            } finally {
+              setTimeout(() => setDemoStatus(''), 3000);
+            }
+          }}
+          title="Prendre immédiatement ce trade en compte démo pour le suivre dans le journal">
+          <i className="fas fa-play"></i>
+          {demoStatus || 'Prendre en Démo'}
+        </button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '0 18px' }}>
         <div>
@@ -3070,6 +3115,94 @@ function PositionsGestion() {
   );
 }
 
+function AgentBriefingCard() {
+  const [briefing, setBriefing] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [masque, setMasque] = useState(false);
+  const [deplie, setDeplie] = useState(false);
+
+  useEffect(() => {
+    api('/recap/du-jour')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d && d.success) setBriefing(d); })
+      .catch(() => {});
+  }, []);
+
+  if (masque || !briefing) return null;
+
+  const envoyerTelegram = async () => {
+    setBusy(true); setMsg('');
+    try {
+      const res = await (await api('/recap/envoyer-telegram', { method: 'POST' })).json();
+      if (res.success) setMsg('✅ Briefing envoyé avec succès sur Telegram !');
+      else setMsg('⚠️ ' + (res.error || 'Échec'));
+    } catch {
+      setMsg('❌ Erreur réseau');
+    } finally {
+      setBusy(false);
+      setTimeout(() => setMsg(''), 4500);
+    }
+  };
+
+  return (
+    <div className="panel" style={{
+      padding: '12px 16px', marginBottom: 12,
+      background: 'linear-gradient(135deg, rgba(30,58,138,.22) 0%, rgba(15,23,42,.45) 100%)',
+      borderColor: 'rgba(59,130,246,.35)', position: 'relative'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 20 }}>☀️</span>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <b style={{ fontSize: 13.5, color: '#93c5fd' }}>Briefing Matinal & Récapitulatif du Jour</b>
+              <span className="badge" style={{ background: 'rgba(59,130,246,.15)', color: '#60a5fa', fontSize: 10 }}>
+                IA Autonome
+              </span>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              Positions ouvertes, gestion du risque et sessions de marché
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button className="btn ghost sm" onClick={() => setDeplie(d => !d)} style={{ fontSize: 11 }}>
+            <i className={`fas ${deplie ? 'fa-chevron-up' : 'fa-chevron-down'}`}></i>
+            {deplie ? 'Masquer texte' : 'Lire le récap'}
+          </button>
+          {briefing.telegramConfigure ? (
+            <button className="btn sm" onClick={envoyerTelegram} disabled={busy}
+              style={{ background: '#2563eb', color: '#fff', fontSize: 11.5 }} title="Recevoir ce récapitulatif sur Telegram">
+              {busy ? <Spinner /> : <><i className="fab fa-telegram"></i> Envoyer sur Telegram</>}
+            </button>
+          ) : (
+            <span className="badge" style={{ background: 'rgba(148,163,184,.12)', color: 'var(--dim)', fontSize: 10.5 }}
+              title="Configurez votre jeton Telegram dans l'onglet Alertes pour recevoir les briefings du matin">
+              <i className="fab fa-telegram"></i> Telegram non lié
+            </span>
+          )}
+          <button className="btn ghost sm" onClick={() => setMasque(true)} title="Fermer ce bandeau" style={{ padding: '4px 8px' }}>
+            <i className="fas fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+      {msg && (
+        <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: msg.startsWith('✅') ? '#34d399' : '#f87171' }}>
+          {msg}
+        </div>
+      )}
+      {deplie && (
+        <div style={{
+          marginTop: 10, fontSize: 12, lineHeight: 1.6, color: 'var(--text)',
+          background: 'rgba(0,0,0,.35)', padding: '12px 14px', borderRadius: 8,
+          border: '1px solid rgba(148,163,184,.15)'
+        }} dangerouslySetInnerHTML={{ __html: briefing.texte }} />
+      )}
+    </div>
+  );
+}
+
 function LiveMarket({ onToJournal }) {
   const [meta, setMeta] = useState({ symbols: [], timeframes: ['1m', '5m', '15m', '1h'] });
   const [symbol, setSymbol] = useState('R_75');
@@ -3318,6 +3451,7 @@ function LiveMarket({ onToJournal }) {
 
   return (
     <>
+      <AgentBriefingCard />
       {/* ── En-tête instrument (collant) ── */}
       <div className="panel" style={{ padding: '11px 14px', marginBottom: 12,
         position: 'sticky', top: 0, zIndex: 40, background: 'var(--panel)',

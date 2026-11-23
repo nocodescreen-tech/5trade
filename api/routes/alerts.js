@@ -392,6 +392,50 @@ module.exports = function monterAlertes(app, deps) {
   });
 
   /**
+   * Consultation du récapitulatif / briefing du jour pour l'affichage écran
+   */
+  app.get('/api/recap/du-jour', async (req, res) => {
+    try {
+      const c = Alerts.get();
+      const briefing = await genererBriefingTelegram(c, { DB });
+      res.json({
+        success: true,
+        texte: briefing.texte,
+        date: new Date().toISOString(),
+        telegramConfigure: Boolean(c && c.telegramToken && c.telegramChat)
+      });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  /**
+   * Envoi immédiat du récapitulatif sur Telegram depuis l'interface
+   */
+  app.post('/api/recap/envoyer-telegram', async (req, res) => {
+    try {
+      const c = Alerts.get();
+      if (!c.telegramToken || !c.telegramChat) {
+        return res.status(400).json({ success: false, error: 'Telegram non configuré (jeton ou chat_id manquant)' });
+      }
+      const briefing = await genererBriefingTelegram(c, { DB });
+      const NotificationTracker = require('../delivery/notification-tracker');
+      const envoi = await NotificationTracker.envoyerTelegramSecurise(
+        c.telegramToken,
+        c.telegramChat,
+        briefing.texte,
+        { parse_mode: 'HTML', reply_markup: { inline_keyboard: briefing.inline_keyboard } }
+      );
+      if (!envoi.ok) {
+        return res.status(400).json({ success: false, error: envoi.erreur });
+      }
+      res.json({ success: true, message: 'Briefing envoyé avec succès sur Telegram !' });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  /**
    * Déclenchement manuel ou planifié du briefing matinal Telegram
    */
   app.all('/api/alerts/telegram/briefing', async (req, res) => {

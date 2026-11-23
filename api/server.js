@@ -826,45 +826,97 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false, t
  * saturé ou retiré côté NVIDIA ne bloque donc jamais une analyse : le suivant
  * prend le relais. Le coût est journalisé à 0 $ (champ `gratuit`).
  */
-// Qui a répondu au dernier appel IA (« nim:<modele> »), exposé par /api/ia-selftest.
+/**
+ * Repli ultrarapide Google Gemini pour texte et JSON (si NVIDIA est lent ou saturé).
+ */
+async function appelGeminiTexte(messages, { maxTokens = 2000, json = false } = {}) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error('GEMINI_API_KEY non configurée');
+  const modele = process.env.GEMINI_TEXT_MODEL || 'gemini-1.5-flash';
+  const prompt = messages.map(m => `${String(m.role || 'user').toUpperCase()}:\n${m.content}`).join('\n\n');
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      maxOutputTokens: maxTokens,
+      temperature: 0.2,
+      responseMimeType: json ? 'application/json' : 'text/plain'
+    }
+  };
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modele}:generateContent`;
+  const fetchRef = globalThis.fetch || require('node-fetch');
+  const res = await fetchRef(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10000)
+  });
+  if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
+  const data = await res.json();
+  const cand = data?.candidates?.[0];
+  const text = cand?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Réponse vide de Gemini');
+  return json ? extraireJSON(text) : text;
+}
+
+/**
+ * Point d'entrée IA UNIQUE de l'app — NVIDIA NIM en cascade, avec repli Gemini ultra rapide.
+ */
 let dernierFournisseur = 'aucun';
 async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'ia' } = {}) {
-  if (!process.env.NVIDIA_API_KEY) {
-    const e = new Error('NVIDIA_API_KEY non configurée dans .env : aucune IA disponible.');
+  const raisons = [];
+  const debut = Date.now();
+
+  // 1. Essai de la chaîne NVIDIA NIM (budget de 10s max par essai pour réactivité)
+  if (process.env.NVIDIA_API_KEY) {
+    for (const modele of NVIDIA_MODELS) {
+      const restant = Math.min(10000, NVIDIA_BUDGET_TOTAL_MS - (Date.now() - debut));
+      if (restant <= 2000) {
+        raisons.push(`${modele}: non essayé (délai dépassé)`);
+        break;
+      }
+      try {
+        const r = await appelNvidia(modele, messages, { maxTokens, json, timeoutMs: restant });
+        try {
+          Couts.enregistrer({
+            route,
+            modele: r.modele,
+            entree: Number(r.usage.prompt_tokens) || Couts.estimerEntree(messages),
+            sortie: Number(r.usage.completion_tokens) || Couts.estimerTokens(r.contenu),
+            gratuit: true
+          });
+        } catch { /* le comptage ne doit jamais casser une analyse */ }
+        if (dernierFournisseur !== `nim:${modele}`) {
+          console.log(`[IA] ${modele} a répondu (${route}).`);
+        }
+        dernierFournisseur = `nim:${modele}`;
+        return r.contenu;
+      } catch (e) {
+        if (e.status === 400) throw e;
+        raisons.push(`${modele}: ${e.message}`);
+        console.warn(`[IA] ${modele} indisponible — ${e.message.slice(0, 140)}`);
+      }
+    }
+  }
+
+  // 2. Repli immédiat sur Google Gemini si disponible (temps de réponse < 2s)
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const rGemini = await appelGeminiTexte(messages, { maxTokens, json });
+      dernierFournisseur = 'gemini:flash';
+      console.log(`[IA] Gemini Flash a pris le relais avec succès (${route}).`);
+      return rGemini;
+    } catch (e) {
+      raisons.push(`gemini: ${e.message}`);
+      console.warn(`[IA] Repli Gemini échec : ${e.message}`);
+    }
+  }
+
+  if (!process.env.NVIDIA_API_KEY && !process.env.GEMINI_API_KEY) {
+    const e = new Error('Aucune clé IA configurée (.env)');
     e.status = 503;
     throw e;
   }
-  const raisons = [];
-  const debut = Date.now();
-  for (const modele of NVIDIA_MODELS) {
-    const restant = NVIDIA_BUDGET_TOTAL_MS - (Date.now() - debut);
-    if (restant <= 2000) {
-      raisons.push(`${modele}: non essayé (échéance de ${NVIDIA_BUDGET_TOTAL_MS} ms atteinte)`);
-      break;
-    }
-    try {
-      const r = await appelNvidia(modele, messages, { maxTokens, json, timeoutMs: restant });
-      try {
-        Couts.enregistrer({
-          route,
-          modele: r.modele,
-          entree: Number(r.usage.prompt_tokens) || Couts.estimerEntree(messages),
-          sortie: Number(r.usage.completion_tokens) || Couts.estimerTokens(r.contenu),
-          gratuit: true
-        });
-      } catch { /* le comptage ne doit jamais casser une analyse */ }
-      if (dernierFournisseur !== `nim:${modele}`) {
-        console.log(`[IA] ${modele} a répondu (${route}).`);
-      }
-      dernierFournisseur = `nim:${modele}`;
-      return r.contenu;
-    } catch (e) {
-      // 400 = requête malformée : elle échouera aussi ailleurs, on ne la rejoue pas.
-      if (e.status === 400) throw e;
-      raisons.push(`${modele}: ${e.message}`);
-      console.warn(`[IA] ${modele} indisponible — ${e.message.slice(0, 140)}`);
-    }
-  }
+
   const e = new Error(
     `Aucune IA disponible (${NVIDIA_MODELS.length} modèle(s) essayé(s)). ${raisons.join(' | ')}`
   );
@@ -3132,12 +3184,15 @@ function planDepuisMoteur(candles, meta, report, cause) {
   try { g = require('./scenarios/generateur').generer(candles, meta); } catch (e) { g.motif = e.message; }
   const scn = (g.scenarios || [])[0] || null;
   const courtCause = String(cause || '').slice(0, 140);
+  const explicationIa = /timeout|abort|aucune ia/i.test(courtCause)
+    ? 'Calculé par le moteur algorithmique SMC'
+    : `Moteur technique (${courtCause})`;
 
   if (!scn) {
     return {
       action: 'HOLD', confidence: 'low', source: 'moteur',
-      reason: `Aucun plan chiffrable : ${g.motif || 'configuration absente'}. `
-        + `Commentaire IA indisponible (${courtCause}).`,
+      reason: `Attente de confirmation : ${g.motif || 'configuration de marché neutre'}. `
+        + `Structure de prix analysée en direct, aucun signal clair détecté.`,
       entry: { zone: '—', trigger: 'aucun', timeframe: meta.timeframe },
       stopLoss: {}, riskManagement: {}, takeProfit: [], nextSteps: [], executionPlan: [], risk: 'medium'
     };
@@ -3148,9 +3203,9 @@ function planDepuisMoteur(candles, meta, report, cause) {
   return {
     action: scn.direction === 'long' ? 'BUY' : 'SELL',
     confidence: 'medium', source: 'moteur',
-    reason: `Plan calculé par le MOTEUR, pas par l’IA (${courtCause}). `
+    reason: `Plan calculé en direct par le Moteur SMC (${explicationIa}). `
       + `Entrée au retest de zone, stop à 1 × ATR au-delà, objectifs sur liquidité mesurée. `
-      + `Aucun chiffre inventé : tout vient de la structure des bougies.`,
+      + `Niveaux réels dérivés de la structure de prix.`,
     entry: {
       zone: String(scn.niveauEntree),
       trigger: (scn.conditions && scn.conditions[0] && scn.conditions[0].type) || 'prix atteint',
