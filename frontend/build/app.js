@@ -10107,6 +10107,15 @@ function NewsPage() {
   }, []);
   const normTitre = t => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
   const impactDe = a => impacts[normTitre(a.titre)] || null;
+  const lireJsonSur = async res => {
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      throw new Error(`Réponse serveur invalide (HTTP ${res.status}) — réessayez dans un instant`);
+    }
+    const d = await res.json();
+    if (!res.ok) throw new Error(d && d.error || `Erreur HTTP ${res.status}`);
+    return d;
+  };
   const interpreterImpact = async () => {
     const liste = (data && data.articles || []).slice(0, 12).map(a => ({
       titre: a.titre,
@@ -10119,7 +10128,7 @@ function NewsPage() {
     setBusyImpact(true);
     setErr('');
     try {
-      const d = await (await api('/news/impact', {
+      const res = await api('/news/impact', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -10127,7 +10136,8 @@ function NewsPage() {
         body: JSON.stringify({
           articles: liste
         })
-      })).json();
+      });
+      const d = await lireJsonSur(res);
       if (!d.success) throw new Error(d.error || 'interprétation impossible');
       if (d.parTitre) setImpacts(d.parTitre);
     } catch (e) {
@@ -10141,7 +10151,8 @@ function NewsPage() {
     setErr('');
     try {
       const q = `?marche=${marche}&impact=${impact}${force ? '&force=1' : ''}`;
-      const d = await (await api('/news/panorama' + q)).json();
+      const res = await api('/news/panorama' + q);
+      const d = await lireJsonSur(res);
       if (!d.success) throw new Error(d.error || 'flux indisponible');
       setData(d);
     } catch (e) {
