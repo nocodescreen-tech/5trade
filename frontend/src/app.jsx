@@ -3406,7 +3406,7 @@ function OrderFlowPanel({ report }) {
 
 // ── Modale de Connexion Broker Deriv (API Token + App ID) ───────────────
 function DerivModal({ ouvert, onClose, onRefresh }) {
-  const [appId, setAppId] = useState('1089');
+  const [appId, setAppId] = useState('353nKCVSd1Td4BoDbtjvr');
   const [token, setToken] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [chargement, setChargement] = useState(false);
@@ -3448,7 +3448,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
       const res = await (await api('/deriv/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appId: appId.trim() || '1089', apiToken: token.trim() })
+        body: JSON.stringify({ appId: appId.trim() || '353nKCVSd1Td4BoDbtjvr', apiToken: token.trim() })
       })).json();
 
       if (res.success) {
@@ -3599,10 +3599,10 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
                   1. Deriv App ID
                 </label>
                 <input className="fld" style={{ width: '100%', fontFamily: 'monospace' }}
-                  placeholder="1089 (par défaut pour tester)"
+                  placeholder="353nKCVSd1Td4BoDbtjvr"
                   value={appId} onChange={e => setAppId(e.target.value)} />
                 <div style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4 }}>
-                  L'identifiant par défaut <code>1089</code> fonctionne directement pour les tests et la démo.
+                  L'identifiant par défaut <code>353nKCVSd1Td4BoDbtjvr</code> est celui de votre application 5trade.
                 </div>
               </div>
 

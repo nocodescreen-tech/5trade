@@ -18,7 +18,7 @@ const DERIV_CLUSTERS = [
   'wss://ws.derivws.com/websockets/v3'
 ];
 
-const DEFAULT_APP_ID = '1089';
+const DEFAULT_APP_ID = '353nKCVSd1Td4BoDbtjvr';
 
 class DerivClient {
   constructor() {

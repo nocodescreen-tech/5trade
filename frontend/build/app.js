@@ -6157,7 +6157,7 @@ function DerivModal({
   onClose,
   onRefresh
 }) {
-  const [appId, setAppId] = useState('1089');
+  const [appId, setAppId] = useState('353nKCVSd1Td4BoDbtjvr');
   const [token, setToken] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [chargement, setChargement] = useState(false);
@@ -6198,7 +6198,7 @@ function DerivModal({
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          appId: appId.trim() || '1089',
+          appId: appId.trim() || '353nKCVSd1Td4BoDbtjvr',
           apiToken: token.trim()
         })
       })).json();
@@ -6494,7 +6494,7 @@ function DerivModal({
       width: '100%',
       fontFamily: 'monospace'
     },
-    placeholder: "1089 (par d\xE9faut pour tester)",
+    placeholder: "353nKCVSd1Td4BoDbtjvr",
     value: appId,
     onChange: e => setAppId(e.target.value)
   }), /*#__PURE__*/React.createElement("div", {
@@ -6503,7 +6503,7 @@ function DerivModal({
       color: 'var(--dim)',
       marginTop: 4
     }
-  }, "L'identifiant par d\xE9faut ", /*#__PURE__*/React.createElement("code", null, "1089"), " fonctionne directement pour les tests et la d\xE9mo.")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, "L'identifiant par d\xE9faut ", /*#__PURE__*/React.createElement("code", null, "353nKCVSd1Td4BoDbtjvr"), " est celui de votre application 5trade.")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'space-between',
