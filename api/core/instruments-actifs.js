@@ -110,7 +110,13 @@ function ajouterInstrument(inst) {
   const actifs = obtenirActifs();
   const sym = String(inst.symbol).trim().toUpperCase();
   const deja = actifs.find(a => a.symbol.toUpperCase() === sym);
-  if (deja) return actifs;
+  if (deja) {
+    if (inst.tf && deja.tf !== inst.tf) {
+      deja.tf = inst.tf;
+      return definirActifs(actifs);
+    }
+    return actifs;
+  }
   actifs.push({
     symbol: inst.symbol,
     provider: inst.provider || 'deriv',

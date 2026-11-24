@@ -7746,17 +7746,34 @@ function LiveMarket({
       }
     }
   }, [decision, symbol]);
+  const changerTf = nouveauTf => {
+    setTf(nouveauTf);
+    api('/instruments/actifs/toggle', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        symbol,
+        tf: nouveauTf,
+        provider,
+        actif: true
+      })
+    }).then(r => r.json()).then(d => {
+      if (d.success && Array.isArray(d.instruments)) setActifs(d.instruments);
+    }).catch(() => {});
+  };
 
   // Raccourcis clavier pro en direct (UT 1-5, Catalogue C, Deriv D, Rafraîchir R)
   useEffect(() => {
     const onKeyDown = e => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
       const k = e.key.toLowerCase();
-      if (k === '1') setTf('1m');else if (k === '2') setTf('5m');else if (k === '3') setTf('15m');else if (k === '4') setTf('1h');else if (k === '5') setTf('4h');else if (k === 'c') setCatalogueOuvert(o => !o);else if (k === 'd') setDerivModalOuvert(o => !o);else if (k === 'r') load();
+      if (k === '1') changerTf('1m');else if (k === '2') changerTf('5m');else if (k === '3') changerTf('15m');else if (k === '4') changerTf('1h');else if (k === '5') changerTf('4h');else if (k === 'c') setCatalogueOuvert(o => !o);else if (k === 'd') setDerivModalOuvert(o => !o);else if (k === 'r') load();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [load]);
+  }, [load, symbol, provider]);
 
   // Calques visuels SMC interactifs sur le graphique
   const [calqueStructure, setCalqueStructure] = useState(true);
@@ -8532,7 +8549,7 @@ function LiveMarket({
       width: 92
     },
     value: tf,
-    onChange: e => setTf(e.target.value)
+    onChange: e => changerTf(e.target.value)
   }, (meta.timeframes || []).map(t => /*#__PURE__*/React.createElement("option", {
     key: t,
     value: t
@@ -8702,7 +8719,7 @@ function LiveMarket({
     className: "workstation-left"
   }, /*#__PURE__*/React.createElement(MultiTimeframeBar, {
     currentTf: tf,
-    onSelectTf: t => setTf(t),
+    onSelectTf: t => changerTf(t),
     confluence: confluence
   }), /*#__PURE__*/React.createElement("div", {
     className: "chart-pro-panel"
