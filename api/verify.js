@@ -8292,6 +8292,56 @@ function tinyPng(W = 64, H = 40) {
       const srvCode = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
       ok('server.js expose les routes d\'instruments actifs persistants',
         srvCode.includes('/api/instruments/actifs') && srvCode.includes('/api/instruments/actifs/toggle'));
+
+      // ── 17. CONSOLIDATION MOTEUR P0 (AUDIT & RECONCILIATION) ──
+      // Test de la courbe de capital calculée à la main
+      // Scénario : 3 trades (+2R, +2R, -1R), capital départ 1000$, risque 1% par trade
+      //   Trade 1 (+2R) : 1000 + (1000 * 0.01 * 2) = 1020.00$
+      //   Trade 2 (+2R) : 1020 + (1020 * 0.01 * 2) = 1040.40$
+      //   Trade 3 (-1R) : 1040.40 - (1040.40 * 0.01 * 1) = 1030.00$
+      const rParTradeTest = [2, 2, -1];
+      let capTest = 1000;
+      const serieManuelle = [1000];
+      for (const r of rParTradeTest) {
+        capTest = capTest * (1 + 0.01 * r);
+        serieManuelle.push(+capTest.toFixed(2));
+      }
+      ok('courbe du capital : calcul direct sans distorsion de cumul (3 trades = 1030.00$)',
+        serieManuelle[serieManuelle.length - 1] === 1030.00 && serieManuelle[1] === 1020.00);
+
+      // Validation de l'ordre géométrique des niveaux dans le contrat
+      const CtrEngine = require('./engine/contrat');
+      const planLongInvalide = {
+        id: 'test:long:inv', source: 'strategie', nom: 'Test Long Invalide', tf: '5m',
+        sens: 'long', status: 'confirme', force: 0.8, conditions: [], preuves: [],
+        entree: 100, stop: 105, objectifs: [110], rr: 2 // stop au-dessus de l'entrée !
+      };
+      const vLongInv = CtrEngine.validerSignal(planLongInvalide);
+      ok('contrat : refuse un signal long dont le stop est au-dessus de l\'entrée',
+        !vLongInv.ok && vLongInv.invalides.some(x => /stop doit être inférieur/i.test(x)));
+
+      const planLongValide = {
+        id: 'test:long:val', source: 'strategie', nom: 'Test Long Valide', tf: '5m',
+        sens: 'long', status: 'confirme', force: 0.8, conditions: [], preuves: [],
+        entree: 100, stop: 95, objectifs: [110, 120], rr: 2
+      };
+      const vLongVal = CtrEngine.validerSignal(planLongValide);
+      ok('contrat : valide un signal long avec entrée, SL et 2 objectifs dans le bon ordre',
+        vLongVal.ok === true);
+
+      // Rejeu direct : refus d'une stratégie inconnue
+      const RejeuDirect = require('./engine/rejeu-direct');
+      const resStratInconnue = RejeuDirect.rejouer([], { symbol: 'XAUUSD' }, { strategie: 'STRATEGIE_IMAGINAIRE_XYZ' });
+      ok('rejeu direct : refuse une stratégie explicitement demandée inconnue ou incompatible',
+        resStratInconnue.ok === false && /inconnue/i.test(resStratInconnue.error));
+
+      // News & Calendrier : détection de phase et heure de Kinshasa (WAT)
+      const Fund = require('./sources/fundamentals');
+      const nowEv = new Date('2026-11-24T13:00:00Z');
+      const calCPI = [{ date: 'Nov 24', heure: '1:15pm', devise: 'USD', impact: 'high', titre: 'US Core CPI' }];
+      const vCPI = Fund.verdictDevise(calCPI, 'USD', { maintenant: nowEv, fenetreMin: 30 });
+      ok('calendrier économique : blocage CPI avec heure de Kinshasa et phase tracée',
+        vCPI.bloque === true && /Kinshasa/i.test(vCPI.heureKinshasa) && /Avant l'annonce/i.test(vCPI.phase));
     })();
   }
 

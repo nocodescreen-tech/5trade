@@ -232,7 +232,7 @@ function instantEvenement(ev, reference = new Date()) {
  * Verdict économique POUR UNE DEVISE : fonction pure, donc testable sans réseau.
  * @returns {{bloque:boolean, raison?:string, news?:object, verifie:boolean}}
  */
-function verdictDevise(events, devise, { maintenant = new Date(), fenetreMin = 30 } = {}) {
+function verdictDevise(events, devise, { maintenant = new Date(), fenetreMin = 30, fenetreApresMin = 15 } = {}) {
   const code = String(devise || '').toUpperCase();
   if (!code) return { bloque: false, verifie: true, raison: 'devise inconnue' };
   const now = maintenant.getTime();
@@ -246,12 +246,31 @@ function verdictDevise(events, devise, { maintenant = new Date(), fenetreMin = 3
     if (t === null) continue;            // heure inconnue : on ne conclut pas
 
     const diff = Math.round((t - now) / 60000);
-    if (diff >= -5 && diff <= fenetreMin) {
+    // Fenêtre de blocage élargie : de fenetreMin avant l'annonce à fenetreApresMin après
+    if (diff >= -fenetreApresMin && diff <= fenetreMin) {
+      const dateSourceISO = new Date(t).toISOString();
+      const heureKinshasa = new Date(t + 3600000).toISOString().slice(11, 16) + ' (Kinshasa WAT)';
+      let phase = '';
+      if (diff > 0) phase = `Avant l'annonce (T - ${diff} min)`;
+      else if (diff === 0) phase = `Pendant la publication (T 0)`;
+      else phase = `Après l'annonce (T + ${-diff} min)`;
+
+      const newsEnrichie = {
+        ...ev,
+        horodatageSource: t,
+        dateSourceISO,
+        heureKinshasa,
+        phaseBlocage: phase
+      };
+
       return {
-        bloque: true, verifie: true, news: ev,
-        raison: diff >= 0
-          ? `News à fort impact dans ${diff} min : ${ev.titre}`
-          : `News à fort impact publiée il y a ${-diff} min : ${ev.titre}`
+        bloque: true,
+        verifie: true,
+        news: newsEnrichie,
+        horodatageSource: t,
+        heureKinshasa,
+        phase,
+        raison: `${phase} : ${ev.titre} à ${heureKinshasa} [source: ${dateSourceISO}]`
       };
     }
   }

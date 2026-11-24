@@ -221,12 +221,11 @@ module.exports = function monterAlertes(app, deps) {
 
           try {
             await DB.saveTradeRecord(nouveauTrade);
-            reponseText = `⚡ Ordre EXÉCUTÉ et ENREGISTRÉ au journal !\n` +
+            reponseText = `📝 SIMULATION AU JOURNAL ENREGISTRÉE (Paper Trading)\n` +
                           `• Paire : ${sym}\n` +
                           `• Sens : ${dir}\n` +
-                          `• Entrée : ${entry}\n` +
-                          `• Stop : ${sl}\n` +
-                          `• TP : ${tp}\n` +
+                          `• Entrée : ${entry} | Stop : ${sl} | TP : ${tp}\n` +
+                          `• Nature : Simulation interne (aucun courtier réel connecté)\n` +
                           `• ID : #${tradeId}`;
           } catch (eTrd) {
             reponseText = `❌ Erreur enregistrement : ${eTrd.message}`;

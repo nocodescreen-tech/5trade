@@ -4519,17 +4519,13 @@ app.get('/api/calendrier', requireAuth, async (req, res) => {
  * au lieu de le supposer.
  */
 /** Courbe de capital à partir des R : chaque prise risque `riskPct` % du compte. */
-function compteDepuisR(courbeR, initialCapital, riskPct) {
+function compteDepuisR(rParTrade, initialCapital, riskPct) {
   let cap = initialCapital;
   const serie = [ +cap.toFixed(2) ];
-  // ATTENTION : `courbeR` est CUMULÉE (chaque point = le total depuis le début).
-  // La parcourir comme une suite de gains isolés composait le cumul à chaque
-  // prise : 10 000 € devenaient 1 241 milliards. On ne compose que le DELTA.
-  let precedent = 0;
-  for (const cumul of courbeR) {
-    const r = (Number.isFinite(cumul) ? cumul : 0) - precedent;
-    precedent = Number.isFinite(cumul) ? cumul : precedent;
-    cap = cap * (1 + (riskPct / 100) * r);
+  // rParTrade contient les résultats R individuels de chaque trade
+  for (const r of (rParTrade || [])) {
+    const val = Number.isFinite(r) ? r : 0;
+    cap = cap * (1 + (riskPct / 100) * val);
     if (!(cap > 0)) cap = 0;              // un compte ne descend pas sous zéro
     serie.push(+cap.toFixed(2));
   }
@@ -4589,6 +4585,9 @@ async function executerBacktest(src = {}) {
       }
     });
     const st = rf.stats || {};
+    const rParTrade = (rf.trades || []).map(t => Number(t.rNet || t.r || 0));
+    let cumulR = 0;
+    const courbeRCumulee = rParTrade.map(r => +(cumulR += r).toFixed(2));
     r = {
       fidele: true,
       mode: 'rejeu_fidele',
@@ -4600,7 +4599,8 @@ async function executerBacktest(src = {}) {
       rTotal: st.rTotal ?? st.rNet ?? 0,
       expectancy: st.esperance ?? st.esperanceNette ?? 0,
       stats: st,
-      courbeR: (rf.trades || []).map(t => Number(t.rNet || t.r || 0)),
+      rParTrade,
+      courbeR: courbeRCumulee,
       note: rf.note
     };
   } else {
@@ -4623,8 +4623,8 @@ async function executerBacktest(src = {}) {
     strategies: options.strategies || []
   };
   // Le compte n'a de sens que s'il y a des prises et un capital de départ.
-  if (initialCapital > 0 && riskPct > 0 && Array.isArray(r.courbeR)) {
-    resultat.compte = compteDepuisR(r.courbeR, initialCapital, riskPct);
+  if (initialCapital > 0 && riskPct > 0 && Array.isArray(r.rParTrade || r.courbeR)) {
+    resultat.compte = compteDepuisR(r.rParTrade || r.courbeR, initialCapital, riskPct);
   }
   return resultat;
 }
@@ -5258,9 +5258,11 @@ async function start() {
         }
       }
 
-      // 2. Alerte pré-clôture Forex du vendredi (21h30 UTC)
+      // 2. Alerte pré-clôture Forex du vendredi (calculée dynamiquement selon la session réelle)
       const cleVendredi = `forex_pre_cloture_${jourStr}`;
-      if (dayUTC === 5 && heureUTC === 21 && minuteUTC >= 30 && !NotificationTracker.estDejaEnvoye(cleVendredi)) {
+      const Sessions = require('./temporal/sessions');
+      const stForexVendredi = Sessions.statutMarche('EURUSD', d);
+      if (dayUTC === 5 && stForexVendredi.statut === 'pre_fermeture' && !NotificationTracker.estDejaEnvoye(cleVendredi)) {
         try {
           const Skills = require('./skills/registry');
           const skillRes = await Skills.executer('forex-session-monitor', { action: 'alerte_telegram', type: 'pre_cloture' });
@@ -5281,7 +5283,6 @@ async function start() {
 
       // 3. Alerte réouverture Forex du dimanche (synchronisée sur le calendrier réel)
       const cleDimanche = `forex_reouverture_${jourStr}`;
-      const Sessions = require('./temporal/sessions');
       const stForexDimanche = Sessions.statutMarche('EURUSD', d);
       if (dayUTC === 0 && stForexDimanche.ouvert && !NotificationTracker.estDejaEnvoye(cleDimanche)) {
         try {

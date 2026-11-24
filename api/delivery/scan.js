@@ -170,7 +170,27 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
         // seuils — sinon le scan annoncerait des signaux que la stratégie refuse.
         // Les bougies, elles, ont été chargées une seule fois.
         for (const passe of passes) {
-          const v = signals.detect(closes, { symbol: symbole, timeframe: unite }, passe.options);
+          let v = null;
+          // Unification du moteur : le scan et le rejeu fidèle partagent le même cerveau décisionnel
+          if (typeof signals.decider === 'function' && passe.options.moteurBrut !== true) {
+            const dec = signals.decider(closes, { symbol: symbole, timeframe: unite }, passe.options);
+            if (dec && (dec.decision === 'ACHAT' || dec.decision === 'VENTE' || dec.decision === 'ATTENTE')) {
+              const sig = dec.signal || (dec.arbitrage && dec.arbitrage.signauxRetenus && dec.arbitrage.signauxRetenus[0]);
+              v = {
+                direction: dec.decision === 'ACHAT' ? 'BUY' : (dec.decision === 'VENTE' ? 'SELL' : 'NEUTRAL'),
+                status: sig ? (sig.status || 'confirme') : (dec.decision === 'ACHAT' || dec.decision === 'VENTE' ? 'confirme' : 'surveiller'),
+                force: sig && typeof sig.force === 'number' ? sig.force : 0.6,
+                trend: sig ? sig.trend : null,
+                confirmations: (dec.confirmation && dec.confirmation.details) ? dec.confirmation.details.length : 1,
+                raison: dec.raison,
+                decision: dec.decision,
+                levels: sig ? (sig.levels || { entry: sig.entree, stop: sig.stop, target1: sig.objectifs && sig.objectifs[0] }) : null
+              };
+            }
+          }
+          if (!v && typeof signals.detect === 'function') {
+            v = signals.detect(closes, { symbol: symbole, timeframe: unite }, passe.options);
+          }
           if (!v) continue;
           // On ne garde que ce qui dit quelque chose : un univers entier de
           // « NEUTRE » n'aide personne à décider.

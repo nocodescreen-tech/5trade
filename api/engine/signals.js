@@ -1646,5 +1646,9 @@ module.exports = {
   detect, scenarios, checklist, levelsFor, profilDepuisStrategie, TOUTES_REGLES,
   confluence, verdictAvecConfluence, TF_SUPERIEURS, TF_MS, fraicheur, normaliserMoteur, STYLES, MOTEUR_DEFAUT,
   filtresDisponibles, CLES_FILTRES, REGLES_INFO,
-  ruleSweep, ruleBreak, ruleZone, rulePosition, ruleDeplacement, ruleExtension, signalTrade
+  ruleSweep, ruleBreak, ruleZone, rulePosition, ruleDeplacement, ruleExtension, signalTrade,
+  decider: (candles, meta, options) => {
+    const DecisionEngine = require('./DecisionEngine');
+    return DecisionEngine.decider(candles, meta, options);
+  }
 };

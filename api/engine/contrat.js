@@ -84,6 +84,26 @@ function validerSignal(s) {
     }
   }
 
+  // Vérification de l'ordre géométrique des niveaux si entrée, stop et objectifs sont présents
+  if (aEntree && aStop && estNombre(c.entree) && estNombre(c.stop) && estTableau(c.objectifs) && c.objectifs.length) {
+    const tp1 = c.objectifs[0];
+    if (estNombre(tp1)) {
+      if (c.sens === 'long' || c.direction === 'BUY') {
+        if (c.stop >= c.entree) invalides.push('signal long : le stop doit être inférieur à l\'entrée');
+        if (tp1 <= c.entree) invalides.push('signal long : le premier objectif doit être supérieur à l\'entrée');
+        if (c.objectifs.length > 1 && estNombre(c.objectifs[1]) && c.objectifs[1] <= tp1) {
+          invalides.push('signal long : le second objectif doit être supérieur au premier');
+        }
+      } else if (c.sens === 'short' || c.direction === 'SELL') {
+        if (c.stop <= c.entree) invalides.push('signal short : le stop doit être supérieur à l\'entrée');
+        if (tp1 >= c.entree) invalides.push('signal short : le premier objectif doit être inférieur à l\'entrée');
+        if (c.objectifs.length > 1 && estNombre(c.objectifs[1]) && c.objectifs[1] >= tp1) {
+          invalides.push('signal short : le second objectif doit être inférieur au premier');
+        }
+      }
+    }
+  }
+
   return { ok: manquants.length === 0 && invalides.length === 0, manquants, invalides };
 }
 

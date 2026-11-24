@@ -36,6 +36,29 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
   let i = fenetre - 1;
   let n = 0;
 
+  // Validation stricte de la stratégie demandée
+  const optionsGlobales = Object.assign({}, opts, reglages.optionsDecision);
+  let strategieExecutee = { id: 'SMC_Institutionnel', titre: 'SMC Institutionnel', version: '1.2.0' };
+  if (optionsGlobales.strategie) {
+    const nomStrat = typeof optionsGlobales.strategie === 'string'
+      ? optionsGlobales.strategie
+      : (optionsGlobales.strategie.id || optionsGlobales.strategie.titre || optionsGlobales.strategie.nom);
+    const stratsValides = ['defaut', 'SMC', 'smc', 'SMC_Institutionnel', 'smc_institutionnel', 'retour-moyenne', 'breakout'];
+    const estValide = stratsValides.includes(nomStrat)
+      || (Array.isArray(optionsGlobales.profils) && optionsGlobales.profils.some(p => p.id === nomStrat || p.titre === nomStrat));
+    if (!estValide) {
+      return {
+        ok: false,
+        error: `Stratégie « ${nomStrat} » inconnue ou incompatible avec cet instrument`,
+        trades: [],
+        etapes: [],
+        stats: { rTotal: 0, tauxReussite: 0, esperance: 0 },
+        strategieExecutee: null
+      };
+    }
+    strategieExecutee = { id: nomStrat, titre: nomStrat, version: '1.0.0' };
+  }
+
   // SIMULATION HISTORIQUE STRICTE DU RISQUE & DU CAPITAL
   // On ne lit pas l'état du journal présent : on reconstruit le capital,
   // l'exposition cumulée et les positions ouvertes au fil de l'eau pour chaque pas historique.
@@ -80,7 +103,7 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
     const fen = serie.slice(Math.max(0, i - fenetre + 1), i + 1);
 
     // Vérificateur de risque dynamique recalculé sur l'état HISTORIQUE exact à l'instant t
-    const optionsPas = Object.assign({}, reglages.optionsDecision || opts);
+    const optionsPas = Object.assign({}, opts, reglages.optionsDecision);
     if (!optionsPas.verificateurRisque && !optionsPas.sansRisqueCompte) {
       optionsPas.verificateurRisque = (contrat) => {
         const montantRisqueTrade = (capitalHistorique * risquePct) / 100;
@@ -206,7 +229,7 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
     positionsMaxSimultanees
   });
 
-  return { trades, etapes, stats: statsFinales };
+  return { trades, etapes, stats: statsFinales, strategieExecutee };
 }
 
 function statistiques(trades) {

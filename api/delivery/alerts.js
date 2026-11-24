@@ -410,7 +410,7 @@ async function envoyerTelegram(c, v, m, qualite = {}) {
   const reply_markup = {
     inline_keyboard: [
       [
-        { text: '⚡ Exécuter Ordre', callback_data: `trade:open:${sigId}` },
+        { text: '📝 Simuler au Journal (Paper)', callback_data: `trade:open:${sigId}` },
         { text: '🛡️ Stop Breakeven', callback_data: `trade:be:${sigId}` }
       ],
       [
@@ -913,14 +913,53 @@ async function verifierBrut(force = false) {
         }
       }
 
-      // 3. Rapport gain/risque : un signal dont l'objectif est plus proche que
-      //    l'invalidation ne mérite pas d'être pris, donc pas d'être envoyé.
+      // 3. Rapport gain/risque & Cohérence des niveaux : entrée, SL et objectifs dans le bon ordre
       let rr = null;
       const lv = v.levels || {};
-      if (c.rrMin > 0 && Number.isFinite(lv.entry) && Number.isFinite(lv.stop)
-        && Number.isFinite(lv.target1) && Math.abs(lv.entry - lv.stop) > 0) {
-        rr = Math.abs(lv.target1 - lv.entry) / Math.abs(lv.entry - lv.stop);
-        if (rr < c.rrMin) {
+      const aEntree = Number.isFinite(lv.entry);
+      const aStop = Number.isFinite(lv.stop);
+      const aTp1 = Number.isFinite(lv.target1);
+      const aTp2 = Number.isFinite(lv.target2);
+
+      if (aEntree && aStop && aTp1) {
+        const distRisque = Math.abs(lv.entry - lv.stop);
+        if (distRisque <= 0) {
+          dire({ verdict: 'refusé — distance stop loss nulle' });
+          continue;
+        }
+        // Vérification de l'ordre géométrique selon le sens du signal
+        const estAchat = v.direction === 'BUY' || v.direction === 'ACHAT';
+        const estVente = v.direction === 'SELL' || v.direction === 'VENTE';
+        if (estAchat) {
+          if (lv.stop >= lv.entry) {
+            dire({ verdict: `refusé — ordre des niveaux invalide à l'achat : stop (${lv.stop}) >= entrée (${lv.entry})` });
+            continue;
+          }
+          if (lv.target1 <= lv.entry) {
+            dire({ verdict: `refusé — ordre des niveaux invalide à l'achat : TP1 (${lv.target1}) <= entrée (${lv.entry})` });
+            continue;
+          }
+          if (aTp2 && lv.target2 <= lv.target1) {
+            dire({ verdict: `refusé — ordre des niveaux invalide à l'achat : TP2 (${lv.target2}) <= TP1 (${lv.target1})` });
+            continue;
+          }
+        } else if (estVente) {
+          if (lv.stop <= lv.entry) {
+            dire({ verdict: `refusé — ordre des niveaux invalide à la vente : stop (${lv.stop}) <= entrée (${lv.entry})` });
+            continue;
+          }
+          if (lv.target1 >= lv.entry) {
+            dire({ verdict: `refusé — ordre des niveaux invalide à la vente : TP1 (${lv.target1}) >= entrée (${lv.entry})` });
+            continue;
+          }
+          if (aTp2 && lv.target2 >= lv.target1) {
+            dire({ verdict: `refusé — ordre des niveaux invalide à la vente : TP2 (${lv.target2}) >= TP1 (${lv.target1})` });
+            continue;
+          }
+        }
+        // Calcul systématique du RR après validation des niveaux
+        rr = +(Math.abs(lv.target1 - lv.entry) / distRisque).toFixed(2);
+        if (c.rrMin > 0 && rr < c.rrMin) {
           dire({ verdict: `refusé — gain/risque ${rr.toFixed(2)} < ${c.rrMin}` });
           continue;
         }
