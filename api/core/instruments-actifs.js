@@ -145,8 +145,10 @@ function synchroniserAlertes(listeActifs) {
       tf: a.tf || '15m',
       provider: a.provider || 'deriv'
     }));
-    Alerts.configurer({ marches });
-  } catch {}
+    Alerts.update({ marches });
+  } catch (e) {
+    console.error('[InstrumentsActifs] Erreur synchronisation alertes :', e.message);
+  }
 }
 
 module.exports = {

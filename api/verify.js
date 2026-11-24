@@ -8415,6 +8415,21 @@ function tinyPng(W = 64, H = 40) {
       const rMem = await ChatExec.executer('qu\'est-ce que tu as mémorisé');
       ok('chat copilote : restitue les préférences persistées réelles',
         rMem && /Mémoire et Préférences/i.test(rMem.texte));
+
+      // 4. Bridage strict de la boucle d'alertes Telegram aux instruments actifs uniquement
+      const AlertsMod = require('./delivery/alerts');
+      AlertsMod.update({
+        actif: true,
+        email: 'test@example.com',
+        marches: [
+          { symbol: 'frxXAUUSD', tf: '15m', provider: 'deriv' },
+          { symbol: 'EURUSD_NON_ACTIF', tf: '15m', provider: 'forex' }
+        ]
+      });
+      // verifier(true) doit filtrer EURUSD_NON_ACTIF car non présent dans InstrumentsActifs
+      const tourAlertes = await AlertsMod.verifier(true);
+      ok('surveillance alertes : ignore strictement tout marché non activé dans InstrumentsActifs',
+        tourAlertes && Array.isArray(tourAlertes.marches) && !tourAlertes.marches.some(m => m.symbol === 'EURUSD_NON_ACTIF'));
     })();
   }
 

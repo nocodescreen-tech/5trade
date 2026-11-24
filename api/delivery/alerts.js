@@ -550,20 +550,29 @@ async function verifierBrut(force = false) {
   }
   if (!c.marches || !c.marches.length) return { controle: false, raison: 'aucun marché surveillé' };
 
+  // Filtrage strict par les instruments actifs enregistrés :
+  // Le système est centralisé sur les marchés réellement activés (XAUUSD seul par défaut).
+  // Si un instrument (Forex, indices, crypto) n'est pas activé, il ne doit JAMAIS faire
+  // l'objet d'alertes ni de notifications Telegram.
+  const InstrumentsActifs = require('../core/instruments-actifs');
+  const actifsEnregistres = InstrumentsActifs.obtenirActifs();
+  if (!actifsEnregistres || !actifsEnregistres.length) {
+    return { controle: false, envoyes: 0, marches: [], raison: 'aucun instrument actif (surveillance suspendue)' };
+  }
+  const actifsSet = new Set(actifsEnregistres.map(a => String(a.symbol || a).toUpperCase()));
+  const marchesAInspecter = (c.marches || []).filter(m => m && actifsSet.has(String(m.symbol).toUpperCase()));
+
+  if (!marchesAInspecter.length) {
+    return { controle: false, envoyes: 0, marches: [], raison: 'aucun marché surveillé dans la sélection active' };
+  }
+
   const resultats = [];
   // Mode d'analyse du cycle : 'stratégie' (règles de la stratégie sélectionnée)
   // ou 'générique' (aucune stratégie — on l'assume et on le dit).
   let modeAnalyse = 'stratégie';
   let envoyes = 0;
 
-  // Aucun marche surveille : il n'y a RIEN a controler. Repondre « controle
-  // effectue » laisserait croire que la surveillance tourne alors qu'elle ne
-  // regarde rien — c'est exactement le cas ou le bot etait « branche sur du vide ».
-  if (!c.marches || !c.marches.length) {
-    return { controle: false, envoyes: 0, marches: [], raison: 'aucun marché surveillé' };
-  }
-
-  for (const m of c.marches) {
+  for (const m of marchesAInspecter) {
     try {
       // Indice synthétique = générateur aléatoire cryptographique. Aucun avantage
       // n'y est possible par construction : alerter dessus revient à alerter sur
