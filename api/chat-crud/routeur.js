@@ -77,7 +77,16 @@ function router(action) {
     return { domaine: 'apprentissage', handler: cmdApprentissage.dernierJournal };
   }
 
-  const domaine = detecterDomaine(action.sujet) || DOMAINE_PAR_VERBE[action.verbe] || null;
+  // RÈGLE DE PRIORITÉ CRITIQUE :
+  // Le verbe APPRENDS ("mémorise que...", "retiens que...", "note bien...") prime
+  // TOUJOURS sur les mots-clés du sujet. Une consigne comme « Mémorise que le stop
+  // doit rester fixe » ou « Retiens que la stratégie XYZ est interdite » relève
+  // de la MÉMOIRE cognitive, et ne doit JAMAIS être détournée vers 'trades' ou 'strategies' !
+  const domaine = (action.verbe === 'APPRENDS' ? 'memoire' : null)
+    || detecterDomaine(action.sujet)
+    || DOMAINE_PAR_VERBE[action.verbe]
+    || null;
+
   if (!domaine) {
     return { domaine: 'inconnu', raison: `domaine non reconnu pour « ${action.sujet} »` };
   }
@@ -91,8 +100,6 @@ function router(action) {
     },
     strategies: {
       MONTRE: cmdStrategies.lister,
-      CRÉE: cmdStrategies.creer,
-      MODIFIE: cmdStrategies.modifier,
       SUPPRIME: cmdStrategies.supprimer,
       ACTIVE: cmdStrategies.activer,
       DÉSACTIVE: cmdStrategies.desactiver,

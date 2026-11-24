@@ -8430,6 +8430,14 @@ function tinyPng(W = 64, H = 40) {
       const tourAlertes = await AlertsMod.verifier(true);
       ok('surveillance alertes : ignore strictement tout marché non activé dans InstrumentsActifs',
         tourAlertes && Array.isArray(tourAlertes.marches) && !tourAlertes.marches.some(m => m.symbol === 'EURUSD_NON_ACTIF'));
+
+      // 5. Priorité du verbe APPRENDS sur les mots-clés de sujet (ex: stop)
+      const RouteurMod = require('./chat-crud/routeur');
+      const ParseurMod = require('./chat-crud/parseur');
+      const actionStop = ParseurMod.parser('mémorise que le stop doit rester fixe');
+      const routeStop = RouteurMod.router(actionStop);
+      ok('chat routeur : le verbe APPRENDS priorise la mémoire même si le sujet contient « stop »',
+        routeStop.domaine === 'memoire' && typeof routeStop.handler === 'function');
     })();
   }
 

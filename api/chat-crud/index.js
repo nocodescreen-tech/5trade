@@ -83,8 +83,9 @@ async function contexteTempsReel() {
     const enAttente = await Scenarios.lister({ statut: 'en_attente', limite: 5 });
     lignes.push(`Scénarios en attente : ${enAttente.length}`);
     for (const s of enAttente) {
+      const tp2Str = s.tp2 ? `, TP2 ${num(s.tp2)}` : '';
       lignes.push(`- ${s.instrument} ${s.timeframe || ''} ${s.direction} si le prix atteint `
-        + `${num(s.niveauEntree)} (stop ${num(s.stop)}, TP1 ${num(s.tp1)})`);
+        + `${num(s.niveauEntree)} (stop ${num(s.stop)}, TP1 ${num(s.tp1)}${tp2Str})`);
     }
   } catch { /* idem */ }
 
@@ -115,7 +116,19 @@ async function contexteTempsReel() {
     lignes.push(`Filtre macro USD/CPI : ${vCPI.bloque ? 'BLOQUÉ' : 'Dégagé'} (Phase : ${vCPI.phase || 'Neutre'}, Kinshasa : ${vCPI.heureKinshasa || 'N/A'})`);
   } catch { /* ignorer */ }
 
-  // 5. Derniers événements publiés (stop touché, objectifs, expirations).
+  // 5. Consignes et préférences persistées en mémoire
+  try {
+    const Preferences = require('../memoire/preferences');
+    const prefs = await Preferences.lister();
+    if (prefs && prefs.length) {
+      lignes.push(`Consignes persistées en mémoire (${prefs.length}) :`);
+      for (const p of prefs.slice(0, 5)) {
+        lignes.push(`- [${p.categorie || 'règle'}] ${p.consigne}`);
+      }
+    }
+  } catch { /* ignorer */ }
+
+  // 6. Derniers événements publiés (stop touché, objectifs, expirations).
   try {
     const Flux = require('./flux');
     const r = Flux.resume(8);
