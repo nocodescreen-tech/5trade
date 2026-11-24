@@ -13,6 +13,64 @@ const api = (path, opts = {}) =>
 
 const REDUCED = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+// Moteur Sonore Professionnel (Web Audio API natif - sans dépendance externe)
+const SoundEngine = {
+  _ctx: null,
+  _muted: typeof window !== 'undefined' ? localStorage.getItem('5trade_muted') === '1' : false,
+  isMuted() { return this._muted; },
+  toggleMute() {
+    this._muted = !this._muted;
+    if (typeof window !== 'undefined') localStorage.setItem('5trade_muted', this._muted ? '1' : '0');
+    return this._muted;
+  },
+  _getCtx() {
+    if (typeof window === 'undefined') return null;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!this._ctx) this._ctx = new AudioCtx();
+    if (this._ctx.state === 'suspended') this._ctx.resume();
+    return this._ctx;
+  },
+  playSignal() {
+    if (this._muted) return;
+    try {
+      const ctx = this._getCtx();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, now);
+      osc.frequency.exponentialRampToValueAtTime(880, now + 0.12);
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.35);
+    } catch {}
+  },
+  playTrade() {
+    if (this._muted) return;
+    try {
+      const ctx = this._getCtx();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(523.25, now);
+      osc.frequency.setValueAtTime(659.25, now + 0.08);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.25);
+    } catch {}
+  }
+};
+
 /* ══════════════ Primitives animées ══════════════ */
 
 function Reveal({ children, delay = 0, className = '', style = {} }) {
@@ -2385,6 +2443,9 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
   const [copie, setCopie] = useState(false);
   const [demoStatus, setDemoStatus] = useState('');
   const [derivTradeMsg, setDerivTradeMsg] = useState('');
+  const [stake, setStake] = useState(10);
+  const [durationVal, setDurationVal] = useState(5);
+  const [optionsDeriv, setOptionsDeriv] = useState(false);
   const lv = signal && signal.levels ? signal.levels : null;
   const ok = lv && Number.isFinite(Number(lv.entry)) && Number.isFinite(Number(lv.stop));
   if (!ok) {
@@ -2503,8 +2564,10 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
                     status: 'open', notes: `Trade démo automatique — ${signal.nom || 'moteur'}`
                   })
                 })).json();
-                if (res.success) setDemoStatus('✅ Pris en démo !');
-                else setDemoStatus('⚠️ Erreur');
+                if (res.success) {
+                  SoundEngine.playTrade();
+                  setDemoStatus('✅ Pris en démo !');
+                } else setDemoStatus('⚠️ Erreur');
               } catch {
                 setDemoStatus('❌ Erreur');
               } finally {
@@ -2525,10 +2588,13 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
                   body: JSON.stringify({
                     symbol: symbol,
                     direction: achat ? 'BUY' : 'SELL',
-                    amount: 10
+                    amount: stake,
+                    duration: durationVal,
+                    durationUnit: 'm'
                   })
                 })).json();
                 if (res.success) {
+                  SoundEngine.playTrade();
                   setDerivTradeMsg(`✅ Contrat #${res.contractId} acheté !`);
                 } else {
                   setDerivTradeMsg('⚠️ ' + (res.error || 'Erreur Deriv'));
@@ -2540,7 +2606,12 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
               }
             }} title="Passer cet ordre sur Deriv (Websocket officiel)">
             <i className="fas fa-bolt" style={{ marginRight: 5 }}></i>
-            {derivTradeMsg || 'Trader Deriv ($10)'}
+            {derivTradeMsg || `Trader Deriv ($${stake})`}
+          </button>
+
+          <button className="btn sm ghost" style={{ padding: '5px 8px', fontSize: 11 }}
+            onClick={() => setOptionsDeriv(!optionsDeriv)} title="Réglages de mise et durée Deriv">
+            <i className="fas fa-gear"></i>
           </button>
 
           {onToJournal && (
@@ -2559,10 +2630,39 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
         </div>
       </div>
 
+      {/* Barre de réglage rapide Deriv (Mise & Durée) */}
+      {optionsDeriv && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', background: 'rgba(0,0,0,0.3)', borderBottom: '1px solid rgba(148,163,184,.1)', fontSize: 11, flexWrap: 'wrap' }}>
+          <span style={{ color: '#38bdf8', fontWeight: 700 }}><i className="fas fa-sliders" style={{ marginRight: 5 }}></i>Options Deriv :</span>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <span style={{ color: '#94a3b8' }}>Mise :</span>
+            {[5, 10, 25, 50, 100].map(val => (
+              <button key={val} type="button"
+                className={`btn sm ${stake === val ? '' : 'ghost'}`}
+                style={{ padding: '2px 7px', fontSize: 10.5, borderColor: stake === val ? '#38bdf8' : 'rgba(148,163,184,.2)', background: stake === val ? '#38bdf8' : 'transparent', color: stake === val ? '#0f172a' : '#cbd5e1' }}
+                onClick={() => setStake(val)}>
+                ${val}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 8 }}>
+            <span style={{ color: '#94a3b8' }}>Durée :</span>
+            {[1, 2, 5, 15].map(d => (
+              <button key={d} type="button"
+                className={`btn sm ${durationVal === d ? '' : 'ghost'}`}
+                style={{ padding: '2px 7px', fontSize: 10.5, borderColor: durationVal === d ? '#38bdf8' : 'rgba(148,163,184,.2)', background: durationVal === d ? '#38bdf8' : 'transparent', color: durationVal === d ? '#0f172a' : '#cbd5e1' }}
+                onClick={() => setDurationVal(d)}>
+                {d}m
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Grille des 4 Niveaux Chiffrés Clairs */}
       <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
         {cardNiveau('1. Entrée', ttFmt(lv.entry), 'Déclenchement précis', '#38bdf8', 'ORDRE')}
-        {cardNiveau('2. Stop Loss', ttFmt(lv.stop), `Risque : ${distSL.toFixed(2)} pts`, '#f43f5e', 'INVALIDATION')}
+        {cardNiveau('2. Stop Loss', ttFmt(lv.stop), `Risque : -${distSL.toFixed(2)} pts`, '#f43f5e', 'INVALIDATION')}
         {cardNiveau('3. Objectif 1', ttFmt(lv.target1), distTP1 ? `Gain : +${distTP1.toFixed(2)} pts` : 'Objectif direct', '#10b981', 'TP1 (50%)')}
         {lv.target2 ? cardNiveau('4. Objectif 2', ttFmt(lv.target2), distTP2 ? `Gain : +${distTP2.toFixed(2)} pts` : 'Extension de tendance', '#059669', 'TP2 (50%)') : null}
       </div>
@@ -4011,6 +4111,168 @@ function AgentBriefingCard() {
   );
 }
 
+// ── Modale des Raccourcis Clavier Pro ──────────────────────────────────
+function RaccourcisModal({ ouvert, onClose }) {
+  if (!ouvert) return null;
+  const touches = [
+    { cat: 'Trading & Ordres', list: [
+      { t: 'B', desc: "Exécuter l'ordre ACHAT (BUY) ou Démo" },
+      { t: 'S', desc: "Exécuter l'ordre VENTE (SELL) ou Démo" },
+      { t: 'D', desc: "Ouvrir le panneau Broker Deriv (Token & Solde)" },
+      { t: 'C', desc: "Ouvrir le catalogue des marchés et instruments" },
+    ]},
+    { cat: 'Unités de Temps (UT)', list: [
+      { t: '1', desc: "Passer à l'unité 1 minute (M1)" },
+      { t: '2', desc: "Passer à l'unité 5 minutes (M5)" },
+      { t: '3', desc: "Passer à l'unité 15 minutes (M15)" },
+      { t: '4', desc: "Passer à l'unité 1 heure (H1)" },
+      { t: '5', desc: "Passer à l'unité 4 heures (H4)" },
+    ]},
+    { cat: 'Système & Confort', list: [
+      { t: 'M', desc: "Couper ou activer le son des alertes et ordres" },
+      { t: 'R', desc: "Rafraîchir les cotations et l'analyse" },
+      { t: 'Échap', desc: "Fermer les fenêtres modales et menus" },
+    ]}
+  ];
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.82)',
+      backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+    }}>
+      <div className="panel" style={{ width: '100%', maxWidth: 540, maxHeight: '85vh', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', boxShadow: '0 20px 40px rgba(0,0,0,.9)' }}>
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid ' + TT.line, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(15,23,42,.8)' }}>
+          <div>
+            <b style={{ fontSize: 15, color: '#fff' }}><i className="fas fa-keyboard" style={{ marginRight: 8, color: '#38bdf8' }}></i>Raccourcis Clavier Pro</b>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>Naviguez et tradez à la vitesse d'un terminal institutionnel</div>
+          </div>
+          <button className="btn ghost sm" onClick={onClose}><i className="fas fa-xmark"></i></button>
+        </div>
+        <div style={{ padding: '16px 18px', overflowY: 'auto', display: 'grid', gap: 16 }}>
+          {touches.map(cat => (
+            <div key={cat.cat}>
+              <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: '#38bdf8', letterSpacing: '.06em', marginBottom: 8 }}>
+                {cat.cat}
+              </div>
+              <div style={{ display: 'grid', gap: 6 }}>
+                {cat.list.map(it => (
+                  <div key={it.t} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', borderRadius: 6, background: 'rgba(148,163,184,.05)' }}>
+                    <span style={{ fontSize: 12, color: '#e2e8f0' }}>{it.desc}</span>
+                    <kbd style={{
+                      padding: '2px 8px', borderRadius: 4, background: '#1e293b', border: '1px solid #475569',
+                      color: '#38bdf8', fontSize: 11, fontWeight: 800, boxShadow: '0 2px 0 #0f172a'
+                    }}>{it.t}</kbd>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ padding: '10px 18px', borderTop: '1px solid ' + TT.line, textAlign: 'right', background: 'rgba(15,23,42,.8)' }}>
+          <button className="btn ghost sm" onClick={onClose}>Compris</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Bandeau Screener Multi-Marchés (Ruban des Marchés Actifs) ───────────
+function MarketScreenerBar({ actifs, currentSymbol, onSelect }) {
+  if (!actifs || actifs.length === 0) return null;
+  return (
+    <div style={{
+      display: 'flex', gap: 8, overflowX: 'auto', padding: '4px 2px 8px',
+      marginBottom: 10, scrollbarWidth: 'thin'
+    }}>
+      {actifs.map(act => {
+        const estActif = act.symbol === currentSymbol;
+        const isGold = act.symbol.includes('XAU');
+        const isDeriv = act.symbol.startsWith('R_') || act.symbol.includes('BOOM') || act.symbol.includes('CRASH');
+        const isForex = act.symbol.startsWith('frx') && !isGold;
+        const icon = isGold ? 'fa-coins' : isDeriv ? 'fa-bolt' : isForex ? 'fa-globe' : 'fa-chart-simple';
+        const iconCol = isGold ? '#fbbf24' : isDeriv ? '#38bdf8' : '#34d399';
+        return (
+          <div key={act.symbol}
+            onClick={() => onSelect(act.symbol, act.provider, act.tf)}
+            style={{
+              flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8,
+              padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+              background: estActif ? 'rgba(56,189,248,0.16)' : 'rgba(15,23,42,0.65)',
+              border: `1px solid ${estActif ? '#38bdf8' : 'rgba(148,163,184,0.15)'}`,
+              transition: 'all .15s ease'
+            }}>
+            <i className={`fas ${icon}`} style={{ color: iconCol, fontSize: 13 }}></i>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: estActif ? '#38bdf8' : '#f8fafc' }}>
+                {act.label || act.symbol}
+              </div>
+              <div style={{ fontSize: 9.5, color: 'var(--dim)' }}>
+                {act.providerLabel || act.provider} · {act.tf || '5m'}
+              </div>
+            </div>
+            {estActif && (
+              <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 5px', borderRadius: 4, background: 'rgba(56,189,248,0.25)', color: '#38bdf8' }}>
+                ACTIF
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Matrice de Confluence Multi-Timeframe ──────────────────────────────
+function MultiTimeframeBar({ currentTf, onSelectTf, confluence }) {
+  const tfs = ['1m', '5m', '15m', '1h', '4h'];
+  const confScore = confluence && Number.isFinite(confluence.score) ? Math.round(confluence.score * 100) : null;
+  const sensConf = confluence && confluence.direction ? confluence.direction : null;
+  const colSens = sensConf === 'BUY' || sensConf === 'long' ? '#10b981' : sensConf === 'SELL' || sensConf === 'short' ? '#f43f5e' : '#94a3b8';
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '7px 12px', background: 'rgba(15,23,42,.7)', borderRadius: 8,
+      border: '1px solid ' + TT.line, marginBottom: 8, flexWrap: 'wrap', gap: 8
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', color: 'var(--dim)', marginRight: 4 }}>
+          <i className="fas fa-clock" style={{ marginRight: 4 }}></i>UT :
+        </span>
+        {tfs.map(t => {
+          const sel = t === currentTf;
+          return (
+            <button key={t} type="button" onClick={() => onSelectTf(t)}
+              className="btn sm"
+              style={{
+                padding: '3px 9px', fontSize: 11, fontWeight: sel ? 800 : 600,
+                background: sel ? '#38bdf8' : 'rgba(148,163,184,.08)',
+                color: sel ? '#0f172a' : '#cbd5e1',
+                borderColor: sel ? '#38bdf8' : 'rgba(148,163,184,.2)'
+              }}>
+              {t}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+        {confScore !== null && (
+          <span style={{ color: colSens, fontWeight: 800 }}>
+            <i className={`fas ${sensConf === 'BUY' ? 'fa-arrow-trend-up' : sensConf === 'SELL' ? 'fa-arrow-trend-down' : 'fa-arrows-left-right'}`} style={{ marginRight: 4 }}></i>
+            Confluence MTF : {confScore}% {sensConf ? `(${sensConf})` : ''}
+          </span>
+        )}
+        {confluence && confluence.detail && (
+          <span style={{ color: 'var(--dim)', fontSize: 10.5 }}>
+            · {confluence.nbAlignes || 0}/{confluence.detail.length} unités en accord
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function LiveMarket({ onToJournal }) {
   const [meta, setMeta] = useState({ symbols: [], timeframes: ['1m', '5m', '15m', '1h'] });
   const [symbol, setSymbol] = useState('frxXAUUSD');
@@ -4060,6 +4322,35 @@ function LiveMarket({ onToJournal }) {
   useEffect(() => {
     api('/deriv/status').then(r => r.json()).then(d => { if (d.success) setDerivStatut(d); }).catch(() => {});
   }, []);
+
+  const dernierSignalSonoreRef = useRef(null);
+  useEffect(() => {
+    if (decision && decision.decision && decision.decision !== 'HOLD' && decision.decision !== 'NEUTRE') {
+      const cle = `${symbol}-${decision.decision}-${(decision.levels && decision.levels.entry) || ''}`;
+      if (dernierSignalSonoreRef.current !== cle) {
+        dernierSignalSonoreRef.current = cle;
+        SoundEngine.playSignal();
+      }
+    }
+  }, [decision, symbol]);
+
+  // Raccourcis clavier pro en direct (UT 1-5, Catalogue C, Deriv D, Rafraîchir R)
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+      const k = e.key.toLowerCase();
+      if (k === '1') setTf('1m');
+      else if (k === '2') setTf('5m');
+      else if (k === '3') setTf('15m');
+      else if (k === '4') setTf('1h');
+      else if (k === '5') setTf('4h');
+      else if (k === 'c') setCatalogueOuvert(o => !o);
+      else if (k === 'd') setDerivModalOuvert(o => !o);
+      else if (k === 'r') load();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [load]);
 
   // Calques visuels SMC interactifs sur le graphique
   const [calqueStructure, setCalqueStructure] = useState(true);
@@ -4327,6 +4618,14 @@ function LiveMarket({ onToJournal }) {
   return (
     <>
       <AgentBriefingCard />
+
+      {/* ── Ruban Screener Multi-Marchés en direct ── */}
+      <MarketScreenerBar actifs={actifs} currentSymbol={symbol}
+        onSelect={(sym, prov, timeframe) => {
+          setSymbol(sym);
+          if (prov) setProvider(prov);
+          if (timeframe) setTf(timeframe);
+        }} />
 
       {/* ── Barre des instruments actifs (XAUUSD + sélection personnalisée) ── */}
       <div className="panel" style={{ padding: '8px 12px', marginBottom: 12, background: 'rgba(15,23,42,.75)',
@@ -4636,6 +4935,9 @@ function LiveMarket({ onToJournal }) {
       <div className="workstation-grid">
         {/* COLONNE GAUCHE : Grand Graphique Pro avec calques SMC & cartographie technique */}
         <div className="workstation-left">
+          {/* Matrice de Confluence Multi-Timeframe */}
+          <MultiTimeframeBar currentTf={tf} onSelectTf={t => setTf(t)} confluence={confluence} />
+
           {/* Panneau Graphique Pro & Calques SMC */}
           <div className="chart-pro-panel">
             {/* Barre de calques interactifs de Structure, Flux & Outils */}
@@ -7874,12 +8176,14 @@ function Outils() {
 
 const PILOTE_RACCOURCIS = [
   { l: "État du système", t: "montre l'état du système" },
+  { l: "Scan marchés",    t: "Quels marchés surveilles-tu et quel est le dernier scan ?" },
+  { l: "Broker Deriv",    t: "Quel est le statut et le solde de mon compte Deriv ?" },
+  { l: "Impact CPI",      t: "Est-ce que le calendrier économique CPI bloque le trading ?" },
+  { l: "Audit Risque",    t: "Quel est le risque configuré et la taille de lot conseillée ?" },
   { l: 'Trades',          t: 'montre les trades' },
   { l: 'Stratégies',      t: 'montre les stratégies' },
   { l: 'Scénarios',       t: 'montre les scénarios en attente' },
-  { l: 'Paramètres',      t: 'montre les paramètres' },
   { l: 'Mémoire',         t: "qu'est-ce que tu sais" },
-  { l: 'Apprentissage',   t: "qu'est-ce que tu as appris cette semaine ?" },
   { l: 'Aide',            t: 'aide' },
 ];
 
@@ -8139,9 +8443,24 @@ function Dashboard({ user, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [derivModalGlobal, setDerivModalGlobal] = useState(false);
   const [derivStatutGlobal, setDerivStatutGlobal] = useState(null);
+  const [sonMuet, setSonMuet] = useState(() => SoundEngine.isMuted());
+  const [raccourcisModal, setRaccourcisModal] = useState(false);
 
   useEffect(() => {
     api('/deriv/status').then(r => r.json()).then(d => { if (d.success) setDerivStatutGlobal(d); }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'm') {
+        const m = SoundEngine.toggleMute();
+        setSonMuet(m);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
 
@@ -8257,6 +8576,15 @@ function Dashboard({ user, onLogout }) {
                       ? `Deriv : ${derivStatutGlobal.account ? derivStatutGlobal.account.loginid : 'Connecté'} ($${Number(derivStatutGlobal.account ? derivStatutGlobal.account.balance : 0).toFixed(0)})`
                       : 'Broker Deriv'}
                   </button>
+                  <button className="btn ghost sm" style={{ padding: '4px 8px', fontSize: 11 }}
+                    onClick={() => { const m = SoundEngine.toggleMute(); setSonMuet(m); }}
+                    title={sonMuet ? 'Activer le son des alertes et ordres (Touche M)' : 'Couper le son (Touche M)'}>
+                    <i className={`fas ${sonMuet ? 'fa-volume-xmark' : 'fa-volume-high'}`} style={{ color: sonMuet ? '#f87171' : '#38bdf8' }}></i>
+                  </button>
+                  <button className="btn ghost sm" style={{ padding: '4px 8px', fontSize: 11 }}
+                    onClick={() => setRaccourcisModal(true)} title="Raccourcis clavier pro">
+                    <i className="fas fa-keyboard" style={{ marginRight: 4 }}></i>Touches
+                  </button>
                   <span style={{ fontSize:12.5, color:'var(--muted)' }}>
                     <i className="fas fa-user-astronaut" style={{ marginRight:6 }}></i>
                     {user.username}
@@ -8346,6 +8674,7 @@ function Dashboard({ user, onLogout }) {
       )}
 
       <DerivModal ouvert={derivModalGlobal} onClose={() => setDerivModalGlobal(false)} onRefresh={st => setDerivStatutGlobal(st)} />
+      <RaccourcisModal ouvert={raccourcisModal} onClose={() => setRaccourcisModal(false)} />
     </div>
   );
 }

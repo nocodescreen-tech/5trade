@@ -232,7 +232,7 @@ class DerivClient {
    * Exécute un ordre de trade sur Deriv
    * Supporte les contrats Multipliers ou Rise/Fall (Call/Put)
    */
-  async executerTrade({ symbol, direction, amount = 10, type = 'MULTUP' }) {
+  async executerTrade({ symbol, direction, amount = 10, type = null, duration = 5, durationUnit = 'm' }) {
     const cfg = await this.lireConfig();
     if (!cfg || !cfg.actif || !cfg.apiToken) {
       return { success: false, error: 'Compte Deriv non connecté. Active d\'abord ton token dans les paramètres.' };
@@ -254,9 +254,9 @@ class DerivClient {
         amount: Number(amount) || 10,
         basis: 'stake',
         contract_type: contractType,
-        currency: cfg.account.currency || 'USD',
-        duration: 5,
-        duration_unit: 'm',
+        currency: (cfg.account && cfg.account.currency) || 'USD',
+        duration: Number(duration) || 5,
+        duration_unit: durationUnit || 'm',
         symbol: symbol || 'R_75',
         req_id: 2
       };

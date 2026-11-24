@@ -2594,9 +2594,9 @@ app.post('/api/deriv/disconnect', requireAuth, async (req, res) => {
 
 app.post('/api/deriv/trade', requireAuth, async (req, res) => {
   try {
-    const { symbol, direction, amount, type } = req.body || {};
+    const { symbol, direction, amount, type, duration, durationUnit } = req.body || {};
     if (!symbol) return res.status(400).json({ success: false, error: 'Symbole requis' });
-    const r = await DerivBroker.executerTrade({ symbol, direction, amount, type });
+    const r = await DerivBroker.executerTrade({ symbol, direction, amount, type, duration, durationUnit });
     if (!r.success) {
       return res.status(400).json(r);
     }
