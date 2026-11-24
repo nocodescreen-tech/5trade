@@ -7764,17 +7764,6 @@ function LiveMarket({
     }).catch(() => {});
   };
 
-  // Raccourcis clavier pro en direct (UT 1-5, Catalogue C, Deriv D, Rafraîchir R)
-  useEffect(() => {
-    const onKeyDown = e => {
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
-      const k = e.key.toLowerCase();
-      if (k === '1') changerTf('1m');else if (k === '2') changerTf('5m');else if (k === '3') changerTf('15m');else if (k === '4') changerTf('1h');else if (k === '5') changerTf('4h');else if (k === 'c') setCatalogueOuvert(o => !o);else if (k === 'd') setDerivModalOuvert(o => !o);else if (k === 'r') load();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [load, symbol, provider]);
-
   // Calques visuels SMC interactifs sur le graphique
   const [calqueStructure, setCalqueStructure] = useState(true);
   const [calqueSweeps, setCalqueSweeps] = useState(true);
@@ -7908,6 +7897,17 @@ function LiveMarket({
       clearInterval(it);
     };
   }, [load]);
+
+  // Raccourcis clavier pro en direct (UT 1-5, Catalogue C, Deriv D, Rafraîchir R)
+  useEffect(() => {
+    const onKeyDown = e => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+      const k = e.key.toLowerCase();
+      if (k === '1') changerTf('1m');else if (k === '2') changerTf('5m');else if (k === '3') changerTf('15m');else if (k === '4') changerTf('1h');else if (k === '5') changerTf('4h');else if (k === 'c') setCatalogueOuvert(o => !o);else if (k === 'd') setDerivModalOuvert(o => !o);else if (k === 'r') load();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [load, symbol, provider]);
 
   // Décision complète du moteur (arbitrage 5 niveaux) — et alignement MTF.
   useEffect(() => {
