@@ -1493,7 +1493,7 @@ function History({ history }) {
 
 /* Graphique TradingView Lightweight Charts : chandeliers + volume + niveaux.
    Zoom, déplacement et échelle de prix sont natifs (molette, glisser-déposer). */
-function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
+function PriceChart({ candles, levels, signal, height, symbol, tf, report, calques = {} }) {
   const boxRef = useRef(null);
   const overlayRef = useRef(null);
   const api = useRef({ chart: null, series: null, vol: null, lines: [], full: true });
@@ -1627,6 +1627,8 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
     const { series } = api.current;
     if (!series) return;
     api.current.lines.forEach(l => { try { series.removePriceLine(l); } catch (e) {} });
+    api.current.lines = [];
+    if (calques.niveaux === false) return;
     // L'axe ne supporte pas vingt-cinq étiquettes : elles se chevauchaient, se
     // superposaient au prix et rendaient le graphique illisible. On garde les
     // niveaux qui décident — les plus proches du prix — plus le support et la
@@ -1660,7 +1662,7 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
       return series.createPriceLine({ price: l.price, color, lineWidth: 1,
         lineStyle: window.LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: l.kind });
     });
-  }, [levels]);
+  }, [levels, calques.niveaux]);
 
   // Repère du signal sur la bougie concernée
   useEffect(() => {
@@ -1750,60 +1752,68 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
       };
 
       // Order blocks : de leur bougie d'origine jusqu'à maintenant.
-      for (const ob of (rep.orderBlocks || [])) {
-        const t0 = Math.floor((ob.t || 0) / 1000);
-        if (!t0 || !Number.isFinite(ob.low) || !Number.isFinite(ob.high)) continue;
-        const haussier = /bull|haus/i.test(String(ob.type || ''));
-        compte.ob++;
-        zone(t0, tFin, ob.low, ob.high,
-          haussier ? 'rgba(34,211,138,.10)' : 'rgba(242,84,91,.10)',
-          haussier ? 'rgba(34,211,138,.42)' : 'rgba(242,84,91,.42)',
-          'OB ' + (haussier ? 'haussier' : 'baissier'));
-      }
-      // Déséquilibres (FVG)
-      for (const f of (rep.fvgs || [])) {
-        const t0 = Math.floor((f.t || 0) / 1000);
-        if (!t0 || !Number.isFinite(f.low) || !Number.isFinite(f.high)) continue;
-        const haussier = /bull|haus/i.test(String(f.type || ''));
-        compte.fvg++;
-        zone(t0, tFin, f.low, f.high,
-          haussier ? 'rgba(96,165,250,.10)' : 'rgba(251,191,36,.10)',
-          haussier ? 'rgba(96,165,250,.40)' : 'rgba(251,191,36,.40)',
-          'FVG ' + (haussier ? 'haussier' : 'baissier'));
-      }
-      // Premium / discount et zone d'entrée optimale : bandes de fond.
-      const pd = rep.premiumDiscount;
-      if (pd && Number.isFinite(pd.equilibrium) && Number.isFinite(pd.high) && Number.isFinite(pd.low)) {
-        bande(pd.equilibrium, pd.high, 'rgba(242,84,91,.045)', 'rgba(242,84,91,.35)', 'PREMIUM');
-        bande(pd.low, pd.equilibrium, 'rgba(34,211,138,.045)', 'rgba(34,211,138,.35)', 'DISCOUNT');
-        if (pd.ote && Number.isFinite(pd.ote.deep) && Number.isFinite(pd.ote.shallow)) {
-          bande(pd.ote.deep, pd.ote.shallow, 'rgba(245,158,11,.10)', 'rgba(245,158,11,.5)', 'OTE 0,618-0,786');
+      if (calques.zones !== false) {
+        for (const ob of (rep.orderBlocks || [])) {
+          const t0 = Math.floor((ob.t || 0) / 1000);
+          if (!t0 || !Number.isFinite(ob.low) || !Number.isFinite(ob.high)) continue;
+          const haussier = /bull|haus/i.test(String(ob.type || ''));
+          compte.ob++;
+          zone(t0, tFin, ob.low, ob.high,
+            haussier ? 'rgba(34,211,138,.10)' : 'rgba(242,84,91,.10)',
+            haussier ? 'rgba(34,211,138,.42)' : 'rgba(242,84,91,.42)',
+            'OB ' + (haussier ? 'haussier' : 'baissier'));
+        }
+        // Déséquilibres (FVG)
+        for (const f of (rep.fvgs || [])) {
+          const t0 = Math.floor((f.t || 0) / 1000);
+          if (!t0 || !Number.isFinite(f.low) || !Number.isFinite(f.high)) continue;
+          const haussier = /bull|haus/i.test(String(f.type || ''));
+          compte.fvg++;
+          zone(t0, tFin, f.low, f.high,
+            haussier ? 'rgba(96,165,250,.10)' : 'rgba(251,191,36,.10)',
+            haussier ? 'rgba(96,165,250,.40)' : 'rgba(251,191,36,.40)',
+            'FVG ' + (haussier ? 'haussier' : 'baissier'));
+        }
+        // Premium / discount et zone d'entrée optimale : bandes de fond.
+        const pd = rep.premiumDiscount;
+        if (pd && Number.isFinite(pd.equilibrium) && Number.isFinite(pd.high) && Number.isFinite(pd.low)) {
+          bande(pd.equilibrium, pd.high, 'rgba(242,84,91,.045)', 'rgba(242,84,91,.35)', 'PREMIUM');
+          bande(pd.low, pd.equilibrium, 'rgba(34,211,138,.045)', 'rgba(34,211,138,.35)', 'DISCOUNT');
+          if (pd.ote && Number.isFinite(pd.ote.deep) && Number.isFinite(pd.ote.shallow)) {
+            bande(pd.ote.deep, pd.ote.shallow, 'rgba(245,158,11,.10)', 'rgba(245,158,11,.5)', 'OTE 0,618-0,786');
+          }
         }
       }
+
       // Liquidité : là où sont posés les stops.
-      ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
-      for (const l of (rep.liquidity || [])) {
-        const y = Y(l.price);
-        if (y === null || y < 0 || y > h) continue;
-        ctx.strokeStyle = 'rgba(245,158,11,.55)';
-        ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(0, y + .5); ctx.lineTo(w, y + .5); ctx.stroke();
-        ctx.setLineDash([]);
-        compte.liq++;
-        if (peutEtiqueter()) {
-          ctx.fillStyle = 'rgba(245,158,11,.9)';
-          ctx.fillText((l.type || 'liquidite') + (l.touches ? ' (' + l.touches + ')' : ''), 6, y - 3);
-          compte.labels++;
+      if (calques.structure !== false) {
+        ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+        for (const l of (rep.liquidity || [])) {
+          const y = Y(l.price);
+          if (y === null || y < 0 || y > h) continue;
+          ctx.strokeStyle = 'rgba(245,158,11,.55)';
+          ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(0, y + .5); ctx.lineTo(w, y + .5); ctx.stroke();
+          ctx.setLineDash([]);
+          compte.liq++;
+          if (peutEtiqueter()) {
+            ctx.fillStyle = 'rgba(245,158,11,.9)';
+            ctx.fillText((l.type || 'liquidite') + (l.touches ? ' (' + l.touches + ')' : ''), 6, y - 3);
+            compte.labels++;
+          }
         }
       }
+
       // Balayages : l'extrême atteint est entouré.
-      for (const s of (rep.sweeps || [])) {
-        const x = X(Math.floor((s.at || 0) / 1000));
-        const y = Y(s.extreme || s.level);
-        if (x === null || y === null) continue;
-        compte.sweep++;
-        ctx.strokeStyle = 'rgba(167,139,250,.85)'; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.stroke();
+      if (calques.sweeps !== false) {
+        for (const s of (rep.sweeps || [])) {
+          const x = X(Math.floor((s.at || 0) / 1000));
+          const y = Y(s.extreme || s.level);
+          if (x === null || y === null) continue;
+          compte.sweep++;
+          ctx.strokeStyle = 'rgba(167,139,250,.85)'; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.stroke();
+        }
       }
 
       // On ne declenche un rendu que si le compte change : redessiner au zoom ne
@@ -1830,7 +1840,7 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report }) {
       try { if (sub) chart.timeScale().unsubscribeVisibleLogicalRangeChange(sub); } catch (e) {}
       api.current.dessiner = null;
     };
-  }, [candles, report, levels]);
+  }, [candles, report, levels, calques.zones, calques.structure, calques.sweeps, calques.niveaux]);
 
   const reset = () => { try { api.current.chart.timeScale().fitContent(); } catch (e) {} };
 
@@ -3522,6 +3532,12 @@ function LiveMarket({ onToJournal }) {
   const [catalogueOuvert, setCatalogueOuvert] = useState(false);
   const [filtreCatalogue, setFiltreCatalogue] = useState('');
 
+  // Calques visuels SMC interactifs sur le graphique
+  const [calqueStructure, setCalqueStructure] = useState(true);
+  const [calqueSweeps, setCalqueSweeps] = useState(true);
+  const [calqueZones, setCalqueZones] = useState(true);
+  const [calqueNiveaux, setCalqueNiveaux] = useState(true);
+
   useEffect(() => {
     const maj = () => setEtroit(window.innerWidth < 820);
     window.addEventListener('resize', maj);
@@ -4070,73 +4086,133 @@ function LiveMarket({ onToJournal }) {
         </div>
       )}
 
-      {/* 03 — LA DÉCISION, TOUT EN HAUT */}
-      <LiveDecisionCenter decision={decision} sse={sse} price={prix}
-        at={(decision && decision.at) || (last && last.t)} symbol={symbol} tf={tf}
-        providerLabel={providerLabel} confluence={confluence} />
-
-      {/* Poste d'analyse institutionnel SMC : Checklist Sweep → CHoCH → Retest OB */}
-      <SMCInstitutionalCard decision={decision} signal={meilleurSetup} report={report} price={prix}
-        symbol={symbol} tf={tf} />
-
-      {/* Setup chiffré, seulement s'il existe */}
-      <TradeSetupCard signal={meilleurSetup} decision={decision || (sse && sse.decision ? sse : null)}
-        sens={sensAffiche} onToJournal={onToJournal} symbol={symbol} tf={tf}
-        provider={provider} providerLabel={providerLabel} />
-
-      {/* Couche L6 — les positions ouvertes et leur plan de gestion chiffré.
-          Un radar qui ne dit pas quoi faire d'une position ouverte n'est qu'un radar. */}
-      <PositionsGestion />
-
-      {/* Graphique : accessible tôt, sans écraser la décision */}
-      <div className="panel" style={{ padding: 14, marginBottom: 12 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-          flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-            <TtLabel>Graphique</TtLabel>
-            {last && (
-              <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                O {ttFmt(last.o)} · H {ttFmt(last.h)} · L {ttFmt(last.l)} · C {ttFmt(last.c)}
+      {/* DISPOSITION WORKSTATION PRO : 2 COLONNES (GRAPHIQUE INTERACTIF + COCKPIT DÉCISIONNEL) */}
+      <div className="workstation-grid">
+        {/* COLONNE GAUCHE : Grand Graphique Pro avec calques SMC & cartographie technique */}
+        <div className="workstation-left">
+          {/* Panneau Graphique Pro & Calques SMC */}
+          <div className="chart-pro-panel">
+            {/* Barre de calques interactifs SMC & Outils */}
+            <div className="smc-layers-bar">
+              <span className="smc-layers-title">
+                <i className="fas fa-layer-group" style={{ color: TT.accent }}></i> CALQUES SMC
               </span>
-            )}
+              <button
+                type="button"
+                className={`layer-btn ${calqueStructure ? 'active' : ''}`}
+                onClick={() => setCalqueStructure(!calqueStructure)}
+                title="BOS (Break of Structure) & CHoCH (Change of Character)"
+              >
+                <i className="fas fa-draw-polygon"></i> 📐 Structure BOS/CHoCH
+              </button>
+              <button
+                type="button"
+                className={`layer-btn ${calqueSweeps ? 'active' : ''}`}
+                onClick={() => setCalqueSweeps(!calqueSweeps)}
+                title="Prises de liquidités (High/Low sweeps & BSL/SSL)"
+              >
+                <i className="fas fa-water"></i> 🌊 Sweeps Liquidité
+              </button>
+              <button
+                type="button"
+                className={`layer-btn ${calqueZones ? 'active' : ''}`}
+                onClick={() => setCalqueZones(!calqueZones)}
+                title="Order Blocks (OB) & Imbalances Fair Value Gaps (FVG)"
+              >
+                <i className="fas fa-cube"></i> 📦 Order Blocks & FVG
+              </button>
+              <button
+                type="button"
+                className={`layer-btn ${calqueNiveaux ? 'active' : ''}`}
+                onClick={() => setCalqueNiveaux(!calqueNiveaux)}
+                title="Niveaux clés d'exécution (Entrée, SL, TP1, TP2)"
+              >
+                <i className="fas fa-crosshairs"></i> 🎯 Niveaux Signal
+              </button>
+            </div>
+
+            {/* En-tête métadonnées cotation & ATR */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+              flexWrap: 'wrap', gap: 8, padding: '10px 14px 6px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                <TtLabel>Graphique Pro</TtLabel>
+                {last && (
+                  <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'monospace' }}>
+                    O: {ttFmt(last.o)} · H: {ttFmt(last.h)} · L: {ttFmt(last.l)} · C: {ttFmt(last.c)}
+                  </span>
+                )}
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--dim)', fontFamily: 'monospace' }}>
+                {report ? `${report.candles} bougies · ATR(14): ${report.atr14}` : ''}
+              </span>
+            </div>
+
+            {/* Rendu Graphique (Canvas local avec calques ou TradingView) */}
+            <div style={{ padding: 10 }}>
+              {vue === 'app' ? (
+                <PriceChart candles={candles} report={report}
+                  levels={report ? report.levels : []} signal={decision && decision.signal}
+                  height={big ? (etroi ? 460 : 620) : (etroi ? 300 : 430)} symbol={symbol} tf={tf}
+                  calques={{
+                    structure: calqueStructure,
+                    sweeps: calqueSweeps,
+                    zones: calqueZones,
+                    niveaux: calqueNiveaux,
+                  }}
+                />
+              ) : (
+                <TradingViewChart
+                  symbole={cur && cur.tv}
+                  tf={tf}
+                  height={big ? (etroi ? 460 : 620) : (etroi ? 300 : 430)}
+                />
+              )}
+            </div>
           </div>
-          <span style={{ fontSize: 11, color: 'var(--dim)' }}>
-            {report ? `${report.candles} bougies · ATR ${report.atr14}` : ''}
-          </span>
+
+          {/* L6 — Gestion des positions ouvertes */}
+          <PositionsGestion />
+
+          {/* Alignement MTF multi-temporel */}
+          <MultiTimeframeMatrix confluence={confluence} />
+
+          {/* 01 — Cartographie de structure de marché */}
+          <MarketStructurePanel carte={decision && decision.carte} report={report} />
+
+          {/* Plans d'attente institutionnels */}
+          <PlansAttente symbol={symbol} />
         </div>
-        <div className="chart-mobile">
-          {vue === 'app' ? (
-            <PriceChart candles={candles} report={report}
-              levels={report ? report.levels : []} signal={decision && decision.signal}
-              height={big ? (etroi ? 460 : 620) : (etroi ? 300 : 430)} symbol={symbol} tf={tf} />
-          ) : (
-            <TradingViewChart symbole={cur && cur.tv} tf={tf}
-              height={big ? (etroi ? 460 : 620) : (etroi ? 300 : 430)} />
-          )}
+
+        {/* COLONNE DROITE : Cockpit Décisionnel Institutionnel Sticky */}
+        <div className="workstation-right">
+          {/* 03 — Cerveau de décision unifié */}
+          <LiveDecisionCenter decision={decision} sse={sse} price={prix}
+            at={(decision && decision.at) || (last && last.t)} symbol={symbol} tf={tf}
+            providerLabel={providerLabel} confluence={confluence} />
+
+          {/* Checklist SMC institutionnelle (Sweep -> CHoCH -> Retest OB) */}
+          <SMCInstitutionalCard decision={decision} signal={meilleurSetup} report={report} price={prix}
+            symbol={symbol} tf={tf} />
+
+          {/* Setup chiffré & simulation paper-trading en 1 clic */}
+          <TradeSetupCard signal={meilleurSetup} decision={decision || (sse && sse.decision ? sse : null)}
+            sens={sensAffiche} onToJournal={onToJournal} symbol={symbol} tf={tf}
+            provider={provider} providerLabel={providerLabel} />
+
+          {/* Analyse approfondie du verdict et entonnoir */}
+          <SignalExplanation trace={(decision && decision.trace) || (sse && sse.trace)}
+            decision={decision} signal={verdict} />
+
+          {/* 02 — Suivi des Playbooks et stratégies */}
+          <StrategyMonitor playbooks={playbooks}
+            signaux={(decision && decision.signaux) || []}
+            statuts={statuts} filtre={filtre} setFiltre={setFiltre}
+            typeTrade={typeTrade} setTypeTrade={setTypeTrade} />
+
+          {/* Historique des signaux et alertes */}
+          <SignalHistory journal={journal} />
         </div>
       </div>
-
-      {/* 02 — Stratégies */}
-      <StrategyMonitor playbooks={playbooks}
-        signaux={(decision && decision.signaux) || []}
-        statuts={statuts} filtre={filtre} setFiltre={setFiltre}
-        typeTrade={typeTrade} setTypeTrade={setTypeTrade} />
-
-      {/* Alignement MTF */}
-      <MultiTimeframeMatrix confluence={confluence} />
-
-      {/* Plans d'attente + cerveau : ce que le système prépare, et pourquoi */}
-      <PlansAttente symbol={symbol} />
-
-      {/* Pourquoi cette décision */}
-      <SignalExplanation trace={(decision && decision.trace) || (sse && sse.trace)}
-        decision={decision} signal={verdict} />
-
-      {/* 01 — Intelligence de marché */}
-      <MarketStructurePanel carte={decision && decision.carte} report={report} />
-
-      {/* Historique */}
-      <SignalHistory journal={journal} />
 
       {vocabulaire && vocabulaire.length > 0 && (
         <details className="panel" style={{ padding: '12px 15px', marginBottom: 12 }}>

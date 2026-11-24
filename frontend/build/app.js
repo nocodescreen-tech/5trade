@@ -2965,7 +2965,8 @@ function PriceChart({
   height,
   symbol,
   tf,
-  report
+  report,
+  calques = {}
 }) {
   const boxRef = useRef(null);
   const overlayRef = useRef(null);
@@ -3217,6 +3218,8 @@ function PriceChart({
         series.removePriceLine(l);
       } catch (e) {}
     });
+    api.current.lines = [];
+    if (calques.niveaux === false) return;
     // L'axe ne supporte pas vingt-cinq étiquettes : elles se chevauchaient, se
     // superposaient au prix et rendaient le graphique illisible. On garde les
     // niveaux qui décident — les plus proches du prix — plus le support et la
@@ -3249,7 +3252,7 @@ function PriceChart({
         title: l.kind
       });
     });
-  }, [levels]);
+  }, [levels, calques.niveaux]);
 
   // Repère du signal sur la bougie concernée
   useEffect(() => {
@@ -3389,61 +3392,69 @@ function PriceChart({
       };
 
       // Order blocks : de leur bougie d'origine jusqu'à maintenant.
-      for (const ob of rep.orderBlocks || []) {
-        const t0 = Math.floor((ob.t || 0) / 1000);
-        if (!t0 || !Number.isFinite(ob.low) || !Number.isFinite(ob.high)) continue;
-        const haussier = /bull|haus/i.test(String(ob.type || ''));
-        compte.ob++;
-        zone(t0, tFin, ob.low, ob.high, haussier ? 'rgba(34,211,138,.10)' : 'rgba(242,84,91,.10)', haussier ? 'rgba(34,211,138,.42)' : 'rgba(242,84,91,.42)', 'OB ' + (haussier ? 'haussier' : 'baissier'));
-      }
-      // Déséquilibres (FVG)
-      for (const f of rep.fvgs || []) {
-        const t0 = Math.floor((f.t || 0) / 1000);
-        if (!t0 || !Number.isFinite(f.low) || !Number.isFinite(f.high)) continue;
-        const haussier = /bull|haus/i.test(String(f.type || ''));
-        compte.fvg++;
-        zone(t0, tFin, f.low, f.high, haussier ? 'rgba(96,165,250,.10)' : 'rgba(251,191,36,.10)', haussier ? 'rgba(96,165,250,.40)' : 'rgba(251,191,36,.40)', 'FVG ' + (haussier ? 'haussier' : 'baissier'));
-      }
-      // Premium / discount et zone d'entrée optimale : bandes de fond.
-      const pd = rep.premiumDiscount;
-      if (pd && Number.isFinite(pd.equilibrium) && Number.isFinite(pd.high) && Number.isFinite(pd.low)) {
-        bande(pd.equilibrium, pd.high, 'rgba(242,84,91,.045)', 'rgba(242,84,91,.35)', 'PREMIUM');
-        bande(pd.low, pd.equilibrium, 'rgba(34,211,138,.045)', 'rgba(34,211,138,.35)', 'DISCOUNT');
-        if (pd.ote && Number.isFinite(pd.ote.deep) && Number.isFinite(pd.ote.shallow)) {
-          bande(pd.ote.deep, pd.ote.shallow, 'rgba(245,158,11,.10)', 'rgba(245,158,11,.5)', 'OTE 0,618-0,786');
+      if (calques.zones !== false) {
+        for (const ob of rep.orderBlocks || []) {
+          const t0 = Math.floor((ob.t || 0) / 1000);
+          if (!t0 || !Number.isFinite(ob.low) || !Number.isFinite(ob.high)) continue;
+          const haussier = /bull|haus/i.test(String(ob.type || ''));
+          compte.ob++;
+          zone(t0, tFin, ob.low, ob.high, haussier ? 'rgba(34,211,138,.10)' : 'rgba(242,84,91,.10)', haussier ? 'rgba(34,211,138,.42)' : 'rgba(242,84,91,.42)', 'OB ' + (haussier ? 'haussier' : 'baissier'));
+        }
+        // Déséquilibres (FVG)
+        for (const f of rep.fvgs || []) {
+          const t0 = Math.floor((f.t || 0) / 1000);
+          if (!t0 || !Number.isFinite(f.low) || !Number.isFinite(f.high)) continue;
+          const haussier = /bull|haus/i.test(String(f.type || ''));
+          compte.fvg++;
+          zone(t0, tFin, f.low, f.high, haussier ? 'rgba(96,165,250,.10)' : 'rgba(251,191,36,.10)', haussier ? 'rgba(96,165,250,.40)' : 'rgba(251,191,36,.40)', 'FVG ' + (haussier ? 'haussier' : 'baissier'));
+        }
+        // Premium / discount et zone d'entrée optimale : bandes de fond.
+        const pd = rep.premiumDiscount;
+        if (pd && Number.isFinite(pd.equilibrium) && Number.isFinite(pd.high) && Number.isFinite(pd.low)) {
+          bande(pd.equilibrium, pd.high, 'rgba(242,84,91,.045)', 'rgba(242,84,91,.35)', 'PREMIUM');
+          bande(pd.low, pd.equilibrium, 'rgba(34,211,138,.045)', 'rgba(34,211,138,.35)', 'DISCOUNT');
+          if (pd.ote && Number.isFinite(pd.ote.deep) && Number.isFinite(pd.ote.shallow)) {
+            bande(pd.ote.deep, pd.ote.shallow, 'rgba(245,158,11,.10)', 'rgba(245,158,11,.5)', 'OTE 0,618-0,786');
+          }
         }
       }
+
       // Liquidité : là où sont posés les stops.
-      ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
-      for (const l of rep.liquidity || []) {
-        const y = Y(l.price);
-        if (y === null || y < 0 || y > h) continue;
-        ctx.strokeStyle = 'rgba(245,158,11,.55)';
-        ctx.setLineDash([2, 4]);
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, y + .5);
-        ctx.lineTo(w, y + .5);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        compte.liq++;
-        if (peutEtiqueter()) {
-          ctx.fillStyle = 'rgba(245,158,11,.9)';
-          ctx.fillText((l.type || 'liquidite') + (l.touches ? ' (' + l.touches + ')' : ''), 6, y - 3);
-          compte.labels++;
+      if (calques.structure !== false) {
+        ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+        for (const l of rep.liquidity || []) {
+          const y = Y(l.price);
+          if (y === null || y < 0 || y > h) continue;
+          ctx.strokeStyle = 'rgba(245,158,11,.55)';
+          ctx.setLineDash([2, 4]);
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(0, y + .5);
+          ctx.lineTo(w, y + .5);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          compte.liq++;
+          if (peutEtiqueter()) {
+            ctx.fillStyle = 'rgba(245,158,11,.9)';
+            ctx.fillText((l.type || 'liquidite') + (l.touches ? ' (' + l.touches + ')' : ''), 6, y - 3);
+            compte.labels++;
+          }
         }
       }
+
       // Balayages : l'extrême atteint est entouré.
-      for (const s of rep.sweeps || []) {
-        const x = X(Math.floor((s.at || 0) / 1000));
-        const y = Y(s.extreme || s.level);
-        if (x === null || y === null) continue;
-        compte.sweep++;
-        ctx.strokeStyle = 'rgba(167,139,250,.85)';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
-        ctx.stroke();
+      if (calques.sweeps !== false) {
+        for (const s of rep.sweeps || []) {
+          const x = X(Math.floor((s.at || 0) / 1000));
+          const y = Y(s.extreme || s.level);
+          if (x === null || y === null) continue;
+          compte.sweep++;
+          ctx.strokeStyle = 'rgba(167,139,250,.85)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
       }
 
       // On ne declenche un rendu que si le compte change : redessiner au zoom ne
@@ -3475,7 +3486,7 @@ function PriceChart({
       } catch (e) {}
       api.current.dessiner = null;
     };
-  }, [candles, report, levels]);
+  }, [candles, report, levels, calques.zones, calques.structure, calques.sweeps, calques.niveaux]);
   const reset = () => {
     try {
       api.current.chart.timeScale().fitContent();
@@ -6320,6 +6331,12 @@ function LiveMarket({
   const [actifs, setActifs] = useState([]);
   const [catalogueOuvert, setCatalogueOuvert] = useState(false);
   const [filtreCatalogue, setFiltreCatalogue] = useState('');
+
+  // Calques visuels SMC interactifs sur le graphique
+  const [calqueStructure, setCalqueStructure] = useState(true);
+  const [calqueSweeps, setCalqueSweeps] = useState(true);
+  const [calqueZones, setCalqueZones] = useState(true);
+  const [calqueNiveaux, setCalqueNiveaux] = useState(true);
   useEffect(() => {
     const maj = () => setEtroit(window.innerWidth < 820);
     window.addEventListener('resize', maj);
@@ -7224,7 +7241,110 @@ function LiveMarket({
     style: {
       marginRight: 8
     }
-  }), /Pas assez de bougies/i.test(err) ? `${err} — marché probablement fermé. Les indices synthétiques (Volatility) et les cryptos cotent 24 h/24.` : err), /*#__PURE__*/React.createElement(LiveDecisionCenter, {
+  }), /Pas assez de bougies/i.test(err) ? `${err} — marché probablement fermé. Les indices synthétiques (Volatility) et les cryptos cotent 24 h/24.` : err), /*#__PURE__*/React.createElement("div", {
+    className: "workstation-grid"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "workstation-left"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "chart-pro-panel"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "smc-layers-bar"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "smc-layers-title"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-layer-group",
+    style: {
+      color: TT.accent
+    }
+  }), " CALQUES SMC"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: `layer-btn ${calqueStructure ? 'active' : ''}`,
+    onClick: () => setCalqueStructure(!calqueStructure),
+    title: "BOS (Break of Structure) & CHoCH (Change of Character)"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-draw-polygon"
+  }), " \uD83D\uDCD0 Structure BOS/CHoCH"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: `layer-btn ${calqueSweeps ? 'active' : ''}`,
+    onClick: () => setCalqueSweeps(!calqueSweeps),
+    title: "Prises de liquidit\xE9s (High/Low sweeps & BSL/SSL)"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-water"
+  }), " \uD83C\uDF0A Sweeps Liquidit\xE9"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: `layer-btn ${calqueZones ? 'active' : ''}`,
+    onClick: () => setCalqueZones(!calqueZones),
+    title: "Order Blocks (OB) & Imbalances Fair Value Gaps (FVG)"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-cube"
+  }), " \uD83D\uDCE6 Order Blocks & FVG"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: `layer-btn ${calqueNiveaux ? 'active' : ''}`,
+    onClick: () => setCalqueNiveaux(!calqueNiveaux),
+    title: "Niveaux cl\xE9s d'ex\xE9cution (Entr\xE9e, SL, TP1, TP2)"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-crosshairs"
+  }), " \uD83C\uDFAF Niveaux Signal")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'baseline',
+      flexWrap: 'wrap',
+      gap: 8,
+      padding: '10px 14px 6px',
+      borderBottom: '1px solid var(--border)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: 10,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement(TtLabel, null, "Graphique Pro"), last && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: 'var(--muted)',
+      fontFamily: 'monospace'
+    }
+  }, "O: ", ttFmt(last.o), " \xB7 H: ", ttFmt(last.h), " \xB7 L: ", ttFmt(last.l), " \xB7 C: ", ttFmt(last.c))), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: 'var(--dim)',
+      fontFamily: 'monospace'
+    }
+  }, report ? `${report.candles} bougies · ATR(14): ${report.atr14}` : '')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: 10
+    }
+  }, vue === 'app' ? /*#__PURE__*/React.createElement(PriceChart, {
+    candles: candles,
+    report: report,
+    levels: report ? report.levels : [],
+    signal: decision && decision.signal,
+    height: big ? etroi ? 460 : 620 : etroi ? 300 : 430,
+    symbol: symbol,
+    tf: tf,
+    calques: {
+      structure: calqueStructure,
+      sweeps: calqueSweeps,
+      zones: calqueZones,
+      niveaux: calqueNiveaux
+    }
+  }) : /*#__PURE__*/React.createElement(TradingViewChart, {
+    symbole: cur && cur.tv,
+    tf: tf,
+    height: big ? etroi ? 460 : 620 : etroi ? 300 : 430
+  }))), /*#__PURE__*/React.createElement(PositionsGestion, null), /*#__PURE__*/React.createElement(MultiTimeframeMatrix, {
+    confluence: confluence
+  }), /*#__PURE__*/React.createElement(MarketStructurePanel, {
+    carte: decision && decision.carte,
+    report: report
+  }), /*#__PURE__*/React.createElement(PlansAttente, {
+    symbol: symbol
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "workstation-right"
+  }, /*#__PURE__*/React.createElement(LiveDecisionCenter, {
     decision: decision,
     sse: sse,
     price: prix,
@@ -7249,53 +7369,11 @@ function LiveMarket({
     tf: tf,
     provider: provider,
     providerLabel: providerLabel
-  }), /*#__PURE__*/React.createElement(PositionsGestion, null), /*#__PURE__*/React.createElement("div", {
-    className: "panel",
-    style: {
-      padding: 14,
-      marginBottom: 12
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'baseline',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginBottom: 8
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      alignItems: 'baseline',
-      gap: 10,
-      flexWrap: 'wrap'
-    }
-  }, /*#__PURE__*/React.createElement(TtLabel, null, "Graphique"), last && /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 11,
-      color: 'var(--muted)'
-    }
-  }, "O ", ttFmt(last.o), " \xB7 H ", ttFmt(last.h), " \xB7 L ", ttFmt(last.l), " \xB7 C ", ttFmt(last.c))), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 11,
-      color: 'var(--dim)'
-    }
-  }, report ? `${report.candles} bougies · ATR ${report.atr14}` : '')), /*#__PURE__*/React.createElement("div", {
-    className: "chart-mobile"
-  }, vue === 'app' ? /*#__PURE__*/React.createElement(PriceChart, {
-    candles: candles,
-    report: report,
-    levels: report ? report.levels : [],
-    signal: decision && decision.signal,
-    height: big ? etroi ? 460 : 620 : etroi ? 300 : 430,
-    symbol: symbol,
-    tf: tf
-  }) : /*#__PURE__*/React.createElement(TradingViewChart, {
-    symbole: cur && cur.tv,
-    tf: tf,
-    height: big ? etroi ? 460 : 620 : etroi ? 300 : 430
-  }))), /*#__PURE__*/React.createElement(StrategyMonitor, {
+  }), /*#__PURE__*/React.createElement(SignalExplanation, {
+    trace: decision && decision.trace || sse && sse.trace,
+    decision: decision,
+    signal: verdict
+  }), /*#__PURE__*/React.createElement(StrategyMonitor, {
     playbooks: playbooks,
     signaux: decision && decision.signaux || [],
     statuts: statuts,
@@ -7303,20 +7381,9 @@ function LiveMarket({
     setFiltre: setFiltre,
     typeTrade: typeTrade,
     setTypeTrade: setTypeTrade
-  }), /*#__PURE__*/React.createElement(MultiTimeframeMatrix, {
-    confluence: confluence
-  }), /*#__PURE__*/React.createElement(PlansAttente, {
-    symbol: symbol
-  }), /*#__PURE__*/React.createElement(SignalExplanation, {
-    trace: decision && decision.trace || sse && sse.trace,
-    decision: decision,
-    signal: verdict
-  }), /*#__PURE__*/React.createElement(MarketStructurePanel, {
-    carte: decision && decision.carte,
-    report: report
   }), /*#__PURE__*/React.createElement(SignalHistory, {
     journal: journal
-  }), vocabulaire && vocabulaire.length > 0 && /*#__PURE__*/React.createElement("details", {
+  }))), vocabulaire && vocabulaire.length > 0 && /*#__PURE__*/React.createElement("details", {
     className: "panel",
     style: {
       padding: '12px 15px',

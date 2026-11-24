@@ -481,6 +481,77 @@
     body{padding-bottom:env(safe-area-inset-bottom)}
   }
 
+  /* ── 5TRADE INSTITUTIONAL WORKSTATION PRO LAYOUT ── */
+  .workstation-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 390px;
+    gap: 16px;
+    align-items: start;
+    margin-bottom: 24px;
+  }
+  @media (max-width: 1040px) {
+    .workstation-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+  .workstation-left {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+  .workstation-right {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+    position: sticky;
+    top: 76px;
+  }
+  @media (max-width: 1040px) {
+    .workstation-right {
+      position: static;
+    }
+  }
+  .chart-pro-panel {
+    background: #090d16;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 8px 24px -10px rgba(0,0,0,0.7);
+  }
+  .smc-layers-bar {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 7px 12px;
+    background: rgba(15, 23, 42, 0.95);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  }
+  .layer-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 9px;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 6px;
+    background: rgba(148, 163, 184, 0.06);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .layer-btn:hover {
+    color: #fff;
+    background: rgba(148, 163, 184, 0.12);
+  }
+  .layer-btn.active {
+    background: rgba(56, 189, 248, 0.15);
+    border-color: #38bdf8;
+    color: #38bdf8;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+  }
+
   @media (prefers-reduced-motion:reduce){
     *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
   }
