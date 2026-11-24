@@ -3724,6 +3724,213 @@ function LiveStatusIndicator({
   })));
 }
 
+// ── Horloge Kinshasa (UTC+1 / West Africa Time, WAT) ──────────────────────
+function HorlogeKinshasa() {
+  const [heure, setHeure] = React.useState(() => {
+    try {
+      return new Date().toLocaleTimeString('fr-FR', {
+        timeZone: 'Africa/Kinshasa',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+    } catch {
+      return new Date().toLocaleTimeString('fr-FR');
+    }
+  });
+  React.useEffect(() => {
+    const t = setInterval(() => {
+      try {
+        setHeure(new Date().toLocaleTimeString('fr-FR', {
+          timeZone: 'Africa/Kinshasa',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        }));
+      } catch {}
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
+  return /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 5,
+      fontSize: 11,
+      color: '#38bdf8',
+      background: 'rgba(56,189,248,0.12)',
+      border: '1px solid rgba(56,189,248,0.3)',
+      padding: '3px 8px',
+      borderRadius: 6,
+      fontWeight: 700,
+      fontVariantNumeric: 'tabular-nums'
+    },
+    title: "Heure locale de Kinshasa (UTC+1 / West Africa Time, WAT)"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-clock",
+    style: {
+      fontSize: 10
+    }
+  }), heure, " Kinshasa");
+}
+
+// ── Âge de la dernière cotation / latence en secondes ─────────────────────
+function LatenceCotation({
+  lastUpdate,
+  live
+}) {
+  const [ageSec, setAgeSec] = React.useState(0);
+  React.useEffect(() => {
+    const update = () => {
+      if (!lastUpdate) {
+        setAgeSec(null);
+        return;
+      }
+      const diff = Math.max(0, Math.round((Date.now() - new Date(lastUpdate).getTime()) / 1000));
+      setAgeSec(diff);
+    };
+    update();
+    const t = setInterval(update, 1000);
+    return () => clearInterval(t);
+  }, [lastUpdate]);
+  if (ageSec === null) return null;
+  const tone = !live || ageSec > 30 ? 'bad' : ageSec > 10 ? 'warn' : 'ok';
+  const color = tone === 'ok' ? '#10b981' : tone === 'warn' ? '#f59e0b' : '#ef4444';
+  const bg = tone === 'ok' ? 'rgba(16,185,129,0.12)' : tone === 'warn' ? 'rgba(245,158,11,0.12)' : 'rgba(239,68,68,0.12)';
+  const border = tone === 'ok' ? 'rgba(16,185,129,0.3)' : tone === 'warn' ? 'rgba(245,158,11,0.3)' : 'rgba(239,68,68,0.3)';
+  return /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 5,
+      fontSize: 11,
+      color,
+      background: bg,
+      border: `1px solid ${border}`,
+      padding: '3px 8px',
+      borderRadius: 6,
+      fontWeight: 700,
+      fontVariantNumeric: 'tabular-nums'
+    },
+    title: live ? `Âge de la dernière cotation : ${ageSec} s` : 'Flux interrompu / coupure détectée'
+  }, /*#__PURE__*/React.createElement("i", {
+    className: `fas ${live ? ageSec > 15 ? 'fa-triangle-exclamation' : 'fa-satellite-dish' : 'fa-circle-xmark'}`,
+    style: {
+      fontSize: 10
+    }
+  }), live ? ageSec === 0 ? 'Flux <1s' : `Flux ${ageSec}s` : 'Flux coupé');
+}
+
+// ── Statut de la session métaux (XAUUSD / spot gold) ───────────────────────
+function SessionMarcheMetaux({
+  symbol
+}) {
+  const [statut, setStatut] = React.useState({
+    session: 'Londres',
+    ouvert: true,
+    alerte: null
+  });
+  React.useEffect(() => {
+    const check = () => {
+      const d = new Date();
+      const jour = d.getUTCDay();
+      const h = d.getUTCHours();
+      if (jour === 6 || jour === 5 && h >= 22 || jour === 0 && h < 22) {
+        setStatut({
+          session: 'Fermé (Weekend)',
+          ouvert: false,
+          alerte: 'Marché fermé jusqu\'à dimanche 22h UTC'
+        });
+        return;
+      }
+      if (h === 21) {
+        setStatut({
+          session: 'Pause CME Métaux (21h-22h UTC)',
+          ouvert: false,
+          alerte: 'Cotation suspendue — réouverture à 22h00 UTC'
+        });
+        return;
+      }
+      if (h >= 8 && h < 13) {
+        setStatut({
+          session: 'Londres (Fixing AM 10:30 UTC)',
+          ouvert: true,
+          alerte: null
+        });
+      } else if (h >= 13 && h < 17) {
+        setStatut({
+          session: 'Londres-NY (Fixing PM 15:00 UTC)',
+          ouvert: true,
+          alerte: 'Liquidité & volatilité maximales'
+        });
+      } else if (h >= 17 && h < 21) {
+        setStatut({
+          session: 'New York (Session US)',
+          ouvert: true,
+          alerte: null
+        });
+      } else {
+        setStatut({
+          session: 'Asie / Pacifique',
+          ouvert: true,
+          alerte: 'Liquidité modérée sur l\'or'
+        });
+      }
+    };
+    check();
+    const t = setInterval(check, 30000);
+    return () => clearInterval(t);
+  }, [symbol]);
+  const tone = !statut.ouvert ? 'bad' : statut.alerte ? 'info' : 'ok';
+  const color = tone === 'bad' ? '#ef4444' : tone === 'info' ? '#a78bfa' : '#10b981';
+  const bg = tone === 'bad' ? 'rgba(239,68,68,0.12)' : tone === 'info' ? 'rgba(167,139,250,0.12)' : 'rgba(16,185,129,0.12)';
+  const border = tone === 'bad' ? 'rgba(239,68,68,0.3)' : tone === 'info' ? 'rgba(167,139,250,0.3)' : 'rgba(16,185,129,0.3)';
+  return /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 5,
+      fontSize: 11,
+      color,
+      background: bg,
+      border: `1px solid ${border}`,
+      padding: '3px 8px',
+      borderRadius: 6,
+      fontWeight: 700
+    },
+    title: statut.alerte || statut.session
+  }, /*#__PURE__*/React.createElement("i", {
+    className: `fas ${!statut.ouvert ? 'fa-ban' : 'fa-sun'}`,
+    style: {
+      fontSize: 10
+    }
+  }), statut.session);
+}
+
+// ── Filtre Calendrier économique US (USD / Métaux) ─────────────────────────
+function CalendrierUSDStatus() {
+  return /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 5,
+      fontSize: 11,
+      color: '#fbbf24',
+      background: 'rgba(251,191,36,0.12)',
+      border: '1px solid rgba(251,191,36,0.3)',
+      padding: '3px 8px',
+      borderRadius: 6,
+      fontWeight: 700
+    },
+    title: "Filtre calendrier \xE9conomique actif : prudence pendant CPI, NFP, FOMC"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-calendar-check",
+    style: {
+      fontSize: 10
+    }
+  }), "USD News : Surveillance active");
+}
+
 // ── NIVEAU 03 : Live Decision Center — l'état global, en un coup d'œil ────
 function LiveDecisionCenter({
   decision,
@@ -4176,6 +4383,265 @@ function TradeSetupCard({
       color: 'var(--dim)'
     }
   }, "Obj 3 non affich\xE9 : le moteur ne le calcule pas. Aucun niveau n'est estim\xE9."));
+}
+
+// ── Poste d'Analyse Institutionnel SMC (Sweep → CHoCH → Retest OB) ──────
+function SMCInstitutionalCard({
+  decision,
+  signal,
+  report,
+  price,
+  symbol,
+  tf
+}) {
+  const st = report && report.structure ? report.structure : {};
+  const ev = st.event || null;
+  const sweeps = report && report.sweeps || [];
+  const obs = report && report.orderBlocks || [];
+  const fvgs = report && report.fvgs || [];
+
+  // 1. Sweep de liquidité
+  const sweepValide = sweeps.length > 0 || decision && decision.signaux && decision.signaux.some(s => (s.regles || []).includes('R1'));
+  const dernierSweep = sweeps.length ? sweeps[sweeps.length - 1] : null;
+
+  // 2. CHoCH
+  const chochValide = ev && ev.type === 'CHoCH' || decision && decision.signaux && decision.signaux.some(s => (s.regles || []).includes('R2') && /choch/i.test(s.nom || ''));
+
+  // 3. Retest Order Block / FVG
+  const zoneValide = obs.length > 0 || fvgs.length > 0 || decision && decision.signaux && decision.signaux.some(s => (s.regles || []).includes('R3'));
+  const derniereZone = obs.length ? obs[obs.length - 1] : fvgs.length ? fvgs[fvgs.length - 1] : null;
+  const lv = signal && signal.levels ? signal.levels : null;
+  const sens = signal && signal.sens || (decision && decision.decision === 'ACHAT' ? 'long' : decision && decision.decision === 'VENTE' ? 'short' : null);
+  const executables = signal && signal.executable === true;
+
+  // Phase globale
+  let phaseTitre = 'PHASE 1/4 : EN ATTENTE DE PURGE DE LIQUIDITÉ';
+  let phaseSous = 'Le moteur surveille les sommets et creux H1/M5 pour identifier une prise de liquidité par mèche.';
+  let phaseTone = 'warn';
+  if (executables && lv) {
+    phaseTitre = `PHASE 4/4 : SETUP INSTITUTIONNEL PRÊT (${sens === 'long' ? 'ACHAT' : 'VENTE'})`;
+    phaseSous = 'Balayage, CHoCH et retest de zone validés. Les niveaux chiffrés et les frais respectent les règles strictes.';
+    phaseTone = 'ok';
+  } else if (chochValide && zoneValide) {
+    phaseTitre = 'PHASE 3/4 : CHoCH CONFIRMÉ — ATTENTE DE RETEST ZONE (OB/FVG)';
+    phaseSous = 'La structure a cassé en clôture. Attente d\'un repli du prix dans l\'Order Block pour une entrée optimale.';
+    phaseTone = 'info';
+  } else if (sweepValide) {
+    phaseTitre = 'PHASE 2/4 : BALAYAGE DÉTECTÉ — ATTENTE DE CONFIRMATION CHoCH';
+    phaseSous = 'Prise de liquidité enregistrée. Une clôture au-delà de la structure opposée est requise pour valider le retournement.';
+    phaseTone = 'warn';
+  }
+  const tTone = TT_TONE[phaseTone] || TT_TONE.warn;
+
+  // Calcul des frais XAUUSD
+  const distSL = lv && Number.isFinite(Number(lv.entry)) && Number.isFinite(Number(lv.stop)) ? Math.abs(Number(lv.entry) - Number(lv.stop)) : null;
+  const spreadFixe = 0.30;
+  const slipFixe = 0.04;
+  const coutTotal = spreadFixe + slipFixe;
+  const partRisque = distSL ? (coutTotal / distSL * 100).toFixed(1) : null;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "panel",
+    style: {
+      padding: 0,
+      marginBottom: 12,
+      overflow: 'hidden',
+      borderColor: 'rgba(56,189,248,.35)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '12px 16px',
+      background: 'rgba(56,189,248,.07)',
+      borderBottom: '1px solid rgba(56,189,248,.2)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-landmark",
+    style: {
+      color: '#38bdf8',
+      fontSize: 16
+    }
+  }), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 900,
+      letterSpacing: '.03em',
+      color: '#f0f9ff'
+    }
+  }, "POSTE D'ANALYSE INSTITUTIONNEL SMC \xB7 ", symbol || 'XAUUSD', " ", tf || 'M5'), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10.5,
+      color: '#94a3b8'
+    }
+  }, "Mod\xE8le SMC : Liquidity Sweep \u2192 CHoCH \u2192 Retest OB \xB7 R:R \u2265 2.0 apr\xE8s frais"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement(TtPill, {
+    tone: phaseTone
+  }, phaseTitre.split(' : ')[0]))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '10px 16px',
+      background: tTone.bg,
+      borderBottom: '1px solid ' + TT.line
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      fontWeight: 800,
+      color: tTone.c
+    }
+  }, phaseTitre), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: 'var(--muted)',
+      marginTop: 2
+    }
+  }, phaseSous)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+      borderBottom: '1px solid ' + TT.line
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '12px 14px',
+      borderRight: '1px solid ' + TT.line
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      fontWeight: 800,
+      textTransform: 'uppercase',
+      color: 'var(--dim)'
+    }
+  }, "1. Balayage (Sweep R1)"), /*#__PURE__*/React.createElement(TtPill, {
+    tone: sweepValide ? 'ok' : 'neu'
+  }, sweepValide ? '✓ VALIDÉ' : '◷ EN ATTENTE')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: '#e2e8f0'
+    }
+  }, dernierSweep ? `Mèche au-${dernierSweep.type === 'high' ? 'dessus du sommet' : 'dessous du creux'} à ${ttFmt(dernierSweep.price)}` : 'Aucun balayage actif sur la fenêtre courante.'), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: 'var(--dim)',
+      marginTop: 4
+    }
+  }, "Purge des stops de protection avant mouvement directionnel.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '12px 14px',
+      borderRight: '1px solid ' + TT.line
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      fontWeight: 800,
+      textTransform: 'uppercase',
+      color: 'var(--dim)'
+    }
+  }, "2. Cassure (CHoCH R2)"), /*#__PURE__*/React.createElement(TtPill, {
+    tone: chochValide ? 'ok' : 'neu'
+  }, chochValide ? '✓ VALIDÉ' : '◷ EN ATTENTE')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: '#e2e8f0'
+    }
+  }, ev && ev.type === 'CHoCH' ? `CHoCH ${ev.direction === 'bullish' ? 'haussier' : 'baissier'} clôturé à ${ttFmt(ev.level)}` : 'En attente de clôture franche au-delà de la structure.'), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: 'var(--dim)',
+      marginTop: 4
+    }
+  }, "Changement de caract\xE8re confirmant le transfert de liquidit\xE9.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '12px 14px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      fontWeight: 800,
+      textTransform: 'uppercase',
+      color: 'var(--dim)'
+    }
+  }, "3. Zone Retest (OB R3)"), /*#__PURE__*/React.createElement(TtPill, {
+    tone: zoneValide ? 'ok' : 'neu'
+  }, zoneValide ? '✓ IDENTIFIÉE' : '◷ EN ATTENTE')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: '#e2e8f0'
+    }
+  }, derniereZone ? `Zone ${derniereZone.type || ''} : ${ttFmt(derniereZone.low)} – ${ttFmt(derniereZone.high)}` : 'Aucun Order Block non mitigé à proximité immédiate.'), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: 'var(--dim)',
+      marginTop: 4
+    }
+  }, "Mitigation institutionnelle pour entr\xE9e avec ratio R:R \xE9lev\xE9."))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '10px 16px',
+      background: 'rgba(15,23,42,.6)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 16,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: 'var(--dim)'
+    }
+  }, "Frais XAUUSD : ", /*#__PURE__*/React.createElement("b", null, "$", spreadFixe.toFixed(2)), " (spread) + ", /*#__PURE__*/React.createElement("b", null, "$", slipFixe.toFixed(2)), " (glissement) = ", /*#__PURE__*/React.createElement("b", null, "$", coutTotal.toFixed(2))), partRisque && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: Number(partRisque) > 15 ? '#f87171' : '#34d399'
+    }
+  }, "Impact frais / risque : ", /*#__PURE__*/React.createElement("b", null, partRisque, "%"), " (Plafond max strict : 15%)")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--dim)'
+    }
+  }, "Gestion sorties partielles : ", /*#__PURE__*/React.createElement("b", null, "50% TP1"), " (passage \xE0 BE) \xB7 ", /*#__PURE__*/React.createElement("b", null, "50% TP2"))));
 }
 
 // ── Condition Tracker : ✓ REMPLIE / ◷ EN ATTENTE / ✕ MANQUANTE ────────────
@@ -5815,7 +6281,7 @@ function LiveMarket({
     symbols: [],
     timeframes: ['1m', '5m', '15m', '1h']
   });
-  const [symbol, setSymbol] = useState('R_75');
+  const [symbol, setSymbol] = useState('frxXAUUSD');
   const [provider, setProvider] = useState('deriv');
   const [tf, setTf] = useState('5m');
   const [profondeur, setProfondeur] = useState(300);
@@ -6140,7 +6606,7 @@ function LiveMarket({
       color: 'var(--dim)',
       textTransform: 'uppercase'
     }
-  }, "5trade terminal"), /*#__PURE__*/React.createElement("div", {
+  }, "5trade terminal \xB7 XAUUSD SMC"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       alignItems: 'baseline',
@@ -6164,7 +6630,12 @@ function LiveMarket({
     style: {
       fontSize: 9
     }
-  }), signal.strategieAppliquee.titre))), /*#__PURE__*/React.createElement("span", {
+  }), signal.strategieAppliquee.titre))), /*#__PURE__*/React.createElement(HorlogeKinshasa, null), /*#__PURE__*/React.createElement(LatenceCotation, {
+    lastUpdate: lastUpdate,
+    live: live
+  }), /*#__PURE__*/React.createElement(SessionMarcheMetaux, {
+    symbol: symbol
+  }), /*#__PURE__*/React.createElement(CalendrierUSDStatus, null), /*#__PURE__*/React.createElement("span", {
     style: {
       flex: '1 1 auto'
     }
@@ -6413,6 +6884,13 @@ function LiveMarket({
     tf: tf,
     providerLabel: providerLabel,
     confluence: confluence
+  }), /*#__PURE__*/React.createElement(SMCInstitutionalCard, {
+    decision: decision,
+    signal: meilleurSetup,
+    report: report,
+    price: prix,
+    symbol: symbol,
+    tf: tf
   }), /*#__PURE__*/React.createElement(TradeSetupCard, {
     signal: meilleurSetup,
     decision: decision || (sse && sse.decision ? sse : null),

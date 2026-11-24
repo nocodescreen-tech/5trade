@@ -5069,6 +5069,27 @@ function tinyPng(W = 64, H = 40) {
       ok('le rejeu fidèle calcule les métriques de portefeuille et d\'exposition cumulée',
         rejeuPlat.stats.capitalInitial === 1000 && Number.isFinite(rejeuPlat.stats.maxDrawdownPct)
         && Number.isFinite(rejeuPlat.stats.expositionMaxPct));
+
+      // Parité exacte Direct = Rejeu sur série XAUUSD M5 :
+      // Sur une même séquence de bougies clôturées, le moteur en direct et le pas de rejeu
+      // appellent la même fonction pure DecisionEngine.decider et produisent les mêmes décisions.
+      const serieXAU = Array.from({ length: 70 }, (_, k) => {
+        const t = 1700000000000 + k * 300000;
+        const o = 2650 + (k % 2 === 0 ? 0.3 : -0.3);
+        const c = o + 0.1;
+        const h = Math.max(o, c) + 0.4;
+        const l = Math.min(o, c) - 0.4;
+        return { t, o: +o.toFixed(2), h: +h.toFixed(2), l: +l.toFixed(2), c: +c.toFixed(2), closed: true };
+      });
+      const metaXAU = { symbol: 'XAUUSD', timeframe: '5m' };
+      const optsXAU = { exigerAlignement: false, sansRisqueCompte: true };
+      const fenXAU = serieXAU.slice(0, 60);
+      const decDirecteXAU = require('./engine/DecisionEngine').decider(fenXAU, metaXAU, optsXAU);
+      const rejeuXAU = R.rejouer(serieXAU, metaXAU, optsXAU, { fenetre: 60, pas: 1, maxEtapes: 5, optionsDecision: optsXAU });
+      ok('parité directe = rejeu : décision identique sur première fenêtre XAUUSD M5',
+        rejeuXAU.etapes.length > 0 && decDirecteXAU.decision === rejeuXAU.etapes[0].decision);
+      ok('parité directe = rejeu : mêmes signaux et règles évaluées',
+        rejeuXAU.etapes.length > 0 && (decDirecteXAU.signaux || []).length === rejeuXAU.etapes[0].signaux);
     }
 
     // ── INVARIANT : toute route qui DÉCIDE fournit les deux garde-fous ────

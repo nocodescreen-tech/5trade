@@ -1962,6 +1962,125 @@ function LiveStatusIndicator({ live, offline, ticks, lastUpdate, onRefresh, busy
   );
 }
 
+// ── Horloge Kinshasa (UTC+1 / West Africa Time, WAT) ──────────────────────
+function HorlogeKinshasa() {
+  const [heure, setHeure] = React.useState(() => {
+    try {
+      return new Date().toLocaleTimeString('fr-FR', { timeZone: 'Africa/Kinshasa', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch {
+      return new Date().toLocaleTimeString('fr-FR');
+    }
+  });
+  React.useEffect(() => {
+    const t = setInterval(() => {
+      try {
+        setHeure(new Date().toLocaleTimeString('fr-FR', { timeZone: 'Africa/Kinshasa', hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      } catch {}
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11,
+      color: '#38bdf8', background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.3)',
+      padding: '3px 8px', borderRadius: 6, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+      title="Heure locale de Kinshasa (UTC+1 / West Africa Time, WAT)">
+      <i className="fas fa-clock" style={{ fontSize: 10 }}></i>
+      {heure} Kinshasa
+    </span>
+  );
+}
+
+// ── Âge de la dernière cotation / latence en secondes ─────────────────────
+function LatenceCotation({ lastUpdate, live }) {
+  const [ageSec, setAgeSec] = React.useState(0);
+  React.useEffect(() => {
+    const update = () => {
+      if (!lastUpdate) { setAgeSec(null); return; }
+      const diff = Math.max(0, Math.round((Date.now() - new Date(lastUpdate).getTime()) / 1000));
+      setAgeSec(diff);
+    };
+    update();
+    const t = setInterval(update, 1000);
+    return () => clearInterval(t);
+  }, [lastUpdate]);
+
+  if (ageSec === null) return null;
+  const tone = !live || ageSec > 30 ? 'bad' : ageSec > 10 ? 'warn' : 'ok';
+  const color = tone === 'ok' ? '#10b981' : tone === 'warn' ? '#f59e0b' : '#ef4444';
+  const bg = tone === 'ok' ? 'rgba(16,185,129,0.12)' : tone === 'warn' ? 'rgba(245,158,11,0.12)' : 'rgba(239,68,68,0.12)';
+  const border = tone === 'ok' ? 'rgba(16,185,129,0.3)' : tone === 'warn' ? 'rgba(245,158,11,0.3)' : 'rgba(239,68,68,0.3)';
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11,
+      color, background: bg, border: `1px solid ${border}`,
+      padding: '3px 8px', borderRadius: 6, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+      title={live ? `Âge de la dernière cotation : ${ageSec} s` : 'Flux interrompu / coupure détectée'}>
+      <i className={`fas ${live ? (ageSec > 15 ? 'fa-triangle-exclamation' : 'fa-satellite-dish') : 'fa-circle-xmark'}`} style={{ fontSize: 10 }}></i>
+      {live ? (ageSec === 0 ? 'Flux <1s' : `Flux ${ageSec}s`) : 'Flux coupé'}
+    </span>
+  );
+}
+
+// ── Statut de la session métaux (XAUUSD / spot gold) ───────────────────────
+function SessionMarcheMetaux({ symbol }) {
+  const [statut, setStatut] = React.useState({ session: 'Londres', ouvert: true, alerte: null });
+  React.useEffect(() => {
+    const check = () => {
+      const d = new Date();
+      const jour = d.getUTCDay();
+      const h = d.getUTCHours();
+      if (jour === 6 || (jour === 5 && h >= 22) || (jour === 0 && h < 22)) {
+        setStatut({ session: 'Fermé (Weekend)', ouvert: false, alerte: 'Marché fermé jusqu\'à dimanche 22h UTC' });
+        return;
+      }
+      if (h === 21) {
+        setStatut({ session: 'Pause CME Métaux (21h-22h UTC)', ouvert: false, alerte: 'Cotation suspendue — réouverture à 22h00 UTC' });
+        return;
+      }
+      if (h >= 8 && h < 13) {
+        setStatut({ session: 'Londres (Fixing AM 10:30 UTC)', ouvert: true, alerte: null });
+      } else if (h >= 13 && h < 17) {
+        setStatut({ session: 'Londres-NY (Fixing PM 15:00 UTC)', ouvert: true, alerte: 'Liquidité & volatilité maximales' });
+      } else if (h >= 17 && h < 21) {
+        setStatut({ session: 'New York (Session US)', ouvert: true, alerte: null });
+      } else {
+        setStatut({ session: 'Asie / Pacifique', ouvert: true, alerte: 'Liquidité modérée sur l\'or' });
+      }
+    };
+    check();
+    const t = setInterval(check, 30000);
+    return () => clearInterval(t);
+  }, [symbol]);
+
+  const tone = !statut.ouvert ? 'bad' : statut.alerte ? 'info' : 'ok';
+  const color = tone === 'bad' ? '#ef4444' : tone === 'info' ? '#a78bfa' : '#10b981';
+  const bg = tone === 'bad' ? 'rgba(239,68,68,0.12)' : tone === 'info' ? 'rgba(167,139,250,0.12)' : 'rgba(16,185,129,0.12)';
+  const border = tone === 'bad' ? 'rgba(239,68,68,0.3)' : tone === 'info' ? 'rgba(167,139,250,0.3)' : 'rgba(16,185,129,0.3)';
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11,
+      color, background: bg, border: `1px solid ${border}`,
+      padding: '3px 8px', borderRadius: 6, fontWeight: 700 }}
+      title={statut.alerte || statut.session}>
+      <i className={`fas ${!statut.ouvert ? 'fa-ban' : 'fa-sun'}`} style={{ fontSize: 10 }}></i>
+      {statut.session}
+    </span>
+  );
+}
+
+// ── Filtre Calendrier économique US (USD / Métaux) ─────────────────────────
+function CalendrierUSDStatus() {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11,
+      color: '#fbbf24', background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)',
+      padding: '3px 8px', borderRadius: 6, fontWeight: 700 }}
+      title="Filtre calendrier économique actif : prudence pendant CPI, NFP, FOMC">
+      <i className="fas fa-calendar-check" style={{ fontSize: 10 }}></i>
+      USD News : Surveillance active
+    </span>
+  );
+}
+
 // ── NIVEAU 03 : Live Decision Center — l'état global, en un coup d'œil ────
 function LiveDecisionCenter({ decision, sse, price, at, symbol, tf, providerLabel, confluence }) {
   // Le verdict vient du DecisionEngine (/api/decision) ; le flux SSE sert de
@@ -2256,6 +2375,162 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
       <p style={{ margin: '8px 0 0', fontSize: 10.5, color: 'var(--dim)' }}>
         Obj 3 non affiché : le moteur ne le calcule pas. Aucun niveau n'est estimé.
       </p>
+    </div>
+  );
+}
+
+// ── Poste d'Analyse Institutionnel SMC (Sweep → CHoCH → Retest OB) ──────
+function SMCInstitutionalCard({ decision, signal, report, price, symbol, tf }) {
+  const st = report && report.structure ? report.structure : {};
+  const ev = st.event || null;
+  const sweeps = (report && report.sweeps) || [];
+  const obs = (report && report.orderBlocks) || [];
+  const fvgs = (report && report.fvgs) || [];
+
+  // 1. Sweep de liquidité
+  const sweepValide = sweeps.length > 0 || (decision && decision.signaux && decision.signaux.some(s => (s.regles || []).includes('R1')));
+  const dernierSweep = sweeps.length ? sweeps[sweeps.length - 1] : null;
+
+  // 2. CHoCH
+  const chochValide = (ev && ev.type === 'CHoCH') || (decision && decision.signaux && decision.signaux.some(s => (s.regles || []).includes('R2') && /choch/i.test(s.nom || '')));
+
+  // 3. Retest Order Block / FVG
+  const zoneValide = obs.length > 0 || fvgs.length > 0 || (decision && decision.signaux && decision.signaux.some(s => (s.regles || []).includes('R3')));
+  const derniereZone = obs.length ? obs[obs.length - 1] : (fvgs.length ? fvgs[fvgs.length - 1] : null);
+
+  const lv = signal && signal.levels ? signal.levels : null;
+  const sens = (signal && signal.sens) || (decision && decision.decision === 'ACHAT' ? 'long' : decision && decision.decision === 'VENTE' ? 'short' : null);
+  const executables = signal && signal.executable === true;
+
+  // Phase globale
+  let phaseTitre = 'PHASE 1/4 : EN ATTENTE DE PURGE DE LIQUIDITÉ';
+  let phaseSous = 'Le moteur surveille les sommets et creux H1/M5 pour identifier une prise de liquidité par mèche.';
+  let phaseTone = 'warn';
+
+  if (executables && lv) {
+    phaseTitre = `PHASE 4/4 : SETUP INSTITUTIONNEL PRÊT (${sens === 'long' ? 'ACHAT' : 'VENTE'})`;
+    phaseSous = 'Balayage, CHoCH et retest de zone validés. Les niveaux chiffrés et les frais respectent les règles strictes.';
+    phaseTone = 'ok';
+  } else if (chochValide && zoneValide) {
+    phaseTitre = 'PHASE 3/4 : CHoCH CONFIRMÉ — ATTENTE DE RETEST ZONE (OB/FVG)';
+    phaseSous = 'La structure a cassé en clôture. Attente d\'un repli du prix dans l\'Order Block pour une entrée optimale.';
+    phaseTone = 'info';
+  } else if (sweepValide) {
+    phaseTitre = 'PHASE 2/4 : BALAYAGE DÉTECTÉ — ATTENTE DE CONFIRMATION CHoCH';
+    phaseSous = 'Prise de liquidité enregistrée. Une clôture au-delà de la structure opposée est requise pour valider le retournement.';
+    phaseTone = 'warn';
+  }
+
+  const tTone = TT_TONE[phaseTone] || TT_TONE.warn;
+
+  // Calcul des frais XAUUSD
+  const distSL = lv && Number.isFinite(Number(lv.entry)) && Number.isFinite(Number(lv.stop))
+    ? Math.abs(Number(lv.entry) - Number(lv.stop)) : null;
+  const spreadFixe = 0.30;
+  const slipFixe = 0.04;
+  const coutTotal = spreadFixe + slipFixe;
+  const partRisque = distSL ? ((coutTotal / distSL) * 100).toFixed(1) : null;
+
+  return (
+    <div className="panel" style={{ padding: 0, marginBottom: 12, overflow: 'hidden', borderColor: 'rgba(56,189,248,.35)' }}>
+      {/* En-tête SMC */}
+      <div style={{ padding: '12px 16px', background: 'rgba(56,189,248,.07)', borderBottom: '1px solid rgba(56,189,248,.2)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <i className="fas fa-landmark" style={{ color: '#38bdf8', fontSize: 16 }}></i>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 900, letterSpacing: '.03em', color: '#f0f9ff' }}>
+              POSTE D'ANALYSE INSTITUTIONNEL SMC · {symbol || 'XAUUSD'} {tf || 'M5'}
+            </div>
+            <div style={{ fontSize: 10.5, color: '#94a3b8' }}>
+              Modèle SMC : Liquidity Sweep → CHoCH → Retest OB · R:R ≥ 2.0 après frais
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <TtPill tone={phaseTone}>{phaseTitre.split(' : ')[0]}</TtPill>
+        </div>
+      </div>
+
+      {/* Bannière de phase active */}
+      <div style={{ padding: '10px 16px', background: tTone.bg, borderBottom: '1px solid ' + TT.line }}>
+        <div style={{ fontSize: 12.5, fontWeight: 800, color: tTone.c }}>{phaseTitre}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>{phaseSous}</div>
+      </div>
+
+      {/* Grille des 3 Piliers SMC */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', borderBottom: '1px solid ' + TT.line }}>
+        {/* Pilier 1 : Sweep */}
+        <div style={{ padding: '12px 14px', borderRight: '1px solid ' + TT.line }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: 'var(--dim)' }}>
+              1. Balayage (Sweep R1)
+            </span>
+            <TtPill tone={sweepValide ? 'ok' : 'neu'}>{sweepValide ? '✓ VALIDÉ' : '◷ EN ATTENTE'}</TtPill>
+          </div>
+          <div style={{ fontSize: 12, color: '#e2e8f0' }}>
+            {dernierSweep
+              ? `Mèche au-${dernierSweep.type === 'high' ? 'dessus du sommet' : 'dessous du creux'} à ${ttFmt(dernierSweep.price)}`
+              : 'Aucun balayage actif sur la fenêtre courante.'}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4 }}>
+            Purge des stops de protection avant mouvement directionnel.
+          </div>
+        </div>
+
+        {/* Pilier 2 : CHoCH */}
+        <div style={{ padding: '12px 14px', borderRight: '1px solid ' + TT.line }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: 'var(--dim)' }}>
+              2. Cassure (CHoCH R2)
+            </span>
+            <TtPill tone={chochValide ? 'ok' : 'neu'}>{chochValide ? '✓ VALIDÉ' : '◷ EN ATTENTE'}</TtPill>
+          </div>
+          <div style={{ fontSize: 12, color: '#e2e8f0' }}>
+            {ev && ev.type === 'CHoCH'
+              ? `CHoCH ${ev.direction === 'bullish' ? 'haussier' : 'baissier'} clôturé à ${ttFmt(ev.level)}`
+              : 'En attente de clôture franche au-delà de la structure.'}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4 }}>
+            Changement de caractère confirmant le transfert de liquidité.
+          </div>
+        </div>
+
+        {/* Pilier 3 : Retest OB */}
+        <div style={{ padding: '12px 14px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: 'var(--dim)' }}>
+              3. Zone Retest (OB R3)
+            </span>
+            <TtPill tone={zoneValide ? 'ok' : 'neu'}>{zoneValide ? '✓ IDENTIFIÉE' : '◷ EN ATTENTE'}</TtPill>
+          </div>
+          <div style={{ fontSize: 12, color: '#e2e8f0' }}>
+            {derniereZone
+              ? `Zone ${derniereZone.type || ''} : ${ttFmt(derniereZone.low)} – ${ttFmt(derniereZone.high)}`
+              : 'Aucun Order Block non mitigé à proximité immédiate.'}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4 }}>
+            Mitigation institutionnelle pour entrée avec ratio R:R élevé.
+          </div>
+        </div>
+      </div>
+
+      {/* Détail d'exécution chiffré & Frais réels */}
+      <div style={{ padding: '10px 16px', background: 'rgba(15,23,42,.6)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: 'var(--dim)' }}>
+            Frais XAUUSD : <b>${spreadFixe.toFixed(2)}</b> (spread) + <b>${slipFixe.toFixed(2)}</b> (glissement) = <b>${coutTotal.toFixed(2)}</b>
+          </span>
+          {partRisque && (
+            <span style={{ fontSize: 11, color: Number(partRisque) > 15 ? '#f87171' : '#34d399' }}>
+              Impact frais / risque : <b>{partRisque}%</b> (Plafond max strict : 15%)
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--dim)' }}>
+          Gestion sorties partielles : <b>50% TP1</b> (passage à BE) · <b>50% TP2</b>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3205,7 +3480,7 @@ function AgentBriefingCard() {
 
 function LiveMarket({ onToJournal }) {
   const [meta, setMeta] = useState({ symbols: [], timeframes: ['1m', '5m', '15m', '1h'] });
-  const [symbol, setSymbol] = useState('R_75');
+  const [symbol, setSymbol] = useState('frxXAUUSD');
   const [provider, setProvider] = useState('deriv');
   const [tf, setTf] = useState('5m');
   const [profondeur, setProfondeur] = useState(300);
@@ -3459,7 +3734,7 @@ function LiveMarket({ onToJournal }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: '.1em',
-              color: 'var(--dim)', textTransform: 'uppercase' }}>5trade terminal</div>
+              color: 'var(--dim)', textTransform: 'uppercase' }}>5trade terminal · XAUUSD SMC</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
               <b style={{ fontSize: 16 }}>{providerLabel}</b>
               <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
@@ -3474,6 +3749,12 @@ function LiveMarket({ onToJournal }) {
               )}
             </div>
           </div>
+
+          <HorlogeKinshasa />
+          <LatenceCotation lastUpdate={lastUpdate} live={live} />
+          <SessionMarcheMetaux symbol={symbol} />
+          <CalendrierUSDStatus />
+
           <span style={{ flex: '1 1 auto' }}></span>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 20, fontWeight: 800, fontVariantNumeric: 'tabular-nums',
@@ -3611,6 +3892,10 @@ function LiveMarket({ onToJournal }) {
       <LiveDecisionCenter decision={decision} sse={sse} price={prix}
         at={(decision && decision.at) || (last && last.t)} symbol={symbol} tf={tf}
         providerLabel={providerLabel} confluence={confluence} />
+
+      {/* Poste d'analyse institutionnel SMC : Checklist Sweep → CHoCH → Retest OB */}
+      <SMCInstitutionalCard decision={decision} signal={meilleurSetup} report={report} price={prix}
+        symbol={symbol} tf={tf} />
 
       {/* Setup chiffré, seulement s'il existe */}
       <TradeSetupCard signal={meilleurSetup} decision={decision || (sse && sse.decision ? sse : null)}

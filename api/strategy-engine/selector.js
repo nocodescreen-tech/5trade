@@ -120,10 +120,15 @@ function selectionner({ candles, meta, strategies, regime = null, max = 3, perfo
     // la stratégie est jugée incompatible avec le marché actuel et ne peut pas être retenue.
     let multiplicateurRegime = 1.0;
     let regimeIncompatible = false;
-    if (regime && profil && Array.isArray(profil.regimes) && profil.regimes.length) {
-      const regimeNormalise = String(regime).toLowerCase();
-      const correspond = profil.regimes.some(r => String(r).toLowerCase() === regimeNormalise);
-      if (correspond) {
+    if (profil && Array.isArray(profil.regimes) && profil.regimes.length) {
+      const regimeNormalise = regime ? String(regime).toLowerCase() : null;
+      const correspond = regimeNormalise
+        && profil.regimes.some(r => String(r).toLowerCase() === regimeNormalise);
+      if (!regimeNormalise || regimeNormalise === 'unknown') {
+        multiplicateurRegime = 0.5;
+        regimeIncompatible = true;
+        motif += ' - regime non determine : setup limite a ' + profil.regimes.join(',');
+      } else if (correspond) {
         multiplicateurRegime = 1.25;
         motif += ` · adapté au régime ${regime}`;
       } else {

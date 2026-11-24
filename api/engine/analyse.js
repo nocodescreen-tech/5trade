@@ -74,13 +74,11 @@ async function analyser(opts = {}) {
   const spread = SPREADS[symbol];
   const prudent = opts.prudent !== false && opts.prudent !== 'false' && opts.prudent !== '0'
     && Number.isFinite(spread) && spread > 0;
-  if (prudent) {
-    F.configurer({ defaut: 0, commissionDefaut: 0, glissement: 0,
-      partMax: 0.15, parSymbole: { [symbol]: { spread, glissement: spread } } });
-  }
+  const frais = prudent ? { defaut: 0, commissionDefaut: 0, glissement: 0,
+    partMax: 0.15, parSymbole: { [symbol]: { spread, glissement: spread } } } : null;
 
   const r = B.lancer(serieCourte, { symbol, timeframe: tf },
-    { profils: PROFIL_TOUT, pas, maxBougies: serieCourte.length,
+    { profils: PROFIL_TOUT, pas, maxBougies: serieCourte.length, frais,
       plafond: 20000, limiteTrades: 1e6, modele: false,
       // `sources` : filtrer motif / structure / strategie. Mesuré sur 8 indices
       // en quotidien, les stratégies coûtent −0,19 R par trade.
@@ -89,8 +87,6 @@ async function analyser(opts = {}) {
       // (moyenne 200 + pente). Mesuré : +6,49 % → +24,59 % sur NQ 1d.
       regime: opts.regime === true || opts.regime === '1' || opts.regime === 'true',
       regimeSma: opts.regimeSma });
-
-  if (prudent) F.configurer({ defaut: 0, commissionDefaut: 0, glissement: 0, partMax: 0.15, parSymbole: {} });
 
   const trades = (r.trades || []).filter(t => Number.isFinite(t.r)).sort((a, b) => a.at - b.at);
   const coupe = trades[Math.floor(trades.length * 0.6)]?.at ?? Infinity;

@@ -246,7 +246,7 @@ function enregistrer(signaux, meta = {}, options = {}) {
  * Évalue UN signal sur les bougies postérieures à son émission.
  * Parcourt les bougies dans l'ordre chronologique : le premier événement gagne.
  */
-function evaluer(sig, bougies) {
+function evaluer(sig, bougies, options = {}) {
   const apres = (bougies || [])
     .filter(c => c && c.t > sig.at && c.closed !== false)
     .sort((a, b) => a.t - b.t);
@@ -337,7 +337,7 @@ function evaluer(sig, bougies) {
   // puisse toujours mesurer l'écart au lieu de le deviner.
   sig.rBrut = multipleR(sig);
   const risque = Math.abs(Number(sig.entree) - Number(sig.stop));
-  const cout = Frais.coutEnR(sig.symbol, sig.entree, risque);
+  const cout = Frais.coutEnR(sig.symbol, sig.entree, risque, options.frais);
   sig.cout = cout.total > 0 ? cout : null;
   sig.r = (sig.rBrut !== null && cout.enR !== null)
     ? +(sig.rBrut - cout.enR).toFixed(2)

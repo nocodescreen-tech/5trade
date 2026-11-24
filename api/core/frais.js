@@ -159,8 +159,8 @@ function configurer(patch = {}) {
  * @param {number} entree prix d'entrée (sert à convertir la commission)
  * @returns {{spread:number, commission:number, total:number}}
  */
-function fraisPour(symbol, entree) {
-  const cfg = configuration();
+function fraisPour(symbol, entree, config = null) {
+  const cfg = config ? normaliser(config) : configuration();
   const perso = symbol && cfg.parSymbole[symbol];
   // Les références NE sont PAS appliquées d'office : un coût estimé appliqué en
   // silence remplacerait une ignorance par une supposition. Elles sont proposées
@@ -194,15 +194,15 @@ function fraisPour(symbol, entree) {
 }
 
 /** Le même coût, exprimé en R (fraction du risque). */
-function coutEnR(symbol, entree, risque) {
-  const f = fraisPour(symbol, entree);
+function coutEnR(symbol, entree, risque, config = null) {
+  const f = fraisPour(symbol, entree, config);
   const r = Math.abs(Number(risque) || 0);
   return { ...f, enR: r > 0 ? +(f.total / r).toFixed(4) : null };
 }
 
 /** Les frais sont-ils réellement configurés ? (sinon net = brut) */
-function actifs() {
-  const cfg = configuration();
+function actifs(config = null) {
+  const cfg = config ? normaliser(config) : configuration();
   if (cfg.defaut > 0 || cfg.commissionDefaut > 0 || cfg.glissement > 0) return true;
   return Object.values(cfg.parSymbole)
     .some(v => v.spread > 0 || v.commissionPct > 0 || v.glissement > 0);
@@ -295,14 +295,14 @@ function coutCritique(paires) {
  * @returns {null|{ok:boolean, cout:number, risque:number, enR:number, part:number,
  *                 partMax:number, exigence:number, raison:string|null}}
  */
-function plafondCout(entree, stop, symbol, partMax = null) {
+function plafondCout(entree, stop, symbol, partMax = null, config = null) {
   const e = Number(entree), s = Number(stop);
   if (!Number.isFinite(e) || !Number.isFinite(s)) return null;
   const risque = Math.abs(e - s);
   if (!(risque > 0)) return null;            // pas de risque : déjà refusé ailleurs
   const seuil = Number.isFinite(partMax) && partMax > 0 && partMax < 1
-    ? partMax : configuration().partMax;
-  const fr = fraisPour(symbol, e);
+    ? partMax : (config ? normaliser(config) : configuration()).partMax;
+  const fr = fraisPour(symbol, e, config);
   const cout = fr.total;
   if (!(cout > 0)) {
     // ZÉRO PAR CONSTRUCTION ≠ ZÉRO VÉRIFIÉ. `fraisPour` distingue déjà un coût

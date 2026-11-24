@@ -832,6 +832,13 @@ const MOTIFS_REGLE = [
 ];
 
 function profilDepuisStrategie(doc) {
+  const regimesDeclares = Array.isArray(doc.supportedRegimes) ? doc.supportedRegimes
+    : (Array.isArray(doc.regimes) ? doc.regimes
+      : (doc.structured && Array.isArray(doc.structured.supportedRegimes)
+        ? doc.structured.supportedRegimes : null));
+  const regimes = regimesDeclares
+    ? [...new Set(regimesDeclares.map(r => String(r).toLowerCase().trim()).filter(Boolean))]
+    : null;
   // Un moteur défini explicitement prime sur toute déduction : l'utilisateur a
   // écrit comment sa stratégie fonctionne, on l'applique tel quel (borné).
   if (doc.moteur && typeof doc.moteur === 'object') {
@@ -852,6 +859,7 @@ function profilDepuisStrategie(doc) {
       // d'alignement : une stratégie de scalping n'exige pas les mêmes que
       // celles d'un suivi de tendance.
       style: m.style,
+      regimes,
       timeframes: m.timeframes,
       seuilAlignes: m.seuilAlignes,
       // Filtres exigés par la stratégie (volatilité, session, range).
@@ -929,6 +937,7 @@ function profilDepuisStrategie(doc) {
     seuilRegles: regles.length >= 2 ? 2 : 1,
     seuilForce: regles.length >= 2 ? 0.35 : 0.6,
     style,
+    regimes,
     // La fiche fait foi ; le style n'est qu'un repli quand elle ne dit rien.
     timeframes: declareesFiche.length ? declareesFiche : (dStyle ? dStyle.timeframes : null),
     timeframesRefusees: refuseesFiche.length ? refuseesFiche : null,

@@ -968,7 +968,7 @@ function detecterTout(candles, meta = {}, options = {}) {
   //    en silence laisse croire que le moteur n'a rien vu.
   const ecartesFrais = [];
   for (const s of signaux) {
-    const verdict = Frais.plafondCout(s.entree, s.stop, meta.symbol);
+    const verdict = Frais.plafondCout(s.entree, s.stop, meta.symbol, null, options.frais);
     if (!verdict || verdict.ok) continue;
     ecartesFrais.push({
       id: s.id, nom: s.nom, source: s.source, sens: s.sens,

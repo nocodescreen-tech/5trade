@@ -107,7 +107,8 @@ function lancer(candles, meta = {}, options = {}) {
         modeleSeuil: options.modeleSeuil,
         // Porte du rapport risque/rendement : absente en direct par défaut,
         // mesurée ici pour comparer les configurations.
-        rrMin: options.rrMin
+        rrMin: options.rrMin,
+        frais: options.frais
       });
     } catch {
       continue;                 // une fenêtre qui échoue ne doit pas arrêter le reste
@@ -205,7 +206,7 @@ function lancer(candles, meta = {}, options = {}) {
         bougiesSuivies: 0
       };
 
-      Journal.evaluer(trade, futurs);
+      Journal.evaluer(trade, futurs, { frais: options.frais });
       trades.push(trade);
       parCle.set(cleTrade, trade);
 
@@ -219,7 +220,7 @@ function lancer(candles, meta = {}, options = {}) {
 
   return {
     ...resumer(trades, { symbol: meta.symbol, timeframe: meta.timeframe,
-      limiteTrades: options.limiteTrades }),
+      limiteTrades: options.limiteTrades, frais: options.frais }),
     at: n ? serie[n - 1].t : null,
     debut: n ? serie[0].t : null,
     bougies: n,
@@ -332,7 +333,7 @@ function resumer(trades, meta = {}) {
     rTotalBrut: +rTotalBrut.toFixed(2),
     esperanceBrute: clos.length ? +(rTotalBrut / clos.length).toFixed(2) : null,
     fraisMoyenR,
-    fraisActifs: Frais.actifs(),
+    fraisActifs: Frais.actifs(meta.frais),
     coutCritique: critique,
     parSource: agreger(t => t.source),
     parSens: agreger(t => t.sens),

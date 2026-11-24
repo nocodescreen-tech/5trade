@@ -43,6 +43,22 @@ const FICHES = {
       requiredConditions: 'v1.2.0 : confluence complète exigée (4 règles sur 4) — le moteur ne déclarait que R1 et R3',
       supportedRegimes: 'non déclaré par la stratégie : laissé vide, donc évaluée sur tous les régimes'
     }
+  },
+
+  // Stratégie institutionnelle SMC sur XAUUSD (Or spot)
+  strat_smc_xauusd: {
+    version: '1.0.0',
+    supportedMarkets: ['metaux'],
+    regles: ['R1', 'R2', 'R3'],
+    seuilForce: 0.65,
+    seuilRegles: 3,
+    requiredConditions: ['R1', 'R2', 'R3'],
+    optionalConditions: ['R4'],
+    justifications: {
+      supportedMarkets: 'Or spot (XAUUSD) — Stratégie institutionnelle Smart Money Concepts',
+      requiredConditions: 'Séquence complète : Balayage de liquidité (R1) + Cassure de structure CHoCH (R2) + Retest Order Block/FVG (R3)',
+      supportedRegimes: 'trending, ranging, volatil'
+    }
   }
 };
 
