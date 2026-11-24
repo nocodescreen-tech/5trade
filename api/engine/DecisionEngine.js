@@ -674,7 +674,13 @@ function decider(candles, meta, options = {}) {
   if ((options.verifierSession === true || (meta && meta.verifierSession === true)) && meta && meta.symbol) {
     try {
       const Sessions = require('../temporal/sessions');
-      const horodatage = options.date || (candles && candles.length ? (candles[candles.length - 1].time || candles[candles.length - 1].epoch * 1000) : Date.now());
+      // Résolution robuste de l'horodatage : date, time, epoch, t (utilisé dans le rejeu), ou Date.now()
+      let horodatage = options.date || options.time || (meta && (meta.date || meta.time || meta.at));
+      if (!horodatage && candles && candles.length) {
+        const derniere = candles[candles.length - 1];
+        horodatage = derniere.t || derniere.time || (derniere.epoch ? derniere.epoch * 1000 : null) || derniere.timestamp;
+      }
+      if (!horodatage) horodatage = Date.now();
       const session = Sessions.statutMarche(meta.symbol, horodatage);
       if (session && !session.ouvert) {
         return {

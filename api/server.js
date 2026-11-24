@@ -1537,6 +1537,21 @@ app.post('/api/scan', requireAuth, async (req, res) => {
         if (profil.executable === false) { nonExecutables.push(id); continue; }
         profils.push(profil);
       }
+      // En mode manuel strict (ou par défaut quand l'utilisateur demande explicitement des stratégies),
+      // refuser la sélection incomplète avec le motif de chaque exclusion pour ne jamais masquer un échec.
+      const strict = req.body && req.body.strict !== false;
+      if (strict && (inconnues.length || nonExecutables.length)) {
+        return res.status(inconnues.length ? 404 : 422).json({
+          success: false,
+          error: `Sélection de stratégies incomplète : ${[
+            inconnues.length ? `introuvable(s) [${inconnues.join(', ')}]` : null,
+            nonExecutables.length ? `non-exécutable(s) [${nonExecutables.join(', ')}]` : null
+          ].filter(Boolean).join(' · ')}`,
+          inconnues,
+          nonExecutables,
+          evaluees: profils.map(p => p.id)
+        });
+      }
       if (!profils.length) {
         return res.status(inconnues.length ? 404 : 409).json({
           success: false,
@@ -5079,14 +5094,16 @@ async function start() {
     }
   });
 
-  // Scan complet SILENCIEUX : tous les marchés, toutes les 15 min, aucun envoi.
-  // La surveillance (au-dessus) reste seule à alerter, sur sa liste courte.
-  // Le scan silencieux juge chaque marché sur l'unité de travail ET sur celle
-  // sous laquelle il est surveillé : deux parcours, une seule réalité.
+  // Scan complet SILENCIEUX : utilise la même sélection persistée d'instruments
+  // actifs que l'écran, le scan manuel et les alertes (XAUUSD par défaut).
+  // Si aucun instrument n'est actif, zéro nouveau scan n'est exécuté.
+  const InstrumentsActifs = require('./core/instruments-actifs');
   Scan.start({
     market: Market,
     signals: Signals,
     tf: '15m',
+    mode: Scan.MODES_SCAN.SURVEILLANCE,
+    symbolesAutorises: () => InstrumentsActifs.obtenirActifs(),
     // Les stratégies de la surveillance : le scan cesse d'être un radar anonyme.
     strategies: profilsSurveillance,
     tfsPour: symbole => (Alerts.get().marches || [])

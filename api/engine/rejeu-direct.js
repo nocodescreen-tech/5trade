@@ -133,7 +133,8 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
     let verdict = null;
     let erreur = null;
     try {
-      verdict = DecisionEngine.decider(fen, meta, optionsPas);
+      const metaPas = Object.assign({}, meta, { at: tempsActuel, date: tempsActuel, time: tempsActuel });
+      verdict = DecisionEngine.decider(fen, metaPas, Object.assign({}, optionsPas, { date: tempsActuel }));
     } catch (e) { erreur = e.message; }
 
     etapes.push({

@@ -77,10 +77,11 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
   const actifs = InstrumentsActifs.obtenirActifs();
 
   if (mode === MODES_SCAN.TRADING_AUTORISE || mode === MODES_SCAN.SURVEILLANCE) {
-    const cibles = Array.isArray(symbolesAutorises) && symbolesAutorises.length ? symbolesAutorises : actifs;
+    const bruts = typeof symbolesAutorises === 'function' ? symbolesAutorises() : symbolesAutorises;
+    const cibles = Array.isArray(bruts) && bruts.length ? bruts : actifs;
     if (!cibles || !cibles.length) {
       return {
-        at: debut, tf, marches: 0, signaux: [],
+        at: new Date().toISOString(), tf, marches: 0, signaux: [],
         erreurs: ['Aucun instrument actif : scan automatique suspendu'], dureeMs: 0
       };
     }
@@ -171,25 +172,43 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
         // Les bougies, elles, ont été chargées une seule fois.
         for (const passe of passes) {
           let v = null;
+          let refusMoteur = null;
           // Unification du moteur : le scan et le rejeu fidèle partagent le même cerveau décisionnel
           if (typeof signals.decider === 'function' && passe.options.moteurBrut !== true) {
-            const dec = signals.decider(closes, { symbol: symbole, timeframe: unite }, passe.options);
-            if (dec && (dec.decision === 'ACHAT' || dec.decision === 'VENTE' || dec.decision === 'ATTENTE')) {
-              const sig = dec.signal || (dec.arbitrage && dec.arbitrage.signauxRetenus && dec.arbitrage.signauxRetenus[0]);
-              v = {
-                direction: dec.decision === 'ACHAT' ? 'BUY' : (dec.decision === 'VENTE' ? 'SELL' : 'NEUTRAL'),
-                status: sig ? (sig.status || 'confirme') : (dec.decision === 'ACHAT' || dec.decision === 'VENTE' ? 'confirme' : 'surveiller'),
-                force: sig && typeof sig.force === 'number' ? sig.force : 0.6,
-                trend: sig ? sig.trend : null,
-                confirmations: (dec.confirmation && dec.confirmation.details) ? dec.confirmation.details.length : 1,
-                raison: dec.raison,
-                decision: dec.decision,
-                levels: sig ? (sig.levels || { entry: sig.entree, stop: sig.stop, target1: sig.objectifs && sig.objectifs[0] }) : null
-              };
+            const dec = signals.decider(closes, { symbol: symbole, timeframe: unite, verifierSession: true }, passe.options);
+            if (dec) {
+              if (dec.decision === 'ACHAT' || dec.decision === 'VENTE' || dec.decision === 'ATTENTE') {
+                const sig = dec.signal || (dec.arbitrage && dec.arbitrage.signauxRetenus && dec.arbitrage.signauxRetenus[0]);
+                const objs = (sig && Array.isArray(sig.objectifs)) ? sig.objectifs : [];
+                v = {
+                  direction: dec.decision === 'ACHAT' ? 'BUY' : (dec.decision === 'VENTE' ? 'SELL' : 'NEUTRAL'),
+                  status: sig ? (sig.status || 'confirme') : (dec.decision === 'ACHAT' || dec.decision === 'VENTE' ? 'confirme' : 'surveiller'),
+                  force: sig && typeof sig.force === 'number' ? sig.force : 0.6,
+                  trend: sig ? sig.trend : null,
+                  confirmations: (dec.confirmation && dec.confirmation.details) ? dec.confirmation.details.length : 1,
+                  raison: dec.raison,
+                  decision: dec.decision,
+                  levels: sig ? (sig.levels || {
+                    entry: sig.entree,
+                    stop: sig.stop,
+                    target1: objs[0] !== undefined ? objs[0] : null,
+                    target2: objs[1] !== undefined ? objs[1] : null
+                  }) : null
+                };
+              } else if (dec.decision === 'NO_TRADE') {
+                // Le moteur a explicitement refusé l'opportunité (ex: marché fermé, risque, etc.).
+                // On conserve le refus et son motif : interdiction formelle de repêcher un faux candidat via detect().
+                refusMoteur = dec.raison || 'Refus du moteur décisionnel';
+              }
             }
           }
-          if (!v && typeof signals.detect === 'function') {
+          // Détection brute réservée uniquement au mode d'exploration explicite
+          if (!v && !refusMoteur && mode === MODES_SCAN.EXPLORATION && typeof signals.detect === 'function') {
             v = signals.detect(closes, { symbol: symbole, timeframe: unite }, passe.options);
+          }
+          if (refusMoteur) {
+            erreurs.push(`${symbole} ${unite} : refus moteur — ${refusMoteur}`);
+            continue;
           }
           if (!v) continue;
           // On ne garde que ce qui dit quelque chose : un univers entier de
@@ -207,6 +226,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
             force: typeof v.force === 'number' ? v.force : (v.strength || 0),
             trend: v.trend || null,
             confirmations: v.confirmations || 0,
+            levels: v.levels || null,
             // Quelle stratégie a produit cette ligne : null = moteur générique.
             strategie: passe.profil ? (passe.profil.titre || passe.profil.id) : null,
             raison: v.raison || null,

@@ -8342,6 +8342,62 @@ function tinyPng(W = 64, H = 40) {
       const vCPI = Fund.verdictDevise(calCPI, 'USD', { maintenant: nowEv, fenetreMin: 30 });
       ok('calendrier économique : blocage CPI avec heure de Kinshasa et phase tracée',
         vCPI.bloque === true && /Kinshasa/i.test(vCPI.heureKinshasa) && /Avant l'annonce/i.test(vCPI.phase));
+
+      // ── Section 18 : Validation des 5 points d'audit P0/P1 ──
+      // 1. Refus du moteur dans scan.js : ne pas repêcher via detect()
+      const ScanMod = require('./delivery/scan');
+      const mockSignalsRefus = {
+        decider: () => ({ decision: 'NO_TRADE', raison: 'Marché fermé le week-end' }),
+        detect: () => ({ direction: 'BUY', status: 'confirme', strength: 0.9 })
+      };
+      const mockMarketRefus = {
+        listSymbols: () => [{ symbol: 'EURUSD', provider: 'forex' }],
+        getCandles: async () => ({ candles: Array.from({ length: 30 }, (_, i) => ({ o: 1, h: 2, l: 0.5, c: 1.5, t: Date.now() - (30 - i) * 60000 })) }),
+        TF_MS: { '15m': 900000 }
+      };
+      const scanRefusRes = await ScanMod.scanComplet({
+        market: mockMarketRefus,
+        signals: mockSignalsRefus,
+        tf: '15m',
+        mode: ScanMod.MODES_SCAN.TRADING_AUTORISE,
+        symbolesAutorises: ['EURUSD']
+      });
+      ok('scan livraison : conserve le refus du moteur et ne repêche pas de faux candidat',
+        scanRefusRes.signaux === 0 && scanRefusRes.erreurs.some(e => /refus moteur.*Marché fermé/i.test(e)));
+
+      // 2. Normalisation TP1 ET TP2 dans les signaux du scan
+      const mockSignalsTP1TP2 = {
+        decider: () => ({
+          decision: 'ACHAT',
+          signal: {
+            entree: 2000,
+            stop: 1990,
+            objectifs: [2020, 2040],
+            status: 'confirme',
+            force: 0.85
+          }
+        })
+      };
+      const scanTPRes = await ScanMod.scanComplet({
+        market: mockMarketRefus,
+        signals: mockSignalsTP1TP2,
+        tf: '15m',
+        mode: ScanMod.MODES_SCAN.TRADING_AUTORISE,
+        symbolesAutorises: ['EURUSD']
+      });
+      const sigExtrait = scanTPRes.resultats && scanTPRes.resultats[0];
+      ok('scan livraison : propage entrée, SL, TP1 ET TP2 dans les levels et le contrat',
+        sigExtrait && sigExtrait.levels && sigExtrait.levels.target1 === 2020 && sigExtrait.levels.target2 === 2040
+        && sigExtrait.contrat && sigExtrait.contrat.objectifs.length === 2 && sigExtrait.contrat.objectifs[1] === 2040);
+
+      // 3. Normalisation temporelle dans DecisionEngine avec bougie historique
+      const DecEngineMod = require('./engine/DecisionEngine');
+      // Samedi 21 nov 2026 à 15h UTC
+      const dateSamediUtc = new Date('2026-11-21T15:00:00Z').getTime();
+      const bougiesSamedi = [{ o: 1, h: 2, l: 0.5, c: 1.5, t: dateSamediUtc }];
+      const decSamedi = DecEngineMod.decider(bougiesSamedi, { symbol: 'EURUSD', verifierSession: true }, { timeframe: '15m' });
+      ok('decision engine : refuse avec précision sur bougie historique en fermeture Forex (horodatage .t)',
+        decSamedi.decision === 'NO_TRADE' && /Marché fermé/i.test(decSamedi.raison));
     })();
   }
 
