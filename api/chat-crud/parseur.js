@@ -19,6 +19,18 @@
  */
 
 const PATTERNS = [
+  // 5 QUESTIONS D'AUDIT & PILOTAGE DIRECT
+  // 1. « Quels marchés surveilles-tu ? » / « qu'as-tu scanné ? »
+  { regex: /^(?:quels?\s+march[ée]s?\s+surveilles?-tu|qu'as-tu\s+(?:r[ée]ellement\s+)?scann[ée]|quels?\s+sont\s+les\s+march[ée]s?\s+actifs?|march[ée]s?\s+surveill[ée]s?)\b/i, verbe: 'MONTRE', sujet: 'marches_surveilles' },
+  // 2. « Pourquoi aucun signal sur XAUUSD / en M5 ? »
+  { regex: /^(?:pourquoi\s+(?:aucun\s+signal|pas\s+de\s+signal)|pourquoi\s+aucun\s+trade)\b/i, verbe: 'EXPLIQUE', sujet: 'pourquoi_pas_signal' },
+  // 3. « Est-ce que le CPI bloque l'or / USD ? »
+  { regex: /^(?:est-ce\s+que\s+(?:le\s+)?cpi\s+bloque|cpi\s+bloque|calendrier\s+cpi|impact\s+cpi)\b/i, verbe: 'MONTRE', sujet: 'blocage_cpi' },
+  // 4. « Pourquoi je n'ai rien reçu sur Telegram ? »
+  { regex: /^(?:pourquoi\s+(?:je\s+n'ai\s+rien\s+re[çc]u|pas\s+de\s+notif|pas\s+d'alerte)|(?:statut|probl[èe]me)\s+telegram)\b/i, verbe: 'EXPLIQUE', sujet: 'statut_telegram' },
+  // 5. « Qu'est-ce que tu as mémorisé / préférences ? »
+  { regex: /^qu'est-ce\s+que\s+tu\s+as\s+m[ée]moris[ée]|^mes\s+pr[ée]f[ée]rences\b/i, verbe: 'MONTRE', sujet: 'preferences_memorisees' },
+
   // MONTRE
   { regex: /^(?:montre(?:\s+moi)?|affiche|liste|donne)\s+(.*)$/i, verbe: 'MONTRE' },
   { regex: /^état\s+(?:du\s+)?(?:système|systeme|sante|santé)\s*$/i, verbe: 'MONTRE', sujet: 'etat_systeme' },

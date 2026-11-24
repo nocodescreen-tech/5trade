@@ -12,6 +12,7 @@ const cmdScenarios = require('./commandes/scenarios');
 const cmdApprentissage = require('./commandes/apprentissage');
 const cmdMemoire = require('./commandes/memoire');
 const cmdSysteme = require('./commandes/systeme');
+const cmdAudit = require('./commandes/audit-copilote');
 
 /**
  * Détecte le domaine à partir du sujet.
@@ -57,8 +58,20 @@ function router(action) {
   if (action.sujet === 'etat_systeme') {
     return { domaine: 'systeme', handler: cmdSysteme.etat };
   }
-  if (action.sujet === 'memoire') {
-    return { domaine: 'memoire', handler: cmdMemoire.etat };
+  if (action.sujet === 'memoire' || action.sujet === 'preferences_memorisees') {
+    return { domaine: 'memoire', handler: cmdAudit.preferencesMemorisees };
+  }
+  if (action.sujet === 'marches_surveilles') {
+    return { domaine: 'systeme', handler: cmdAudit.marchesSurveilles };
+  }
+  if (action.sujet === 'pourquoi_pas_signal') {
+    return { domaine: 'trades', handler: () => cmdAudit.pourquoiPasSignal(action.brut || '') };
+  }
+  if (action.sujet === 'blocage_cpi') {
+    return { domaine: 'systeme', handler: cmdAudit.blocageCpi };
+  }
+  if (action.sujet === 'statut_telegram') {
+    return { domaine: 'systeme', handler: cmdAudit.statutTelegram };
   }
   if (action.sujet === 'apprentissage') {
     return { domaine: 'apprentissage', handler: cmdApprentissage.dernierJournal };

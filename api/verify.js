@@ -8398,6 +8398,23 @@ function tinyPng(W = 64, H = 40) {
       const decSamedi = DecEngineMod.decider(bougiesSamedi, { symbol: 'EURUSD', verifierSession: true }, { timeframe: '15m' });
       ok('decision engine : refuse avec précision sur bougie historique en fermeture Forex (horodatage .t)',
         decSamedi.decision === 'NO_TRADE' && /Marché fermé/i.test(decSamedi.raison));
+
+      // ── Section 19 : Copilote IA branché sur les 5 lectures système réelles ──
+      const ChatExec = require('./chat-crud');
+      // 1. « Quels marchés surveilles-tu ? »
+      const rMarches = await ChatExec.executer('quels marchés surveilles-tu');
+      ok('chat copilote : répond avec la sélection active enregistrée et le dernier scan',
+        rMarches && /Surveillance des marchés/i.test(rMarches.texte) && /Sélection enregistrée/i.test(rMarches.texte));
+
+      // 2. « Est-ce que le CPI bloque l'or ? »
+      const rCPI = await ChatExec.executer('est-ce que le cpi bloque');
+      ok('chat copilote : analyse l\'impact macroéconomique CPI avec l\'heure de Kinshasa',
+        rCPI && /Impact Macroéconomique/i.test(rCPI.texte) && /Kinshasa/i.test(rCPI.texte));
+
+      // 3. « Qu'est-ce que tu as mémorisé ? »
+      const rMem = await ChatExec.executer('qu\'est-ce que tu as mémorisé');
+      ok('chat copilote : restitue les préférences persistées réelles',
+        rMem && /Mémoire et Préférences/i.test(rMem.texte));
     })();
   }
 

@@ -88,7 +88,34 @@ async function contexteTempsReel() {
     }
   } catch { /* idem */ }
 
-  // 3. Derniers événements publiés (stop touché, objectifs, expirations).
+  // 3. Marchés actifs & Dernier scan exécuté
+  try {
+    const InstrumentsActifs = require('../core/instruments-actifs');
+    const Scan = require('../delivery/scan');
+    const actifs = InstrumentsActifs.obtenirActifs();
+    lignes.push(`Marchés surveillés enregistrés : ${actifs.length ? actifs.join(', ') : 'aucun'}`);
+    const ds = Scan.dernierScan();
+    if (ds && ds.dernier) {
+      const d = ds.dernier;
+      lignes.push(`Dernier scan automatique (${d.at || '?'}) : ${d.marches} marché(s) sur [${(d.tfs || [d.tf]).join(', ')}], `
+        + `${d.signaux} signal(aux), stratégies évaluées : [${(d.strategies || []).join(', ') || 'générique'}]`);
+      if (d.erreurs && d.erreurs.length) {
+        lignes.push(`Erreurs / blocages scan : ${d.erreurs.slice(0, 3).join(' · ')}`);
+      }
+    } else {
+      lignes.push('Dernier scan automatique : aucun cycle exécuté pour le moment.');
+    }
+  } catch { /* ignorer */ }
+
+  // 4. Calendrier économique & Filtre Macro (Heure de Kinshasa WAT)
+  try {
+    const Fund = require('../sources/fundamentals');
+    const cal = await Fund.getCalendar();
+    const vCPI = Fund.verdictDevise(cal, 'USD', { fenetreMin: 30 });
+    lignes.push(`Filtre macro USD/CPI : ${vCPI.bloque ? 'BLOQUÉ' : 'Dégagé'} (Phase : ${vCPI.phase || 'Neutre'}, Kinshasa : ${vCPI.heureKinshasa || 'N/A'})`);
+  } catch { /* ignorer */ }
+
+  // 5. Derniers événements publiés (stop touché, objectifs, expirations).
   try {
     const Flux = require('./flux');
     const r = Flux.resume(8);
