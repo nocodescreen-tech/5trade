@@ -71,8 +71,20 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
   if (!market || !signals) throw new Error('scan complet : market et signals sont requis');
   const debut = Date.now();
   let symboles = market.listSymbols() || [];
-  if (mode === MODES_SCAN.TRADING_AUTORISE && Array.isArray(symbolesAutorises)) {
-    const autorisesSet = new Set(symbolesAutorises.map(s => String(s.symbol || s).toUpperCase()));
+
+  // Filtrage strict par les instruments actifs ou autorisés
+  const InstrumentsActifs = require('../core/instruments-actifs');
+  const actifs = InstrumentsActifs.obtenirActifs();
+
+  if (mode === MODES_SCAN.TRADING_AUTORISE || mode === MODES_SCAN.SURVEILLANCE) {
+    const cibles = Array.isArray(symbolesAutorises) && symbolesAutorises.length ? symbolesAutorises : actifs;
+    if (!cibles || !cibles.length) {
+      return {
+        at: debut, tf, marches: 0, signaux: [],
+        erreurs: ['Aucun instrument actif : scan automatique suspendu'], dureeMs: 0
+      };
+    }
+    const autorisesSet = new Set(cibles.map(s => String(s.symbol || s).toUpperCase()));
     symboles = symboles.filter(s => autorisesSet.has(String(s.symbol || s).toUpperCase()));
   }
   const signaux = [];

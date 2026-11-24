@@ -1548,7 +1548,29 @@ app.post('/api/scan', requireAuth, async (req, res) => {
       }
     }
 
-    const r = await Scan.scanComplet({ market: Market, signals: Signals, tf, strategies: profils });
+    const InstrumentsActifs = require('./core/instruments-actifs');
+    const symbolesDemandes = req.body && req.body.symboles;
+    const symbolesAutorises = Array.isArray(symbolesDemandes) && symbolesDemandes.length
+      ? symbolesDemandes
+      : InstrumentsActifs.obtenirActifs();
+
+    if (!symbolesAutorises.length) {
+      return res.json({
+        success: true, at: Date.now(), tf, marches: 0, signaux: [],
+        erreurs: ['Aucun instrument actif : activez au moins un instrument depuis le catalogue.'],
+        dureeMs: 0, strategiesEvaluees: profils.map(p => p.titre || p.id),
+        inconnues, nonExecutables
+      });
+    }
+
+    const r = await Scan.scanComplet({
+      market: Market,
+      signals: Signals,
+      tf,
+      strategies: profils,
+      mode: Scan.MODES_SCAN.TRADING_AUTORISE,
+      symbolesAutorises
+    });
     res.json({
       success: true, ...r,
       strategiesEvaluees: profils.map(p => p.titre || p.id),
@@ -2933,6 +2955,45 @@ app.get('/api/market/status', requireAuth, async (req, res) => {
 
 app.get('/api/market/symbols', requireAuth, (req, res) => {
   res.json({ success: true, symbols: Market.listSymbols(), timeframes: Market.TIMEFRAMES });
+});
+
+// ── Instruments actifs persistants (sélection utilisateur / serveur) ───────
+app.get('/api/instruments/actifs', requireAuth, (req, res) => {
+  try {
+    const InstrumentsActifs = require('./core/instruments-actifs');
+    const instruments = InstrumentsActifs.obtenirActifs();
+    res.json({ success: true, instruments });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/instruments/actifs', requireAuth, (req, res) => {
+  try {
+    const InstrumentsActifs = require('./core/instruments-actifs');
+    const liste = req.body && req.body.instruments;
+    const instruments = InstrumentsActifs.definirActifs(liste || []);
+    res.json({ success: true, instruments });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/instruments/actifs/toggle', requireAuth, (req, res) => {
+  try {
+    const InstrumentsActifs = require('./core/instruments-actifs');
+    const { symbol, provider, tf, label, tv, actif } = req.body || {};
+    if (!symbol) return res.status(400).json({ success: false, error: 'symbol requis' });
+    let instruments;
+    if (actif === false) {
+      instruments = InstrumentsActifs.retirerInstrument(symbol);
+    } else {
+      instruments = InstrumentsActifs.ajouterInstrument({ symbol, provider, tf, label, tv });
+    }
+    res.json({ success: true, instruments });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
+  }
 });
 
 // Bougies OHLCV exactes (REST puis buffer live)
@@ -5242,6 +5303,12 @@ async function start() {
       }
     } catch { /* surveillance temporelle non-bloquante */ }
   }, 30000);
+
+  // Synchronisation initiale des alertes et du scan avec la sélection active
+  try {
+    const InstrumentsActifs = require('./core/instruments-actifs');
+    InstrumentsActifs.synchroniserAlertes(InstrumentsActifs.obtenirActifs());
+  } catch {}
 
   // 0.0.0.0 en production : derrière le proxy de la plateforme, un bind sur
   // 127.0.0.1 rend le service injoignable (« listening » dans les logs, 502 au

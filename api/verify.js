@@ -8239,6 +8239,59 @@ function tinyPng(W = 64, H = 40) {
       const valRisque = await ValidateurAudit.evaluer({ verbe: 'APPRENDS', sujet: 'modifier le risque max à 15%' });
       ok('validateur chat : distinction du niveau système sur consigne touchant au risque',
         valRisque.niveau === 'système' && valRisque.confirmation_requise === true);
+
+      // 16. Instruments Actifs & Persistance Serveur (XAUUSD par défaut + indices Deriv à la demande)
+      const InstActifs = require('./core/instruments-actifs');
+      const defautActifs = InstActifs.DEFAUT_INITIAL;
+      ok('instruments actifs : XAUUSD (frxXAUUSD) est le seul marché actif par défaut initial',
+        defautActifs.length === 1 && defautActifs[0].symbol === 'frxXAUUSD');
+
+      // Ajout d'un indice Deriv
+      const avecIndice = InstActifs.ajouterInstrument({
+        symbol: 'R_75',
+        provider: 'deriv',
+        label: 'Volatility 75',
+        tv: 'DERIV:R_75',
+        tf: '5m'
+      });
+      ok('instruments actifs : ajout réussi d\'un indice Deriv',
+        avecIndice.some(a => a.symbol === 'R_75'));
+
+      // Retrait d'un instrument
+      const sansIndice = InstActifs.retirerInstrument('R_75');
+      ok('instruments actifs : retrait réussi d\'un indice désactivé',
+        !sansIndice.some(a => a.symbol === 'R_75'));
+
+      // État « Aucun instrument actif »
+      const toutVide = InstActifs.definirActifs([]);
+      ok('instruments actifs : désactivation de tout -> état aucun instrument actif',
+        toutVide.length === 0);
+
+      // Scan avec zéro instrument actif -> suspension automatique
+      const MarketMock = { listSymbols: () => [{ symbol: 'frxXAUUSD' }, { symbol: 'R_75' }] };
+      const SignalsMock = {};
+      const resScanVide = await Scan.scanComplet({
+        market: MarketMock,
+        signals: SignalsMock,
+        mode: Scan.MODES_SCAN.TRADING_AUTORISE
+      });
+      ok('scan automatique : suspendu immédiatement quand aucun instrument n\'est actif',
+        resScanVide.marches === 0 && resScanVide.erreurs.some(e => /aucun instrument actif/i.test(e)));
+
+      // Restauration de l'état nominal XAUUSD
+      InstActifs.definirActifs(InstActifs.DEFAUT_INITIAL);
+      const resScanXau = await Scan.scanComplet({
+        market: MarketMock,
+        signals: SignalsMock,
+        mode: Scan.MODES_SCAN.TRADING_AUTORISE,
+        symbolesAutorises: [{ symbol: 'frxXAUUSD' }]
+      });
+      ok('scan automatique : scanne uniquement l\'instrument actif (XAUUSD)',
+        resScanXau.marches === 1);
+
+      const srvCode = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+      ok('server.js expose les routes d\'instruments actifs persistants',
+        srvCode.includes('/api/instruments/actifs') && srvCode.includes('/api/instruments/actifs/toggle'));
     })();
   }
 

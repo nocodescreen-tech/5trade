@@ -3518,11 +3518,65 @@ function LiveMarket({ onToJournal }) {
   const [typeTrade, setTypeTrade] = useState('auto');
 
   const [etroi, setEtroit] = useState(() => typeof window !== 'undefined' && window.innerWidth < 820);
+  const [actifs, setActifs] = useState([]);
+  const [catalogueOuvert, setCatalogueOuvert] = useState(false);
+  const [filtreCatalogue, setFiltreCatalogue] = useState('');
+
   useEffect(() => {
     const maj = () => setEtroit(window.innerWidth < 820);
     window.addEventListener('resize', maj);
     return () => window.removeEventListener('resize', maj);
   }, []);
+
+  // Chargement des instruments actifs persistants depuis le serveur (source de vérité unique)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await (await api('/instruments/actifs')).json();
+        if (res.success && Array.isArray(res.instruments)) {
+          setActifs(res.instruments);
+          if (res.instruments.length > 0 && !res.instruments.some(a => a.symbol === symbol)) {
+            setSymbol(res.instruments[0].symbol);
+            setProvider(res.instruments[0].provider);
+            if (res.instruments[0].tf) setTf(res.instruments[0].tf);
+          }
+        }
+      } catch (e) { /* hors-ligne : garde la sélection par défaut */ }
+    })();
+  }, []);
+
+  const toggleInstrument = async (sym, actif, details = {}) => {
+    try {
+      const res = await (await api('/instruments/actifs/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: sym,
+          actif: !!actif,
+          provider: details.provider || (sym.startsWith('frx') || sym.startsWith('R_') ? 'deriv' : 'binance'),
+          label: details.label || sym,
+          tv: details.tv || sym,
+          tf: details.tf || '5m'
+        })
+      })).json();
+      if (res.success && Array.isArray(res.instruments)) {
+        setActifs(res.instruments);
+        if (actif) {
+          setSymbol(sym);
+          if (details.provider) setProvider(details.provider);
+          if (details.tf) setTf(details.tf);
+        } else if (sym === symbol) {
+          if (res.instruments.length > 0) {
+            setSymbol(res.instruments[0].symbol);
+            setProvider(res.instruments[0].provider);
+            setTf(res.instruments[0].tf || '5m');
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Erreur toggle instrument :', e);
+    }
+  };
 
   // Profils (stratégies de la base) pour le mode « Ma stratégie ».
   useEffect(() => {
@@ -3727,6 +3781,134 @@ function LiveMarket({ onToJournal }) {
   return (
     <>
       <AgentBriefingCard />
+
+      {/* ── Barre des instruments actifs (XAUUSD + sélection personnalisée) ── */}
+      <div className="panel" style={{ padding: '8px 12px', marginBottom: 12, background: 'rgba(15,23,42,.75)',
+        border: '1px solid rgba(56,189,248,.25)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 6 }}>
+          <i className="fas fa-layer-group" style={{ color: '#38bdf8', fontSize: 13 }}></i>
+          <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.06em', color: '#94a3b8' }}>
+            Instruments actifs ({actifs.length}) :
+          </span>
+        </div>
+        {actifs.map(act => {
+          const estSelectionne = act.symbol === symbol;
+          return (
+            <div key={act.symbol} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 9px', borderRadius: 6,
+              background: estSelectionne ? 'rgba(56,189,248,0.18)' : 'rgba(148,163,184,0.08)',
+              border: `1px solid ${estSelectionne ? '#38bdf8' : 'rgba(148,163,184,0.2)'}`,
+              cursor: 'pointer'
+            }} onClick={() => { setSymbol(act.symbol); setProvider(act.provider); if (act.tf) setTf(act.tf); }}>
+              <span style={{ fontSize: 11.5, fontWeight: estSelectionne ? 800 : 600, color: estSelectionne ? '#38bdf8' : '#e2e8f0' }}>
+                {act.label || act.symbol} · {act.tf || tf}
+              </span>
+              <button className="btn ghost sm" style={{ padding: '0 4px', fontSize: 9.5, color: 'var(--dim)', height: 18 }}
+                title={`Retirer ${act.label || act.symbol} de l'écran live et du scan`}
+                onClick={(e) => { e.stopPropagation(); toggleInstrument(act.symbol, false); }}>
+                <i className="fas fa-xmark"></i>
+              </button>
+            </div>
+          );
+        })}
+        <button className="btn sm" style={{ padding: '4px 10px', fontSize: 11, background: 'rgba(56,189,248,0.15)', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.4)' }}
+          onClick={() => setCatalogueOuvert(true)} title="Ajouter XAUUSD, des indices Deriv ou du Forex depuis le catalogue">
+          <i className="fas fa-plus" style={{ marginRight: 5 }}></i>Catalogue
+        </button>
+      </div>
+
+      {actifs.length === 0 && (
+        <div className="panel" style={{ padding: 24, textAlign: 'center', marginBottom: 12, borderColor: 'rgba(245,158,11,0.4)', background: 'rgba(245,158,11,0.06)' }}>
+          <i className="fas fa-ban" style={{ fontSize: 36, color: '#f59e0b', marginBottom: 10 }}></i>
+          <div style={{ fontSize: 17, fontWeight: 800, color: '#f59e0b' }}>Aucun instrument actif sélectionné</div>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 6, maxWidth: 520, margin: '6px auto 16px' }}>
+            Le scan automatique, les alertes Telegram et l'analyse de marché sont en pause.<br />
+            Activez <b>XAUUSD</b> ou des <b>indices synthétiques Deriv</b> depuis le catalogue pour démarrer la surveillance.
+          </div>
+          <button className="btn" style={{ background: '#38bdf8', color: '#0f172a', fontWeight: 800 }}
+            onClick={() => setCatalogueOuvert(true)}>
+            <i className="fas fa-book-open" style={{ marginRight: 6 }}></i>Ouvrir le Catalogue d'Instruments
+          </button>
+        </div>
+      )}
+
+      {/* ── Modal Catalogue d'instruments ── */}
+      {catalogueOuvert && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.8)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+        }}>
+          <div className="panel" style={{ width: '100%', maxWidth: 680, maxHeight: '85vh', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,.9)' }}>
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid ' + TT.line, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(15,23,42,.8)' }}>
+              <div>
+                <b style={{ fontSize: 15, color: '#fff' }}><i className="fas fa-book-bookmark" style={{ marginRight: 8, color: '#38bdf8' }}></i>Catalogue des Instruments</b>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                  Sélectionnez les marchés actifs pour l'écran live, le scan automatique et les alertes Telegram
+                </div>
+              </div>
+              <button className="btn ghost sm" onClick={() => setCatalogueOuvert(false)}><i className="fas fa-xmark"></i></button>
+            </div>
+
+            <div style={{ padding: '10px 18px', borderBottom: '1px solid ' + TT.line }}>
+              <input className="fld" placeholder="Filtrer par symbole ou libellé (ex: XAUUSD, R_75, EUR)..."
+                value={filtreCatalogue} onChange={e => setFiltreCatalogue(e.target.value)} style={{ width: '100%' }} />
+            </div>
+
+            <div style={{ overflowY: 'auto', padding: '14px 18px', flex: 1, display: 'grid', gap: 14 }}>
+              {Object.entries((meta.symbols || []).reduce((acc, s) => {
+                const k = s.kind === 'metal' || (s.symbol && (s.symbol.includes('XAU') || s.symbol.includes('XAG'))) ? 'Métaux précieux'
+                  : s.kind === 'synthétique' || (s.symbol && (s.symbol.startsWith('R_') || s.symbol.startsWith('1HZ') || s.symbol.includes('BOOM') || s.symbol.includes('CRASH'))) ? 'Indices synthétiques Deriv'
+                  : s.kind === 'crypto' || (s.symbol && s.symbol.includes('USDT')) ? 'Crypto-actifs'
+                  : 'Forex & Devises';
+                (acc[k] = acc[k] || []).push(s);
+                return acc;
+              }, {})).map(([cat, list]) => {
+                const filtres = list.filter(s => !filtreCatalogue ||
+                  String(s.symbol || '').toLowerCase().includes(filtreCatalogue.toLowerCase()) ||
+                  String(s.label || '').toLowerCase().includes(filtreCatalogue.toLowerCase()));
+                if (!filtres.length) return null;
+                return (
+                  <div key={cat} style={{ background: 'rgba(148,163,184,.03)', padding: 10, borderRadius: 8, border: '1px solid ' + TT.line }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.06em', color: '#38bdf8', marginBottom: 8 }}>
+                      {cat} ({filtres.length})
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
+                      {filtres.map(s => {
+                        const estActif = actifs.some(a => a.symbol.toUpperCase() === s.symbol.toUpperCase());
+                        return (
+                          <div key={s.symbol} style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px',
+                            borderRadius: 6, background: estActif ? 'rgba(56,189,248,0.08)' : 'rgba(0,0,0,0.25)',
+                            border: `1px solid ${estActif ? '#38bdf8' : 'rgba(148,163,184,0.15)'}`
+                          }}>
+                            <div>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: '#f8fafc' }}>{s.label || s.symbol}</div>
+                              <div style={{ fontSize: 10, color: 'var(--dim)' }}>{s.providerLabel || s.provider} · {s.tv || s.symbol}</div>
+                            </div>
+                            <button className={`btn sm ${estActif ? 'ghost' : ''}`}
+                              style={{ padding: '3px 9px', fontSize: 10.5, borderColor: estActif ? '#ef4444' : '#38bdf8', color: estActif ? '#ef4444' : '#0f172a', background: estActif ? 'transparent' : '#38bdf8' }}
+                              onClick={() => toggleInstrument(s.symbol, !estActif, s)}>
+                              {estActif ? <><i className="fas fa-xmark"></i> Retirer</> : <><i className="fas fa-plus"></i> Activer</>}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ padding: '12px 18px', borderTop: '1px solid ' + TT.line, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(15,23,42,.8)' }}>
+              <span style={{ fontSize: 11, color: 'var(--dim)' }}>
+                {actifs.length} instrument(s) actif(s) sur {meta.symbols ? meta.symbols.length : 0} disponibles
+              </span>
+              <button className="btn ghost sm" onClick={() => setCatalogueOuvert(false)}>Fermer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── En-tête instrument (collant) ── */}
       <div className="panel" style={{ padding: '11px 14px', marginBottom: 12,
         position: 'sticky', top: 0, zIndex: 40, background: 'var(--panel)',
