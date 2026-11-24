@@ -1869,9 +1869,54 @@ function AddKnowledge({
     style: {
       fontSize: 13,
       color: 'var(--muted)',
-      marginBottom: 12
+      marginBottom: 10
     }
-  }, "Explique ta strat\xE9gie avec tes mots. L'application l'analyse, en tire une fiche structur\xE9e \u2014 r\xE8gles, style, unit\xE9s de temps, entr\xE9e, invalidation \u2014 et l'enregistre. Elle est ensuite utilisable dans \xAB Ma strat\xE9gie \xBB."), /*#__PURE__*/React.createElement("textarea", {
+  }, "Explique ta strat\xE9gie avec tes mots ou choisis un mod\xE8le ci-dessous. Le moteur l'analyse, en extrait les r\xE8gles math\xE9matiques, les march\xE9s cibles, l'invalidation et les objectifs chiffr\xE9s, et l'enregistre imm\xE9diatement dans la base universelle."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap',
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      fontWeight: 700,
+      color: '#94a3b8',
+      alignSelf: 'center',
+      marginRight: 4
+    }
+  }, "Mod\xE8les universels :"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn sm ghost",
+    style: {
+      fontSize: 11,
+      padding: '3px 8px',
+      color: '#38bdf8',
+      borderColor: 'rgba(56,189,248,.3)'
+    },
+    onClick: () => setDecrire("Stratégie Scalping Volatility Deriv en M1/M5. J'attends un épuisement de volatilité et une mèche de balayage sur le dernier swing high ou low. Clôture avec reprise de force dans le sens opposé. Entrée immédiate avec Stop Loss protégé derrière la mèche. Objectif 1 au Point of Control (POC), Objectif 2 sur la borne opposée de la Value Area.")
+  }, "\u26A1 Deriv Synth\xE9tiques (R_75 / Boom / Crash)"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn sm ghost",
+    style: {
+      fontSize: 11,
+      padding: '3px 8px',
+      color: '#fbbf24',
+      borderColor: 'rgba(251,191,36,.3)'
+    },
+    onClick: () => setDecrire("Stratégie Breakout & Confluence Or (XAUUSD) en M15. Je trade exclusivement les sessions de Londres et New York. J'attends une cassure franche de la structure de séance avec confirmation du volume et du delta acheteur/vendeur. Invalidation sous la bougie d'impulsion, TP1 à 1:2 R:R et TP2 en extension.")
+  }, "\uD83C\uDFC6 Or Spot (XAUUSD)"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn sm ghost",
+    style: {
+      fontSize: 11,
+      padding: '3px 8px',
+      color: '#34d399',
+      borderColor: 'rgba(52,211,153,.3)'
+    },
+    onClick: () => setDecrire("Stratégie Suivi de Tendance Forex Majeur (EURUSD/GBPUSD) en H1/M15. Alignement de tendance sur les unités supérieures H4. Entrée sur repli en zone d'équilibre (Discount pour achat, Premium pour vente) avec confirmation de divergence RSI. Sortie 50% à 1:2 R:R et passage du stop à Break-Even.")
+  }, "\uD83C\uDF10 Forex Majeur")), /*#__PURE__*/React.createElement("textarea", {
     className: "fld",
     rows: "8",
     value: decrire,
@@ -4526,7 +4571,7 @@ function TradeSetupCard({
       fontSize: 11,
       color: '#cbd5e1'
     }
-  }, symbol, " \xB7 ", tf, " \xB7 ", signal.nom || 'Modèle SMC & Order Flow'))), /*#__PURE__*/React.createElement("div", {
+  }, symbol, " \xB7 ", tf, " \xB7 ", signal.nom || 'Structure Universelle & Order Flow'))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       alignItems: 'center',
@@ -4682,8 +4727,8 @@ function TradeSetupCard({
   }, /*#__PURE__*/React.createElement("span", null, "S\xE9curisation : passage du stop \xE0 ", /*#__PURE__*/React.createElement("b", null, "Break-Even (BE)"), " d\xE8s l'atteinte du TP1."), /*#__PURE__*/React.createElement("span", null, "Visualisation : niveaux trac\xE9s en direct sur le graphique ci-contre.")));
 }
 
-// ── Poste d'Analyse Institutionnel SMC (Sweep → CHoCH → Retest OB) ──────
-function SMCInstitutionalCard({
+// ── Poste d'Analyse de Structure de Marché & Flux Universel ──────────────
+function MarketStructureCard({
   decision,
   signal,
   report,
@@ -4713,24 +4758,24 @@ function SMCInstitutionalCard({
 
   // Phase globale
   let phaseTitre = 'PHASE 1/4 : EN ATTENTE DE PURGE DE LIQUIDITÉ';
-  let phaseSous = 'Le moteur surveille les sommets et creux H1/M5 pour identifier une prise de liquidité par mèche.';
+  let phaseSous = 'Le moteur surveille les sommets et creux pour identifier une prise de liquidité ou épuisement.';
   let phaseTone = 'warn';
   if (executables && lv) {
     phaseTitre = `PHASE 4/4 : SETUP INSTITUTIONNEL PRÊT (${sens === 'long' ? 'ACHAT' : 'VENTE'})`;
-    phaseSous = 'Balayage, CHoCH et retest de zone validés. Les niveaux chiffrés et les frais respectent les règles strictes.';
+    phaseSous = 'Balayage, cassure structurelle et retest de zone validés. Les niveaux chiffrés et les frais respectent les règles strictes.';
     phaseTone = 'ok';
   } else if (chochValide && zoneValide) {
-    phaseTitre = 'PHASE 3/4 : CHoCH CONFIRMÉ — ATTENTE DE RETEST ZONE (OB/FVG)';
-    phaseSous = 'La structure a cassé en clôture. Attente d\'un repli du prix dans l\'Order Block pour une entrée optimale.';
+    phaseTitre = 'PHASE 3/4 : CASSURE CONFIRMÉE — ATTENTE DE RETEST DE ZONE (OB/FVG)';
+    phaseSous = 'La structure a cassé en clôture. Attente d\'un repli du prix dans la zone clé pour une entrée optimale.';
     phaseTone = 'info';
   } else if (sweepValide) {
-    phaseTitre = 'PHASE 2/4 : BALAYAGE DÉTECTÉ — ATTENTE DE CONFIRMATION CHoCH';
+    phaseTitre = 'PHASE 2/4 : BALAYAGE DÉTECTÉ — ATTENTE DE CONFIRMATION DE CASSURE';
     phaseSous = 'Prise de liquidité enregistrée. Une clôture au-delà de la structure opposée est requise pour valider le retournement.';
     phaseTone = 'warn';
   }
   const tTone = TT_TONE[phaseTone] || TT_TONE.warn;
 
-  // Calcul des frais XAUUSD
+  // Calcul des frais
   const distSL = lv && Number.isFinite(Number(lv.entry)) && Number.isFinite(Number(lv.stop)) ? Math.abs(Number(lv.entry) - Number(lv.stop)) : null;
   const spreadFixe = 0.30;
   const slipFixe = 0.04;
@@ -4774,12 +4819,12 @@ function SMCInstitutionalCard({
       letterSpacing: '.03em',
       color: '#f0f9ff'
     }
-  }, "POSTE D'ANALYSE INSTITUTIONNEL SMC \xB7 ", symbol || 'XAUUSD', " ", tf || 'M5'), /*#__PURE__*/React.createElement("div", {
+  }, "POSTE DE STRUCTURE DE MARCH\xC9 & FLUX \xB7 ", symbol || 'XAUUSD', " ", tf || 'M5'), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10.5,
       color: '#94a3b8'
     }
-  }, "Mod\xE8le SMC : Liquidity Sweep \u2192 CHoCH \u2192 Retest OB \xB7 R:R \u2265 2.0 apr\xE8s frais"))), /*#__PURE__*/React.createElement("div", {
+  }, "Mod\xE8le Universel : Balayage Liquidit\xE9 \u2192 Rupture Structurelle \u2192 Retest & Flux \xB7 R:R \u2265 2.0 apr\xE8s frais"))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       alignItems: 'center',
@@ -4830,7 +4875,7 @@ function SMCInstitutionalCard({
       textTransform: 'uppercase',
       color: 'var(--dim)'
     }
-  }, "1. Balayage (Sweep R1)"), /*#__PURE__*/React.createElement(TtPill, {
+  }, "1. Balayage (Liquidit\xE9 R1)"), /*#__PURE__*/React.createElement(TtPill, {
     tone: sweepValide ? 'ok' : 'neu'
   }, sweepValide ? '✓ VALIDÉ' : '◷ EN ATTENTE')), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4862,14 +4907,14 @@ function SMCInstitutionalCard({
       textTransform: 'uppercase',
       color: 'var(--dim)'
     }
-  }, "2. Cassure (CHoCH R2)"), /*#__PURE__*/React.createElement(TtPill, {
+  }, "2. Rupture (Cassure R2)"), /*#__PURE__*/React.createElement(TtPill, {
     tone: chochValide ? 'ok' : 'neu'
   }, chochValide ? '✓ VALIDÉ' : '◷ EN ATTENTE')), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: '#e2e8f0'
     }
-  }, ev && ev.type === 'CHoCH' ? `CHoCH ${ev.direction === 'bullish' ? 'haussier' : 'baissier'} clôturé à ${ttFmt(ev.level)}` : 'En attente de clôture franche au-delà de la structure.'), /*#__PURE__*/React.createElement("div", {
+  }, ev && ev.type === 'CHoCH' ? `Cassure ${ev.direction === 'bullish' ? 'haussière' : 'baissière'} clôturée à ${ttFmt(ev.level)}` : 'En attente de clôture franche au-delà de la structure.'), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       color: 'var(--dim)',
@@ -4893,20 +4938,20 @@ function SMCInstitutionalCard({
       textTransform: 'uppercase',
       color: 'var(--dim)'
     }
-  }, "3. Zone Retest (OB R3)"), /*#__PURE__*/React.createElement(TtPill, {
+  }, "3. Zone Retest (Zone Cl\xE9 R3)"), /*#__PURE__*/React.createElement(TtPill, {
     tone: zoneValide ? 'ok' : 'neu'
   }, zoneValide ? '✓ IDENTIFIÉE' : '◷ EN ATTENTE')), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: '#e2e8f0'
     }
-  }, derniereZone ? `Zone ${derniereZone.type || ''} : ${ttFmt(derniereZone.low)} – ${ttFmt(derniereZone.high)}` : 'Aucun Order Block non mitigé à proximité immédiate.'), /*#__PURE__*/React.createElement("div", {
+  }, derniereZone ? `Zone ${derniereZone.type || ''} : ${ttFmt(derniereZone.low)} – ${ttFmt(derniereZone.high)}` : 'Aucune zone clé non mitigée à proximité immédiate.'), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       color: 'var(--dim)',
       marginTop: 4
     }
-  }, "Mitigation institutionnelle pour entr\xE9e avec ratio R:R \xE9lev\xE9."))), /*#__PURE__*/React.createElement("div", {
+  }, "Zone d\\'\xE9quilibre pour entr\xE9e avec ratio R:R \xE9lev\xE9."))), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '10px 16px',
       background: 'rgba(15,23,42,.6)',
@@ -7888,7 +7933,7 @@ function LiveMarket({
       color: 'var(--dim)',
       textTransform: 'uppercase'
     }
-  }, "5trade terminal \xB7 XAUUSD SMC"), /*#__PURE__*/React.createElement("div", {
+  }, "5trade terminal \xB7 Universal Market Intelligence"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       alignItems: 'baseline',
@@ -8172,7 +8217,7 @@ function LiveMarket({
     style: {
       color: TT.accent
     }
-  }), " CALQUES SMC"), /*#__PURE__*/React.createElement("button", {
+  }), " STRUCTURE & FLUX"), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: `layer-btn ${calqueStructure ? 'active' : ''}`,
     onClick: () => setCalqueStructure(!calqueStructure),
@@ -8279,7 +8324,7 @@ function LiveMarket({
     tf: tf,
     providerLabel: providerLabel,
     confluence: confluence
-  }), /*#__PURE__*/React.createElement(SMCInstitutionalCard, {
+  }), /*#__PURE__*/React.createElement(MarketStructureCard, {
     decision: decision,
     signal: meilleurSetup,
     report: report,

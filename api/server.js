@@ -3335,7 +3335,7 @@ function planDepuisMoteur(candles, meta, report, cause) {
   const scn = (g.scenarios || [])[0] || null;
   const courtCause = String(cause || '').slice(0, 140);
   const explicationIa = /timeout|abort|aucune ia/i.test(courtCause)
-    ? 'Calculé par le moteur algorithmique SMC'
+    ? 'Calculé par le moteur algorithmique universel'
     : `Moteur technique (${courtCause})`;
 
   if (!scn) {
@@ -3353,7 +3353,7 @@ function planDepuisMoteur(candles, meta, report, cause) {
   return {
     action: scn.direction === 'long' ? 'BUY' : 'SELL',
     confidence: 'medium', source: 'moteur',
-    reason: `Plan calculé en direct par le Moteur SMC (${explicationIa}). `
+    reason: `Plan calculé en direct par le Moteur Universel (${explicationIa}). `
       + `Entrée au retest de zone, stop à 1 × ATR au-delà, objectifs sur liquidité mesurée. `
       + `Niveaux réels dérivés de la structure de prix.`,
     entry: {

@@ -967,11 +967,27 @@ function AddKnowledge({ refresh }) {
           </div>
 
           {tab==='decrire' && (<>
-            <p style={{ fontSize:13, color:'var(--muted)', marginBottom:12 }}>
-              Explique ta stratégie avec tes mots. L'application l'analyse, en tire une
-              fiche structurée — règles, style, unités de temps, entrée, invalidation — et
-              l'enregistre. Elle est ensuite utilisable dans « Ma stratégie ».
+            <p style={{ fontSize:13, color:'var(--muted)', marginBottom:10 }}>
+              Explique ta stratégie avec tes mots ou choisis un modèle ci-dessous. Le moteur l'analyse, en extrait les
+              règles mathématiques, les marchés cibles, l'invalidation et les objectifs chiffrés, et l'enregistre immédiatement dans la base universelle.
             </p>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', alignSelf: 'center', marginRight: 4 }}>
+                Modèles universels :
+              </span>
+              <button type="button" className="btn sm ghost" style={{ fontSize: 11, padding: '3px 8px', color: '#38bdf8', borderColor: 'rgba(56,189,248,.3)' }}
+                onClick={() => setDecrire("Stratégie Scalping Volatility Deriv en M1/M5. J'attends un épuisement de volatilité et une mèche de balayage sur le dernier swing high ou low. Clôture avec reprise de force dans le sens opposé. Entrée immédiate avec Stop Loss protégé derrière la mèche. Objectif 1 au Point of Control (POC), Objectif 2 sur la borne opposée de la Value Area.")}>
+                ⚡ Deriv Synthétiques (R_75 / Boom / Crash)
+              </button>
+              <button type="button" className="btn sm ghost" style={{ fontSize: 11, padding: '3px 8px', color: '#fbbf24', borderColor: 'rgba(251,191,36,.3)' }}
+                onClick={() => setDecrire("Stratégie Breakout & Confluence Or (XAUUSD) en M15. Je trade exclusivement les sessions de Londres et New York. J'attends une cassure franche de la structure de séance avec confirmation du volume et du delta acheteur/vendeur. Invalidation sous la bougie d'impulsion, TP1 à 1:2 R:R et TP2 en extension.")}>
+                🏆 Or Spot (XAUUSD)
+              </button>
+              <button type="button" className="btn sm ghost" style={{ fontSize: 11, padding: '3px 8px', color: '#34d399', borderColor: 'rgba(52,211,153,.3)' }}
+                onClick={() => setDecrire("Stratégie Suivi de Tendance Forex Majeur (EURUSD/GBPUSD) en H1/M15. Alignement de tendance sur les unités supérieures H4. Entrée sur repli en zone d'équilibre (Discount pour achat, Premium pour vente) avec confirmation de divergence RSI. Sortie 50% à 1:2 R:R et passage du stop à Break-Even.")}>
+                🌐 Forex Majeur
+              </button>
+            </div>
             <textarea className="fld" rows="8" value={decrire}
               onChange={e=>setDecrire(e.target.value)}
               placeholder="Ex. Je scalpe les indices synthétiques en 1 minute. J'attends que le prix balaie un plus bas évident puis revienne vite au-dessus. Là je regarde si la bougie de retour laisse un FVG ou un order block : quand le prix revient tester cette zone et rejette, j'achète. Stop sous le plus bas du balayage, objectif sur l'équilibre du range. Je ne trade pas la session asiatique." />
@@ -2455,7 +2471,7 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
               )}
             </div>
             <div style={{ fontSize: 11, color: '#cbd5e1' }}>
-              {symbol} · {tf} · {signal.nom || 'Modèle SMC & Order Flow'}
+              {symbol} · {tf} · {signal.nom || 'Structure Universelle & Order Flow'}
             </div>
           </div>
         </div>
@@ -2561,8 +2577,8 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
   );
 }
 
-// ── Poste d'Analyse Institutionnel SMC (Sweep → CHoCH → Retest OB) ──────
-function SMCInstitutionalCard({ decision, signal, report, price, symbol, tf }) {
+// ── Poste d'Analyse de Structure de Marché & Flux Universel ──────────────
+function MarketStructureCard({ decision, signal, report, price, symbol, tf }) {
   const st = report && report.structure ? report.structure : {};
   const ev = st.event || null;
   const sweeps = (report && report.sweeps) || [];
@@ -2586,26 +2602,26 @@ function SMCInstitutionalCard({ decision, signal, report, price, symbol, tf }) {
 
   // Phase globale
   let phaseTitre = 'PHASE 1/4 : EN ATTENTE DE PURGE DE LIQUIDITÉ';
-  let phaseSous = 'Le moteur surveille les sommets et creux H1/M5 pour identifier une prise de liquidité par mèche.';
+  let phaseSous = 'Le moteur surveille les sommets et creux pour identifier une prise de liquidité ou épuisement.';
   let phaseTone = 'warn';
 
   if (executables && lv) {
     phaseTitre = `PHASE 4/4 : SETUP INSTITUTIONNEL PRÊT (${sens === 'long' ? 'ACHAT' : 'VENTE'})`;
-    phaseSous = 'Balayage, CHoCH et retest de zone validés. Les niveaux chiffrés et les frais respectent les règles strictes.';
+    phaseSous = 'Balayage, cassure structurelle et retest de zone validés. Les niveaux chiffrés et les frais respectent les règles strictes.';
     phaseTone = 'ok';
   } else if (chochValide && zoneValide) {
-    phaseTitre = 'PHASE 3/4 : CHoCH CONFIRMÉ — ATTENTE DE RETEST ZONE (OB/FVG)';
-    phaseSous = 'La structure a cassé en clôture. Attente d\'un repli du prix dans l\'Order Block pour une entrée optimale.';
+    phaseTitre = 'PHASE 3/4 : CASSURE CONFIRMÉE — ATTENTE DE RETEST DE ZONE (OB/FVG)';
+    phaseSous = 'La structure a cassé en clôture. Attente d\'un repli du prix dans la zone clé pour une entrée optimale.';
     phaseTone = 'info';
   } else if (sweepValide) {
-    phaseTitre = 'PHASE 2/4 : BALAYAGE DÉTECTÉ — ATTENTE DE CONFIRMATION CHoCH';
+    phaseTitre = 'PHASE 2/4 : BALAYAGE DÉTECTÉ — ATTENTE DE CONFIRMATION DE CASSURE';
     phaseSous = 'Prise de liquidité enregistrée. Une clôture au-delà de la structure opposée est requise pour valider le retournement.';
     phaseTone = 'warn';
   }
 
   const tTone = TT_TONE[phaseTone] || TT_TONE.warn;
 
-  // Calcul des frais XAUUSD
+  // Calcul des frais
   const distSL = lv && Number.isFinite(Number(lv.entry)) && Number.isFinite(Number(lv.stop))
     ? Math.abs(Number(lv.entry) - Number(lv.stop)) : null;
   const spreadFixe = 0.30;
@@ -2615,17 +2631,17 @@ function SMCInstitutionalCard({ decision, signal, report, price, symbol, tf }) {
 
   return (
     <div className="panel" style={{ padding: 0, marginBottom: 12, overflow: 'hidden', borderColor: 'rgba(56,189,248,.35)' }}>
-      {/* En-tête SMC */}
+      {/* En-tête Structure & Flux Universel */}
       <div style={{ padding: '12px 16px', background: 'rgba(56,189,248,.07)', borderBottom: '1px solid rgba(56,189,248,.2)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <i className="fas fa-landmark" style={{ color: '#38bdf8', fontSize: 16 }}></i>
           <div>
             <div style={{ fontSize: 13, fontWeight: 900, letterSpacing: '.03em', color: '#f0f9ff' }}>
-              POSTE D'ANALYSE INSTITUTIONNEL SMC · {symbol || 'XAUUSD'} {tf || 'M5'}
+              POSTE DE STRUCTURE DE MARCHÉ & FLUX · {symbol || 'XAUUSD'} {tf || 'M5'}
             </div>
             <div style={{ fontSize: 10.5, color: '#94a3b8' }}>
-              Modèle SMC : Liquidity Sweep → CHoCH → Retest OB · R:R ≥ 2.0 après frais
+              Modèle Universel : Balayage Liquidité → Rupture Structurelle → Retest & Flux · R:R ≥ 2.0 après frais
             </div>
           </div>
         </div>
@@ -2640,13 +2656,13 @@ function SMCInstitutionalCard({ decision, signal, report, price, symbol, tf }) {
         <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>{phaseSous}</div>
       </div>
 
-      {/* Grille des 3 Piliers SMC */}
+      {/* Grille des 3 Piliers de Structure Universelle */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', borderBottom: '1px solid ' + TT.line }}>
         {/* Pilier 1 : Sweep */}
         <div style={{ padding: '12px 14px', borderRight: '1px solid ' + TT.line }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
             <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: 'var(--dim)' }}>
-              1. Balayage (Sweep R1)
+              1. Balayage (Liquidité R1)
             </span>
             <TtPill tone={sweepValide ? 'ok' : 'neu'}>{sweepValide ? '✓ VALIDÉ' : '◷ EN ATTENTE'}</TtPill>
           </div>
@@ -2664,13 +2680,13 @@ function SMCInstitutionalCard({ decision, signal, report, price, symbol, tf }) {
         <div style={{ padding: '12px 14px', borderRight: '1px solid ' + TT.line }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
             <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: 'var(--dim)' }}>
-              2. Cassure (CHoCH R2)
+              2. Rupture (Cassure R2)
             </span>
             <TtPill tone={chochValide ? 'ok' : 'neu'}>{chochValide ? '✓ VALIDÉ' : '◷ EN ATTENTE'}</TtPill>
           </div>
           <div style={{ fontSize: 12, color: '#e2e8f0' }}>
             {ev && ev.type === 'CHoCH'
-              ? `CHoCH ${ev.direction === 'bullish' ? 'haussier' : 'baissier'} clôturé à ${ttFmt(ev.level)}`
+              ? `Cassure ${ev.direction === 'bullish' ? 'haussière' : 'baissière'} clôturée à ${ttFmt(ev.level)}`
               : 'En attente de clôture franche au-delà de la structure.'}
           </div>
           <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4 }}>
@@ -2682,17 +2698,17 @@ function SMCInstitutionalCard({ decision, signal, report, price, symbol, tf }) {
         <div style={{ padding: '12px 14px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
             <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: 'var(--dim)' }}>
-              3. Zone Retest (OB R3)
+              3. Zone Retest (Zone Clé R3)
             </span>
             <TtPill tone={zoneValide ? 'ok' : 'neu'}>{zoneValide ? '✓ IDENTIFIÉE' : '◷ EN ATTENTE'}</TtPill>
           </div>
           <div style={{ fontSize: 12, color: '#e2e8f0' }}>
             {derniereZone
               ? `Zone ${derniereZone.type || ''} : ${ttFmt(derniereZone.low)} – ${ttFmt(derniereZone.high)}`
-              : 'Aucun Order Block non mitigé à proximité immédiate.'}
+              : 'Aucune zone clé non mitigée à proximité immédiate.'}
           </div>
           <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4 }}>
-            Mitigation institutionnelle pour entrée avec ratio R:R élevé.
+            Zone d\'équilibre pour entrée avec ratio R:R élevé.
           </div>
         </div>
       </div>
@@ -4462,7 +4478,7 @@ function LiveMarket({ onToJournal }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: '.1em',
-              color: 'var(--dim)', textTransform: 'uppercase' }}>5trade terminal · XAUUSD SMC</div>
+              color: 'var(--dim)', textTransform: 'uppercase' }}>5trade terminal · Universal Market Intelligence</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
               <b style={{ fontSize: 16 }}>{providerLabel}</b>
               <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
@@ -4622,10 +4638,10 @@ function LiveMarket({ onToJournal }) {
         <div className="workstation-left">
           {/* Panneau Graphique Pro & Calques SMC */}
           <div className="chart-pro-panel">
-            {/* Barre de calques interactifs SMC & Outils */}
+            {/* Barre de calques interactifs de Structure, Flux & Outils */}
             <div className="smc-layers-bar">
               <span className="smc-layers-title">
-                <i className="fas fa-layer-group" style={{ color: TT.accent }}></i> CALQUES SMC
+                <i className="fas fa-layer-group" style={{ color: TT.accent }}></i> STRUCTURE & FLUX
               </span>
               <button
                 type="button"
@@ -4732,8 +4748,8 @@ function LiveMarket({ onToJournal }) {
             at={(decision && decision.at) || (last && last.t)} symbol={symbol} tf={tf}
             providerLabel={providerLabel} confluence={confluence} />
 
-          {/* Checklist SMC institutionnelle (Sweep -> CHoCH -> Retest OB) */}
-          <SMCInstitutionalCard decision={decision} signal={meilleurSetup} report={report} price={prix}
+          {/* Validation de Structure & Flux (Épuisement -> Cassure -> Retest) */}
+          <MarketStructureCard decision={decision} signal={meilleurSetup} report={report} price={prix}
             symbol={symbol} tf={tf} />
 
           {/* Setup chiffré & simulation paper-trading en 1 clic */}
