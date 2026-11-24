@@ -4355,6 +4355,7 @@ function TradeSetupCard({
 }) {
   const [copie, setCopie] = useState(false);
   const [demoStatus, setDemoStatus] = useState('');
+  const [derivTradeMsg, setDerivTradeMsg] = useState('');
   const lv = signal && signal.levels ? signal.levels : null;
   const ok = lv && Number.isFinite(Number(lv.entry)) && Number.isFinite(Number(lv.stop));
   if (!ok) {
@@ -4593,7 +4594,47 @@ function TradeSetupCard({
     style: {
       marginRight: 5
     }
-  }), demoStatus || 'Exécuter Démo'), onToJournal && /*#__PURE__*/React.createElement("button", {
+  }), demoStatus || 'Exécuter Démo'), /*#__PURE__*/React.createElement("button", {
+    className: "btn sm",
+    style: {
+      padding: '5px 10px',
+      fontSize: 11,
+      background: '#ef4444',
+      color: '#fff',
+      border: '1px solid #dc2626'
+    },
+    onClick: async () => {
+      try {
+        setDerivTradeMsg('Envoi Deriv…');
+        const res = await (await api('/deriv/trade', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            symbol: symbol,
+            direction: achat ? 'BUY' : 'SELL',
+            amount: 10
+          })
+        })).json();
+        if (res.success) {
+          setDerivTradeMsg(`✅ Contrat #${res.contractId} acheté !`);
+        } else {
+          setDerivTradeMsg('⚠️ ' + (res.error || 'Erreur Deriv'));
+        }
+      } catch (e) {
+        setDerivTradeMsg('❌ ' + e.message);
+      } finally {
+        setTimeout(() => setDerivTradeMsg(''), 4500);
+      }
+    },
+    title: "Passer cet ordre sur Deriv (Websocket officiel)"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-bolt",
+    style: {
+      marginRight: 5
+    }
+  }), derivTradeMsg || 'Trader Deriv ($10)'), onToJournal && /*#__PURE__*/React.createElement("button", {
     className: "btn sm ghost",
     style: {
       padding: '5px 10px',
@@ -5920,6 +5961,460 @@ function OrderFlowPanel({
   }), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("b", null, "Absorption institutionnelle d\xE9tect\xE9e :"), " ", abs.detail)))));
 }
 
+// ── Modale de Connexion Broker Deriv (API Token + App ID) ───────────────
+function DerivModal({
+  ouvert,
+  onClose,
+  onRefresh
+}) {
+  const [appId, setAppId] = useState('1089');
+  const [token, setToken] = useState('');
+  const [showToken, setShowToken] = useState(false);
+  const [chargement, setChargement] = useState(false);
+  const [statut, setStatut] = useState(null);
+  const [message, setMessage] = useState('');
+  const [erreur, setErreur] = useState('');
+  const rafraichirStatut = useCallback(async () => {
+    try {
+      const res = await (await api('/deriv/status')).json();
+      if (res.success) {
+        setStatut(res);
+        if (res.appId) setAppId(res.appId);
+        if (onRefresh) onRefresh(res);
+      }
+    } catch {}
+  }, [onRefresh]);
+  useEffect(() => {
+    if (ouvert) {
+      rafraichirStatut();
+      setMessage('');
+      setErreur('');
+    }
+  }, [ouvert, rafraichirStatut]);
+  if (!ouvert) return null;
+  const handleConnecter = async e => {
+    e.preventDefault();
+    if (!token.trim()) {
+      setErreur('Veuillez entrer votre Token API Deriv.');
+      return;
+    }
+    setChargement(true);
+    setErreur('');
+    setMessage('');
+    try {
+      const res = await (await api('/deriv/config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          appId: appId.trim() || '1089',
+          apiToken: token.trim()
+        })
+      })).json();
+      if (res.success) {
+        setMessage(res.message || 'Compte Deriv connecté avec succès !');
+        setToken('');
+        await rafraichirStatut();
+      } else {
+        setErreur(res.error || 'Échec de connexion à Deriv.');
+      }
+    } catch (err) {
+      setErreur(err.message || 'Erreur réseau.');
+    } finally {
+      setChargement(false);
+    }
+  };
+  const handleDeconnecter = async () => {
+    setChargement(true);
+    try {
+      await api('/deriv/disconnect', {
+        method: 'POST'
+      });
+      setStatut(null);
+      setMessage('Compte Deriv déconnecté.');
+      await rafraichirStatut();
+    } catch (err) {
+      setErreur(err.message);
+    } finally {
+      setChargement(false);
+    }
+  };
+  const handleActualiserSolde = async () => {
+    setChargement(true);
+    try {
+      const res = await (await api('/deriv/balance')).json();
+      if (res.success && res.account) {
+        setStatut(prev => ({
+          ...prev,
+          account: res.account
+        }));
+        setMessage('Solde actualisé en direct depuis Deriv !');
+        if (onRefresh) onRefresh({
+          ...statut,
+          account: res.account
+        });
+      } else {
+        setErreur(res.error || 'Erreur lors de l\'actualisation');
+      }
+    } catch (err) {
+      setErreur(err.message);
+    } finally {
+      setChargement(false);
+    }
+  };
+  const acc = statut && statut.account;
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'fixed',
+      inset: 0,
+      zIndex: 10000,
+      background: 'rgba(0,0,0,0.82)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "panel",
+    style: {
+      width: '100%',
+      maxWidth: 540,
+      maxHeight: '90vh',
+      display: 'flex',
+      flexDirection: 'column',
+      padding: 0,
+      overflow: 'hidden',
+      boxShadow: '0 25px 50px rgba(0,0,0,.95)',
+      border: '1px solid rgba(56,189,248,.35)',
+      borderRadius: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '14px 18px',
+      borderBottom: '1px solid ' + TT.line,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      background: 'rgba(15,23,42,.85)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 34,
+      height: 34,
+      borderRadius: 8,
+      background: '#ef4444',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: '#fff',
+      fontSize: 16
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-plug"
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("b", {
+    style: {
+      fontSize: 14,
+      color: '#fff'
+    }
+  }, "Connexion Broker Deriv"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--muted)'
+    }
+  }, "Indices synth\xE9tiques (Volatility, Crash, Boom) & Forex 24/7"))), /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost sm",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-xmark"
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '18px 20px',
+      overflowY: 'auto',
+      display: 'grid',
+      gap: 16
+    }
+  }, message && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '9px 12px',
+      borderRadius: 8,
+      background: 'rgba(34,211,138,.12)',
+      border: '1px solid rgba(34,211,138,.3)',
+      color: '#34d399',
+      fontSize: 12
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-check-circle",
+    style: {
+      marginRight: 7
+    }
+  }), message), erreur && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '9px 12px',
+      borderRadius: 8,
+      background: 'rgba(244,63,94,.12)',
+      border: '1px solid rgba(244,63,94,.3)',
+      color: '#f43f5e',
+      fontSize: 12
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-triangle-exclamation",
+    style: {
+      marginRight: 7
+    }
+  }), erreur), statut && statut.connecte && acc ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'rgba(15,23,42,.65)',
+      border: '1px solid rgba(56,189,248,.3)',
+      borderRadius: 10,
+      padding: '16px 18px',
+      display: 'grid',
+      gap: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "badge",
+    style: {
+      background: acc.isVirtual ? 'rgba(245,158,11,.15)' : 'rgba(34,211,138,.15)',
+      color: acc.isVirtual ? '#fbbf24' : '#34d399',
+      border: `1px solid ${acc.isVirtual ? 'rgba(245,158,11,.3)' : 'rgba(34,211,138,.3)'}`,
+      fontSize: 11,
+      fontWeight: 800
+    }
+  }, acc.isVirtual ? 'COMPTE DÉMO (VR)' : 'COMPTE RÉEL (CR)'), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: 'var(--dim)',
+      fontFamily: 'monospace'
+    }
+  }, "ID : ", /*#__PURE__*/React.createElement("b", null, acc.loginid))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-end',
+      borderBottom: '1px solid ' + TT.line,
+      paddingBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--muted)',
+      textTransform: 'uppercase',
+      letterSpacing: '.04em'
+    }
+  }, "Solde en direct"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 26,
+      fontWeight: 900,
+      color: '#38bdf8',
+      fontVariantNumeric: 'tabular-nums',
+      marginTop: 2
+    }
+  }, "$", Number(acc.balance).toFixed(2), " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 14,
+      color: '#94a3b8'
+    }
+  }, acc.currency))), /*#__PURE__*/React.createElement("button", {
+    className: "btn sm",
+    style: {
+      padding: '6px 12px',
+      fontSize: 11
+    },
+    onClick: handleActualiserSolde,
+    disabled: chargement
+  }, /*#__PURE__*/React.createElement("i", {
+    className: `fas fa-rotate ${chargement ? 'fa-spin' : ''}`,
+    style: {
+      marginRight: 6
+    }
+  }), "Actualiser")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: 'var(--dim)',
+      display: 'grid',
+      gap: 4
+    }
+  }, acc.email && /*#__PURE__*/React.createElement("div", null, "Email li\xE9 : ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#e2e8f0'
+    }
+  }, acc.email)), /*#__PURE__*/React.createElement("div", null, "Token actif : ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: 'monospace',
+      color: '#94a3b8'
+    }
+  }, statut.tokenMasque)), /*#__PURE__*/React.createElement("div", null, "App ID : ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: 'monospace',
+      color: '#94a3b8'
+    }
+  }, statut.appId))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'flex-end',
+      marginTop: 6
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn sm ghost",
+    style: {
+      color: '#f43f5e',
+      borderColor: 'rgba(244,63,94,.4)'
+    },
+    onClick: handleDeconnecter,
+    disabled: chargement
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-link-slash",
+    style: {
+      marginRight: 6
+    }
+  }), "D\xE9connecter ce compte"))) :
+  /*#__PURE__*/
+  /* Formulaire de connexion */
+  React.createElement("form", {
+    onSubmit: handleConnecter,
+    style: {
+      display: 'grid',
+      gap: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: {
+      display: 'block',
+      fontSize: 11.5,
+      fontWeight: 700,
+      color: '#e2e8f0',
+      marginBottom: 5
+    }
+  }, "1. Deriv App ID"), /*#__PURE__*/React.createElement("input", {
+    className: "fld",
+    style: {
+      width: '100%',
+      fontFamily: 'monospace'
+    },
+    placeholder: "1089 (par d\xE9faut pour tester)",
+    value: appId,
+    onChange: e => setAppId(e.target.value)
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10.5,
+      color: 'var(--dim)',
+      marginTop: 4
+    }
+  }, "L'identifiant par d\xE9faut ", /*#__PURE__*/React.createElement("code", null, "1089"), " fonctionne directement pour les tests et la d\xE9mo.")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 5
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 11.5,
+      fontWeight: 700,
+      color: '#e2e8f0'
+    }
+  }, "2. Token API Deriv"), /*#__PURE__*/React.createElement("a", {
+    href: "https://app.deriv.com/account/api-token",
+    target: "_blank",
+    rel: "noopener noreferrer",
+    style: {
+      fontSize: 11,
+      color: '#38bdf8',
+      textDecoration: 'none'
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-external-link-alt",
+    style: {
+      marginRight: 4
+    }
+  }), "Cr\xE9er mon Token Deriv")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'relative'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "fld",
+    style: {
+      width: '100%',
+      paddingRight: 38,
+      fontFamily: 'monospace'
+    },
+    type: showToken ? 'text' : 'password',
+    placeholder: "Colle ton token API Deriv ici (ex: a1b2c3d4e5f6)",
+    value: token,
+    onChange: e => setToken(e.target.value)
+  }), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn ghost sm",
+    style: {
+      position: 'absolute',
+      right: 4,
+      top: 4,
+      padding: '4px 8px',
+      color: 'var(--dim)'
+    },
+    onClick: () => setShowToken(!showToken)
+  }, /*#__PURE__*/React.createElement("i", {
+    className: `fas ${showToken ? 'fa-eye-slash' : 'fa-eye'}`
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10.5,
+      color: 'var(--dim)',
+      marginTop: 4
+    }
+  }, "Cr\xE9e ton token avec les autorisations ", /*#__PURE__*/React.createElement("b", null, "Lecture (Read)"), " et ", /*#__PURE__*/React.createElement("b", null, "Trading (Trade)"), " sur ton tableau de bord Deriv.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 6
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "submit",
+    className: "btn primary",
+    style: {
+      width: '100%',
+      padding: '10px 16px',
+      fontSize: 13,
+      justifyContent: 'center'
+    },
+    disabled: chargement
+  }, /*#__PURE__*/React.createElement("i", {
+    className: `fas ${chargement ? 'fa-spinner fa-spin' : 'fa-plug'}`,
+    style: {
+      marginRight: 8
+    }
+  }), chargement ? 'Vérification et connexion en cours…' : 'Connecter mon compte Deriv'))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '12px 14px',
+      borderRadius: 8,
+      background: 'rgba(56,189,248,.05)',
+      border: '1px solid rgba(56,189,248,.15)',
+      fontSize: 11.5,
+      color: '#94a3b8'
+    }
+  }, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#38bdf8',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      marginBottom: 4
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-shield-halved"
+  }), "S\xE9curit\xE9 & Confidentialit\xE9"), "Ton token est chiffr\xE9 et stock\xE9 localement sur ton instance 5TRADE. Les ordres sont pass\xE9s directement entre ton serveur et l'API WebSocket s\xE9curis\xE9e de Deriv sans interm\xE9diaire."))));
+}
+
 // ── Historique des signaux (confirmés / rejetés / expirés) ───────────────
 function SignalHistory({
   journal
@@ -6724,6 +7219,13 @@ function LiveMarket({
   const [actifs, setActifs] = useState([]);
   const [catalogueOuvert, setCatalogueOuvert] = useState(false);
   const [filtreCatalogue, setFiltreCatalogue] = useState('');
+  const [derivModalOuvert, setDerivModalOuvert] = useState(false);
+  const [derivStatut, setDerivStatut] = useState(null);
+  useEffect(() => {
+    api('/deriv/status').then(r => r.json()).then(d => {
+      if (d.success) setDerivStatut(d);
+    }).catch(() => {});
+  }, []);
 
   // Calques visuels SMC interactifs sur le graphique
   const [calqueStructure, setCalqueStructure] = useState(true);
@@ -7131,7 +7633,27 @@ function LiveMarket({
     style: {
       marginRight: 5
     }
-  }), "Catalogue")), actifs.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }), "Catalogue"), /*#__PURE__*/React.createElement("button", {
+    className: "btn sm",
+    style: {
+      padding: '4px 10px',
+      fontSize: 11,
+      background: derivStatut && derivStatut.connecte ? 'rgba(34,211,138,0.18)' : 'rgba(239,68,68,0.15)',
+      color: derivStatut && derivStatut.connecte ? '#34d399' : '#f87171',
+      border: `1px solid ${derivStatut && derivStatut.connecte ? 'rgba(34,211,138,0.4)' : 'rgba(239,68,68,0.4)'}`
+    },
+    onClick: () => setDerivModalOuvert(true),
+    title: "Connecter mon Token et App ID Deriv pour ex\xE9cuter des ordres en direct"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-plug",
+    style: {
+      marginRight: 5
+    }
+  }), derivStatut && derivStatut.connecte ? `Deriv : ${derivStatut.account ? derivStatut.account.loginid : 'Connecté'} ($${Number(derivStatut.account ? derivStatut.account.balance : 0).toFixed(0)})` : 'Broker Deriv (Token)')), /*#__PURE__*/React.createElement(DerivModal, {
+    ouvert: derivModalOuvert,
+    onClose: () => setDerivModalOuvert(false),
+    onRefresh: st => setDerivStatut(st)
+  }), actifs.length === 0 && /*#__PURE__*/React.createElement("div", {
     className: "panel",
     style: {
       padding: 24,
@@ -14053,6 +14575,13 @@ function Dashboard({
   const [history, setHistory] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [derivModalGlobal, setDerivModalGlobal] = useState(false);
+  const [derivStatutGlobal, setDerivStatutGlobal] = useState(null);
+  useEffect(() => {
+    api('/deriv/status').then(r => r.json()).then(d => {
+      if (d.success) setDerivStatutGlobal(d);
+    }).catch(() => {});
+  }, []);
   const load = useCallback(async () => {
     try {
       const [k, h, st] = await Promise.all([api('/knowledge').then(r => r.ok ? r.json() : null), api('/history').then(r => r.ok ? r.json() : null), api('/stats').then(r => r.ok ? r.json() : null)]);
@@ -14232,9 +14761,25 @@ function Dashboard({
     style: {
       display: 'flex',
       alignItems: 'center',
-      gap: 12
+      gap: 10
     }
-  }, /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn sm",
+    style: {
+      padding: '4px 10px',
+      fontSize: 11,
+      background: derivStatutGlobal && derivStatutGlobal.connecte ? 'rgba(34,211,138,0.18)' : 'rgba(239,68,68,0.15)',
+      color: derivStatutGlobal && derivStatutGlobal.connecte ? '#34d399' : '#f87171',
+      border: `1px solid ${derivStatutGlobal && derivStatutGlobal.connecte ? 'rgba(34,211,138,0.4)' : 'rgba(239,68,68,0.4)'}`
+    },
+    onClick: () => setDerivModalGlobal(true),
+    title: "Broker Deriv : Token & App ID"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-plug",
+    style: {
+      marginRight: 5
+    }
+  }), derivStatutGlobal && derivStatutGlobal.connecte ? `Deriv : ${derivStatutGlobal.account ? derivStatutGlobal.account.loginid : 'Connecté'} ($${Number(derivStatutGlobal.account ? derivStatutGlobal.account.balance : 0).toFixed(0)})` : 'Broker Deriv'), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12.5,
       color: 'var(--muted)'
@@ -14381,7 +14926,11 @@ function Dashboard({
     }
   }, /*#__PURE__*/React.createElement("i", {
     className: `fas ${n.icon}`
-  }), n.label))));
+  }), n.label))), /*#__PURE__*/React.createElement(DerivModal, {
+    ouvert: derivModalGlobal,
+    onClose: () => setDerivModalGlobal(false),
+    onRefresh: st => setDerivStatutGlobal(st)
+  }));
 }
 
 /* ══════════════ APP ══════════════ */

@@ -2368,6 +2368,7 @@ function TempsAnalyse({ depuis }) {
 function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provider, providerLabel }) {
   const [copie, setCopie] = useState(false);
   const [demoStatus, setDemoStatus] = useState('');
+  const [derivTradeMsg, setDerivTradeMsg] = useState('');
   const lv = signal && signal.levels ? signal.levels : null;
   const ok = lv && Number.isFinite(Number(lv.entry)) && Number.isFinite(Number(lv.stop));
   if (!ok) {
@@ -2496,6 +2497,34 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
             }} title="Prendre immédiatement ce trade en compte démo">
             <i className="fas fa-play" style={{ marginRight: 5 }}></i>
             {demoStatus || 'Exécuter Démo'}
+          </button>
+
+          <button className="btn sm" style={{ padding: '5px 10px', fontSize: 11, background: '#ef4444', color: '#fff', border: '1px solid #dc2626' }}
+            onClick={async () => {
+              try {
+                setDerivTradeMsg('Envoi Deriv…');
+                const res = await (await api('/deriv/trade', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    symbol: symbol,
+                    direction: achat ? 'BUY' : 'SELL',
+                    amount: 10
+                  })
+                })).json();
+                if (res.success) {
+                  setDerivTradeMsg(`✅ Contrat #${res.contractId} acheté !`);
+                } else {
+                  setDerivTradeMsg('⚠️ ' + (res.error || 'Erreur Deriv'));
+                }
+              } catch (e) {
+                setDerivTradeMsg('❌ ' + e.message);
+              } finally {
+                setTimeout(() => setDerivTradeMsg(''), 4500);
+              }
+            }} title="Passer cet ordre sur Deriv (Websocket officiel)">
+            <i className="fas fa-bolt" style={{ marginRight: 5 }}></i>
+            {derivTradeMsg || 'Trader Deriv ($10)'}
           </button>
 
           {onToJournal && (
@@ -3259,6 +3288,257 @@ function OrderFlowPanel({ report }) {
   );
 }
 
+// ── Modale de Connexion Broker Deriv (API Token + App ID) ───────────────
+function DerivModal({ ouvert, onClose, onRefresh }) {
+  const [appId, setAppId] = useState('1089');
+  const [token, setToken] = useState('');
+  const [showToken, setShowToken] = useState(false);
+  const [chargement, setChargement] = useState(false);
+  const [statut, setStatut] = useState(null);
+  const [message, setMessage] = useState('');
+  const [erreur, setErreur] = useState('');
+
+  const rafraichirStatut = useCallback(async () => {
+    try {
+      const res = await (await api('/deriv/status')).json();
+      if (res.success) {
+        setStatut(res);
+        if (res.appId) setAppId(res.appId);
+        if (onRefresh) onRefresh(res);
+      }
+    } catch {}
+  }, [onRefresh]);
+
+  useEffect(() => {
+    if (ouvert) {
+      rafraichirStatut();
+      setMessage('');
+      setErreur('');
+    }
+  }, [ouvert, rafraichirStatut]);
+
+  if (!ouvert) return null;
+
+  const handleConnecter = async (e) => {
+    e.preventDefault();
+    if (!token.trim()) {
+      setErreur('Veuillez entrer votre Token API Deriv.');
+      return;
+    }
+    setChargement(true);
+    setErreur('');
+    setMessage('');
+    try {
+      const res = await (await api('/deriv/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appId: appId.trim() || '1089', apiToken: token.trim() })
+      })).json();
+
+      if (res.success) {
+        setMessage(res.message || 'Compte Deriv connecté avec succès !');
+        setToken('');
+        await rafraichirStatut();
+      } else {
+        setErreur(res.error || 'Échec de connexion à Deriv.');
+      }
+    } catch (err) {
+      setErreur(err.message || 'Erreur réseau.');
+    } finally {
+      setChargement(false);
+    }
+  };
+
+  const handleDeconnecter = async () => {
+    setChargement(true);
+    try {
+      await api('/deriv/disconnect', { method: 'POST' });
+      setStatut(null);
+      setMessage('Compte Deriv déconnecté.');
+      await rafraichirStatut();
+    } catch (err) {
+      setErreur(err.message);
+    } finally {
+      setChargement(false);
+    }
+  };
+
+  const handleActualiserSolde = async () => {
+    setChargement(true);
+    try {
+      const res = await (await api('/deriv/balance')).json();
+      if (res.success && res.account) {
+        setStatut(prev => ({ ...prev, account: res.account }));
+        setMessage('Solde actualisé en direct depuis Deriv !');
+        if (onRefresh) onRefresh({ ...statut, account: res.account });
+      } else {
+        setErreur(res.error || 'Erreur lors de l\'actualisation');
+      }
+    } catch (err) {
+      setErreur(err.message);
+    } finally {
+      setChargement(false);
+    }
+  };
+
+  const acc = statut && statut.account;
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.82)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+    }}>
+      <div className="panel" style={{
+        width: '100%', maxWidth: 540, maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+        padding: 0, overflow: 'hidden', boxShadow: '0 25px 50px rgba(0,0,0,.95)',
+        border: '1px solid rgba(56,189,248,.35)', borderRadius: 12
+      }}>
+        {/* En-tête de la modale */}
+        <div style={{
+          padding: '14px 18px', borderBottom: '1px solid ' + TT.line,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: 'rgba(15,23,42,.85)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 34, height: 34, borderRadius: 8, background: '#ef4444',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16
+            }}>
+              <i className="fas fa-plug"></i>
+            </div>
+            <div>
+              <b style={{ fontSize: 14, color: '#fff' }}>Connexion Broker Deriv</b>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                Indices synthétiques (Volatility, Crash, Boom) & Forex 24/7
+              </div>
+            </div>
+          </div>
+          <button className="btn ghost sm" onClick={onClose}><i className="fas fa-xmark"></i></button>
+        </div>
+
+        {/* Corps */}
+        <div style={{ padding: '18px 20px', overflowY: 'auto', display: 'grid', gap: 16 }}>
+          {message && (
+            <div style={{ padding: '9px 12px', borderRadius: 8, background: 'rgba(34,211,138,.12)', border: '1px solid rgba(34,211,138,.3)', color: '#34d399', fontSize: 12 }}>
+              <i className="fas fa-check-circle" style={{ marginRight: 7 }}></i>{message}
+            </div>
+          )}
+          {erreur && (
+            <div style={{ padding: '9px 12px', borderRadius: 8, background: 'rgba(244,63,94,.12)', border: '1px solid rgba(244,63,94,.3)', color: '#f43f5e', fontSize: 12 }}>
+              <i className="fas fa-triangle-exclamation" style={{ marginRight: 7 }}></i>{erreur}
+            </div>
+          )}
+
+          {/* Si un compte est connecté */}
+          {statut && statut.connecte && acc ? (
+            <div style={{
+              background: 'rgba(15,23,42,.65)', border: '1px solid rgba(56,189,248,.3)',
+              borderRadius: 10, padding: '16px 18px', display: 'grid', gap: 12
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <span className="badge" style={{
+                  background: acc.isVirtual ? 'rgba(245,158,11,.15)' : 'rgba(34,211,138,.15)',
+                  color: acc.isVirtual ? '#fbbf24' : '#34d399',
+                  border: `1px solid ${acc.isVirtual ? 'rgba(245,158,11,.3)' : 'rgba(34,211,138,.3)'}`,
+                  fontSize: 11, fontWeight: 800
+                }}>
+                  {acc.isVirtual ? 'COMPTE DÉMO (VR)' : 'COMPTE RÉEL (CR)'}
+                </span>
+                <span style={{ fontSize: 12, color: 'var(--dim)', fontFamily: 'monospace' }}>
+                  ID : <b>{acc.loginid}</b>
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid ' + TT.line, paddingBottom: 12 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Solde en direct</div>
+                  <div style={{ fontSize: 26, fontWeight: 900, color: '#38bdf8', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+                    ${Number(acc.balance).toFixed(2)} <span style={{ fontSize: 14, color: '#94a3b8' }}>{acc.currency}</span>
+                  </div>
+                </div>
+                <button className="btn sm" style={{ padding: '6px 12px', fontSize: 11 }}
+                  onClick={handleActualiserSolde} disabled={chargement}>
+                  <i className={`fas fa-rotate ${chargement ? 'fa-spin' : ''}`} style={{ marginRight: 6 }}></i>Actualiser
+                </button>
+              </div>
+
+              <div style={{ fontSize: 11.5, color: 'var(--dim)', display: 'grid', gap: 4 }}>
+                {acc.email && <div>Email lié : <b style={{ color: '#e2e8f0' }}>{acc.email}</b></div>}
+                <div>Token actif : <span style={{ fontFamily: 'monospace', color: '#94a3b8' }}>{statut.tokenMasque}</span></div>
+                <div>App ID : <span style={{ fontFamily: 'monospace', color: '#94a3b8' }}>{statut.appId}</span></div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+                <button className="btn sm ghost" style={{ color: '#f43f5e', borderColor: 'rgba(244,63,94,.4)' }}
+                  onClick={handleDeconnecter} disabled={chargement}>
+                  <i className="fas fa-link-slash" style={{ marginRight: 6 }}></i>Déconnecter ce compte
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Formulaire de connexion */
+            <form onSubmit={handleConnecter} style={{ display: 'grid', gap: 14 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: '#e2e8f0', marginBottom: 5 }}>
+                  1. Deriv App ID
+                </label>
+                <input className="fld" style={{ width: '100%', fontFamily: 'monospace' }}
+                  placeholder="1089 (par défaut pour tester)"
+                  value={appId} onChange={e => setAppId(e.target.value)} />
+                <div style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4 }}>
+                  L'identifiant par défaut <code>1089</code> fonctionne directement pour les tests et la démo.
+                </div>
+              </div>
+
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                  <label style={{ fontSize: 11.5, fontWeight: 700, color: '#e2e8f0' }}>
+                    2. Token API Deriv
+                  </label>
+                  <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noopener noreferrer"
+                    style={{ fontSize: 11, color: '#38bdf8', textDecoration: 'none' }}>
+                    <i className="fas fa-external-link-alt" style={{ marginRight: 4 }}></i>Créer mon Token Deriv
+                  </a>
+                </div>
+                <div style={{ position: 'relative' }}>
+                  <input className="fld" style={{ width: '100%', paddingRight: 38, fontFamily: 'monospace' }}
+                    type={showToken ? 'text' : 'password'}
+                    placeholder="Colle ton token API Deriv ici (ex: a1b2c3d4e5f6)"
+                    value={token} onChange={e => setToken(e.target.value)} />
+                  <button type="button" className="btn ghost sm"
+                    style={{ position: 'absolute', right: 4, top: 4, padding: '4px 8px', color: 'var(--dim)' }}
+                    onClick={() => setShowToken(!showToken)}>
+                    <i className={`fas ${showToken ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                  </button>
+                </div>
+                <div style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4 }}>
+                  Crée ton token avec les autorisations <b>Lecture (Read)</b> et <b>Trading (Trade)</b> sur ton tableau de bord Deriv.
+                </div>
+              </div>
+
+              <div style={{ marginTop: 6 }}>
+                <button type="submit" className="btn primary" style={{ width: '100%', padding: '10px 16px', fontSize: 13, justifyContent: 'center' }}
+                  disabled={chargement}>
+                  <i className={`fas ${chargement ? 'fa-spinner fa-spin' : 'fa-plug'}`} style={{ marginRight: 8 }}></i>
+                  {chargement ? 'Vérification et connexion en cours…' : 'Connecter mon compte Deriv'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Guide d'aide */}
+          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'rgba(56,189,248,.05)', border: '1px solid rgba(56,189,248,.15)', fontSize: 11.5, color: '#94a3b8' }}>
+            <b style={{ color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <i className="fas fa-shield-halved"></i>Sécurité & Confidentialité
+            </b>
+            Ton token est chiffré et stocké localement sur ton instance 5TRADE. Les ordres sont passés directement entre ton serveur et l'API WebSocket sécurisée de Deriv sans intermédiaire.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Historique des signaux (confirmés / rejetés / expirés) ───────────────
 function SignalHistory({ journal }) {
   const RES = {
@@ -3758,6 +4038,12 @@ function LiveMarket({ onToJournal }) {
   const [actifs, setActifs] = useState([]);
   const [catalogueOuvert, setCatalogueOuvert] = useState(false);
   const [filtreCatalogue, setFiltreCatalogue] = useState('');
+  const [derivModalOuvert, setDerivModalOuvert] = useState(false);
+  const [derivStatut, setDerivStatut] = useState(null);
+
+  useEffect(() => {
+    api('/deriv/status').then(r => r.json()).then(d => { if (d.success) setDerivStatut(d); }).catch(() => {});
+  }, []);
 
   // Calques visuels SMC interactifs sur le graphique
   const [calqueStructure, setCalqueStructure] = useState(true);
@@ -4059,7 +4345,23 @@ function LiveMarket({ onToJournal }) {
           onClick={() => setCatalogueOuvert(true)} title="Ajouter XAUUSD, des indices Deriv ou du Forex depuis le catalogue">
           <i className="fas fa-plus" style={{ marginRight: 5 }}></i>Catalogue
         </button>
+
+        <button className="btn sm" style={{
+          padding: '4px 10px', fontSize: 11,
+          background: derivStatut && derivStatut.connecte ? 'rgba(34,211,138,0.18)' : 'rgba(239,68,68,0.15)',
+          color: derivStatut && derivStatut.connecte ? '#34d399' : '#f87171',
+          border: `1px solid ${derivStatut && derivStatut.connecte ? 'rgba(34,211,138,0.4)' : 'rgba(239,68,68,0.4)'}`
+        }}
+          onClick={() => setDerivModalOuvert(true)}
+          title="Connecter mon Token et App ID Deriv pour exécuter des ordres en direct">
+          <i className="fas fa-plug" style={{ marginRight: 5 }}></i>
+          {derivStatut && derivStatut.connecte
+            ? `Deriv : ${derivStatut.account ? derivStatut.account.loginid : 'Connecté'} ($${Number(derivStatut.account ? derivStatut.account.balance : 0).toFixed(0)})`
+            : 'Broker Deriv (Token)'}
+        </button>
       </div>
+
+      <DerivModal ouvert={derivModalOuvert} onClose={() => setDerivModalOuvert(false)} onRefresh={st => setDerivStatut(st)} />
 
       {actifs.length === 0 && (
         <div className="panel" style={{ padding: 24, textAlign: 'center', marginBottom: 12, borderColor: 'rgba(245,158,11,0.4)', background: 'rgba(245,158,11,0.06)' }}>
@@ -7819,6 +8121,12 @@ function Dashboard({ user, onLogout }) {
   const [history, setHistory] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [derivModalGlobal, setDerivModalGlobal] = useState(false);
+  const [derivStatutGlobal, setDerivStatutGlobal] = useState(null);
+
+  useEffect(() => {
+    api('/deriv/status').then(r => r.json()).then(d => { if (d.success) setDerivStatutGlobal(d); }).catch(() => {});
+  }, []);
 
 
   const load = useCallback(async () => {
@@ -7921,7 +8229,18 @@ function Dashboard({ user, onLogout }) {
                     </span>
                   )}
                 </div>
-                <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                  <button className="btn sm" style={{
+                    padding: '4px 10px', fontSize: 11,
+                    background: derivStatutGlobal && derivStatutGlobal.connecte ? 'rgba(34,211,138,0.18)' : 'rgba(239,68,68,0.15)',
+                    color: derivStatutGlobal && derivStatutGlobal.connecte ? '#34d399' : '#f87171',
+                    border: `1px solid ${derivStatutGlobal && derivStatutGlobal.connecte ? 'rgba(34,211,138,0.4)' : 'rgba(239,68,68,0.4)'}`
+                  }} onClick={() => setDerivModalGlobal(true)} title="Broker Deriv : Token & App ID">
+                    <i className="fas fa-plug" style={{ marginRight: 5 }}></i>
+                    {derivStatutGlobal && derivStatutGlobal.connecte
+                      ? `Deriv : ${derivStatutGlobal.account ? derivStatutGlobal.account.loginid : 'Connecté'} ($${Number(derivStatutGlobal.account ? derivStatutGlobal.account.balance : 0).toFixed(0)})`
+                      : 'Broker Deriv'}
+                  </button>
                   <span style={{ fontSize:12.5, color:'var(--muted)' }}>
                     <i className="fas fa-user-astronaut" style={{ marginRight:6 }}></i>
                     {user.username}
@@ -8009,6 +8328,8 @@ function Dashboard({ user, onLogout }) {
           ))}
         </div>
       )}
+
+      <DerivModal ouvert={derivModalGlobal} onClose={() => setDerivModalGlobal(false)} onRefresh={st => setDerivStatutGlobal(st)} />
     </div>
   );
 }

@@ -2546,6 +2546,80 @@ app.post('/api/trades', requireAuth, async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// ─── Connecteur Broker Deriv (WebSocket API v3) ───
+const DerivBroker = require('./deriv/client');
+
+app.get('/api/deriv/status', requireAuth, async (req, res) => {
+  try {
+    const status = await DerivBroker.obtenirStatut();
+    res.json({ success: true, ...status });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/deriv/config', requireAuth, async (req, res) => {
+  try {
+    const { appId, apiToken } = req.body || {};
+    if (!apiToken) {
+      return res.status(400).json({ success: false, error: 'Token API Deriv requis' });
+    }
+    const r = await DerivBroker.enregistrer(appId, apiToken);
+    if (!r.success) {
+      return res.status(400).json(r);
+    }
+    res.json(r);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.get('/api/deriv/balance', requireAuth, async (req, res) => {
+  try {
+    const account = await DerivBroker.rafraichirSolde();
+    res.json({ success: true, account });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/deriv/disconnect', requireAuth, async (req, res) => {
+  try {
+    const r = await DerivBroker.deconnecter();
+    res.json(r);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/deriv/trade', requireAuth, async (req, res) => {
+  try {
+    const { symbol, direction, amount, type } = req.body || {};
+    if (!symbol) return res.status(400).json({ success: false, error: 'Symbole requis' });
+    const r = await DerivBroker.executerTrade({ symbol, direction, amount, type });
+    if (!r.success) {
+      return res.status(400).json(r);
+    }
+    // Enregistre aussi le trade dans le journal interne 5TRADE
+    try {
+      const tradeInterne = {
+        id: 'deriv-' + r.contractId,
+        pair: symbol,
+        direction: (direction === 'BUY' || direction === 'long') ? 'BUY' : 'SELL',
+        entry: r.buyPrice,
+        status: 'open',
+        notes: `Ordre direct Deriv (Contrat #${r.contractId})`,
+        openedAt: new Date().toISOString()
+      };
+      await DB.saveTradeRecord(tradeInterne);
+    } catch {}
+
+    res.json(r);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // ─── Dashboard temps réel ───
 app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
