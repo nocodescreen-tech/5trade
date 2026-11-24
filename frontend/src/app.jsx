@@ -1667,17 +1667,24 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report, calqu
   // Repère du signal sur la bougie concernée
   useEffect(() => {
     const { series } = api.current;
-    if (!series || !signal || !signal.at) return;
-    const buy = signal.direction === 'BUY';
+    if (!series) return;
+    if (!signal) {
+      try { series.setMarkers([]); } catch (e) {}
+      return;
+    }
+    const buy = signal.direction === 'BUY' || signal.sens === 'long' || signal.direction === 'long';
+    const tAt = signal.at || signal.timestamp || (candles && candles.length ? candles[candles.length - 1].time * 1000 : null);
+    if (!tAt) return;
     try {
-      series.setMarkers([{ time: Math.floor(signal.at / 1000),
+      series.setMarkers([{
+        time: Math.floor(tAt / 1000),
         position: buy ? 'belowBar' : 'aboveBar',
-        color: signal.status === 'confirme' && signal.levels ? (buy ? '#22d38a' : '#f2545b') : '#64748b',
+        color: signal.status === 'confirme' && signal.levels ? (buy ? '#22d38a' : '#f2545b') : '#94a3b8',
         shape: buy ? 'arrowUp' : 'arrowDown',
-        // Gris = règles d'accord SANS niveaux publiés, donc rien à exécuter.
-        text: (signal.status === 'confirme' && signal.levels ? '' : 'règles ') + (buy ? 'ACHAT' : 'VENTE') }]);
+        text: (signal.status === 'confirme' && signal.levels ? 'SETUP ' : 'RÈGLES ') + (buy ? 'ACHAT' : 'VENTE')
+      }]);
     } catch (e) {}
-  }, [signal]);
+  }, [signal, candles]);
 
   // ── Calque de zones : OB, FVG, liquidité, premium/discount, OTE ──
   // Tout est redessiné quand les données changent, quand on zoome ou qu'on
@@ -1859,6 +1866,75 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report, calqu
         }
       }
 
+      // Tracé visuel du setup de trade institutionnel (Entrée, SL, TP1, TP2)
+      if (calques.niveaux !== false && signal && signal.levels) {
+        const lv = signal.levels;
+        const e = Number(lv.entry), sl = Number(lv.stop), tp1 = Number(lv.target1), tp2 = Number(lv.target2);
+        const yE = Number.isFinite(e) ? Y(e) : null;
+        const ySl = Number.isFinite(sl) ? Y(sl) : null;
+        const yTp1 = Number.isFinite(tp1) ? Y(tp1) : null;
+        const yTp2 = Number.isFinite(tp2) ? Y(tp2) : null;
+        const isLong = signal.sens === 'long' || signal.direction === 'BUY' || signal.direction === 'long';
+
+        // Zones translucides de risque et de gain
+        if (yE !== null && ySl !== null) {
+          ctx.fillStyle = 'rgba(242, 84, 91, 0.07)';
+          ctx.fillRect(0, Math.min(yE, ySl), w, Math.abs(ySl - yE));
+        }
+        if (yE !== null && yTp1 !== null) {
+          ctx.fillStyle = 'rgba(34, 211, 138, 0.07)';
+          ctx.fillRect(0, Math.min(yE, yTp1), w, Math.abs(yTp1 - yE));
+        }
+
+        // Ligne Stop Loss
+        if (ySl !== null && ySl >= 0 && ySl <= h) {
+          ctx.strokeStyle = '#f43f5e';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath(); ctx.moveTo(0, ySl + 0.5); ctx.lineTo(w, ySl + 0.5); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = '#f43f5e';
+          ctx.font = 'bold 10px monospace';
+          ctx.fillText(`🛑 STOP LOSS ${sl.toFixed(2)}`, w - 165, ySl - 4);
+        }
+
+        // Ligne Entrée
+        if (yE !== null && yE >= 0 && yE <= h) {
+          ctx.strokeStyle = isLong ? '#38bdf8' : '#fb923c';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 3]);
+          ctx.beginPath(); ctx.moveTo(0, yE + 0.5); ctx.lineTo(w, yE + 0.5); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = isLong ? '#38bdf8' : '#fb923c';
+          ctx.font = 'bold 10.5px monospace';
+          ctx.fillText(`🎯 ENTRÉE ${isLong ? 'BUY' : 'SELL'} ${e.toFixed(2)}`, w - 185, yE - 4);
+        }
+
+        // Ligne TP1
+        if (yTp1 !== null && yTp1 >= 0 && yTp1 <= h) {
+          ctx.strokeStyle = '#10b981';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 2]);
+          ctx.beginPath(); ctx.moveTo(0, yTp1 + 0.5); ctx.lineTo(w, yTp1 + 0.5); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = '#10b981';
+          ctx.font = 'bold 10px monospace';
+          ctx.fillText(`💰 TP1 ${tp1.toFixed(2)}`, w - 145, yTp1 - 4);
+        }
+
+        // Ligne TP2
+        if (yTp2 !== null && yTp2 >= 0 && yTp2 <= h) {
+          ctx.strokeStyle = '#059669';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([2, 4]);
+          ctx.beginPath(); ctx.moveTo(0, yTp2 + 0.5); ctx.lineTo(w, yTp2 + 0.5); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = '#059669';
+          ctx.font = '9.5px monospace';
+          ctx.fillText(`🏆 TP2 ${tp2.toFixed(2)}`, w - 145, yTp2 - 4);
+        }
+      }
+
       // On ne declenche un rendu que si le compte change : redessiner au zoom ne
       // doit pas provoquer une cascade de rendus React.
       const cle = `${compte.ob}-${compte.fvg}-${compte.liq}-${compte.sweep}`;
@@ -1883,7 +1959,7 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report, calqu
       try { if (sub) chart.timeScale().unsubscribeVisibleLogicalRangeChange(sub); } catch (e) {}
       api.current.dessiner = null;
     };
-  }, [candles, report, levels, calques.zones, calques.structure, calques.sweeps, calques.niveaux]);
+  }, [candles, report, levels, signal, calques.zones, calques.structure, calques.sweeps, calques.niveaux, calques.orderflow]);
 
   const reset = () => { try { api.current.chart.timeScale().fitContent(); } catch (e) {} };
 
@@ -2295,139 +2371,163 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
   const lv = signal && signal.levels ? signal.levels : null;
   const ok = lv && Number.isFinite(Number(lv.entry)) && Number.isFinite(Number(lv.stop));
   if (!ok) {
-    // Deux situations différentes, deux messages différents : « le moteur
-    // cherche encore » n'est pas « le moteur a conclu qu'il n'y a rien ».
-    // Les confondre affichait un verdict pendant l'analyse.
-    // « En cours » veut dire : le moteur n'a pas encore répondu. Si le moteur a
-    // répondu NO_TRADE, ce n'est PAS en cours — c'est une conclusion, et elle a
-    // une raison. Annoncer « analyse en cours » dans ce cas laissait l'écran
-    // tourner indéfiniment sur une analyse terminée.
-    // Le repli SSE porte la même information : sans lui, la bande affichait
-    // NO TRADE (via le flux) pendant que cette carte affichait « analyse en
-    // cours » (via la requête REST pas encore revenue).
     const enCours = !decision;
     const motifMoteur = decision
       ? (signal && signal.levels ? null : (decision.raison || decision.decision || 'aucun setup exécutable'))
       : null;
     return (
-      <div className="panel" style={{ padding: '11px 14px', marginBottom: 12,
-        borderColor: 'rgba(148,163,184,.3)' }}>
-        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-          <i className={`fas ${enCours ? 'fa-spinner fa-spin' : 'fa-circle-info'}`}
-            style={{ marginRight: 7, color: TT.neu }}></i>
-          {enCours
-            ? <React.Fragment>
-                Analyse du marché en cours : les niveaux ne sont pas encore calculés.
-                <TempsAnalyse depuis={window.__debutAnalyse} />
-              </React.Fragment>
-            : <>Aucun setup exécutable — {motifMoteur}. Le moteur ne publie pas de trade qu'il ne peut pas chiffrer.</>}
+      <div className="panel" style={{ padding: '14px 16px', marginBottom: 12,
+        background: 'rgba(15,23,42,.6)', borderColor: 'rgba(148,163,184,.25)', borderRadius: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <i className={`fas ${enCours ? 'fa-spinner fa-spin' : 'fa-shield-halved'}`}
+            style={{ fontSize: 16, color: enCours ? '#38bdf8' : '#94a3b8' }}></i>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: '#e2e8f0' }}>
+              {enCours ? 'Analyse du marché en cours…' : 'Aucun setup exécutable chiffré'}
+              {enCours && <TempsAnalyse depuis={window.__debutAnalyse} />}
+            </div>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+              {enCours
+                ? 'Le moteur évalue les bougies et structures institutionnelles…'
+                : `Motif : ${motifMoteur}. 5TRADE ne déclenche un signal que lorsque les 4 niveaux stricts (Entrée, SL, TP1, TP2) sont garantis.`}
+            </div>
+          </div>
         </div>
       </div>
     );
   }
-  const achat = (signal.sens === 'long') || sens === 'BUY';
-  const col = achat ? TT.ok : TT.bad;
-  const risque = Math.abs(Number(lv.entry) - Number(lv.stop));
+
+  const achat = (signal.sens === 'long') || sens === 'BUY' || signal.direction === 'BUY' || signal.direction === 'long';
+  const col = achat ? '#10b981' : '#f43f5e';
+  const bgCol = achat ? 'rgba(16,185,129,.12)' : 'rgba(244,63,94,.12)';
+  const bordCol = achat ? 'rgba(16,185,129,.4)' : 'rgba(244,63,94,.4)';
+  const distSL = Math.abs(Number(lv.entry) - Number(lv.stop));
+  const distTP1 = Number.isFinite(Number(lv.target1)) ? Math.abs(Number(lv.target1) - Number(lv.entry)) : null;
+  const distTP2 = Number.isFinite(Number(lv.target2)) ? Math.abs(Number(lv.target2) - Number(lv.entry)) : null;
   const rr = Number.isFinite(Number(signal.rr)) && Number(signal.rr) > 0
     ? Number(signal.rr)
-    : (Number.isFinite(Number(lv.target1)) && risque > 0
-      ? Math.abs(Number(lv.target1) - Number(lv.entry)) / risque : null);
+    : (distTP1 && distSL > 0 ? distTP1 / distSL : null);
 
-  const ligne = (k, v, c) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10,
-      padding: '5px 0', borderBottom: '1px solid ' + TT.line }}>
-      <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{k}</span>
-      <b style={{ fontSize: 12.5, color: c || '#e2e8f0', fontVariantNumeric: 'tabular-nums' }}>{v}</b>
+  const cardNiveau = (titre, valeur, sousTitre, couleur, badge) => (
+    <div style={{
+      background: 'rgba(15,23,42,.65)', border: `1px solid ${couleur ? couleur + '44' : 'rgba(148,163,184,.15)'}`,
+      borderRadius: 8, padding: '10px 12px', minWidth: 120
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+        <span style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.05em', color: '#94a3b8' }}>
+          {titre}
+        </span>
+        {badge && <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: couleur + '22', color: couleur }}>{badge}</span>}
+      </div>
+      <div style={{ fontSize: 16, fontWeight: 900, color: couleur || '#f8fafc', fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em' }}>
+        {valeur}
+      </div>
+      {sousTitre && (
+        <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+          {sousTitre}
+        </div>
+      )}
     </div>
   );
 
   return (
-    <div className="panel" style={{ padding: '13px 15px', marginBottom: 12, borderColor: col + '55' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-        <i className="fas fa-crosshairs" style={{ color: col }}></i>
-        <b style={{ fontSize: 13 }}>Setup de trade</b>
-        <TtPill tone={achat ? 'ok' : 'bad'}>{achat ? 'ACHAT' : 'VENTE'}</TtPill>
-        {signal.nom && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{signal.nom}</span>}
-        <span style={{ flex: '1 1 auto' }}></span>
-        {onToJournal && (
-          <button className="btn ghost sm" style={{ padding: '5px 9px' }}
-            onClick={() => onToJournal({
-              pair: symbol, direction: achat ? 'BUY' : 'SELL',
-              entry: Number(lv.entry), sl: Number(lv.stop),
-              tp: Number.isFinite(Number(lv.target1)) ? Number(lv.target1) : null,
-              timeframe: tf, provider, providerLabel,
-              signalStatus: 'confirme', signalStrength: signal.force,
-              notes: `Setup ${achat ? 'achat' : 'vente'} — ${signal.nom || 'moteur'}`
-            })}
-            title="Ouvrir le journal avec ce setup pré-rempli">
-            <i className="fas fa-floppy-disk"></i>Journal
+    <div className="panel" style={{ padding: 0, marginBottom: 12, overflow: 'hidden', borderColor: bordCol, borderRadius: 10 }}>
+      {/* En-tête Setup en grand */}
+      <div style={{ padding: '14px 16px', background: bgCol, borderBottom: `1px solid ${bordCol}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            width: 38, height: 38, borderRadius: 8, background: col, display: 'flex',
+            alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 18
+          }}>
+            <i className={`fas ${achat ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down'}`}></i>
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 16, fontWeight: 900, color: col, letterSpacing: '.02em' }}>
+                SETUP {achat ? 'ACHAT (BUY)' : 'VENTE (SELL)'}
+              </span>
+              {rr && (
+                <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 7px', borderRadius: 5, background: 'rgba(16,185,129,.2)', color: '#34d399', border: '1px solid rgba(16,185,129,.4)' }}>
+                  R:R 1 : {rr.toFixed(2)}
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: '#cbd5e1' }}>
+              {symbol} · {tf} · {signal.nom || 'Modèle SMC & Order Flow'}
+            </div>
+          </div>
+        </div>
+
+        {/* Boutons d'action clairs */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <button className="btn sm" style={{ padding: '5px 10px', fontSize: 11, background: 'rgba(56,189,248,.18)', color: '#38bdf8', border: '1px solid rgba(56,189,248,.4)' }}
+            onClick={() => {
+              const texte = `${symbol} ${achat ? 'BUY' : 'SELL'} @ ${lv.entry} | SL: ${lv.stop} | TP1: ${lv.target1} | TP2: ${lv.target2 || '—'}`;
+              navigator.clipboard.writeText(texte);
+              setCopie(true);
+              setTimeout(() => setCopie(false), 2500);
+            }} title="Copier les paramètres du trade pour MetaTrader 5">
+            <i className={`fas ${copie ? 'fa-check' : 'fa-copy'}`} style={{ marginRight: 5 }}></i>
+            {copie ? 'Copié MT5 !' : 'Copier MT5'}
           </button>
-        )}
-        <button className="btn ghost sm" style={{ padding: '5px 9px', color: '#60a5fa' }}
-          onClick={() => {
-            const texte = `${symbol} ${achat ? 'BUY' : 'SELL'} @ ${lv.entry} | SL: ${lv.stop} | TP1: ${lv.target1} | TP2: ${lv.target2 || '—'}`;
-            navigator.clipboard.writeText(texte);
-            setCopie(true);
-            setTimeout(() => setCopie(false), 2500);
-          }}
-          title="Copier les paramètres du trade pour MetaTrader 5">
-          <i className={`fas ${copie ? 'fa-check' : 'fa-copy'}`}></i>
-          {copie ? 'Copié MT5 !' : 'Copier MT5'}
-        </button>
-        <button className="btn ghost sm" style={{ padding: '5px 9px', color: '#34d399' }}
-          onClick={async () => {
-            try {
-              setDemoStatus('En cours…');
-              const res = await (await api('/trades', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  pair: symbol,
-                  direction: achat ? 'BUY' : 'SELL',
-                  entry: Number(lv.entry),
-                  sl: Number(lv.stop),
-                  tp: Number.isFinite(Number(lv.target1)) ? Number(lv.target1) : null,
-                  status: 'open',
-                  notes: `Trade démo automatique — ${signal.nom || 'moteur'}`
-                })
-              })).json();
-              if (res.success) {
-                setDemoStatus('✅ Pris en démo !');
-              } else {
-                setDemoStatus('⚠️ Erreur');
+
+          <button className="btn sm" style={{ padding: '5px 10px', fontSize: 11, background: 'rgba(16,185,129,.18)', color: '#34d399', border: '1px solid rgba(16,185,129,.4)' }}
+            onClick={async () => {
+              try {
+                setDemoStatus('En cours…');
+                const res = await (await api('/trades', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    pair: symbol, direction: achat ? 'BUY' : 'SELL',
+                    entry: Number(lv.entry), sl: Number(lv.stop),
+                    tp: Number.isFinite(Number(lv.target1)) ? Number(lv.target1) : null,
+                    status: 'open', notes: `Trade démo automatique — ${signal.nom || 'moteur'}`
+                  })
+                })).json();
+                if (res.success) setDemoStatus('✅ Pris en démo !');
+                else setDemoStatus('⚠️ Erreur');
+              } catch {
+                setDemoStatus('❌ Erreur');
+              } finally {
+                setTimeout(() => setDemoStatus(''), 3000);
               }
-            } catch {
-              setDemoStatus('❌ Erreur');
-            } finally {
-              setTimeout(() => setDemoStatus(''), 3000);
-            }
-          }}
-          title="Prendre immédiatement ce trade en compte démo pour le suivre dans le journal">
-          <i className="fas fa-play"></i>
-          {demoStatus || 'Prendre en Démo'}
-        </button>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '0 18px' }}>
-        <div>
-          {ligne('Entrée', ttFmt(lv.entry))}
-          {ligne('Invalidation', ttFmt(lv.stop), TT.bad)}
-        </div>
-        <div>
-          {ligne('Objectif 1', ttFmt(lv.target1), TT.ok)}
-          {ligne('Objectif 2', ttFmt(lv.target2), TT.ok)}
-        </div>
-        <div>
-          {ligne('Risque / Rendement', rr ? rr.toFixed(2) : '—', rr ? '#e2e8f0' : 'var(--dim)')}
-          {ligne('R attendu (modèle)',
-            signal.modele && Number.isFinite(signal.modele.rAttendu)
-              ? `${signal.modele.rAttendu > 0 ? '+' : ''}${signal.modele.rAttendu} R`
-              : 'non couvert',
-            signal.modele && Number.isFinite(signal.modele.rAttendu) && signal.modele.rAttendu > 0 ? TT.ok : 'var(--dim)')}
+            }} title="Prendre immédiatement ce trade en compte démo">
+            <i className="fas fa-play" style={{ marginRight: 5 }}></i>
+            {demoStatus || 'Exécuter Démo'}
+          </button>
+
+          {onToJournal && (
+            <button className="btn sm ghost" style={{ padding: '5px 10px', fontSize: 11 }}
+              onClick={() => onToJournal({
+                pair: symbol, direction: achat ? 'BUY' : 'SELL',
+                entry: Number(lv.entry), sl: Number(lv.stop),
+                tp: Number.isFinite(Number(lv.target1)) ? Number(lv.target1) : null,
+                timeframe: tf, provider, providerLabel,
+                signalStatus: 'confirme', signalStrength: signal.force,
+                notes: `Setup ${achat ? 'achat' : 'vente'} — ${signal.nom || 'moteur'}`
+              })} title="Enregistrer dans le journal de trading">
+              <i className="fas fa-floppy-disk" style={{ marginRight: 5 }}></i>Journal
+            </button>
+          )}
         </div>
       </div>
-      <p style={{ margin: '8px 0 0', fontSize: 10.5, color: 'var(--dim)' }}>
-        Obj 3 non affiché : le moteur ne le calcule pas. Aucun niveau n'est estimé.
-      </p>
+
+      {/* Grille des 4 Niveaux Chiffrés Clairs */}
+      <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
+        {cardNiveau('1. Entrée', ttFmt(lv.entry), 'Déclenchement précis', '#38bdf8', 'ORDRE')}
+        {cardNiveau('2. Stop Loss', ttFmt(lv.stop), `Risque : ${distSL.toFixed(2)} pts`, '#f43f5e', 'INVALIDATION')}
+        {cardNiveau('3. Objectif 1', ttFmt(lv.target1), distTP1 ? `Gain : +${distTP1.toFixed(2)} pts` : 'Objectif direct', '#10b981', 'TP1 (50%)')}
+        {lv.target2 ? cardNiveau('4. Objectif 2', ttFmt(lv.target2), distTP2 ? `Gain : +${distTP2.toFixed(2)} pts` : 'Extension de tendance', '#059669', 'TP2 (50%)') : null}
+      </div>
+
+      {/* Barre de synthèse & Rendu */}
+      <div style={{ padding: '8px 16px', background: 'rgba(15,23,42,.4)', borderTop: '1px solid rgba(148,163,184,.1)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, fontSize: 11, color: '#94a3b8' }}>
+        <span>Sécurisation : passage du stop à <b>Break-Even (BE)</b> dès l'atteinte du TP1.</span>
+        <span>Visualisation : niveaux tracés en direct sur le graphique ci-contre.</span>
+      </div>
     </div>
   );
 }
@@ -3083,50 +3183,74 @@ function OrderFlowPanel({ report }) {
   const deltas = Array.isArray(of.delta) ? of.delta : [];
   const dernierDelta = deltas.length ? deltas[deltas.length - 1] : 0;
   const deltaCumule = deltas.slice(-20).reduce((acc, v) => acc + (Number(v) || 0), 0);
-  const deltaCol = deltaCumule > 0 ? TT.ok : deltaCumule < 0 ? TT.bad : TT.warn;
-  const deltaLabel = deltaCumule > 0 ? 'ACHETEUR (Agressif)' : deltaCumule < 0 ? 'VENDEUR (Agressif)' : 'ÉQUILIBRÉ';
+  const estAcheteur = deltaCumule > 0 && dernierDelta >= 0;
+  const estVendeur = deltaCumule < 0 && dernierDelta <= 0;
+  const fluxTone = estAcheteur ? '#10b981' : estVendeur ? '#f43f5e' : '#38bdf8';
+  const fluxBg = estAcheteur ? 'rgba(16,185,129,.1)' : estVendeur ? 'rgba(244,63,94,.1)' : 'rgba(56,189,248,.1)';
+  const fluxTitre = estAcheteur
+    ? '🟢 FLUX ACHETEUR INSTITUTIONNEL (Accumulation)'
+    : estVendeur
+      ? '🔴 FLUX VENDEUR INSTITUTIONNEL (Distribution)'
+      : '⚪ FLUX VOLUMÉTRIQUE ÉQUILIBRÉ / PHASE D\'ATTENTE';
 
-  const cell = (label, valeur, couleur) => (
-    <div style={{ minWidth: 110 }}>
-      <TtLabel>{label}</TtLabel>
-      <div style={{ fontSize: 12.5, fontWeight: 700, color: couleur || '#e2e8f0', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+  const cardMeta = (label, valeur, couleur, sous) => (
+    <div style={{
+      background: 'rgba(15,23,42,.65)', border: `1px solid ${couleur ? couleur + '33' : 'rgba(148,163,184,.15)'}`,
+      borderRadius: 8, padding: '10px 12px', flex: '1 1 120px', minWidth: 110
+    }}>
+      <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.05em', color: '#94a3b8' }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 16, fontWeight: 900, color: couleur || '#f8fafc', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
         {valeur}
       </div>
+      {sous && <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>{sous}</div>}
     </div>
   );
 
   return (
-    <div className="panel" style={{ padding: '13px 15px', marginBottom: 12, borderLeft: '3px solid #38bdf8' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 9, flexWrap: 'wrap', marginBottom: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <i className="fas fa-chart-simple" style={{ color: '#38bdf8' }}></i>
-          <b style={{ fontSize: 13, color: '#fff' }}>Order Flow & Volume Profile</b>
+    <div className="panel" style={{ padding: 0, marginBottom: 12, overflow: 'hidden', border: `1px solid ${fluxTone}44`, borderRadius: 10 }}>
+      {/* En-tête diagnostic Order Flow en grand */}
+      <div style={{ padding: '12px 16px', background: fluxBg, borderBottom: `1px solid ${fluxTone}33`,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <i className="fas fa-chart-simple" style={{ color: fluxTone, fontSize: 15 }}></i>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 900, color: '#f8fafc', letterSpacing: '.01em' }}>
+              Flux d'Ordres & Profil de Volume (Order Flow)
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: fluxTone, marginTop: 1 }}>
+              {fluxTitre}
+            </div>
+          </div>
         </div>
-        <span className="badge" style={{ fontSize: 10, background: deltaCumule > 0 ? 'rgba(34,211,138,.14)' : 'rgba(242,84,91,.14)', color: deltaCol }}>
+        <span className="badge" style={{ fontSize: 11, fontWeight: 800, background: fluxTone + '22', color: fluxTone, border: `1px solid ${fluxTone}44` }}>
           CVD (20) : {deltaCumule > 0 ? '+' : ''}{deltaCumule.toFixed(0)}
         </span>
       </div>
 
-      <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 8 }}>
-        {cell('Pression Delta', deltaLabel, deltaCol)}
-        {cell('Dernier Delta', `${dernierDelta > 0 ? '+' : ''}${Number(dernierDelta).toFixed(1)}`, dernierDelta > 0 ? TT.ok : TT.bad)}
-        {vp.poc ? cell('POC Institutionnel', ttFmt(vp.poc), '#ef4444') : null}
-        {vp.vah ? cell('VAH (Haut 70%)', ttFmt(vp.vah), '#60a5fa') : null}
-        {vp.val ? cell('VAL (Bas 70%)', ttFmt(vp.val), '#60a5fa') : null}
+      {/* Cartes métriques claires */}
+      <div style={{ padding: '12px 16px', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {cardMeta('CVD Cumulé (20)', `${deltaCumule > 0 ? '+' : ''}${deltaCumule.toFixed(0)}`, deltaCumule > 0 ? '#10b981' : deltaCumule < 0 ? '#f43f5e' : '#94a3b8', 'Pression globale')}
+        {cardMeta('Dernier Delta', `${dernierDelta > 0 ? '+' : ''}${Number(dernierDelta).toFixed(1)}`, dernierDelta > 0 ? '#10b981' : '#f43f5e', 'Dernière bougie')}
+        {vp.poc ? cardMeta('POC Institutionnel', ttFmt(vp.poc), '#ef4444', 'Volume max (Aimant)') : null}
+        {vp.vah ? cardMeta('VAH (Haut 70%)', ttFmt(vp.vah), '#60a5fa', 'Résistance Value') : null}
+        {vp.val ? cardMeta('VAL (Bas 70%)', ttFmt(vp.val), '#60a5fa', 'Support Value') : null}
       </div>
 
+      {/* Imbalances & Absorptions institutionnelles */}
       {((of.imbalances && of.imbalances.length > 0) || (of.absorption && of.absorption.length > 0)) && (
-        <div style={{ display: 'grid', gap: 4, marginTop: 8, paddingTop: 8, borderTop: '1px solid ' + TT.line }}>
+        <div style={{ padding: '10px 16px', background: 'rgba(15,23,42,.4)', borderTop: '1px solid rgba(148,163,184,.1)', display: 'grid', gap: 5 }}>
           {(of.imbalances || []).slice(-2).map((imb, i) => (
-            <div key={'imb-' + i} style={{ fontSize: 11.5, color: imb.type === 'bid' ? '#34d399' : '#f87171', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div key={'imb-' + i} style={{ fontSize: 11.5, color: imb.type === 'bid' ? '#34d399' : '#f87171', display: 'flex', alignItems: 'center', gap: 8 }}>
               <i className="fas fa-bolt" style={{ fontSize: 10 }}></i>
-              <span><b>Imbalance {imb.type.toUpperCase()} :</b> {imb.detail}</span>
+              <span><b>Déséquilibre (Imbalance) {imb.type === 'bid' ? 'Acheteur' : 'Vendeur'} :</b> {imb.detail}</span>
             </div>
           ))}
           {(of.absorption || []).slice(-2).map((abs, i) => (
-            <div key={'abs-' + i} style={{ fontSize: 11.5, color: '#fbbf24', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div key={'abs-' + i} style={{ fontSize: 11.5, color: '#fbbf24', display: 'flex', alignItems: 'center', gap: 8 }}>
               <i className="fas fa-hand-holding-dollar" style={{ fontSize: 10 }}></i>
-              <span><b>Absorption institutionnelle :</b> {abs.detail}</span>
+              <span><b>Absorption institutionnelle détectée :</b> {abs.detail}</span>
             </div>
           ))}
         </div>
@@ -4263,7 +4387,7 @@ function LiveMarket({ onToJournal }) {
             <div style={{ padding: 10 }}>
               {vue === 'app' ? (
                 <PriceChart candles={candles} report={report}
-                  levels={report ? report.levels : []} signal={decision && decision.signal}
+                  levels={report ? report.levels : []} signal={meilleurSetup || (decision && decision.signal)}
                   height={big ? (etroi ? 460 : 620) : (etroi ? 300 : 430)} symbol={symbol} tf={tf}
                   calques={{
                     structure: calqueStructure,
