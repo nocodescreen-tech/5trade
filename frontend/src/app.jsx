@@ -1816,6 +1816,49 @@ function PriceChart({ candles, levels, signal, height, symbol, tf, report, calqu
         }
       }
 
+      // Order Flow : POC (Point of Control), VAH/VAL et Imbalances
+      if (calques.orderflow !== false && rep.volumeProfile) {
+        const vp = rep.volumeProfile;
+        // Ligne POC (rouge écarlate / orange institutionnel)
+        if (vp.poc && Number.isFinite(vp.poc)) {
+          const yPoc = Y(vp.poc);
+          if (yPoc !== null && yPoc >= 0 && yPoc <= h) {
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 2]);
+            ctx.beginPath(); ctx.moveTo(0, yPoc + 0.5); ctx.lineTo(w, yPoc + 0.5); ctx.stroke();
+            ctx.setLineDash([]);
+            if (peutEtiqueter()) {
+              ctx.fillStyle = '#ef4444';
+              ctx.font = 'bold 10px monospace';
+              ctx.fillText(`POC ${vp.poc.toFixed(2)}`, 8, yPoc - 4);
+              compte.labels++;
+            }
+          }
+        }
+        // VAH / VAL (Value Area 70%)
+        if (vp.vah && vp.val && Number.isFinite(vp.vah) && Number.isFinite(vp.val)) {
+          const yVah = Y(vp.vah), yVal = Y(vp.val);
+          if (yVah !== null && yVal !== null) {
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.05)';
+            ctx.fillRect(0, Math.min(yVah, yVal), w, Math.abs(yVal - yVah));
+            ctx.strokeStyle = 'rgba(59, 130, 246, 0.4)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 4]);
+            ctx.beginPath(); ctx.moveTo(0, yVah + 0.5); ctx.lineTo(w, yVah + 0.5); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, yVal + 0.5); ctx.lineTo(w, yVal + 0.5); ctx.stroke();
+            ctx.setLineDash([]);
+            if (peutEtiqueter()) {
+              ctx.fillStyle = '#60a5fa';
+              ctx.font = '9.5px monospace';
+              ctx.fillText(`VAH ${vp.vah.toFixed(2)}`, 8, yVah - 3);
+              ctx.fillText(`VAL ${vp.val.toFixed(2)}`, 8, yVal + 11);
+              compte.labels += 2;
+            }
+          }
+        }
+      }
+
       // On ne declenche un rendu que si le compte change : redessiner au zoom ne
       // doit pas provoquer une cascade de rendus React.
       const cle = `${compte.ob}-${compte.fvg}-${compte.liq}-${compte.sweep}`;
@@ -3032,6 +3075,66 @@ function MarketStructurePanel({ carte, report }) {
   );
 }
 
+// ── Panneau Order Flow & Volume Profile Institutionnel ──────────────────
+function OrderFlowPanel({ report }) {
+  if (!report) return null;
+  const of = report.orderFlow || {};
+  const vp = report.volumeProfile || {};
+  const deltas = Array.isArray(of.delta) ? of.delta : [];
+  const dernierDelta = deltas.length ? deltas[deltas.length - 1] : 0;
+  const deltaCumule = deltas.slice(-20).reduce((acc, v) => acc + (Number(v) || 0), 0);
+  const deltaCol = deltaCumule > 0 ? TT.ok : deltaCumule < 0 ? TT.bad : TT.warn;
+  const deltaLabel = deltaCumule > 0 ? 'ACHETEUR (Agressif)' : deltaCumule < 0 ? 'VENDEUR (Agressif)' : 'ÉQUILIBRÉ';
+
+  const cell = (label, valeur, couleur) => (
+    <div style={{ minWidth: 110 }}>
+      <TtLabel>{label}</TtLabel>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: couleur || '#e2e8f0', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+        {valeur}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="panel" style={{ padding: '13px 15px', marginBottom: 12, borderLeft: '3px solid #38bdf8' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 9, flexWrap: 'wrap', marginBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <i className="fas fa-chart-simple" style={{ color: '#38bdf8' }}></i>
+          <b style={{ fontSize: 13, color: '#fff' }}>Order Flow & Volume Profile</b>
+        </div>
+        <span className="badge" style={{ fontSize: 10, background: deltaCumule > 0 ? 'rgba(34,211,138,.14)' : 'rgba(242,84,91,.14)', color: deltaCol }}>
+          CVD (20) : {deltaCumule > 0 ? '+' : ''}{deltaCumule.toFixed(0)}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 8 }}>
+        {cell('Pression Delta', deltaLabel, deltaCol)}
+        {cell('Dernier Delta', `${dernierDelta > 0 ? '+' : ''}${Number(dernierDelta).toFixed(1)}`, dernierDelta > 0 ? TT.ok : TT.bad)}
+        {vp.poc ? cell('POC Institutionnel', ttFmt(vp.poc), '#ef4444') : null}
+        {vp.vah ? cell('VAH (Haut 70%)', ttFmt(vp.vah), '#60a5fa') : null}
+        {vp.val ? cell('VAL (Bas 70%)', ttFmt(vp.val), '#60a5fa') : null}
+      </div>
+
+      {((of.imbalances && of.imbalances.length > 0) || (of.absorption && of.absorption.length > 0)) && (
+        <div style={{ display: 'grid', gap: 4, marginTop: 8, paddingTop: 8, borderTop: '1px solid ' + TT.line }}>
+          {(of.imbalances || []).slice(-2).map((imb, i) => (
+            <div key={'imb-' + i} style={{ fontSize: 11.5, color: imb.type === 'bid' ? '#34d399' : '#f87171', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <i className="fas fa-bolt" style={{ fontSize: 10 }}></i>
+              <span><b>Imbalance {imb.type.toUpperCase()} :</b> {imb.detail}</span>
+            </div>
+          ))}
+          {(of.absorption || []).slice(-2).map((abs, i) => (
+            <div key={'abs-' + i} style={{ fontSize: 11.5, color: '#fbbf24', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <i className="fas fa-hand-holding-dollar" style={{ fontSize: 10 }}></i>
+              <span><b>Absorption institutionnelle :</b> {abs.detail}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Historique des signaux (confirmés / rejetés / expirés) ───────────────
 function SignalHistory({ journal }) {
   const RES = {
@@ -3537,6 +3640,7 @@ function LiveMarket({ onToJournal }) {
   const [calqueSweeps, setCalqueSweeps] = useState(true);
   const [calqueZones, setCalqueZones] = useState(true);
   const [calqueNiveaux, setCalqueNiveaux] = useState(true);
+  const [calqueOrderFlow, setCalqueOrderFlow] = useState(true);
 
   useEffect(() => {
     const maj = () => setEtroit(window.innerWidth < 820);
@@ -4129,6 +4233,14 @@ function LiveMarket({ onToJournal }) {
               >
                 <i className="fas fa-crosshairs"></i> 🎯 Niveaux Signal
               </button>
+              <button
+                type="button"
+                className={`layer-btn ${calqueOrderFlow ? 'active' : ''}`}
+                onClick={() => setCalqueOrderFlow(!calqueOrderFlow)}
+                title="Flux d'ordres institutionnel : POC (Point of Control) & Value Area VAH/VAL"
+              >
+                <i className="fas fa-chart-simple"></i> 📊 Order Flow & POC
+              </button>
             </div>
 
             {/* En-tête métadonnées cotation & ATR */}
@@ -4158,6 +4270,7 @@ function LiveMarket({ onToJournal }) {
                     sweeps: calqueSweeps,
                     zones: calqueZones,
                     niveaux: calqueNiveaux,
+                    orderflow: calqueOrderFlow,
                   }}
                 />
               ) : (
@@ -4178,6 +4291,9 @@ function LiveMarket({ onToJournal }) {
 
           {/* 01 — Cartographie de structure de marché */}
           <MarketStructurePanel carte={decision && decision.carte} report={report} />
+
+          {/* Module Order Flow institutionnel (Delta, Imbalances, Absorptions, POC) */}
+          <OrderFlowPanel report={report} />
 
           {/* Plans d'attente institutionnels */}
           <PlansAttente symbol={symbol} />

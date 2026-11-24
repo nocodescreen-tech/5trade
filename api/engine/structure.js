@@ -550,11 +550,30 @@ function analyze(candles, meta = {}, options = {}) {
     range20: {
       high: +Math.max(...clean.slice(-20).map(c => c.h)).toFixed(6),
       low: +Math.min(...clean.slice(-20).map(c => c.l)).toFixed(6)
-    }
+    },
+    // Order Flow & Volume Profile intégrés au rapport de structure :
+    // Delta cumulé, imbalances bid/ask, absorptions, POC et Value Area (VAH/VAL)
+    orderFlow: (() => {
+      try {
+        const OF = require('./orderFlow');
+        return OF.analyserOrderFlow(clean);
+      } catch { return null; }
+    })(),
+    volumeProfile: (() => {
+      try {
+        const VP = require('./volumeProfile');
+        return VP.volumeProfile(clean);
+      } catch { return null; }
+    })()
   };
 
   // Niveaux exploitables : ce que le plan doit utiliser comme SL/TP
   const levels = [];
+  if (r.volumeProfile && r.volumeProfile.poc) {
+    levels.push({ kind: 'POC (Point of Control)', price: r.volumeProfile.poc, side: 'volume' });
+    if (r.volumeProfile.vah) levels.push({ kind: 'VAH (Value Area High)', price: r.volumeProfile.vah, side: 'resistance' });
+    if (r.volumeProfile.val) levels.push({ kind: 'VAL (Value Area Low)', price: r.volumeProfile.val, side: 'support' });
+  }
   if (r.structure.event) levels.push({ kind: r.structure.event.type, price: r.structure.event.level, side: r.structure.event.direction });
   if (r.structure.lastSwingHigh) levels.push({ kind: 'swing high', price: r.structure.lastSwingHigh.price, side: 'resistance' });
   if (r.structure.lastSwingLow) levels.push({ kind: 'swing low', price: r.structure.lastSwingLow.price, side: 'support' });
