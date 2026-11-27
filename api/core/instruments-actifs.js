@@ -34,25 +34,26 @@ const DEFAUT_INITIAL = [
 
 function lireFichier() {
   try {
-    if (fs.existsSync(FICHIER_ACTIFS)) {
-      const data = JSON.parse(fs.readFileSync(FICHIER_ACTIFS, 'utf8'));
-      if (Array.isArray(data)) return data;
-    }
+    const data = JSON.parse(fs.readFileSync(FICHIER_ACTIFS, 'utf8'));
+    if (!Array.isArray(data)) throw new Error('Configuration des instruments invalide');
+    return data;
   } catch (e) {
-    console.error('[InstrumentsActifs] Erreur lecture fichier :', e.message);
+    if (e.code === 'ENOENT') return null;
+    // Never silently re-enable the default instrument after corrupt storage.
+    throw e;
   }
-  return null;
 }
 
 function ecrireFichier(liste) {
+  fs.mkdirSync(path.dirname(FICHIER_ACTIFS), { recursive: true });
+  const tmp = FICHIER_ACTIFS + '.' + require('node:crypto').randomUUID() + '.tmp';
   try {
-    fs.mkdirSync(path.dirname(FICHIER_ACTIFS), { recursive: true });
-    fs.writeFileSync(FICHIER_ACTIFS, JSON.stringify(liste, null, 2), 'utf8');
-    return true;
-  } catch (e) {
-    console.error('[InstrumentsActifs] Erreur écriture fichier :', e.message);
-    return false;
+    fs.writeFileSync(tmp, JSON.stringify(liste, null, 2), { flag: 'wx', mode: 0o600 });
+    fs.renameSync(tmp, FICHIER_ACTIFS);
+  } finally {
+    try { fs.unlinkSync(tmp); } catch (e) { if (e.code !== 'ENOENT') throw e; }
   }
+  return true;
 }
 
 /**
