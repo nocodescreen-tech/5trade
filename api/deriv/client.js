@@ -232,73 +232,13 @@ class DerivClient {
    * Exécute un ordre de trade sur Deriv
    * Supporte les contrats Multipliers ou Rise/Fall (Call/Put)
    */
-  async executerTrade({ symbol, direction, amount = 10, type = null, duration = 5, durationUnit = 'm' }) {
-    const cfg = await this.lireConfig();
-    if (!cfg || !cfg.actif || !cfg.apiToken) {
-      return { success: false, error: 'Compte Deriv non connecté. Active d\'abord ton token dans les paramètres.' };
-    }
-
-    const sensAchat = direction === 'BUY' || direction === 'long';
-    // Mapping du type de contrat : si non spécifié, utilise CALL ou PUT
-    const contractType = type || (sensAchat ? 'CALL' : 'PUT');
-
-    let ws = null;
-    try {
-      ws = await this._connectCluster(cfg.appId);
-      // 1. Authentification
-      await this._ask(ws, { authorize: cfg.apiToken }, 'authorize', 9000);
-
-      // 2. Demande de proposition de prix (Proposal)
-      const propReq = {
-        proposal: 1,
-        amount: Number(amount) || 10,
-        basis: 'stake',
-        contract_type: contractType,
-        currency: (cfg.account && cfg.account.currency) || 'USD',
-        duration: Number(duration) || 5,
-        duration_unit: durationUnit || 'm',
-        symbol: symbol || 'R_75',
-        req_id: 2
-      };
-
-      const propRes = await this._ask(ws, propReq, 'proposal', 8000);
-      if (!propRes || !propRes.proposal || !propRes.proposal.id) {
-        throw new Error('Deriv n\'a pas retourné de cotation valide pour cet ordre');
-      }
-
-      // 3. Achat effectif du contrat
-      const buyRes = await this._ask(ws, {
-        buy: propRes.proposal.id,
-        price: propRes.proposal.ask_price,
-        req_id: 3
-      }, 'buy', 8000);
-
-      if (buyRes && buyRes.buy) {
-        const b = buyRes.buy;
-        // Met à jour le solde dans la config
-        if (b.balance_after) {
-          cfg.account.balance = Number(b.balance_after);
-          await DB.kvEcrire('deriv_config', cfg);
-          this._cachedConfig = cfg;
-        }
-        return {
-          success: true,
-          contractId: b.contract_id,
-          transactionId: b.transaction_id,
-          buyPrice: b.buy_price,
-          payout: b.payout,
-          balanceAfter: b.balance_after,
-          account: cfg.account
-        };
-      }
-      return { success: false, error: 'Achat non confirmé par Deriv' };
-    } catch (err) {
-      return { success: false, error: err.message };
-    } finally {
-      if (ws) {
-        try { ws.close(); } catch {}
-      }
-    }
+  async executerTrade() {
+    // Defence in depth: callers cannot bypass the disabled HTTP route.
+    return {
+      success: false,
+      code: 'EXECUTION_DISABLED',
+      error: 'Exécution Deriv suspendue en attente du moteur de risque et de la réconciliation.'
+    };
   }
 
   /**
