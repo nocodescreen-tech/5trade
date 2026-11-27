@@ -5577,7 +5577,7 @@ function tinyPng(W = 64, H = 40) {
       eur.devises.join('/') || 'aucune');
     const or = F.devisesDuSymbole('frxXAUUSD');
     ok('un symbole préfixé par le courtier est décomposé correctement',
-      or.devises.includes('USD') && or.devises.some(d => d === 'XAU'),
+      or.devises.length === 1 && or.devises.includes('USD'),
       `${or.devises.join('/')} (au lieu de « FRX »)`);
     const btc = F.devisesDuSymbole('BTCUSDT');
     ok('USDT est ramené au dollar', btc.devises.includes('USD'), btc.devises.join('/'));
@@ -8362,15 +8362,17 @@ function tinyPng(W = 64, H = 40) {
         decider: () => ({ decision: 'NO_TRADE', raison: 'Marché fermé le week-end' }),
         detect: () => ({ direction: 'BUY', status: 'confirme', strength: 0.9 })
       };
+      const scanClock = Date.parse('2026-11-24T12:00:00Z');
       const mockMarketRefus = {
         listSymbols: () => [{ symbol: 'EURUSD', provider: 'forex' }],
-        getCandles: async () => ({ candles: Array.from({ length: 30 }, (_, i) => ({ o: 1, h: 2, l: 0.5, c: 1.5, t: Date.now() - (30 - i) * 60000 })) }),
+        getCandles: async () => ({ candles: Array.from({ length: 30 }, (_, i) => ({ o: 1.4, h: 2, l: 0.5, c: 1.5 + Math.sin(i)*0.05, t: scanClock - (30 - i) * 900000 })) }),
         TF_MS: { '15m': 900000 }
       };
       InstActifs.definirActifs([{ symbol: 'EURUSD', provider: 'forex' }]);
       const scanRefusRes = await ScanMod.scanComplet({
         market: mockMarketRefus,
         signals: mockSignalsRefus,
+        maintenant: () => scanClock,
         tf: '15m',
         mode: ScanMod.MODES_SCAN.TRADING_AUTORISE,
         symbolesAutorises: ['EURUSD']
@@ -8394,6 +8396,7 @@ function tinyPng(W = 64, H = 40) {
       const scanTPRes = await ScanMod.scanComplet({
         market: mockMarketRefus,
         signals: mockSignalsTP1TP2,
+        maintenant: () => scanClock,
         tf: '15m',
         mode: ScanMod.MODES_SCAN.TRADING_AUTORISE,
         symbolesAutorises: ['EURUSD']
