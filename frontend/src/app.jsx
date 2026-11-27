@@ -5209,6 +5209,47 @@ function StatutDirectPanel() {
   );
 }
 
+function PaperObservationsPanel() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const h = React.createElement;
+  async function refresh() {
+    setBusy(true); setError('');
+    try {
+      const response = await api('/paper-observations?limit=50');
+      const body = await response.json();
+      if (!response.ok || !body.success) throw new Error(body.error || 'Suivi indisponible');
+      setData(body);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  useEffect(() => { refresh(); }, []);
+  const labels = {pending:'En cours', tp1_touched:'TP1 touché', tp2_touched:'TP2 touché', stop_touched:'Stop touché',
+    ambiguous_entry_bar:'Entrée ambiguë', ambiguous_exit_bar:'Sortie ambiguë', data_gap:'Données manquantes',
+    invalid_data:'Données invalides', expired_after_entry:'Expiré après entrée', expired_untriggered:'Expiré sans entrée'};
+  const statusLabel = k => labels[k] || k;
+  const fmt = v => Number.isFinite(v) ? Number(v).toLocaleString('fr-FR', {maximumFractionDigits: 6}) : '—';
+  const cells = (tag, values) => values.map((v,i)=>h(tag,{key:i,style:{padding:'10px 12px',textAlign:i>3?'right':'left',whiteSpace:'nowrap',borderBottom:'1px solid var(--border, #293241)'}},v));
+  return h('section',{className:'panel',style:{marginBottom:16,padding:16}},
+    h('header',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}},
+      h('div',null,h('h3',{style:{margin:'0 0 4px',fontSize:16}},'Recherche prospective'),
+        h('p',{style:{margin:0,fontSize:12,color:'var(--muted)'}},'Observations OHLC horodatées. Aucun ordre courtier, aucun P&L simulé.')),
+      h('button',{type:'button',className:'btn sm ghost',disabled:busy,onClick:refresh},busy?'Chargement…':'Actualiser')),
+    error && h('p',{role:'alert',style:{color:'#f59e0b',fontSize:12}},error),
+    data?.workerError && h('p',{role:'status',style:{color:'#f59e0b',fontSize:12}},data.workerError),
+    data && h('div',null,
+      h('p',{style:{fontSize:12,color:'var(--muted)'}},'Dernière mise à jour : '+(data.lastRun?new Date(data.lastRun).toLocaleString('fr-FR'):'pas encore exécutée')),
+      h('div',{style:{display:'flex',flexWrap:'wrap',gap:12,margin:'12px 0'}},(data.summary||[]).map(r=>h('div',{key:r.status,style:{borderLeft:'2px solid var(--border, #475569)',padding:'4px 10px'}},h('strong',{style:{display:'block',fontSize:18,fontVariantNumeric:'tabular-nums'}},r.count),h('span',{style:{fontSize:12,color:'var(--muted)'}},statusLabel(r.status))))),
+      (data.observations||[]).length ? h('div',{style:{overflowX:'auto'}},h('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},h('thead',null,h('tr',null,cells('th',['Date','Instrument','Stratégie','Issue','Entrée','SL','TP1','TP2']))),
+        h('tbody',null,data.observations.map(r=>{const o=r.snapshot||{};return h('tr',{key:o.id},cells('td',[
+          o.observedAt?new Date(o.observedAt).toLocaleString('fr-FR'):'—',
+          [o.symbol,o.timeframe].filter(Boolean).join(' · '),[o.strategyId,o.strategyVersion].filter(v=>v!==null&&v!==undefined).join(' · '),
+          statusLabel(r.outcome?.status||'pending'),fmt(o.entry),fmt(o.stop),fmt(o.targets?.[0]),fmt(o.targets?.[1])
+        ]));})))) : h('p',{style:{fontSize:13,color:'var(--muted)'}},'Aucune observation enregistrée. Une stratégie versionnée, des coûts connus et un signal confirmé sont requis.')),
+    !data&&!error&&h('p',{role:'status',style:{fontSize:12,color:'var(--muted)'}},'Chargement du suivi…'));
+}
+
 function JournalSignauxPanel() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
@@ -6136,6 +6177,7 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
       {/* Le devenir des signaux du moteur, en tête du journal : c'est la seule
           partie qui ne dépend pas d'une saisie manuelle. */}
       <StatutDirectPanel />
+      <PaperObservationsPanel />
       <JournalSignauxPanel />
       <BacktestPanel />
 
