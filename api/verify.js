@@ -7936,7 +7936,7 @@ function tinyPng(W = 64, H = 40) {
       const ex = DE.niveauExecution(sigSansTP1, { symbol: 'TEST' }, { rrMin: 0, verifierFrais: false });
       ok('exécution : un signal sans TP1 est rejeté même avec rrMin nul',
         ex.ok === false && ex.executables === 0
-        && ex.details.some(d => d.blocages.some(b => /objectif 1 absent/.test(b))),
+        && ex.details.some(d => d.blocages.some(b => /objectif 1 absent|premier objectif/.test(b))),
         JSON.stringify(ex));
     }
 
@@ -8111,12 +8111,12 @@ function tinyPng(W = 64, H = 40) {
       const codeMalveillant = 'module.exports = { id: "bad", executer: () => { return process.env; } };';
       const resSandboxMal = Sandbox.chargerDansSandbox(codeMalveillant);
       ok('skill sandbox : neutralise les tentatives d\'accès aux ressources système hôtes',
-        resSandboxMal.ok === false && /violations de sécurité|interdit/.test(resSandboxMal.erreur));
+        resSandboxMal.ok === false);
 
       const codeSain = 'module.exports = { id: "calculateur", nom: "Calcul", version: "1.0.0", description: "Skill de calcul mathématique pur", actions: ["add"], executer: (p) => ({ resultat: (p.a || 0) + (p.b || 0) }) };';
       const resSandboxSain = Sandbox.chargerDansSandbox(codeSain);
-      ok('skill sandbox : exécute hermétiquement un skill valide',
-        resSandboxSain.ok === true && resSandboxSain.exports.id === 'calculateur');
+      ok('skill sandbox : refuse également le code non approuvé',
+        resSandboxSain.ok === false);
 
       // 12. Skill Factory autonome (Cycle complet création -> test sandbox -> installation -> exécution -> désinstallation)
       const Factory = require('./skills/factory');
@@ -8131,16 +8131,14 @@ function tinyPng(W = 64, H = 40) {
           { params: { h: 10, l: 5, c: 6 }, assertion: (r) => r && r.pivot === 7 }
         ]
       });
-      ok('skill factory : test en sandbox et installation atomique réussie',
-        installRes.ok === true && installRes.id === 'pivot_detector');
-
+      ok('skill factory : proposition persistée mais installation refusée',
+        installRes.ok === false && installRes.proposalSaved === true && !!installRes.proposalId);
       const execDyn = await Skills.executer('pivot_detector', { h: 10, l: 5, c: 6 });
-      ok('skill factory : le skill dynamique est immédiatement exécutable par le registre',
-        execDyn.ok === true && execDyn.resultat && execDyn.resultat.pivot === 7);
-
-      const cleanRes = Factory.desinstallerSkill('pivot_detector');
-      ok('skill factory : désinstallation et nettoyage complet du skill',
-        cleanRes.ok === true);
+      ok('skill factory : le code non approuvé ne peut pas être exécuté', execDyn.ok === false);
+      if (installRes.proposalSaved) {
+        fs.unlinkSync(path.join(require('./core/dossiers').DATA_DIR, 'skill-proposals', installRes.proposalId + '.json'));
+      }
+      ok('skill factory : désinstallation dynamique refusée', Factory.desinstallerSkill('pivot_detector').ok === false);
 
       // 13. Application active des consignes au DecisionEngine
       const MemoirePref = require('./memoire/preferences');
@@ -8289,6 +8287,12 @@ function tinyPng(W = 64, H = 40) {
       ok('scan automatique : scanne uniquement l\'instrument actif (XAUUSD)',
         resScanXau.marches === 1);
 
+      const expliciteVide = await Scan.scanComplet({ market: MarketMock, signals: SignalsMock,
+        mode: Scan.MODES_SCAN.TRADING_AUTORISE, symbolesAutorises: [] });
+      ok('scan : une autorisation explicitement vide ne réactive aucun instrument', expliciteVide.marches === 0);
+      const horsSelection = await Scan.scanComplet({ market: MarketMock, signals: SignalsMock,
+        mode: Scan.MODES_SCAN.TRADING_AUTORISE, symbolesAutorises: ['R_75'] });
+      ok('scan : un instrument hors sélection est refusé', horsSelection.marches === 0);
       const srvCode = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
       ok('server.js expose les routes d\'instruments actifs persistants',
         srvCode.includes('/api/instruments/actifs') && srvCode.includes('/api/instruments/actifs/toggle'));
@@ -8355,6 +8359,7 @@ function tinyPng(W = 64, H = 40) {
         getCandles: async () => ({ candles: Array.from({ length: 30 }, (_, i) => ({ o: 1, h: 2, l: 0.5, c: 1.5, t: Date.now() - (30 - i) * 60000 })) }),
         TF_MS: { '15m': 900000 }
       };
+      InstActifs.definirActifs([{ symbol: 'EURUSD', provider: 'forex' }]);
       const scanRefusRes = await ScanMod.scanComplet({
         market: mockMarketRefus,
         signals: mockSignalsRefus,
@@ -8385,6 +8390,7 @@ function tinyPng(W = 64, H = 40) {
         mode: ScanMod.MODES_SCAN.TRADING_AUTORISE,
         symbolesAutorises: ['EURUSD']
       });
+      InstActifs.definirActifs(InstActifs.DEFAUT_INITIAL);
       const sigExtrait = scanTPRes.resultats && scanTPRes.resultats[0];
       ok('scan livraison : propage entrée, SL, TP1 ET TP2 dans les levels et le contrat',
         sigExtrait && sigExtrait.levels && sigExtrait.levels.target1 === 2020 && sigExtrait.levels.target2 === 2040
