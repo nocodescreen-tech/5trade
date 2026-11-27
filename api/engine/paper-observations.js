@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const Contract = require('./contrat');
 
 function buildObservation(row, profile, candles, costs, tfMs, now = Date.now()) {
-  if (!profile || !profile.id || !profile.version || !['ACHAT', 'VENTE'].includes(row.decision)) return null;
+  if (!profile || !profile.id || profile.version === null || profile.version === undefined || !['ACHAT', 'VENTE'].includes(row.decision)) return null;
   if (!Number.isFinite(tfMs) || tfMs <= 0 || !Number.isFinite(now)) return null;
   const c = row.contrat;
   if (!c || !Contract.validerSignal(c).ok || c.status !== 'confirme' ||
