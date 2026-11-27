@@ -132,6 +132,14 @@ function tinyPng(W = 64, H = 40) {
     } catch (e) { ok(f, false, e.message.split('\n')[0]); }
   }
 
+  // Safety regression tests are part of the canonical verification, not optional.
+  try {
+    require('node:child_process').execFileSync(process.execPath, ['--test', path.join(__dirname, 'tests', 'production-hardening.test.js')], { stdio: 'pipe' });
+    ok('Régressions P0 : contrats, exécution courtier et skills', true);
+  } catch (error) {
+    ok('Régressions P0 : contrats, exécution courtier et skills', false, String(error.stdout || error.message));
+  }
+
   // Anti-régression : le compte vit en base. Écrire dans data/account.json
   // n'aurait aucun effet (l'application ne lit plus ce fichier) — le jour où
   // on perd le mot de passe, le script de secours doit réellement agir.
