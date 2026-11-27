@@ -2592,32 +2592,13 @@ app.post('/api/deriv/disconnect', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/deriv/trade', requireAuth, async (req, res) => {
-  try {
-    const { symbol, direction, amount, type, duration, durationUnit } = req.body || {};
-    if (!symbol) return res.status(400).json({ success: false, error: 'Symbole requis' });
-    const r = await DerivBroker.executerTrade({ symbol, direction, amount, type, duration, durationUnit });
-    if (!r.success) {
-      return res.status(400).json(r);
-    }
-    // Enregistre aussi le trade dans le journal interne 5TRADE
-    try {
-      const tradeInterne = {
-        id: 'deriv-' + r.contractId,
-        pair: symbol,
-        direction: (direction === 'BUY' || direction === 'long') ? 'BUY' : 'SELL',
-        entry: r.buyPrice,
-        status: 'open',
-        notes: `Ordre direct Deriv (Contrat #${r.contractId})`,
-        openedAt: new Date().toISOString()
-      };
-      await DB.saveTradeRecord(tradeInterne);
-    } catch {}
-
-    res.json(r);
-  } catch (e) {
-    res.status(500).json({ success: false, error: e.message });
-  }
+// Options CALL/PUT are not CFD positions. Never forward an unapproved order.
+app.post('/api/deriv/trade', requireAuth, (req, res) => {
+  res.status(503).json({
+    success: false,
+    code: 'EXECUTION_DISABLED',
+    error: 'Exécution Deriv suspendue : aucun ordre ne sera envoyé avant validation du moteur de risque et de la réconciliation.'
+  });
 });
 
 // ─── Dashboard temps réel ───
