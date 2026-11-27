@@ -2567,53 +2567,21 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
                 })).json();
                 if (res.success) {
                   SoundEngine.playTrade();
-                  setDemoStatus('✅ Pris en démo !');
+                  setDemoStatus('Simulation enregistrée');
                 } else setDemoStatus('⚠️ Erreur');
               } catch {
                 setDemoStatus('❌ Erreur');
               } finally {
                 setTimeout(() => setDemoStatus(''), 3000);
               }
-            }} title="Prendre immédiatement ce trade en compte démo">
+            }} title="Créer une entrée de journal simulée, sans ordre courtier">
             <i className="fas fa-play" style={{ marginRight: 5 }}></i>
-            {demoStatus || 'Exécuter Démo'}
+            {demoStatus || 'Journal simulé'}
           </button>
 
-          <button className="btn sm" style={{ padding: '5px 10px', fontSize: 11, background: '#ef4444', color: '#fff', border: '1px solid #dc2626' }}
-            onClick={async () => {
-              try {
-                setDerivTradeMsg('Envoi Deriv…');
-                const res = await (await api('/deriv/trade', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    symbol: symbol,
-                    direction: achat ? 'BUY' : 'SELL',
-                    amount: stake,
-                    duration: durationVal,
-                    durationUnit: 'm'
-                  })
-                })).json();
-                if (res.success) {
-                  SoundEngine.playTrade();
-                  setDerivTradeMsg(`✅ Contrat #${res.contractId} acheté !`);
-                } else {
-                  setDerivTradeMsg('⚠️ ' + (res.error || 'Erreur Deriv'));
-                }
-              } catch (e) {
-                setDerivTradeMsg('❌ ' + e.message);
-              } finally {
-                setTimeout(() => setDerivTradeMsg(''), 4500);
-              }
-            }} title="Passer cet ordre sur Deriv (Websocket officiel)">
-            <i className="fas fa-bolt" style={{ marginRight: 5 }}></i>
-            {derivTradeMsg || `Trader Deriv ($${stake})`}
-          </button>
-
-          <button className="btn sm ghost" style={{ padding: '5px 8px', fontSize: 11 }}
-            onClick={() => setOptionsDeriv(!optionsDeriv)} title="Réglages de mise et durée Deriv">
-            <i className="fas fa-gear"></i>
-          </button>
+          <span className="btn sm ghost" role="status" title="Exécution réelle indisponible : contrôles courtier en cours de validation">
+            <i className="fas fa-lock" style={{ marginRight: 5 }} aria-hidden="true"></i>Deriv · Lecture seule
+          </span>
 
           {onToJournal && (
             <button className="btn sm ghost" style={{ padding: '5px 10px', fontSize: 11 }}
@@ -2631,47 +2599,18 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
         </div>
       </div>
 
-      {/* Barre de réglage rapide Deriv (Mise & Durée) */}
-      {optionsDeriv && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', background: 'rgba(0,0,0,0.3)', borderBottom: '1px solid rgba(148,163,184,.1)', fontSize: 11, flexWrap: 'wrap' }}>
-          <span style={{ color: '#38bdf8', fontWeight: 700 }}><i className="fas fa-sliders" style={{ marginRight: 5 }}></i>Options Deriv :</span>
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <span style={{ color: '#94a3b8' }}>Mise :</span>
-            {[5, 10, 25, 50, 100].map(val => (
-              <button key={val} type="button"
-                className={`btn sm ${stake === val ? '' : 'ghost'}`}
-                style={{ padding: '2px 7px', fontSize: 10.5, borderColor: stake === val ? '#38bdf8' : 'rgba(148,163,184,.2)', background: stake === val ? '#38bdf8' : 'transparent', color: stake === val ? '#0f172a' : '#cbd5e1' }}
-                onClick={() => setStake(val)}>
-                ${val}
-              </button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 8 }}>
-            <span style={{ color: '#94a3b8' }}>Durée :</span>
-            {[1, 2, 5, 15].map(d => (
-              <button key={d} type="button"
-                className={`btn sm ${durationVal === d ? '' : 'ghost'}`}
-                style={{ padding: '2px 7px', fontSize: 10.5, borderColor: durationVal === d ? '#38bdf8' : 'rgba(148,163,184,.2)', background: durationVal === d ? '#38bdf8' : 'transparent', color: durationVal === d ? '#0f172a' : '#cbd5e1' }}
-                onClick={() => setDurationVal(d)}>
-                {d}m
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Grille des 4 Niveaux Chiffrés Clairs */}
       <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
         {cardNiveau('1. Entrée', ttFmt(lv.entry), 'Déclenchement précis', '#38bdf8', 'ORDRE')}
         {cardNiveau('2. Stop Loss', ttFmt(lv.stop), `Risque : -${distSL.toFixed(2)} pts`, '#f43f5e', 'INVALIDATION')}
-        {cardNiveau('3. Objectif 1', ttFmt(lv.target1), distTP1 ? `Gain : +${distTP1.toFixed(2)} pts` : 'Objectif direct', '#10b981', 'TP1 (50%)')}
-        {lv.target2 ? cardNiveau('4. Objectif 2', ttFmt(lv.target2), distTP2 ? `Gain : +${distTP2.toFixed(2)} pts` : 'Extension de tendance', '#059669', 'TP2 (50%)') : null}
+        {cardNiveau('3. Objectif 1', ttFmt(lv.target1), distTP1 ? `Gain : +${distTP1.toFixed(2)} pts` : 'Objectif direct', '#10b981', 'TP1')}
+        {lv.target2 ? cardNiveau('4. Objectif 2', ttFmt(lv.target2), distTP2 ? `Gain : +${distTP2.toFixed(2)} pts` : 'Extension de tendance', '#059669', 'TP2') : null}
       </div>
 
       {/* Barre de synthèse & Rendu */}
       <div style={{ padding: '8px 16px', background: 'rgba(15,23,42,.4)', borderTop: '1px solid rgba(148,163,184,.1)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, fontSize: 11, color: '#94a3b8' }}>
-        <span>Sécurisation : passage du stop à <b>Break-Even (BE)</b> dès l'atteinte du TP1.</span>
+        <span>Gestion du stop et sorties partielles : non automatisées.</span>
         <span>Visualisation : niveaux tracés en direct sur le graphique ci-contre.</span>
       </div>
     </div>
