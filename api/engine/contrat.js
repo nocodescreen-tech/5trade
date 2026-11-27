@@ -68,6 +68,7 @@ function validerSignal(s) {
   // C'est l'intégration que l'audit demandait de vérifier : un signal peut
   // annoncer une entrée sans stop, ou un rr sans premier objectif, et l'écran
   // affiche alors un plan incomplet comme s'il était exécutable.
+  if (estTableau(c.objectifs) && c.objectifs.some(v => !estNombre(v))) invalides.push('objectifs : chaque prix doit être un nombre fini');
   const aEntree = c.entree !== null && c.entree !== undefined;
   const aStop = c.stop !== null && c.stop !== undefined;
   if (aEntree && !estNombre(c.entree)) invalides.push('entree : attendu un nombre');
@@ -86,6 +87,12 @@ function validerSignal(s) {
 
   // Vérification de l'ordre géométrique des niveaux si entrée, stop et objectifs sont présents
   if (aEntree && aStop && estNombre(c.entree) && estNombre(c.stop) && estTableau(c.objectifs) && c.objectifs.length) {
+    if (!['long', 'short'].includes(c.sens)) invalides.push('niveaux de trade sans direction exploitable');
+    if (c.direction && c.direction !== (c.sens === 'long' ? 'BUY' : c.sens === 'short' ? 'SELL' : 'UNKNOWN')) invalides.push('direction et sens contradictoires');
+    for (let i = 1; i < c.objectifs.length; i++) {
+      if (c.sens === 'long' && c.objectifs[i] <= c.objectifs[i - 1]) invalides.push('objectifs long non croissants');
+      if (c.sens === 'short' && c.objectifs[i] >= c.objectifs[i - 1]) invalides.push('objectifs short non décroissants');
+    }
     const tp1 = c.objectifs[0];
     if (estNombre(tp1)) {
       if (c.sens === 'long' || c.direction === 'BUY') {
@@ -206,7 +213,7 @@ function directionDe(sens) {
 function objectifsNormalises(b, l) {
   const brut = Array.isArray(b.objectifs) ? b.objectifs
     : [b.target1 ?? l.target1, b.target2 ?? l.target2].filter(v => v !== undefined && v !== null);
-  return brut.map(nombreOuNull).filter(v => v !== null);
+  return brut.map(nombreOuNull);
 }
 
 function normaliser(brut, options = {}) {
