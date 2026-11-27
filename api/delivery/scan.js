@@ -78,14 +78,15 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
 
   if (mode === MODES_SCAN.TRADING_AUTORISE || mode === MODES_SCAN.SURVEILLANCE) {
     const bruts = typeof symbolesAutorises === 'function' ? symbolesAutorises() : symbolesAutorises;
-    const cibles = Array.isArray(bruts) && bruts.length ? bruts : actifs;
+    const cibles = Array.isArray(bruts) ? bruts : actifs;
     if (!cibles || !cibles.length) {
       return {
         at: new Date().toISOString(), tf, marches: 0, signaux: [],
         erreurs: ['Aucun instrument actif : scan automatique suspendu'], dureeMs: 0
       };
     }
-    const autorisesSet = new Set(cibles.map(s => String(s.symbol || s).toUpperCase()));
+    const selection = new Set(actifs.map(s => String(s.symbol || s).toUpperCase()));
+    const autorisesSet = new Set(cibles.map(s => String(s.symbol || s).toUpperCase()).filter(s => selection.has(s)));
     symboles = symboles.filter(s => autorisesSet.has(String(s.symbol || s).toUpperCase()));
   }
   const signaux = [];
@@ -183,7 +184,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
                 v = {
                   direction: dec.decision === 'ACHAT' ? 'BUY' : (dec.decision === 'VENTE' ? 'SELL' : 'NEUTRAL'),
                   status: sig ? (sig.status || 'confirme') : (dec.decision === 'ACHAT' || dec.decision === 'VENTE' ? 'confirme' : 'surveiller'),
-                  force: sig && typeof sig.force === 'number' ? sig.force : 0.6,
+                  force: sig && Number.isFinite(sig.force) ? sig.force : 0,
                   trend: sig ? sig.trend : null,
                   confirmations: (dec.confirmation && dec.confirmation.details) ? dec.confirmation.details.length : 1,
                   raison: dec.raison,
