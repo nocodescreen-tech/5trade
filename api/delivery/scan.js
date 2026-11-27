@@ -159,9 +159,10 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
         // une analyse calibrée sur cet instrument.
         const Calibration = require('../market-intelligence/calibration');
         const calib = Calibration.pour(symbole, { timeframe: unite, classe });
+        const macro = typeof verifierCalendrier === 'function' ? await verifierCalendrier(symbole) : null;
         let diagnostic = null;
         if (moteur.analyser) {
-          diagnostic = Moteurs.analyser(classe, closes.map(c => c.c), { symbol: symbole, classe, timeframe: unite });
+          diagnostic = Moteurs.analyser(classe, closes.map(c => c.c), { symbol: symbole, classe, timeframe: unite, provider, candles: closes, macro, now: Date.now(), live: mode !== MODES_SCAN.EXPLORATION });
           if (diagnostic && diagnostic.convient === false) {
             erreurs.push(`${symbole} ${unite} : lecture refusée par le moteur ${moteur.id} — `
               + (diagnostic.refus || []).join(' · '));
@@ -172,7 +173,6 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
         // Pour CHAQUE profil : ses règles, ses conditions obligatoires et ses
         // seuils — sinon le scan annoncerait des signaux que la stratégie refuse.
         // Les bougies, elles, ont été chargées une seule fois.
-        const macro = typeof verifierCalendrier === 'function' ? await verifierCalendrier(symbole) : null;
         for (const passe of passes) {
           if (mode !== MODES_SCAN.EXPLORATION && passe.profil && (passe.profil.executable === false || passe.profil.partiel)) {
             erreurs.push(`${symbole} ${unite} : stratégie incomplète ou non exécutable (${passe.profil.id})`);
@@ -255,7 +255,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
             // Le diagnostic du moteur quand il en produit un (synthétiques).
             diagnostic: diagnostic ? {
               famille: diagnostic.famille, regime: diagnostic.regime,
-              faits: diagnostic.faits, statistiques: diagnostic.statistiques
+              faits: diagnostic.faits, statistiques: diagnostic.statistiques, contexte: diagnostic.contexte || null, manquants: diagnostic.manquants || []
             } : null
           };
           ligne.contrat = Contrat.normaliser(ligne, { source: 'scan' });
