@@ -371,6 +371,13 @@ function niveauExecution(signaux, meta, options = {}) {
     // dialectes du dépôt (levels.entry, entree, symbole+target, cle+symbol) à la
     // forme du contrat. Ce bloc devinait auparavant lequel des deux il recevait.
     const c = Contrat.normaliser(s, { source: s.source });
+    const contrat = Contrat.validerSignal(c);
+    if (!contrat.ok || !['long', 'short'].includes(c.sens)) {
+      blocages.push('contrat non exécutable : ' + [...contrat.manquants, ...contrat.invalides, ...(!['long', 'short'].includes(c.sens) ? ['direction non exploitable'] : [])].join(', '));
+      details.push({ source, nom, ok: false, blocages, sens: c.sens });
+      nonExecutables++;
+      continue;
+    }
     const entry = c.entree;
     const stop = c.stop;
     const target1 = c.objectifs[0];
