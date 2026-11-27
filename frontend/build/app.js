@@ -4692,7 +4692,7 @@ function TradeSetupCard({
         })).json();
         if (res.success) {
           SoundEngine.playTrade();
-          setDemoStatus('✅ Pris en démo !');
+          setDemoStatus('Simulation enregistrée');
         } else setDemoStatus('⚠️ Erreur');
       } catch {
         setDemoStatus('❌ Erreur');
@@ -4700,66 +4700,16 @@ function TradeSetupCard({
         setTimeout(() => setDemoStatus(''), 3000);
       }
     },
-    title: "Prendre imm\xE9diatement ce trade en compte d\xE9mo"
+    title: "Créer une entrée de journal simulée, sans ordre courtier"
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-play",
     style: {
       marginRight: 5
     }
-  }), demoStatus || 'Exécuter Démo'), /*#__PURE__*/React.createElement("button", {
-    className: "btn sm",
-    style: {
-      padding: '5px 10px',
-      fontSize: 11,
-      background: '#ef4444',
-      color: '#fff',
-      border: '1px solid #dc2626'
-    },
-    onClick: async () => {
-      try {
-        setDerivTradeMsg('Envoi Deriv…');
-        const res = await (await api('/deriv/trade', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            symbol: symbol,
-            direction: achat ? 'BUY' : 'SELL',
-            amount: stake,
-            duration: durationVal,
-            durationUnit: 'm'
-          })
-        })).json();
-        if (res.success) {
-          SoundEngine.playTrade();
-          setDerivTradeMsg(`✅ Contrat #${res.contractId} acheté !`);
-        } else {
-          setDerivTradeMsg('⚠️ ' + (res.error || 'Erreur Deriv'));
-        }
-      } catch (e) {
-        setDerivTradeMsg('❌ ' + e.message);
-      } finally {
-        setTimeout(() => setDerivTradeMsg(''), 4500);
-      }
-    },
-    title: "Passer cet ordre sur Deriv (Websocket officiel)"
-  }, /*#__PURE__*/React.createElement("i", {
-    className: "fas fa-bolt",
-    style: {
-      marginRight: 5
-    }
-  }), derivTradeMsg || `Trader Deriv ($${stake})`), /*#__PURE__*/React.createElement("button", {
-    className: "btn sm ghost",
-    style: {
-      padding: '5px 8px',
-      fontSize: 11
-    },
-    onClick: () => setOptionsDeriv(!optionsDeriv),
-    title: "R\xE9glages de mise et dur\xE9e Deriv"
-  }, /*#__PURE__*/React.createElement("i", {
-    className: "fas fa-gear"
-  })), onToJournal && /*#__PURE__*/React.createElement("button", {
+  }), demoStatus || 'Journal simulé'), /*#__PURE__*/React.createElement("span", {
+    className: "btn sm ghost", role: "status",
+    title: "Exécution réelle indisponible : contrôles courtier en cours de validation"
+  }, /*#__PURE__*/React.createElement("i", {className: "fas fa-lock", style: {marginRight: 5}, "aria-hidden": "true"}), "Deriv · Lecture seule"), onToJournal && /*#__PURE__*/React.createElement("button", {
     className: "btn sm ghost",
     style: {
       padding: '5px 10px',
@@ -4784,80 +4734,14 @@ function TradeSetupCard({
     style: {
       marginRight: 5
     }
-  }), "Journal"))), optionsDeriv && /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 12,
-      padding: '8px 16px',
-      background: 'rgba(0,0,0,0.3)',
-      borderBottom: '1px solid rgba(148,163,184,.1)',
-      fontSize: 11,
-      flexWrap: 'wrap'
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: '#38bdf8',
-      fontWeight: 700
-    }
-  }, /*#__PURE__*/React.createElement("i", {
-    className: "fas fa-sliders",
-    style: {
-      marginRight: 5
-    }
-  }), "Options Deriv :"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      gap: 4,
-      alignItems: 'center'
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: '#94a3b8'
-    }
-  }, "Mise :"), [5, 10, 25, 50, 100].map(val => /*#__PURE__*/React.createElement("button", {
-    key: val,
-    type: "button",
-    className: `btn sm ${stake === val ? '' : 'ghost'}`,
-    style: {
-      padding: '2px 7px',
-      fontSize: 10.5,
-      borderColor: stake === val ? '#38bdf8' : 'rgba(148,163,184,.2)',
-      background: stake === val ? '#38bdf8' : 'transparent',
-      color: stake === val ? '#0f172a' : '#cbd5e1'
-    },
-    onClick: () => setStake(val)
-  }, "$", val))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      gap: 4,
-      alignItems: 'center',
-      marginLeft: 8
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: '#94a3b8'
-    }
-  }, "Dur\xE9e :"), [1, 2, 5, 15].map(d => /*#__PURE__*/React.createElement("button", {
-    key: d,
-    type: "button",
-    className: `btn sm ${durationVal === d ? '' : 'ghost'}`,
-    style: {
-      padding: '2px 7px',
-      fontSize: 10.5,
-      borderColor: durationVal === d ? '#38bdf8' : 'rgba(148,163,184,.2)',
-      background: durationVal === d ? '#38bdf8' : 'transparent',
-      color: durationVal === d ? '#0f172a' : '#cbd5e1'
-    },
-    onClick: () => setDurationVal(d)
-  }, d, "m")))), /*#__PURE__*/React.createElement("div", {
+  }), "Journal"))), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '14px 16px',
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
       gap: 10
     }
-  }, cardNiveau('1. Entrée', ttFmt(lv.entry), 'Déclenchement précis', '#38bdf8', 'ORDRE'), cardNiveau('2. Stop Loss', ttFmt(lv.stop), `Risque : -${distSL.toFixed(2)} pts`, '#f43f5e', 'INVALIDATION'), cardNiveau('3. Objectif 1', ttFmt(lv.target1), distTP1 ? `Gain : +${distTP1.toFixed(2)} pts` : 'Objectif direct', '#10b981', 'TP1 (50%)'), lv.target2 ? cardNiveau('4. Objectif 2', ttFmt(lv.target2), distTP2 ? `Gain : +${distTP2.toFixed(2)} pts` : 'Extension de tendance', '#059669', 'TP2 (50%)') : null), /*#__PURE__*/React.createElement("div", {
+  }, cardNiveau('1. Entrée', ttFmt(lv.entry), 'Déclenchement précis', '#38bdf8', 'ORDRE'), cardNiveau('2. Stop Loss', ttFmt(lv.stop), `Risque : -${distSL.toFixed(2)} pts`, '#f43f5e', 'INVALIDATION'), cardNiveau('3. Objectif 1', ttFmt(lv.target1), distTP1 ? `Gain : +${distTP1.toFixed(2)} pts` : 'Objectif direct', '#10b981', 'TP1'), lv.target2 ? cardNiveau('4. Objectif 2', ttFmt(lv.target2), distTP2 ? `Gain : +${distTP2.toFixed(2)} pts` : 'Extension de tendance', '#059669', 'TP2') : null), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '8px 16px',
       background: 'rgba(15,23,42,.4)',
@@ -4870,7 +4754,7 @@ function TradeSetupCard({
       fontSize: 11,
       color: '#94a3b8'
     }
-  }, /*#__PURE__*/React.createElement("span", null, "S\xE9curisation : passage du stop \xE0 ", /*#__PURE__*/React.createElement("b", null, "Break-Even (BE)"), " d\xE8s l'atteinte du TP1."), /*#__PURE__*/React.createElement("span", null, "Visualisation : niveaux trac\xE9s en direct sur le graphique ci-contre.")));
+  }, /*#__PURE__*/React.createElement("span", null, "Gestion du stop et sorties partielles : non automatisées."), /*#__PURE__*/React.createElement("span", null, "Visualisation : niveaux trac\xE9s en direct sur le graphique ci-contre.")));
 }
 
 // ── Poste d'Analyse de Structure de Marché & Flux Universel ──────────────
