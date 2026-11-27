@@ -24,7 +24,7 @@ const ROOT = path.join(__dirname, '..');
 const uiSrc = () => {
   const src = path.join(ROOT, 'frontend', 'src', 'app.jsx');
   if (fs.existsSync(src)) return fs.readFileSync(src, 'utf8');
-  return uiSrc();
+  throw new Error('Source frontend introuvable : ' + src);
 };
 const ENV = path.join(ROOT, '.env');
 const API = 'http://localhost:3001';
