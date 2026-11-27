@@ -2235,7 +2235,7 @@ Réponds en texte structuré, dense et exploitable.`;
     }
 
     // 1b. Vérification du calendrier économique — bloquer si news à fort impact
-    const cal = await filtreCalendrier(pair);
+    const cal = await filtreCalendrier(pair, { strict: true });
     if (!cal.ok) {
       return res.json({
         success: true,
@@ -3912,12 +3912,15 @@ async function profilsSurveillance() {
   const docs = await loadAllStrategies();
   const parId = new Map((docs || []).map(d => [d.id, d]));
   const profils = [];
+  const versions = await Registry.carteVersions().catch(() => ({}));
   for (const id of ids) {
     const doc = parId.get(id);
-    if (!doc) continue;
+    if (!doc || doc.actif === false) continue;
     const p = Signals.profilDepuisStrategie(doc);
     // Une fiche non exécutable est ignorée ici : la surveillance la refuse aussi.
-    if (p.executable !== false) profils.push(p);
+    const version = versions[doc.id];
+    if (version) { p.version = version.version; p.versionEtat = version.etat; }
+    if (p.executable !== false && !p.partiel) profils.push(p);
   }
   return profils;
 }
@@ -5153,11 +5156,69 @@ async function start() {
   // actifs que l'écran, le scan manuel et les alertes (XAUUSD par défaut).
   // Si aucun instrument n'est actif, zéro nouveau scan n'est exécuté.
   const InstrumentsActifs = require('./core/instruments-actifs');
+  const Paper = require('./engine/paper-observations');
+  let paperRepo = null;
+  let paperError = null;
+  let paperBusy = false;
+  let paperLastRun = null;
+  try {
+    paperRepo = Paper.repository(DB.client());
+    await paperRepo.init();
+  } catch (error) {
+    paperRepo = null;
+    paperError = error.message;
+    console.error('[Paper observations]', paperError);
+  }
+  app.get('/api/paper-observations', requireAuth, async (req, res) => {
+    if (!paperRepo) return res.status(503).json({ success: false, error: 'Stockage prospectif indisponible' });
+    try {
+      const limit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit) || 50)));
+      res.json({ success: true, mode: 'observation_ohlc', ordersExecuted: false,
+        lastRun: paperLastRun, workerError: paperError,
+        summary: await paperRepo.summary(), observations: await paperRepo.history(limit) });
+    } catch (error) { res.status(503).json({ success: false, error: 'Lecture du suivi prospectif indisponible' }); }
+  });
+  async function updatePaperObservations() {
+    if (!paperRepo || paperBusy) return;
+    paperBusy = true;
+    try {
+      const pending = await paperRepo.pending();
+      const groups = new Map();
+      for (const obs of pending) {
+        const key = JSON.stringify([obs.symbol, obs.timeframe, obs.provider]);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(obs);
+      }
+      const errors = [];
+      for (const group of groups.values()) {
+        const obs = group[0];
+        try {
+          const data = await Market.getCandles(obs.symbol, obs.timeframe, 300, obs.provider || undefined);
+          for (const item of group) {
+            const outcome = Paper.evaluate(item, data.candles || []);
+            if (outcome) await paperRepo.resolve(item.id, outcome);
+          }
+        } catch (error) { errors.push(obs.symbol + ': ' + error.message); }
+      }
+      paperLastRun = new Date().toISOString();
+      paperError = errors.length ? 'Certaines sources de prix sont indisponibles' : null;
+    } catch (error) { paperError = 'Échec de mise à jour des observations'; console.error('[Paper observations]', error.message); }
+    finally { paperBusy = false; }
+  }
+  const paperTimer = setInterval(updatePaperObservations, 120000);
+  paperTimer.unref?.();
   Scan.start({
     market: Market,
     signals: Signals,
     tf: '15m',
     mode: Scan.MODES_SCAN.SURVEILLANCE,
+    verifierCalendrier: symbol => filtreCalendrier(symbol, { strict: true }),
+    observer: async (row, profile, candles) => {
+      if (!paperRepo) return;
+      const costs = Frais.fraisPour(row.symbole, row.contrat?.entree);
+      const obs = Paper.buildObservation(row, profile, candles, costs, Market.TF_MS[row.tf]);
+      if (obs) await paperRepo.insert(obs);
+    },
     symbolesAutorises: () => InstrumentsActifs.obtenirActifs(),
     // Les stratégies de la surveillance : le scan cesse d'être un radar anonyme.
     strategies: profilsSurveillance,
