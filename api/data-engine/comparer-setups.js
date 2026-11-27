@@ -102,4 +102,20 @@ function comparer({ setups = [], marches = [], ratio = 0.6, backtester = Backtes
   };
 }
 
-module.exports = { comparer, statistiques, raisonCompatibilite };
+// CSV uses explicit columns and preserves rejected experiments. Prefix
+// spreadsheet formula characters in text fields to prevent CSV injection.
+function exportCSV(resultat) {
+  const fields = ['setup','titre','symbol','timeframe','regime','statut','raison',
+    'split_at','is_trades','is_expectancy','is_total_r','oos_trades','oos_expectancy','oos_total_r','oos_psr'];
+  const cell = v => {
+    if (v === null || v === undefined) return '';
+    const value = typeof v === 'string' && /^[=+@\-\t\r]/.test(v) ? "'" + v : String(v);
+    return '"' + value.replace(/"/g, '""') + '"';
+  };
+  const rows = (resultat.lignes || []).map(l => [
+    l.setup,l.titre,l.symbol,l.timeframe,l.regime,l.statut,l.raison,l.separation?.at,
+    l.is?.trades,l.is?.esperance,l.is?.totalR,l.oos?.trades,l.oos?.esperance,l.oos?.totalR,l.oos?.psr
+  ].map(cell).join(','));
+  return [fields.join(','), ...rows].join('\r\n') + '\r\n';
+}
+module.exports = { comparer, statistiques, raisonCompatibilite, exportCSV };
