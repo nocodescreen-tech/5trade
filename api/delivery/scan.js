@@ -67,7 +67,7 @@ function unitesPour(symbole, tf, tfsPour, TF_MS) {
   return [...new Set([tf, ...sup])];
 }
 
-async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERVALLE_MIN, strategies = null, tfsPour = null, mode = MODES_SCAN.EXPLORATION, symbolesAutorises = null, observer = null, verifierCalendrier = null } = {}) {
+async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERVALLE_MIN, strategies = null, tfsPour = null, mode = MODES_SCAN.EXPLORATION, symbolesAutorises = null, observer = null, verifierCalendrier = null, maintenant = () => Date.now() } = {}) {
   if (!market || !signals) throw new Error('scan complet : market et signals sont requis');
   const debut = Date.now();
   let symboles = market.listSymbols() || [];
@@ -134,7 +134,8 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
       try {
         const r = await market.getCandles(symbole, unite, BOUGIES, provider);
         const closes = (r.candles || []).filter(c => c.closed !== false);
-        const q = Qualite.analyser(r.candles || [], { timeframe: unite });
+        const instant = maintenant();
+        const q = Qualite.analyser(r.candles || [], { timeframe: unite, maintenant: instant });
         if (!q.ok) {
           erreurs.push(`${symbole} ${unite} : données non fiables — `
             + q.problemes.filter(p => p.gravite === 'critique').map(p => p.detail).join(', '));
@@ -162,7 +163,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
         const macro = typeof verifierCalendrier === 'function' ? await verifierCalendrier(symbole) : null;
         let diagnostic = null;
         if (moteur.analyser) {
-          diagnostic = Moteurs.analyser(classe, closes.map(c => c.c), { symbol: symbole, classe, timeframe: unite, provider, candles: closes, macro, now: Date.now(), live: mode !== MODES_SCAN.EXPLORATION });
+          diagnostic = Moteurs.analyser(classe, closes.map(c => c.c), { symbol: symbole, classe, timeframe: unite, provider, candles: closes, macro, now: instant, live: mode !== MODES_SCAN.EXPLORATION });
           if (diagnostic && diagnostic.convient === false) {
             erreurs.push(`${symbole} ${unite} : lecture refusée par le moteur ${moteur.id} — `
               + (diagnostic.refus || []).join(' · '));
@@ -182,7 +183,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
           let refusMoteur = null;
           // Unification du moteur : le scan et le rejeu fidèle partagent le même cerveau décisionnel
           if (typeof signals.decider === 'function' && passe.options.moteurBrut !== true) {
-            const dec = signals.decider(closes, { symbol: symbole, timeframe: unite, verifierSession: true }, passe.options);
+            const dec = signals.decider(closes, { symbol: symbole, timeframe: unite, verifierSession: mode !== MODES_SCAN.EXPLORATION, at: instant }, passe.options);
             if (dec) {
               if (dec.decision === 'ACHAT' || dec.decision === 'VENTE' || dec.decision === 'ATTENTE') {
                 const sig = dec.signal || (dec.arbitrage && dec.arbitrage.signauxRetenus && dec.arbitrage.signauxRetenus[0]);
