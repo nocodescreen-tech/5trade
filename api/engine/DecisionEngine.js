@@ -471,8 +471,15 @@ function niveauArbitrage(signaux, meta, options = {}) {
   // acquis — validé, confirmé, exécutable.
   const executables = signaux.filter(s => s.executable === true
     && s.confirme !== false && s.valide !== false);
-  const longs = executables.filter(s => s.sens === 'long' || s.direction === 'BUY');
-  const shorts = executables.filter(s => s.sens === 'short' || s.direction === 'SELL');
+  // PRIORITY AUX STRATÉGIES UTILISATEUR :
+  // Si des signaux exécutables proviennent d'une STRATÉGIE utilisateur, ils sont prioritaires
+  // absolus sur les simples figures géométriques génériques (motifs, structure).
+  // Une simple Pin bar ou un BOS générique ne doit JAMAIS écraser ou contredire une stratégie choisie par l'utilisateur.
+  const stratsExecutables = executables.filter(s => s.source === 'strategie');
+  const pool = stratsExecutables.length > 0 ? stratsExecutables : executables;
+
+  const longs = pool.filter(s => s.sens === 'long' || s.direction === 'BUY');
+  const shorts = pool.filter(s => s.sens === 'short' || s.direction === 'SELL');
 
   let decision = 'NO_TRADE';
   let raison = 'aucun signal exécutable';

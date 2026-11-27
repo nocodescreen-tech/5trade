@@ -103,6 +103,9 @@ function lancer(candles, meta = {}, options = {}) {
     try {
       r = Multi.detecterTout(fenetre, meta, {
         profils,
+        motifs: options.motifs,
+        structure: options.structure,
+        sources: options.sources,
         modele: options.modele,
         modeleSeuil: options.modeleSeuil,
         // Porte du rapport risque/rendement : absente en direct par défaut,

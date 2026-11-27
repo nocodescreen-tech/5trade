@@ -21,6 +21,7 @@ const api = (path, opts = {}) => fetch(`${API_BASE}${path}`, {
   credentials: 'include',
   ...opts
 });
+const lireJsonApi = window.FiveTradeApiResponse && window.FiveTradeApiResponse.lireJson;
 const REDUCED = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // Moteur Sonore Professionnel (Web Audio API natif - sans dépendance externe)
@@ -1846,8 +1847,8 @@ function AddKnowledge({
           texte: decrire
         })
       });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || 'Analyse refusée');
+      if (!lireJsonApi) throw new Error('Client API incomplet : recharge la page');
+      const d = await lireJsonApi(r, 'Analyse de strategie');
       setFiche(d);
       refresh();
     } catch (e) {

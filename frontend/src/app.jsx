@@ -10,6 +10,7 @@ const API_BASE = (window.location.port === '5173' || window.location.protocol ==
 const UI_VERSION = 'r2026-11-14d';
 const api = (path, opts = {}) =>
   fetch(`${API_BASE}${path}`, { credentials: 'include', ...opts });
+const lireJsonApi = window.FiveTradeApiResponse && window.FiveTradeApiResponse.lireJson;
 
 const REDUCED = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -980,8 +981,8 @@ function AddKnowledge({ refresh }) {
         method:'POST', headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ texte: decrire })
       });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || 'Analyse refusée');
+      if (!lireJsonApi) throw new Error('Client API incomplet : recharge la page');
+      const d = await lireJsonApi(r, 'Analyse de strategie');
       setFiche(d);
       refresh();
     } catch (e) { setDecrireErr(e.message); }
