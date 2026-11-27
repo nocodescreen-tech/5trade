@@ -67,7 +67,7 @@ function unitesPour(symbole, tf, tfsPour, TF_MS) {
   return [...new Set([tf, ...sup])];
 }
 
-async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERVALLE_MIN, strategies = null, tfsPour = null, mode = MODES_SCAN.EXPLORATION, symbolesAutorises = null } = {}) {
+async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERVALLE_MIN, strategies = null, tfsPour = null, mode = MODES_SCAN.EXPLORATION, symbolesAutorises = null, observer = null, verifierCalendrier = null } = {}) {
   if (!market || !signals) throw new Error('scan complet : market et signals sont requis');
   const debut = Date.now();
   let symboles = market.listSymbols() || [];
@@ -109,7 +109,8 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
     seuilForce: p.seuilForce,
     seuilRegles: p.seuilRegles,
     parametres: p.parametres,
-    strategie: { id: p.id, titre: p.titre }
+    profils: [p],
+    strategie: { id: p.id, titre: p.titre, version: p.version || null }
   } : {});
   const passes = profils.length
     ? profils.map(p => ({ profil: p, options: optionsDe(p) }))
@@ -171,7 +172,12 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
         // Pour CHAQUE profil : ses règles, ses conditions obligatoires et ses
         // seuils — sinon le scan annoncerait des signaux que la stratégie refuse.
         // Les bougies, elles, ont été chargées une seule fois.
+        const macro = typeof verifierCalendrier === 'function' ? await verifierCalendrier(symbole) : null;
         for (const passe of passes) {
+          if (mode !== MODES_SCAN.EXPLORATION && passe.profil && (passe.profil.executable === false || passe.profil.partiel)) {
+            erreurs.push(`${symbole} ${unite} : stratégie incomplète ou non exécutable (${passe.profil.id})`);
+            continue;
+          }
           let v = null;
           let refusMoteur = null;
           // Unification du moteur : le scan et le rejeu fidèle partagent le même cerveau décisionnel
@@ -224,6 +230,11 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
             tf: unite,
             direction: v.direction,
             status: v.status || null,
+            decision: v.decision || null,
+            macro: macro || null,
+            strategyId: passe.profil?.id || null,
+            strategyVersion: passe.profil?.version || null,
+            candleAt: closes[closes.length - 1]?.t ?? null,
             force: typeof v.force === 'number' ? v.force : (v.strength || 0),
             trend: v.trend || null,
             confirmations: v.confirmations || 0,
@@ -248,7 +259,17 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
             } : null
           };
           ligne.contrat = Contrat.normaliser(ligne, { source: 'scan' });
+          if (macro && macro.applicable && (!macro.ok || !macro.verifie) && mode !== MODES_SCAN.EXPLORATION) {
+            ligne.decision = 'ATTENTE';
+            ligne.status = 'surveiller';
+            ligne.raison = macro.detail || 'Calendrier non vérifié';
+            ligne.contrat.status = 'surveiller';
+          }
           signaux.push(ligne);
+          if (typeof observer === 'function' && mode === MODES_SCAN.SURVEILLANCE && ['ACHAT', 'VENTE'].includes(ligne.decision)) {
+            try { await observer(ligne, passe.profil, closes); }
+            catch (error) { erreurs.push(`${symbole} ${unite} : observation non enregistrée — ${error.message}`); }
+          }
         }
       } catch (e) {
         erreurs.push(`${symbole} ${unite} : ${e.message}`);
