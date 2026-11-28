@@ -170,16 +170,29 @@ const deriv = {
   /** Un aller-retour sur le WebSocket public, en attendant `want`. */
   _askOnce(payload, want, ms = 12000) {
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(this.ws);
-      const done = (fn, arg) => { clearTimeout(timer); try { socket.close(); } catch {} fn(arg); };
+      const socket = new WebSocket(this.ws, { handshakeTimeout: ms });
+      let settled = false;
+      const req_id = payload.req_id ?? 1;
+      const done = (fn, arg) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { if (socket.readyState === WebSocket.CONNECTING) socket.terminate(); else socket.close(); } catch {}
+        fn(arg);
+      };
       const timer = setTimeout(() => done(reject, new Error('Deriv : délai dépassé')), ms);
-      socket.on('open', () => socket.send(JSON.stringify(payload)));
+      socket.on('open', () => {
+        try { socket.send(JSON.stringify({ ...payload, req_id })); }
+        catch { done(reject, new Error('Deriv : envoi WebSocket impossible')); }
+      });
       socket.on('message', raw => {
-        let d; try { d = JSON.parse(raw); } catch { return; }
+        let d; try { d = JSON.parse(raw.toString()); } catch { return; }
+        if (d.req_id !== req_id) return;
         if (d.error) return done(reject, new Error('Deriv : ' + d.error.message));
         if (d.msg_type === want) done(resolve, d);
       });
       socket.on('error', e => done(reject, new Error('Deriv : ' + e.message)));
+      socket.on('close', () => done(reject, new Error('Deriv : socket fermé avant réponse')));
     });
   },
   /**
@@ -191,7 +204,7 @@ const deriv = {
     for (let i = 1; i <= essais; i++) {
       try { return await this._askOnce(payload, want, ms); }
       catch (e) {
-        const transitoire = /ECONNRESET|ECONNREFUSED|socket hang|délai dépassé|timeout/i.test(e.message);
+        const transitoire = /ECONNRESET|ECONNREFUSED|socket hang|socket fermé|délai dépassé|timeout/i.test(e.message);
         if (i === essais || !transitoire) throw e;
         await new Promise(r => setTimeout(r, 800));
       }
@@ -226,6 +239,8 @@ const deriv = {
   parse(msg) {
     if (msg.msg_type !== 'ohlc' || !msg.ohlc) return null;
     const o = msg.ohlc;
+    if (typeof o.symbol !== 'string' || !o.symbol || [o.open_time, o.open, o.high, o.low, o.close].some(v => v == null || v === '' || !Number.isFinite(Number(v)))) return null;
+    if (+o.open_time <= 0 || +o.low <= 0 || +o.high < Math.max(+o.open, +o.close, +o.low) || +o.low > Math.min(+o.open, +o.close)) return null;
     return {
       symbol: o.symbol,
       candle: { t: o.open_time * 1000, o: +o.open, h: +o.high, l: +o.low, c: +o.close, v: 0, closed: false }
@@ -247,7 +262,10 @@ const deriv = {
       });
       sock.on('message', raw => {
         let d; try { d = JSON.parse(raw); } catch { return; }
-        if (d && d.msg_type === 'tick' && d.tick) {
+        if (d && d.msg_type === 'tick' && d.tick && d.tick.symbol === symbol &&
+            d.tick.epoch != null && d.tick.quote != null && d.tick.quote !== '' &&
+            Number.isFinite(Number(d.tick.epoch)) && Number(d.tick.epoch) > 0 &&
+            Number.isFinite(Number(d.tick.quote)) && Number(d.tick.quote) > 0) {
           onTick({ t: d.tick.epoch * 1000, prix: +d.tick.quote, symbole: d.tick.symbol, source: 'deriv' });
         }
       });
