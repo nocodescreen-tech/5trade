@@ -113,7 +113,7 @@ class DerivClient {
         if (msg.req_id === reqId) {
           cleanup();
           if (msg.error) {
-            return reject(new Error(msg.error.message || `Erreur Deriv ${msg.error.code}`));
+            return reject(new Error('Deriv : requête WebSocket refusée'));
           }
           if (msgTypeExpected && msg.msg_type !== msgTypeExpected) return reject(new Error('Deriv : réponse inattendue'));
           resolve(msg);
@@ -160,7 +160,8 @@ class DerivClient {
           loginid: a.account_id, currency: a.currency, isVirtual: a.account_type === 'demo',
           typeCompte: a.account_type === 'demo' ? 'Démo' : 'Réel'
         }));
-      const account = accountId ? accounts.find(a => a.loginid === accountId) : accounts.find(a => a.isVirtual);
+      const demos = accounts.filter(a => a.isVirtual);
+      const account = accountId ? accounts.find(a => a.loginid === accountId) : demos.length === 1 ? demos[0] : null;
       if (!account) return { ok: false, error: 'Deriv : aucun compte démo actif ou compte sélectionné introuvable', accounts };
       ws = await this._openAccount(id, apiToken.trim(), account);
       const res = await this._ask(ws, { balance: 1, req_id: 1 }, 'balance');
@@ -204,7 +205,6 @@ class DerivClient {
    * Lit la configuration Deriv persistée
    */
   async lireConfig() {
-    if (this._cachedConfig) return this._cachedConfig;
     const stored = await DB.kvLire('deriv_config', null);
     const cfg = unprotectConfig(stored);
     if (cfg?.apiToken && !stored.tokenEncrypted) {
@@ -248,10 +248,12 @@ class DerivClient {
     }
     const test = await this.verifierEtAutoriser(cfg.appId, cfg.apiToken, cfg.account?.loginid);
     if (test.ok && test.account) {
-      cfg.account = test.account;
-      cfg.updatedAt = new Date().toISOString();
-      await DB.kvEcrire('deriv_config', protectConfig(cfg));
-      this._cachedConfig = cfg;
+      const current = unprotectConfig(await DB.kvLire('deriv_config', null));
+      if (!current?.actif || current.appId !== cfg.appId || current.apiToken !== cfg.apiToken ||
+          current.account?.loginid !== cfg.account?.loginid) {
+        throw new Error('Deriv : configuration modifiée pendant la lecture');
+      }
+      // A balance read must not recreate a disconnected account.
       return test.account;
     }
     throw new Error(test.error || 'Échec d\'actualisation du solde Deriv');
