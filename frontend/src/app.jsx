@@ -4256,6 +4256,12 @@ function LiveMarket({ onToJournal }) {
 
   const [etroi, setEtroit] = useState(() => typeof window !== 'undefined' && window.innerWidth < 820);
   const [actifs, setActifs] = useState([]);
+  const [selectionEtat,setSelectionEtat]=useState('loading');
+  const marketEnabled=selectionEtat==='ready'&&actifs.some(a=>a.symbol===symbol&&a.provider===provider);
+  const marketKey=marketEnabled?JSON.stringify([provider,symbol,tf,profondeur,mode,strategiesChoisies]):'inactive';
+  const keyRef=useRef(marketKey);
+  keyRef.current=marketKey;
+  const pendingMarket=useRef(new Set());
   const [catalogueOuvert, setCatalogueOuvert] = useState(false);
   const [filtreCatalogue, setFiltreCatalogue] = useState('');
   const [derivModalOuvert, setDerivModalOuvert] = useState(false);
@@ -4267,16 +4273,17 @@ function LiveMarket({ onToJournal }) {
 
   const dernierSignalSonoreRef = useRef(null);
   useEffect(() => {
-    if (decision && decision.decision && decision.decision !== 'HOLD' && decision.decision !== 'NEUTRE') {
+    if (marketEnabled && decision && ['ACHAT','VENTE'].includes(decision.decision)) {
       const cle = `${symbol}-${decision.decision}-${(decision.levels && decision.levels.entry) || ''}`;
       if (dernierSignalSonoreRef.current !== cle) {
         dernierSignalSonoreRef.current = cle;
         SoundEngine.playSignal();
       }
     }
-  }, [decision, symbol]);
+  }, [decision, symbol, marketEnabled]);
 
   const changerTf = (nouveauTf) => {
+    if(!marketEnabled)return;
     setTf(nouveauTf);
     api('/instruments/actifs/toggle', {
       method: 'POST',
@@ -4306,14 +4313,16 @@ function LiveMarket({ onToJournal }) {
       try {
         const res = await (await api('/instruments/actifs')).json();
         if (res.success && Array.isArray(res.instruments)) {
+          setSelectionEtat('ready');
           setActifs(res.instruments);
-          if (res.instruments.length > 0 && !res.instruments.some(a => a.symbol === symbol)) {
+          if (res.instruments.length > 0 && !res.instruments.some(a => a.symbol === symbol && a.provider === provider)) {
             setSymbol(res.instruments[0].symbol);
             setProvider(res.instruments[0].provider);
             if (res.instruments[0].tf) setTf(res.instruments[0].tf);
           }
         }
-      } catch (e) { /* hors-ligne : garde la sélection par défaut */ }
+        else setSelectionEtat('error');
+      } catch (e) { setSelectionEtat('error'); }
     })();
   }, []);
 
@@ -4325,28 +4334,29 @@ function LiveMarket({ onToJournal }) {
         body: JSON.stringify({
           symbol: sym,
           actif: !!actif,
-          provider: details.provider || (sym.startsWith('frx') || sym.startsWith('R_') ? 'deriv' : 'binance'),
+          provider: details.provider || provider,
           label: details.label || sym,
           tv: details.tv || sym,
           tf: details.tf || '5m'
         })
       })).json();
       if (res.success && Array.isArray(res.instruments)) {
+        setSelectionEtat('ready');
         setActifs(res.instruments);
         if (actif) {
           setSymbol(sym);
           if (details.provider) setProvider(details.provider);
           if (details.tf) setTf(details.tf);
-        } else if (sym === symbol) {
+        } else if (sym === symbol && (details.provider||provider)===provider) {
           if (res.instruments.length > 0) {
             setSymbol(res.instruments[0].symbol);
             setProvider(res.instruments[0].provider);
             setTf(res.instruments[0].tf || '5m');
           }
         }
-      }
+      } else { setErr(res.error||'Sélection refusée'); }
     } catch (e) {
-      console.error('Erreur toggle instrument :', e);
+      setErr('Sélection non enregistrée : '+String(e.message||e));
     }
   };
 
@@ -4382,10 +4392,13 @@ function LiveMarket({ onToJournal }) {
     setCandles([]); setReport(null); setVocabulaire(null);
     setDecision(null); setSse(null); setConfluence(null); setTicks(0);
     window.__debutAnalyse = Date.now();   // point de départ du compteur d'attente
-  }, [symbol, tf, provider]);
+      setTick(null); setLastUpdate(null); setOffline(false); setResult(null);
+  }, [symbol, tf, provider, marketEnabled]);
 
   // Bougies + structure (playbooks, vocabulaire) — rafraîchi régulièrement.
   const load = useCallback(async () => {
+    if(!marketEnabled || pendingMarket.current.has(marketKey))return;
+    pendingMarket.current.add(marketKey);
     setErr('');
     try {
       const [cb, st] = await Promise.all([
@@ -4394,8 +4407,9 @@ function LiveMarket({ onToJournal }) {
         api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`)
           .then(r => r.json()).catch(() => null)
       ]);
+      if(keyRef.current!==marketKey)return;
       if (cb && cb.success && Array.isArray(cb.candles) && cb.candles.length) setCandles(cb.candles);
-      if (cb && cb.offline) setOffline(true);
+      setOffline(!cb||!cb.success||!!cb.offline);
       if (st && st.success && st.report) {
         setReport(st.report);
         if (st.vocabulaire) setVocabulaire(st.vocabulaire);
@@ -4404,14 +4418,14 @@ function LiveMarket({ onToJournal }) {
       if (!cb || !cb.success) {
         setErr((cb && cb.error) || 'chargement des bougies impossible');
       }
-    } catch (e) { setErr(String(e.message || e)); }
-  }, [symbol, tf, provider, profondeur]);
+    } catch(e){if(keyRef.current===marketKey){setOffline(true);setErr(String(e.message||e));}} finally {pendingMarket.current.delete(marketKey);}
+  }, [symbol, tf, provider, profondeur, marketEnabled, marketKey]);
 
   useEffect(() => {
     let vivant = true;
     const recharger = () => { if (vivant) load(); };
     recharger();
-    const it = setInterval(recharger, 5000);
+    const it = setInterval(recharger, 15000);
     return () => { vivant = false; clearInterval(it); };
   }, [load]);
 
@@ -4431,16 +4445,17 @@ function LiveMarket({ onToJournal }) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [load, symbol, provider]);
+  }, [load, symbol, provider, marketEnabled]);
 
   // Décision complète du moteur (arbitrage 5 niveaux) — et alignement MTF.
   useEffect(() => {
     let vivant = true;
+    if(!marketEnabled)return;
     const chargerDecision = async () => {
       try {
         const d = await (await api(`/decision?${paramsCommuns()}`)).json();
-        if (vivant && d.success && d.decision) { setDecision(d.decision); }
-      } catch (e) { /* repli : le flux SSE garde le dernier verdict */ }
+        if(vivant)setDecision(d.success&&d.decision?d.decision:null);
+      } catch (e) { if(vivant)setDecision(null); }
     };
     const chargerVerdict = async () => {
       try {
@@ -4478,11 +4493,12 @@ function LiveMarket({ onToJournal }) {
       clearInterval(iDec); clearInterval(iVer); clearInterval(iConf);
       clearInterval(iStat); clearInterval(iJour);
     };
-  }, [paramsCommuns]);
+  }, [paramsCommuns,marketEnabled]);
 
   // Bougies en direct (SSE).
   useEffect(() => {
     setLive(false);
+    if(!marketEnabled)return;
     const es = new EventSource(`/api/market/stream?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`);
     es.addEventListener('hello', () => setLive(true));
     es.addEventListener('candle', ev => {
@@ -4501,11 +4517,11 @@ function LiveMarket({ onToJournal }) {
     });
     es.addEventListener('error', () => setLive(false));
     return () => es.close();
-  }, [symbol, tf, provider]);
+  }, [symbol, tf, provider,marketEnabled]);
 
   // Ticks bruts (prix réel).
   useEffect(() => {
-    if (!symbol) return;
+    if (!marketEnabled) return;
     setTick(null); setTickRate(0); tickPrec.current = null;
     const es = new EventSource(`/api/market/ticks?symbol=${encodeURIComponent(symbol)}&provider=${provider}`);
     let recus = 0;
@@ -4520,19 +4536,21 @@ function LiveMarket({ onToJournal }) {
     es.addEventListener('error', () => {});
     const compteur = setInterval(() => { setTickRate(recus); recus = 0; }, 1000);
     return () => { clearInterval(compteur); es.close(); };
-  }, [symbol, provider]);
+  }, [symbol, provider,marketEnabled]);
 
   // Verdict en direct (SSE) : repli immédiat du Decision Center.
   useEffect(() => {
     setSse(null);
+    if(!marketEnabled)return;
     const es = new EventSource(`/api/signals/stream?${paramsCommuns()}`);
     es.addEventListener('signal', ev => {
       try { setSse(JSON.parse(ev.data)); } catch (e) { /* trame illisible */ }
     });
     return () => es.close();
-  }, [paramsCommuns]);
+  }, [paramsCommuns,marketEnabled]);
 
   const analyser = async () => {
+    if(!marketEnabled||busy)return;
     setBusy(true); setErr('');
     try {
       const r = await (await api('/market/analyze', {
@@ -4540,7 +4558,7 @@ function LiveMarket({ onToJournal }) {
         body: JSON.stringify({ symbol, tf, provider, maxStrategies: 3 })
       })).json();
       if (!r.success) throw new Error(r.error || 'analyse impossible');
-      setResult(r);
+      if(keyRef.current===marketKey)setResult(r);
     } catch (e) { setErr(String(e.message || e)); }
     finally { setBusy(false); }
   };
@@ -4570,18 +4588,9 @@ function LiveMarket({ onToJournal }) {
 
   return (
     <>
-      <AgentBriefingCard />
-
-      {/* ── Ruban Screener Multi-Marchés en direct ── */}
-      <MarketScreenerBar actifs={actifs} currentSymbol={symbol}
-        onSelect={(sym, prov, timeframe) => {
-          setSymbol(sym);
-          if (prov) setProvider(prov);
-          if (timeframe) setTf(timeframe);
-        }} />
-
+      <div className="terminal-title"><div><span>ESPACE DE MARCHÉ</span><h1>Terminal de trading</h1></div><div className="terminal-readonly"><i className="fas fa-shield-halved"/> Analyse · Ordres réels désactivés</div></div>
       {/* ── Barre des instruments actifs (XAUUSD + sélection personnalisée) ── */}
-      <div className="panel" style={{ padding: '8px 12px', marginBottom: 12, background: 'rgba(15,23,42,.75)',
+      <div className="panel terminal-watchlist" style={{ padding: '8px 12px', marginBottom: 12, background: 'rgba(15,23,42,.75)',
         border: '1px solid rgba(56,189,248,.25)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 6 }}>
           <i className="fas fa-layer-group" style={{ color: '#38bdf8', fontSize: 13 }}></i>
@@ -4590,9 +4599,9 @@ function LiveMarket({ onToJournal }) {
           </span>
         </div>
         {actifs.map(act => {
-          const estSelectionne = act.symbol === symbol;
+          const estSelectionne = act.symbol === symbol && act.provider===provider;
           return (
-            <div key={act.symbol} style={{
+            <div key={`${act.provider}|${act.symbol}`} style={{
               display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 9px', borderRadius: 6,
               background: estSelectionne ? 'rgba(56,189,248,0.18)' : 'rgba(148,163,184,0.08)',
               border: `1px solid ${estSelectionne ? '#38bdf8' : 'rgba(148,163,184,0.2)'}`,
@@ -4603,7 +4612,7 @@ function LiveMarket({ onToJournal }) {
               </span>
               <button className="btn ghost sm" style={{ padding: '0 4px', fontSize: 9.5, color: 'var(--dim)', height: 18 }}
                 title={`Retirer ${act.label || act.symbol} de l'écran live et du scan`}
-                onClick={(e) => { e.stopPropagation(); toggleInstrument(act.symbol, false); }}>
+                onClick={(e) => { e.stopPropagation(); toggleInstrument(act.symbol, false,act); }}>
                 <i className="fas fa-xmark"></i>
               </button>
             </div>
@@ -4621,7 +4630,7 @@ function LiveMarket({ onToJournal }) {
           border: `1px solid ${derivStatut && derivStatut.connecte ? 'rgba(34,211,138,0.4)' : 'rgba(239,68,68,0.4)'}`
         }}
           onClick={() => setDerivModalOuvert(true)}
-          title="Connecter mon Token et App ID Deriv pour exécuter des ordres en direct">
+          title="Connexion Deriv en consultation ; ordres réels désactivés">
           <i className="fas fa-plug" style={{ marginRight: 5 }}></i>
           {derivStatut && derivStatut.connecte
             ? `Deriv : ${derivStatut.account ? derivStatut.account.loginid : 'Connecté'} ($${Number(derivStatut.account ? derivStatut.account.balance : 0).toFixed(0)})`
@@ -4631,7 +4640,9 @@ function LiveMarket({ onToJournal }) {
 
       <DerivModal ouvert={derivModalOuvert} onClose={() => setDerivModalOuvert(false)} onRefresh={st => setDerivStatut(st)} />
 
-      {actifs.length === 0 && (
+      {selectionEtat==='loading' && <div className="panel terminal-placeholder" role="status">Chargement des instruments…</div>}
+      {selectionEtat==='error' && <div className="panel terminal-placeholder" role="alert">Sélection indisponible. Rechargez la page ou ouvrez le catalogue.</div>}
+      {selectionEtat==='ready' && actifs.length === 0 && (
         <div className="panel" style={{ padding: 24, textAlign: 'center', marginBottom: 12, borderColor: 'rgba(245,158,11,0.4)', background: 'rgba(245,158,11,0.06)' }}>
           <i className="fas fa-ban" style={{ fontSize: 36, color: '#f59e0b', marginBottom: 10 }}></i>
           <div style={{ fontSize: 17, fontWeight: 800, color: '#f59e0b' }}>Aucun instrument actif sélectionné</div>
@@ -4688,9 +4699,9 @@ function LiveMarket({ onToJournal }) {
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
                       {filtres.map(s => {
-                        const estActif = actifs.some(a => a.symbol.toUpperCase() === s.symbol.toUpperCase());
+                        const estActif = actifs.some(a => a.symbol.toUpperCase() === s.symbol.toUpperCase() && a.provider===s.provider);
                         return (
-                          <div key={s.symbol} style={{
+                          <div key={`${s.provider}|${s.symbol}`} style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px',
                             borderRadius: 6, background: estActif ? 'rgba(56,189,248,0.08)' : 'rgba(0,0,0,0.25)',
                             border: `1px solid ${estActif ? '#38bdf8' : 'rgba(148,163,184,0.15)'}`
@@ -4723,9 +4734,10 @@ function LiveMarket({ onToJournal }) {
         </div>
       )}
 
+      {marketEnabled && <>
       {/* ── En-tête instrument (collant) ── */}
       <div className="panel" style={{ padding: '11px 14px', marginBottom: 12,
-        position: 'sticky', top: 0, zIndex: 40, background: 'var(--panel)',
+        position: 'relative', zIndex: 20, background: 'var(--panel)',
         boxShadow: '0 6px 18px -12px rgba(0,0,0,.9)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{ minWidth: 0 }}>
@@ -4778,7 +4790,7 @@ function LiveMarket({ onToJournal }) {
             <select className="fld" aria-label="Marché analysé" style={{ width: 220 }}
               value={`${provider}|${symbol}`}
               onChange={e => { const [pv, sy] = e.target.value.split('|'); setProvider(pv); setSymbol(sy); }}>
-              {Object.entries((meta.symbols || []).reduce((acc, s) => {
+              {Object.entries((actifs || []).reduce((acc, s) => {
                 const k = s.providerLabel || 'Marchés';
                 (acc[k] = acc[k] || []).push(s);
                 return acc;
@@ -4904,7 +4916,7 @@ function LiveMarket({ onToJournal }) {
                 onClick={() => setCalqueStructure(!calqueStructure)}
                 title="BOS (Break of Structure) & CHoCH (Change of Character)"
               >
-                <i className="fas fa-draw-polygon"></i> 📐 Structure BOS/CHoCH
+                <i className="fas fa-draw-polygon"></i> Structure BOS/CHoCH
               </button>
               <button
                 type="button"
@@ -4912,7 +4924,7 @@ function LiveMarket({ onToJournal }) {
                 onClick={() => setCalqueSweeps(!calqueSweeps)}
                 title="Prises de liquidités (High/Low sweeps & BSL/SSL)"
               >
-                <i className="fas fa-water"></i> 🌊 Sweeps Liquidité
+                <i className="fas fa-water"></i> Sweeps Liquidité
               </button>
               <button
                 type="button"
@@ -4920,7 +4932,7 @@ function LiveMarket({ onToJournal }) {
                 onClick={() => setCalqueZones(!calqueZones)}
                 title="Order Blocks (OB) & Imbalances Fair Value Gaps (FVG)"
               >
-                <i className="fas fa-cube"></i> 📦 Order Blocks & FVG
+                <i className="fas fa-cube"></i> Order Blocks & FVG
               </button>
               <button
                 type="button"
@@ -4928,7 +4940,7 @@ function LiveMarket({ onToJournal }) {
                 onClick={() => setCalqueNiveaux(!calqueNiveaux)}
                 title="Niveaux clés d'exécution (Entrée, SL, TP1, TP2)"
               >
-                <i className="fas fa-crosshairs"></i> 🎯 Niveaux Signal
+                <i className="fas fa-crosshairs"></i> Niveaux Signal
               </button>
               <button
                 type="button"
@@ -4936,7 +4948,7 @@ function LiveMarket({ onToJournal }) {
                 onClick={() => setCalqueOrderFlow(!calqueOrderFlow)}
                 title="Flux d'ordres institutionnel : POC (Point of Control) & Value Area VAH/VAL"
               >
-                <i className="fas fa-chart-simple"></i> 📊 Order Flow & POC
+                <i className="fas fa-chart-simple"></i> Order Flow & POC
               </button>
             </div>
 
@@ -5049,6 +5061,8 @@ function LiveMarket({ onToJournal }) {
       )}
 
       {result && <Result result={result} />}
+      <details className="panel terminal-research"><summary>Briefing IA et contexte de recherche</summary><AgentBriefingCard /></details>
+      </>}
     </>
   );
 }
@@ -8649,7 +8663,7 @@ function Dashboard({ user, onLogout }) {
               </div>
             </header>
 
-      <main className="wrap">
+      <main className={`wrap ${tab==='live'?'terminal-wrap':''}`}>
               <div className="nav" style={{ marginBottom:20 }}>
                 {NAV.map(n => (
                   <button key={n.id}
