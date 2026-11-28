@@ -78,3 +78,76 @@ test('market contexts expose missing data rather than claiming a complete engine
   assert.ok(metal.manquants.some(x=>/Rendements/.test(x)));
   assert.equal(Context.analyse('crypto',prices,{symbol:'frxXAUUSD'}).convient,false);
 });
+
+const TelegramAuth=require('../delivery/telegram-auth');
+const Outbox=require('../delivery/telegram-outbox');
+const Perf=require('../engine/performance');
+const Quant=require('../engine/quantitative');
+const WF=require('../engine/walk-forward');
+const Flow=require('../engine/orderFlow');
+const VP=require('../engine/volumeProfile');
+
+test('Telegram requires secret, configured private chat and owner',()=>{
+  const secret='0123456789abcdefghijklmnop';
+  const update={message:{chat:{id:42,type:'private'},from:{id:42},text:'/recap'}};
+  assert.equal(TelegramAuth.authorizeUpdate(update,secret,secret,'42').ok,true);
+  assert.equal(TelegramAuth.authorizeUpdate(update,'wrong',secret,'42').status,401);
+  assert.equal(TelegramAuth.authorizeUpdate(update,secret,secret,'43').status,403);
+  assert.equal(TelegramAuth.authorizeUpdate(update,secret,'','42').status,503);
+  assert.equal(TelegramAuth.authorizeUpdate({...update,message:{...update.message,from:{id:43}}},secret,secret,'42').status,403);
+});
+test('outbox retries only explicit rate-limit rejection and records uncertainty',async()=>{
+  const job={attempts:1,expires_at:new Date(now+600000)};
+  assert.equal(Outbox.transition(job,{ok:true,messageId:100},now).state,'sent');
+  assert.equal(Outbox.transition(job,{ok:false,kind:'uncertain'},now).state,'uncertain');
+  assert.equal(Outbox.transition(job,{ok:false,kind:'rate_limit',retryAfterMs:2000},now).state,'pending');
+  assert.equal(Outbox.transition({...job,attempts:5},{ok:false,kind:'rate_limit'},now).state,'failed');
+  const result=await Outbox.sendOnce('fake','42','test',{},async()=>{throw Error('network')});
+  assert.equal(result.kind,'uncertain');
+});
+test('performance excludes null, blank, boolean and sorts numerical timestamps',()=>{
+  const rows=[{at:4,r:1},{at:1,r:-1},{at:2,r:null},{at:3,r:''},{at:5,r:false}];
+  assert.equal(Perf.metriques(rows).n,2);
+  assert.deepEqual(Perf.exploitables(rows).map(t=>t.r),[-1,1]);
+  assert.equal(Quant.ratios([{r:1},{r:1},{r:1},{r:-1}]).sortino,1);
+});
+test('bootstrap is reproducible and rolling selection never tests rejected candidates',async()=>{
+  const trades=Array.from({length:50},(_,i)=>({r:i%3===0?-1:1.2,at:i+1}));
+  const sample=WF.blockBootstrap(trades,{iterations:100,seed:9});
+  assert.deepEqual(sample,WF.blockBootstrap(trades,{iterations:100,seed:9}));
+  const candles=Array.from({length:300},(_,i)=>({t:i*step,o:100,h:101,l:99,c:100,closed:true}));
+  const calls=[];
+  const result=await WF.walkForward({candles,candidates:[{id:'a',version:1},{id:'b',version:1}],train:100,test:100,
+    run:async(window,p)=>{
+      calls.push([window[0].t,p.id]);
+      return {trades:window.slice(1,25).map(c=>({at:c.t,clotureAt:c.t+step,resultat:'tp1',rNet:p.id==='a'?1:-1,fraisConnus:true}))};
+    }});
+  assert.equal(result.folds.length,2);
+  assert.equal(result.folds[0].selected.id,'a');
+  assert.deepEqual(calls.slice(0,3),[[0,'a'],[0,'b'],[100*step,'a']]);
+  assert.equal(result.outOfSample.n,48);
+});
+test('real taker volume produces delta and missing volume cannot produce POC',()=>{
+  const c={o:100,h:102,l:99,c:101,v:10,takerBuyBase:7,volumeSource:'binance_spot'};
+  const flow=Flow.analyserOrderFlow([{...c,t:1},{...c,t:2}]);
+  assert.equal(flow.methode,'delta_taker_binance_spot');
+  assert.equal(flow.delta[0],4);
+  assert.equal(flow.cvd[0].value,4);
+  assert.equal(VP.volumeProfile([{...c,v:0},{...c,v:0}]).poc,null);
+  assert.equal(Flow.analyserOrderFlow([{...c,v:0},{...c,v:0}]).disponible,false);
+});
+test('replay capital is settled once rather than credited twice',()=>{
+  const Replay=require('../engine/rejeu-direct');
+  const candles=Array.from({length:80},(_,i)=>({t:(i+1)*step,o:100,h:110,l:95,c:101,closed:true}));
+  let issued=false;
+  const run=Replay.rejouer(candles,{symbol:'TEST',timeframe:'5m'},{sansRisqueCompte:true},{
+    fenetre:60,pas:5,initialCapital:1000,riskPct:1,
+    decider:()=>{
+      if(issued)return {decision:'ATTENTE'};
+      issued=true;return {decision:'ACHAT',signal:{id:'test',sens:'long',executable:true,entree:100,stop:95,objectifs:[110]},risque:{ok:true}};
+    },
+    evaluer:s=>({...s,resultat:'tp1',r:2,rBrut:2,leveLe:s.at+step,bougiesSuivies:1,cout:{connu:true,enR:0}})
+  });
+  assert.equal(run.stats.capitalFinal,1020);
+  assert.equal(run.stats.positionsMaxSimultanees,1);
+});
