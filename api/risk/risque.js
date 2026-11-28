@@ -124,6 +124,9 @@ function dimensionner(entree, stop, capital = null, risquePct = null) {
   if (!Number.isFinite(e) || !Number.isFinite(s) || e <= 0) {
     return { taille: null, risqueMontant: null, risquePct: null, exposition: null, raison: 'prix d entrée invalide' };
   }
+  if (!(cap > 0) || !(pct > 0) || s <= 0 || entree == null || stop == null) {
+    return { taille: null, risqueMontant: null, risquePct: pct, exposition: null, raison: 'capital, risque ou niveaux invalides' };
+  }
   const distance = Math.abs(e - s);
   if (!(distance > 0)) {
     return { taille: null, risqueMontant: null, risquePct: null, exposition: null, raison: 'risque nul : entrée et stop confondus' };
@@ -136,6 +139,9 @@ function dimensionner(entree, stop, capital = null, risquePct = null) {
   }
   const risqueMontant = cap * pct / 100;
   const taille = risqueMontant / distance;
+  if (!Number.isFinite(taille) || !Number.isFinite(risqueMontant) || !Number.isFinite(taille * e) || taille < 0.00000001) {
+    return { taille: null, risqueMontant: null, risquePct: pct, exposition: null, raison: 'taille de position invalide ou trop faible' };
+  }
   return {
     taille: +taille.toFixed(8),
     risqueMontant: +risqueMontant.toFixed(2),
@@ -244,8 +250,11 @@ function etat(signaux, options = {}) {
  */
 function verifierPrise(trade, etatCourant, options = {}) {
   const cfg = configuration();
-  const e = etatCourant || etat([], options);
+  const e = etatCourant;
   const refus = [];
+  if (!trade || !e || !['capital', 'perteJourPct', 'positionsOuvertes', 'risqueEngage', 'expositionTotale'].every(k => Number.isFinite(e[k])) || e.capital <= 0 || e.positionsOuvertes < 0 || e.risqueEngage < 0 || e.expositionTotale < 0) {
+    return { ok: false, refus: ['état du compte absent ou invalide'], taille: null, risqueMontant: null, exposition: null, raison: 'état du compte absent ou invalide' };
+  }
 
   const d = dimensionner(trade.entree, trade.stop, e.capital, options.risquePct);
   if (d.taille === null) refus.push(d.raison);
@@ -257,6 +266,7 @@ function verifierPrise(trade, etatCourant, options = {}) {
     refus.push(`${e.positionsOuvertes} positions ouvertes pour ${cfg.maxSimultanes} autorisées`);
   }
   const symbole = trade.symbol || '?';
+  if (symbole === '?') refus.push('instrument absent : risque par marché non vérifiable');
   // Plafonds de RISQUE ENGAGÉ (pas de notionnel : voir la note de DEFAUT).
   const risqueMarche = (e.risqueParMarche && e.risqueParMarche[symbole]) || 0;
   const risqueApres = risqueMarche + (d.risqueMontant || 0);
