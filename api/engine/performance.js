@@ -8,15 +8,18 @@
  */
 
 /** Trades utilisables : résultat numérique et horodatage. */
+const rValide = v => (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && Number.isFinite(Number(v));
+const instant = v => typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() ? Date.parse(v) : NaN;
+
 function exploitables(trades) {
   return (trades || [])
-    .filter(t => t && Number.isFinite(Number(t.r)))
-    .map(t => ({ ...t, r: Number(t.r), at: t.at || t.closAt || t.emissionAt || null }))
+    .filter(t => t && rValide(t.r))
+    .map(t => ({ ...t, r: Number(t.r), at: t.at ?? t.closAt ?? t.emissionAt ?? null }))
     // Un trade sans date n'est pas « le 1er janvier 1970 » : il n'a pas de place
     // dans l'ordre. On le met en fin de liste, sans inventer d'horodatage.
     .sort((a, b) => {
-      const ta = a.at ? Date.parse(a.at) : NaN;
-      const tb = b.at ? Date.parse(b.at) : NaN;
+      const ta = instant(a.at);
+      const tb = instant(b.at);
       const va = Number.isFinite(ta), vb = Number.isFinite(tb);
       if (!va && !vb) return 0;
       if (!va) return 1;
@@ -83,8 +86,8 @@ function decouper(trades, options = {}) {
   const t = exploitables(trades);
   const fraction = Number.isFinite(options.fractionValidation) ? options.fractionValidation : 0.3;
   const mini = Number.isFinite(options.minimumEntrainement) ? options.minimumEntrainement : 20;
-  const coupe = Math.floor(t.length * (1 - fraction));
-  if (t.length < mini + 10) {
+  const coupe = Math.floor(t.length * (1 - Math.max(0.1, Math.min(0.8, fraction))));
+  if (t.length < mini + 10 || coupe < mini || t.length - coupe < 10 || t.some(x => !Number.isFinite(instant(x.at)))) {
     return { entrainement: t, validation: [], motif: `seulement ${t.length} trade(s) : pas de découpe honnête possible` };
   }
   return {
@@ -188,9 +191,9 @@ function appliquerCout(trades, coutR) {
   // avec `t.r` — qui est net — puis soustraire encore le coût appliquait les
   // frais deux fois. Le brut existant est conservé, et le net repart de lui.
   return (trades || []).map(t => {
-    const brut = Number.isFinite(Number(t.rBrut)) ? Number(t.rBrut) : Number(t.r);
+    const brut = rValide(t.rBrut) ? Number(t.rBrut) : rValide(t.r) ? Number(t.r) : NaN;
     return { ...t, rBrut: brut, r: Number.isFinite(brut) ? +(brut - cout).toFixed(4) : t.r };
   });
 }
 
-module.exports = { metriques, decouper, verdict, verdictDepuisMetriques, appliquerCout, parDimension, verifierChronologie, exploitables };
+module.exports = { rValide, instant, metriques, decouper, verdict, verdictDepuisMetriques, appliquerCout, parDimension, verifierChronologie, exploitables };
