@@ -65,7 +65,7 @@ const binance = {
       t: k[0],                      // epoch ms d'ouverture
       o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5],
       takerBuyBase: k[9] == null ? null : Number(k[9]), quoteVolume: k[7] == null ? null : Number(k[7]), volumeSource: 'binance_spot',
-      closed: true
+      closed: Number(k[6]) < Date.now()
     }));
   },
   streamUrl(symbols, tf) {
@@ -453,9 +453,10 @@ function cacheInfo() {
  * pendant que le prix, lui, bougeait. On corrige une fois pour tous les
  * fournisseurs plutôt que dans chacun.
  */
-function marquerEnCours(liste) {
-  if (Array.isArray(liste) && liste.length) liste[liste.length - 1].closed = false;
-  return liste;
+function marquerEnCours(liste,tf,now=Date.now()) {
+  const pas=TF_MS[tf];
+  if (!Array.isArray(liste)||!pas) return liste;
+  return liste.map(c=>({...c,closed:c.closed!==false&&Number.isFinite(c.t)&&c.t+pas<=now}));
 }
 
 /**
@@ -519,7 +520,7 @@ async function getCandles(symbol, tf, count = 300, providerId) {
       fournies: a.bougies.length, demandees: count, trous: a.trous };
   }
   try {
-    const a = assainirBougies(marquerEnCours(await p.candles(symbol, tf, count)), tf);
+    const a = assainirBougies(marquerEnCours(await p.candles(symbol, tf, count),tf), tf);
     buffers.set(k, a.bougies);
     bufferMaj.set(k, Date.now());
     saveCacheSoon();
