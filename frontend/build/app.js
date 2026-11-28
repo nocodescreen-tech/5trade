@@ -6456,7 +6456,7 @@ function DerivModal({
       color: 'var(--dim)',
       marginTop: 4
     }
-  }, "Cr\xE9e ton token avec les autorisations ", /*#__PURE__*/React.createElement("b", null, "Lecture (Read)"), " et ", /*#__PURE__*/React.createElement("b", null, "Trading (Trade)"), " sur ton tableau de bord Deriv.")), /*#__PURE__*/React.createElement("div", {
+  }, "Crée un token avec la seule autorisation ", React.createElement("b",null,"Lecture (Read)"), ". Ne donne pas la permission Trading.")), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 6
     }
@@ -6494,7 +6494,7 @@ function DerivModal({
     }
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-shield-halved"
-  }), "S\xE9curit\xE9 & Confidentialit\xE9"), "Ton token est chiffr\xE9 et stock\xE9 localement sur ton instance 5TRADE. Les ordres sont pass\xE9s directement entre ton serveur et l'API WebSocket s\xE9curis\xE9e de Deriv sans interm\xE9diaire."))));
+  }), "S\xE9curit\xE9 & Confidentialit\xE9"), "Utilise uniquement un jeton de consultation. L’exécution des ordres réels est désactivée sur 5TRADE."))));
 }
 
 // ── Historique des signaux (confirmés / rejetés / expirés) ───────────────
