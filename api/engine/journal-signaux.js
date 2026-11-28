@@ -248,7 +248,7 @@ function enregistrer(signaux, meta = {}, options = {}) {
  */
 function evaluer(sig, bougies, options = {}) {
   const apres = (bougies || [])
-    .filter(c => c && c.t > sig.at && c.closed !== false)
+    .filter(c => c && Number.isFinite(c.t) && c.t > Math.max(sig.at, sig.derniereBougieSuivie || sig.at) && c.closed !== false)
     .sort((a, b) => a.t - b.t);
   if (!apres.length) return sig;
 
@@ -269,15 +269,17 @@ function evaluer(sig, bougies, options = {}) {
   const stop = sig.stop;
   const tp1 = sig.objectifs[0];
   const tp2 = sig.objectifs[1];
-  let maxFav = null, maxDef = null;
+  let maxFav = sig.extremumFavorable ?? null, maxDef = sig.extremumDefavorable ?? null;
   // Bougie où TP1 a été touché : le retour à l'entrée ne peut être constaté
   // qu'APRÈS. Le tester sur la bougie du TP1 était faux — cette bougie part
   // souvent de l'entrée, donc son extrême défavorable touche le point d'entrée
   // par construction et le signal était classé « BE » alors qu'il venait
   // d'atteindre son objectif.
-  let tp1At = null;
+  let tp1At = sig.tp1At ?? null;
 
   for (const c of apres) {
+    if (sig.derniereBougieSuivie != null && c.t <= sig.derniereBougieSuivie) continue;
+    sig.derniereBougieSuivie = c.t;
     sig.bougiesSuivies++;
 
     const fav = long ? c.h : c.l;
@@ -300,6 +302,7 @@ function evaluer(sig, bougies, options = {}) {
     if (!sig.atteintTP1 && touche1) {
       sig.atteintTP1 = true;
       tp1At = c.t;
+      sig.tp1At = c.t;
     }
     if (sig.atteintTP1 && Number.isFinite(tp2) && (long ? c.h >= tp2 : c.l <= tp2)) {
       sig.atteintTP2 = true;
@@ -338,7 +341,7 @@ function evaluer(sig, bougies, options = {}) {
   sig.rBrut = multipleR(sig);
   const risque = Math.abs(Number(sig.entree) - Number(sig.stop));
   const cout = Frais.coutEnR(sig.symbol, sig.entree, risque, options.frais);
-  sig.cout = cout.total > 0 ? cout : null;
+  sig.cout = cout.connu || cout.total > 0 ? cout : null;
   sig.r = (sig.rBrut !== null && cout.enR !== null)
     ? +(sig.rBrut - cout.enR).toFixed(2)
     : sig.rBrut;
@@ -444,6 +447,7 @@ async function mettreAJour(getBougies, options = {}) {
 
   let maj = 0;
   const transitions = [];
+  const progresses = new Map();
   for (const [k, liste] of groupes) {
     const [symbol, timeframe, provider] = k.split('|');
     let bougies = null;
@@ -454,7 +458,9 @@ async function mettreAJour(getBougies, options = {}) {
     if (!Array.isArray(bougies) || !bougies.length) continue;
     for (const s of liste) {
       const avant = s.resultat;
+      const cursor = s.derniereBougieSuivie;
       evaluer(s, bougies);
+      if (s.resultat !== avant || s.derniereBougieSuivie !== cursor) progresses.set(s.cle,s);
       if (s.resultat !== avant) maj++;
       // Une issue n'est pas une ligne de tableau : c'est un fait qui doit être
       // DIT. Le flux publie une bulle dans la conversation (stop touché, TP1,
@@ -463,9 +469,15 @@ async function mettreAJour(getBougies, options = {}) {
     }
   }
 
-  if (maj) {
-    data.majLe = Date.now();
-    sauver(data);
+  if (progresses.size) {
+    // Reload after network awaits to preserve newly registered signals.
+    const courant = charger();
+    courant.signaux = courant.signaux.map(s => {
+      const next = progresses.get(s.cle);
+      return next && s.resultat === 'ouvert' && (s.derniereBougieSuivie || 0) <= (next.derniereBougieSuivie || 0) ? {...s,...next} : s;
+    });
+    courant.majLe = Date.now();
+    sauver(courant);
     // Publication APRÈS l'écriture : si la sauvegarde échoue, on n'annonce pas
     // une issue qui n'est pas enregistrée. Un échec d'annonce ne casse jamais
     // la mise à jour du journal.
