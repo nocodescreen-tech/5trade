@@ -4466,7 +4466,15 @@ function TradeSetupCard({
   const [durationVal, setDurationVal] = useState(5);
   const [optionsDeriv, setOptionsDeriv] = useState(false);
   const lv = signal && signal.levels ? signal.levels : null;
-  const ok = lv && Number.isFinite(Number(lv.entry)) && Number.isFinite(Number(lv.stop));
+  const prixValide = x => x != null && x !== '' && Number.isFinite(Number(x)) && Number(x)>0;
+  const long = signal?.sens === 'long' || signal?.direction === 'BUY' || signal?.direction === 'long';
+  const short = signal?.sens === 'short' || signal?.direction === 'SELL' || signal?.direction === 'short';
+  const ok = lv && [lv.entry,lv.stop,lv.target1,lv.target2].every(prixValide)
+    && ((long && !short && +lv.stop < +lv.entry && +lv.entry < +lv.target1 && +lv.target1 < +lv.target2)
+      || (short && !long && +lv.stop > +lv.entry && +lv.entry > +lv.target1 && +lv.target1 > +lv.target2));
+  const autoriseSimulation = !!(ok && signal?.id && decision?.signal?.id === signal.id && decision.risque?.ok === true
+    && (long ? decision.decision === 'ACHAT' : decision.decision === 'VENTE')
+    && decision.signauxRetenus?.some(x=>x.id === signal.id && x.executable === true));
   if (!ok) {
     const enCours = !decision;
     const motifMoteur = decision ? signal && signal.levels ? null : decision.raison || decision.decision || 'aucun setup exécutable' : null;
@@ -4509,7 +4517,7 @@ function TradeSetupCard({
         color: '#94a3b8',
         marginTop: 2
       }
-    }, enCours ? 'Le moteur évalue les bougies et structures institutionnelles…' : `Motif : ${motifMoteur}. 5TRADE ne déclenche un signal que lorsque les 4 niveaux stricts (Entrée, SL, TP1, TP2) sont garantis.`))));
+    }, enCours ? 'Le moteur évalue les bougies et structures institutionnelles…' : `Motif : ${motifMoteur}. Les quatre niveaux (entrée, SL, TP1, TP2) doivent être présents et ordonnés.`))));
   }
   const achat = signal.sens === 'long' || sens === 'BUY' || signal.direction === 'BUY' || signal.direction === 'long';
   const col = achat ? '#10b981' : '#f43f5e';
@@ -4620,7 +4628,7 @@ function TradeSetupCard({
       color: col,
       letterSpacing: '.02em'
     }
-  }, "SETUP ", achat ? 'ACHAT (BUY)' : 'VENTE (SELL)'), rr && /*#__PURE__*/React.createElement("span", {
+  }, autoriseSimulation ? "SETUP VALIDÉ" : "PLAN À VÉRIFIER", " · ", achat ? "BUY" : "SELL"), rr && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 11,
       fontWeight: 800,
@@ -4700,13 +4708,14 @@ function TradeSetupCard({
         setTimeout(() => setDemoStatus(''), 3000);
       }
     },
-    title: "Prendre imm\xE9diatement ce trade en compte d\xE9mo"
+    disabled: !autoriseSimulation || demoStatus === 'En cours…',
+    title: "Enregistrer une simulation locale après validation du moteur"
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-play",
     style: {
       marginRight: 5
     }
-  }), demoStatus || 'Exécuter Démo'), /*#__PURE__*/React.createElement("button", {
+  }), demoStatus || 'Simuler au journal'), /*#__PURE__*/React.createElement("button", {
     className: "btn sm",
     style: {
       padding: '5px 10px',
@@ -4743,20 +4752,21 @@ function TradeSetupCard({
         setTimeout(() => setDerivTradeMsg(''), 4500);
       }
     },
-    title: "Passer cet ordre sur Deriv (Websocket officiel)"
+    disabled: true,
+    title: "Exécution Deriv suspendue : intégration courtier non validée"
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-bolt",
     style: {
       marginRight: 5
     }
-  }), derivTradeMsg || `Trader Deriv ($${stake})`), /*#__PURE__*/React.createElement("button", {
+  }), derivTradeMsg || 'Ordres Deriv suspendus'), /*#__PURE__*/React.createElement("button", {
     className: "btn sm ghost",
     style: {
       padding: '5px 8px',
       fontSize: 11
     },
     onClick: () => setOptionsDeriv(!optionsDeriv),
-    title: "R\xE9glages de mise et dur\xE9e Deriv"
+    disabled: true, title: "R\xE9glages de mise et dur\xE9e Deriv"
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-gear"
   })), onToJournal && /*#__PURE__*/React.createElement("button", {
@@ -4774,7 +4784,7 @@ function TradeSetupCard({
       timeframe: tf,
       provider,
       providerLabel,
-      signalStatus: 'confirme',
+      signalStatus: autoriseSimulation ? 'confirme' : 'surveiller',
       signalStrength: signal.force,
       notes: `Setup ${achat ? 'achat' : 'vente'} — ${signal.nom || 'moteur'}`
     }),
