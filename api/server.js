@@ -3866,15 +3866,17 @@ async function optionsAnalyse(src) {
   else if (typeof brut === 'string' && brut.trim()) ids = brut.split(',').map(x => x.trim());
   ids = [...new Set(ids.filter(Boolean))];
 
-  if (mode !== 'manuel' || !ids.length) return { mode: 'auto' };
+  if (!ids.length) { if (mode==='manuel') throw Object.assign(new Error('Sélection manuelle vide'),{code:422}); return {mode:'auto'}; }
+  if(ids.length>8) throw Object.assign(new Error('Maximum huit stratégies'),{code:422});
 
   const strategies = await loadAllStrategies().catch(() => []);
   const profils = ids
     .map(id => (strategies || []).find(x => x.id === id))
-    .filter(Boolean)
+    .filter(doc=>doc&&doc.actif!==false)
     .map(doc => Signals.profilDepuisStrategie(doc));
 
-  if (!profils.length) return { mode: 'manuel', strategiesIntrouvables: ids };
+  const classe=require('./market-intelligence/instrument-classifier').classifier(src.symbol,{provider:src.provider}).classe;
+  if (profils.length!==ids.length||profils.some(p=>p.executable===false||p.partiel||!p.supportedMarkets?.includes(classe)||(p.executionTimeframes?.length&&!p.executionTimeframes.includes(src.tf||'5m')))) throw Object.assign(new Error('Sélection incomplète, stratégie incompatible ou non exécutable'),{code:422});
 
   // Union des règles : choisir deux stratégies ne doit pas en écarter une.
   const regles = [...new Set(profils.flatMap(p => p.regles))];
@@ -3954,7 +3956,7 @@ async function alignementMtf(symbol, tfBase, provider, options = {}) {
   const resultat = exploitables.length
     ? Signals.verdictAvecConfluence(exploitables, { seuilAlignes: options.seuilAlignes || undefined })
     : null;
-  return { tfs, exploitables, resultat, confluence: resultat ? resultat.confluence : null };
+  return { tfs, exploitables, parTF, resultat, confluence: resultat ? resultat.confluence : null };
 }
 
 /**
@@ -4006,7 +4008,7 @@ app.get('/api/signals/confluence', requireAuth, async (req, res) => {
     if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
 
     const options = await optionsAnalyse(req.query);
-    const { tfs, exploitables, resultat } = await alignementMtf(symbol, tfBase, provider, options);
+    const { tfs, exploitables, resultat, parTF } = await alignementMtf(symbol, tfBase, provider, options);
     if (!resultat) {
       return res.json({
         success: true, symbol, timeframes: tfs, mode: options.mode,
@@ -4043,6 +4045,21 @@ app.get('/api/signals/confluence', requireAuth, async (req, res) => {
 
 // NOUVELLE ROUTE : Decision Engine — verdict global arbitré avec traçabilité complète
 // 5 niveaux : Détection → Validation → Confirmation → Exécution → Arbitrage
+function gateLiveDecision(decision,macro,quality){
+  if(!decision)return decision;
+  const refused=!quality?.ok||(macro?.applicable!==false&&(!macro?.verifie||!macro?.ok||macro?.bloque));
+  decision.macro=macro||null;
+  decision.qualite=quality||null;
+  if(refused){
+    decision.decision='ATTENTE';decision.direction='NEUTRAL';
+    decision.raison=!quality?.ok?'Données non fiables':macro?.detail||'Calendrier non vérifié';
+    decision.signal=null;
+    decision.signauxRetenus=[];decision.idsRetenus=[];
+    if(decision.arbitrage){decision.arbitrage.decision='ATTENTE';decision.arbitrage.signauxRetenus=[];}
+  }
+  return decision;
+}
+
 app.get('/api/decision', requireAuth, async (req, res) => {
   try {
     const symbol = String(req.query.symbol || '').trim();
@@ -4145,6 +4162,7 @@ app.get('/api/decision', requireAuth, async (req, res) => {
 
     const decision = DecisionEngine.decider(closed, { symbol, timeframe: tf }, {
       profils: options.profils || [],
+      strategieStrict: options.mode==='manuel'||!!options.profils?.length,
       // La confluence par stratégie prime : c'est celle de la fiche retenue.
       confluence: confluenceStrategie || confluence,
       // …et elle est aussi fournie par signal : le contrôle MTF de chaque
@@ -4163,6 +4181,7 @@ app.get('/api/decision', requireAuth, async (req, res) => {
       verifierModele: true
     });
 
+    gateLiveDecision(decision,await filtreCalendrier(symbol,{strict:true}),Qualite.analyser(closed,{timeframe:tf}));
     res.json({
       success: true,
       symbol,
@@ -4372,8 +4391,8 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
   let lastKey = null;
   let closed = true;
   // Résolu une seule fois : la stratégie choisie ne change pas pendant le flux.
-  let optionsFlux = { mode: 'auto' };
-  optionsAnalyse(req.query).then(o => { optionsFlux = o; evaluate(); }).catch(() => {});
+  let optionsFlux = null;
+  optionsAnalyse(req.query).then(o => { optionsFlux = o; evaluate(); }).catch(e => { if(closed)res.write('event: signal\ndata: '+JSON.stringify({status:'indisponible',direction:'NEUTRE',summary:e.message})+'\n\n'); });
 
   // Le flux se réévalue bien plus souvent qu'une route : l'alignement MTF et
   // l'état de compte n'ont pas à être recalculés à chaque tick. MTF = 60 s
@@ -4383,7 +4402,10 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
   const cacheMtf = { at: 0, cle: '', conf: null };
   const cacheRisque = { at: 0, verif: undefined };
 
+  let evaluating=false;
   let evaluate = async () => {
+    if(!optionsFlux||evaluating||!closed)return;
+    evaluating=true;
     try {
       const { candles } = await Market.getCandles(symbol, tf, 300, provider);
       // On n'analyse QUE des bougies terminées : sinon le verdict clignote
@@ -4428,6 +4450,7 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
       try {
         decision = DecisionEngine.decider(done, { symbol, timeframe: tf }, {
           profils: optionsFlux.profils || [],
+          strategieStrict: optionsFlux.mode==='manuel',
           confluence,
           verificateurRisque,
           exigerVerificateurRisque: true,
@@ -4443,15 +4466,9 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
         });
       } catch (e) { decision = null; }
 
-      // Journal : on persiste UNIQUEMENT les signaux RETENUS par l'arbitrage
-      if (decision && Array.isArray(decision.signauxRetenus) && decision.signauxRetenus.length) {
-        try {
-          JournalSignaux.enregistrer(
-            decision.signauxRetenus.filter(s => s.statusFinal === 'confirme' || s.status === 'confirme' || s.executable === true),
-            { symbol, timeframe: tf, provider, at: verdict.at }
-          );
-        } catch { /* le journal ne doit jamais casser le flux */ }
-      }
+      gateLiveDecision(decision,await filtreCalendrier(symbol,{strict:true}),Qualite.analyser(done,{timeframe:tf}));
+      // Le flux d'affichage est en lecture seule. Seul le cycle de surveillance
+      // explicitement configuré publie des observations ou écrit le journal.
 
       // Format pour le flux SSE : décision finale + traçabilité
       const payload = decision ? DecisionEngine.deciderStream(decision) : {
@@ -4470,6 +4487,7 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
         if (closed) res.write(`event: signal\ndata: ${JSON.stringify(payload)}\n\n`);
       }
     } catch { /* bougie incomplète ou réseau : on retentera */ }
+    finally { evaluating=false; }
   };
 
   evaluate();
