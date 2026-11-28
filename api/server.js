@@ -3916,12 +3916,12 @@ async function profilsSurveillance() {
   const versions = await Registry.carteVersions().catch(() => ({}));
   for (const id of ids) {
     const doc = parId.get(id);
-    if (!doc || doc.actif === false) continue;
+    if (!doc || doc.actif === false) { profils.push({id,executable:false,partiel:true,titre:id}); continue; }
     const p = Signals.profilDepuisStrategie(doc);
     // Une fiche non exécutable est ignorée ici : la surveillance la refuse aussi.
     const version = versions[doc.id];
     if (version) { p.version = version.version; p.versionEtat = version.etat; }
-    if (p.executable !== false && !p.partiel) profils.push(p);
+    profils.push(p);
   }
   return profils;
 }
@@ -4659,7 +4659,7 @@ async function executerBacktest(src = {}) {
       }
     });
     const st = rf.stats || {};
-    const rParTrade = (rf.trades || []).map(t => Number(t.rNet || t.r || 0));
+    const rParTrade = (rf.trades || []).filter(t => Number.isFinite(t.rNet)).map(t => t.rNet);
     let cumulR = 0;
     const courbeRCumulee = rParTrade.map(r => +(cumulR += r).toFixed(2));
     r = {
@@ -4669,9 +4669,9 @@ async function executerBacktest(src = {}) {
       total: (rf.trades || []).length,
       gagnants: st.nbGagnants ?? st.gagnants ?? 0,
       perdants: st.nbPerdants ?? (st.avecR ? st.avecR - (st.gagnants || 0) : 0),
-      winRate: st.tauxReussite ?? 0,
-      rTotal: st.rTotal ?? st.rNet ?? 0,
-      expectancy: st.esperance ?? st.esperanceNette ?? 0,
+      winRate: st.tauxReussite ?? null,
+      rTotal: st.rTotal ?? st.rNet ?? null,
+      expectancy: st.esperance ?? st.esperanceNette ?? null,
       stats: st,
       rParTrade,
       courbeR: courbeRCumulee,
@@ -4697,8 +4697,8 @@ async function executerBacktest(src = {}) {
     strategies: options.strategies || []
   };
   // Le compte n'a de sens que s'il y a des prises et un capital de départ.
-  if (initialCapital > 0 && riskPct > 0 && Array.isArray(r.rParTrade || r.courbeR)) {
-    resultat.compte = compteDepuisR(r.rParTrade || r.courbeR, initialCapital, riskPct);
+  if (initialCapital > 0 && riskPct > 0 && Array.isArray(r.rParTrade)) {
+    resultat.compte = compteDepuisR(r.rParTrade, initialCapital, riskPct);
   }
   return resultat;
 }
@@ -5101,7 +5101,25 @@ async function start() {
   if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
     configurerVAPID(process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
   }
+  const Outbox = require('./delivery/telegram-outbox');
+  let outbox = null;
+  let outboxBusy = false;
+  let outboxError = null;
+  try {
+    outbox = Outbox.repository(DB.client());
+    await outbox.init();
+  } catch (error) {
+    outbox = null;
+    console.error('[Telegram outbox] PostgreSQL indisponible');
+  }
   Alerts.start({
+    enqueueTelegram: async (config, cle, texte) => {
+      if (!outbox) throw new Error('File persistante indisponible');
+      const chat=String(config.telegramChat);
+      const id='signal:'+require('node:crypto').createHash('sha256').update(chat+'|'+cle).digest('hex');
+      await outbox.enqueue(id,{chat,text:texte,opts:{parse_mode:'HTML',reply_markup:{inline_keyboard:[[{text:'État du compte',callback_data:'account:status'}]]}}},Date.now()+15*60000);
+      return true; // accepted or already present under the same immutable key
+    },
     market: Market,
     signals: Signals,
     // Filtre économique : branché dans la boucle d'alertes (il ne l'était que
@@ -5128,26 +5146,7 @@ async function start() {
     // Les stratégies que l'utilisateur a choisi de surveiller. Sans ce câblage,
     // la surveillance tournait en mode « auto » (toutes les règles) et ignorait
     // complètement les stratégies configurées dans l'app.
-    profilsSurveillance: async () => {
-      try {
-        const c = Alerts.get();
-        const ids = Array.isArray(c.strategies) ? c.strategies.filter(Boolean) : [];
-        if (!ids.length) return [];
-        const strategies = await loadAllStrategies();
-        // Version réellement enregistrée de chaque fiche : c'est elle qui part
-        // dans la trace, pour prouver QUELLES règles ont produit le signal.
-        const carte = await Registry.carteVersions().catch(() => ({}));
-        return ids
-          .map(id => (strategies || []).find(x => x.id === id))
-          .filter(Boolean)
-          .map(doc => {
-            const p = Signals.profilDepuisStrategie(doc);
-            const enr = carte[doc.id];
-            if (enr) { p.version = enr.version; p.versionEtat = enr.etat; }
-            return p;
-          });
-      } catch { return []; }
-    },
+    profilsSurveillance,
     sendMail,
     sendPush,
     labelOf: id => {
@@ -5362,17 +5361,6 @@ async function start() {
 
   // Scheduled Telegram notifications persist independently of the process.
   const Tracker = require('./delivery/notification-tracker');
-  const Outbox = require('./delivery/telegram-outbox');
-  let outbox = null;
-  let outboxBusy = false;
-  let outboxError = null;
-  try {
-    outbox = Outbox.repository(DB.client());
-    await outbox.init();
-  } catch (error) {
-    outbox = null;
-    console.error('[Telegram outbox] PostgreSQL indisponible');
-  }
   app.get('/api/alerts/outbox', requireAuth, async (req,res) => {
     if (!outbox) return res.status(503).json({success:false,error:'File persistante indisponible'});
     try { res.json({success:true,workerError:outboxError,...await outbox.status()}); }
