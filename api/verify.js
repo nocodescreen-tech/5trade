@@ -6369,7 +6369,8 @@ function tinyPng(W = 64, H = 40) {
 
     const r4 = Q.ratios([{ r: 1 }, { r: 1 }, { r: 1 }, { r: -1 }]);
     ok('le Sharpe est calculé par trade, en R', r4.sharpe === 0.5, String(r4.sharpe));
-    ok('le Sortino ne pénalise que la volatilité baissière', r4.sortino === 0.5, String(r4.sortino));
+    // Downside deviation relative to zero uses all four observations: sqrt(1/4) = 0.5.
+    ok('le Sortino utilise la déviation baissière sur toute la série', r4.sortino === 1, String(r4.sortino));
     // Calmar et recovery factor avaient la même formule sous deux noms. Le
     // recovery factor reste ; le Calmar exige une annualisation qu'on ne peut pas
     // faire en R par trade, donc il vaut null avec sa raison.
