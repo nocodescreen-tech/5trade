@@ -1,0 +1,36 @@
+name: dependency-security
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install locked production dependencies
+        run: npm --prefix api ci --omit=dev --ignore-scripts
+      - name: Audit production dependencies
+        shell: bash
+        run: |
+          set +e
+          npm --prefix api audit --omit=dev --audit-level=high --json > dependency-audit.json
+          result=$?
+          set -e
+          node -e "const r=require('./dependency-audit.json'); console.log(JSON.stringify(r.metadata?.vulnerabilities || r.error || {},null,2)); if(!r.metadata?.vulnerabilities) process.exit(2)"
+          node -e "const r=require('./dependency-audit.json'); for(const [name,v] of Object.entries(r.vulnerabilities||{})) console.log(JSON.stringify({name,severity:v.severity,range:v.range,fixAvailable:v.fixAvailable,via:v.via.map(x=>typeof x==='string'?x:{title:x.title,range:x.range,url:x.url})}))"
+          exit "$result"
+      - name: Preserve audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit
+          path: dependency-audit.json
+          retention-days: 14

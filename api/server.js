@@ -20,7 +20,6 @@ const cors = require('cors');
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
-const compression = require('compression');
 const DB = require('./core/db');
 // UN SEUL chargement. Le second appel (fallback « .env dans api/ ») etait inutile
 // et risque : dotenv cherche alors dans le dossier courant et peut ecraser des
@@ -131,10 +130,7 @@ app.use(cors({
     cb(null, false);                                                      // tout le reste : non
   }
 }));
-// Compression : les reponses de bougies depassent souvent 100 Ko de JSON, qui se
-// compriment a ~10 %. Sans elle, chaque rafraichissement de graphique transporte
-// l'integralite du texte.
-app.use(compression());
+// Compression applicative retirée ; utiliser la compression du proxy après validation.
 
 // En-tetes de securite, poses a la main plutot que via helmet : cinq lignes
 // suffisent ici, et ca evite une dependance de plus.
