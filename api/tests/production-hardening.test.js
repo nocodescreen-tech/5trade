@@ -263,3 +263,28 @@ test('Deriv candles are closed only after their period and malformed OHLC is rej
   assert.equal(deriv.parse({msg_type:'ohlc',ohlc:{ ...candle, symbol:'R_75', close:null }}), null);
   assert.equal(deriv.parse({msg_type:'ohlc',ohlc:{ ...candle, symbol:'R_75' }}).candle.closed, false);
 });
+
+
+test('Deriv PAT encryption authenticates ciphertext, account and app binding', () => {
+  const { sealToken, openToken, encryptionKey } = require('../deriv/client');
+  const key = encryptionKey('ab'.repeat(32));
+  const secret = 'test-pat-not-real';
+  const box = sealToken(secret, 'app-1', 'DOT1', key);
+  assert.equal(openToken(box, 'app-1', 'DOT1', key), secret);
+  assert.ok(!JSON.stringify(box).includes(secret));
+  assert.notEqual(sealToken(secret, 'app-1', 'DOT1', key).iv, box.iv);
+  assert.throws(() => openToken(box, 'app-2', 'DOT1', key));
+  assert.throws(() => openToken(box, 'app-1', 'DOT2', key));
+  assert.throws(() => openToken(box, 'app-1', 'DOT1', encryptionKey('cd'.repeat(32))));
+  assert.throws(() => openToken({...box, tag: (box.tag[0] === 'a' ? 'b' : 'a') + box.tag.slice(1)}, 'app-1', 'DOT1', key));
+  assert.throws(() => encryptionKey('short'));
+});
+
+test('ambiguous Deriv accounts require explicit selection and expose only safe fields', async () => {
+  const { verifyAccounts } = require('../deriv/client');
+  const fake = async () => ({ ok:true, json:async()=>({data:['DOT1','DOT2'].map(account_id=>({account_id,account_type:'demo',status:'active',currency:'USD',balance:10,secret:'private'}))}) });
+  const result = await verifyAccounts('app-1','fake-token',null,fake);
+  assert.equal(result.code,'ACCOUNT_SELECTION_REQUIRED');
+  assert.deepEqual(result.accounts,[{loginid:'DOT1',currency:'USD',isVirtual:true},{loginid:'DOT2',currency:'USD',isVirtual:true}]);
+  assert.equal((await verifyAccounts('app-1','fake-token','DOT2',fake)).account.loginid,'DOT2');
+});
