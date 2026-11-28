@@ -54,6 +54,12 @@ const DOMAINE_PAR_VERBE = {
  * @returns {{domaine:string, handler:Function}|{domaine:'inconnu', raison:string}}
  */
 function router(action) {
+  if (action.type === 'skill' || action.type === 'skill_calcul') {
+    const Skills = require('./commandes/skills');
+    const handler = action.type === 'skill_calcul' ? Skills.calculer :
+      ({MONTRE:Skills.lister,'CRÉE':Skills.creer,ACTIVE:Skills.activer,'DÉSACTIVE':Skills.desactiver})[action.verbe];
+    return {domaine:'skills',handler};
+  }
   // Cas spéciaux : sujets codés
   if (action.sujet === 'etat_systeme') {
     return { domaine: 'systeme', handler: cmdSysteme.etat };
