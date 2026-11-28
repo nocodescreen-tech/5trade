@@ -25,6 +25,7 @@ jobs:
           result=$?
           set -e
           node -e "const r=require('./dependency-audit.json'); console.log(JSON.stringify(r.metadata?.vulnerabilities || r.error || {},null,2)); if(!r.metadata?.vulnerabilities) process.exit(2)"
+          node -e "const r=require('./dependency-audit.json'); for(const [name,v] of Object.entries(r.vulnerabilities||{})) console.log(JSON.stringify({name,severity:v.severity,range:v.range,fixAvailable:v.fixAvailable,via:v.via.map(x=>typeof x==='string'?x:{title:x.title,range:x.range,url:x.url})}))"
           exit "$result"
       - name: Preserve audit report
         if: always()
