@@ -126,9 +126,9 @@ async function contexteTempsReel() {
     const Preferences = require('../memoire/preferences');
     const prefs = await Preferences.lister();
     if (prefs && prefs.length) {
-      lignes.push(`Consignes persistées en mémoire (${prefs.length}) :`);
+      lignes.push(`Consignes globales de l'instance persistées en mémoire (${prefs.length}) :`);
       for (const p of prefs.slice(0, 5)) {
-        lignes.push(`- [${p.categorie || 'règle'}] ${p.consigne}`);
+        lignes.push(`- [${p.categorie || 'règle'}] ${p.contenu}`);
       }
     }
   } catch { /* ignorer */ }
