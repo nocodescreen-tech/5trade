@@ -5102,7 +5102,7 @@ async function start() {
     signals: Signals,
     // Filtre économique : branché dans la boucle d'alertes (il ne l'était que
     // sur le chemin IA). Un signal ne doit pas partir pendant une publication.
-    filtreNews: filtreCalendrier,
+    filtreNews: symbol => filtreCalendrier(symbol, { strict: true }),
     // Multi-signaux : permet à la surveillance de dire QUELLE stratégie s'est
     // déclenchée, et de lister les motifs, au lieu d'un verdict anonyme.
     signaux: Multi,
@@ -5356,87 +5356,79 @@ async function start() {
     }
   });
 
-  // Briefing matinal automatique Telegram avec fenêtre horaire tolérante (06:00 à 10:00 UTC)
-  // et données statistiques réelles (recap journal, positions, risque).
-  const NotificationTracker = require('./delivery/notification-tracker');
-
-  setInterval(async () => {
+  // Scheduled Telegram notifications persist independently of the process.
+  const Tracker = require('./delivery/notification-tracker');
+  const Outbox = require('./delivery/telegram-outbox');
+  let outbox = null;
+  let outboxBusy = false;
+  let outboxError = null;
+  try {
+    outbox = Outbox.repository(DB.client());
+    await outbox.init();
+  } catch (error) {
+    outbox = null;
+    console.error('[Telegram outbox] PostgreSQL indisponible');
+  }
+  app.get('/api/alerts/outbox', requireAuth, async (req,res) => {
+    if (!outbox) return res.status(503).json({success:false,error:'File persistante indisponible'});
+    try { res.json({success:true,workerError:outboxError,...await outbox.status()}); }
+    catch { res.status(503).json({success:false,error:'Lecture indisponible'}); }
+  });
+  const kinshasa = date => new Intl.DateTimeFormat('fr-FR',{
+    timeZone:'Africa/Kinshasa',dateStyle:'medium',timeStyle:'short'
+  }).format(date);
+  const scheduleTelegram = async () => {
+    if (!outbox || outboxBusy) return;
+    outboxBusy = true;
     try {
-      const d = new Date();
-      const jourStr = d.toISOString().slice(0, 10);
-      const heureUTC = d.getUTCHours();
-      const minuteUTC = d.getUTCMinutes();
-      const dayUTC = d.getUTCDay(); // 0 = Dimanche, 5 = Vendredi
-
-      const c = Alerts.get();
-      if (!c.telegramToken || !c.telegramChat) return;
-
-      // 1. Briefing matinal quotidien (06:00 à 10:00 UTC)
-      const cleBriefing = `briefing_matin_${jourStr}`;
-      if (heureUTC >= 6 && heureUTC <= 10 && !NotificationTracker.estDejaEnvoye(cleBriefing)) {
-        try {
-          const { genererBriefingTelegram } = require('./routes/alerts');
-          const briefing = await genererBriefingTelegram(c, { DB });
-          const resBriefing = await NotificationTracker.envoyerTelegramSecurise(
-            c.telegramToken,
-            c.telegramChat,
-            briefing.texte,
-            { parse_mode: 'HTML', reply_markup: { inline_keyboard: briefing.inline_keyboard } }
-          );
-          if (resBriefing.ok) {
-            NotificationTracker.marquerEnvoye(cleBriefing, { type: 'briefing_matinal' });
-          }
-        } catch (e) {
-          console.warn(`[Scheduler] Erreur briefing : ${e.message}`);
+      const config = Alerts.get();
+      if (!config.telegramToken || !config.telegramChat) return;
+      const now = Date.now(), d = new Date(now);
+      const local = new Date(now + 3600000);
+      const day = local.toISOString().slice(0,10);
+      const utcDay = d.toISOString().slice(0,10);
+      const clock = local.getUTCHours();
+      const chat = String(config.telegramChat);
+      const enqueue = async (key,text,expiresAt,opts={}) => {
+        if (!Tracker.estDejaEnvoye(key)) await outbox.enqueue(key+':'+chat,{chat,text,opts},expiresAt);
+      };
+      // Morning briefing: 07:00–11:00 Kinshasa, without inventing account data.
+      if (clock >= 7 && clock < 11) {
+        const key = 'briefing_matin_'+day;
+        const briefing = await require('./routes/alerts').genererBriefingTelegram(config,{DB});
+        await enqueue(key,briefing.texte,Date.parse(day+'T10:00:00Z'),
+          {parse_mode:'HTML',reply_markup:{inline_keyboard:briefing.inline_keyboard}});
+      }
+      const session = require('./temporal/sessions').statutMarche('EURUSD',d);
+      if (session.statut === 'pre_fermeture' && session.prochaineFermeture) {
+        const close = new Date(session.prochaineFermeture);
+        await enqueue('forex_pre_cloture_'+utcDay,'Forex — fermeture hebdomadaire estimée : '+kinshasa(close)+' (Kinshasa). Horaires exacts selon le courtier.',close.getTime());
+      }
+      if (d.getUTCDay() === 0 && session.ouvert) {
+        const closeHour = session.dst ? 21 : 22;
+        const opened = new Date(utcDay+'T00:00:00Z');
+        opened.setUTCHours(closeHour);
+        if (now >= opened.getTime() && now < opened.getTime()+3600000) {
+          await enqueue('forex_reouverture_'+utcDay,'Forex — réouverture hebdomadaire estimée : '+kinshasa(opened)+' (Kinshasa). Vérifier les cotations du courtier.',opened.getTime()+3600000);
         }
       }
-
-      // 2. Alerte pré-clôture Forex du vendredi (calculée dynamiquement selon la session réelle)
-      const cleVendredi = `forex_pre_cloture_${jourStr}`;
-      const Sessions = require('./temporal/sessions');
-      const stForexVendredi = Sessions.statutMarche('EURUSD', d);
-      if (dayUTC === 5 && stForexVendredi.statut === 'pre_fermeture' && !NotificationTracker.estDejaEnvoye(cleVendredi)) {
-        try {
-          const Skills = require('./skills/registry');
-          const skillRes = await Skills.executer('forex-session-monitor', { action: 'alerte_telegram', type: 'pre_cloture' });
-          if (skillRes.ok && skillRes.resultat?.texte) {
-            const resEnvoi = await NotificationTracker.envoyerTelegramSecurise(
-              c.telegramToken,
-              c.telegramChat,
-              skillRes.resultat.texte
-            );
-            if (resEnvoi.ok) {
-              NotificationTracker.marquerEnvoye(cleVendredi, { type: 'pre_cloture_forex' });
-            }
-          }
-        } catch (e) {
-          console.warn(`[Scheduler] Erreur pré-clôture Forex : ${e.message}`);
-        }
+      for (let i=0;i<3;i++) {
+        const job = await outbox.claim();
+        if (!job) break;
+        const result = String(config.telegramChat) === job.payload.chat
+          ? await Outbox.sendOnce(config.telegramToken,job.payload.chat,job.payload.text,job.payload.opts)
+          : {ok:false,kind:'rejected'};
+        await outbox.finish(job,result);
       }
-
-      // 3. Alerte réouverture Forex du dimanche (synchronisée sur le calendrier réel)
-      const cleDimanche = `forex_reouverture_${jourStr}`;
-      const stForexDimanche = Sessions.statutMarche('EURUSD', d);
-      if (dayUTC === 0 && stForexDimanche.ouvert && !NotificationTracker.estDejaEnvoye(cleDimanche)) {
-        try {
-          const Skills = require('./skills/registry');
-          const skillRes = await Skills.executer('forex-session-monitor', { action: 'alerte_telegram', type: 'reouverture' });
-          if (skillRes.ok && skillRes.resultat?.texte) {
-            const resEnvoi = await NotificationTracker.envoyerTelegramSecurise(
-              c.telegramToken,
-              c.telegramChat,
-              skillRes.resultat.texte
-            );
-            if (resEnvoi.ok) {
-              NotificationTracker.marquerEnvoye(cleDimanche, { type: 'reouverture_forex' });
-            }
-          }
-        } catch (e) {
-          console.warn(`[Scheduler] Erreur réouverture Forex : ${e.message}`);
-        }
-      }
-    } catch { /* surveillance temporelle non-bloquante */ }
-  }, 30000);
+      outboxError = null;
+    } catch (error) {
+      outboxError = 'Cycle de notification indisponible';
+      console.error('[Telegram outbox] cycle en échec');
+    } finally { outboxBusy=false; }
+  };
+  const telegramTimer = setInterval(scheduleTelegram,30000);
+  telegramTimer.unref?.();
+  scheduleTelegram();
 
   // Synchronisation initiale des alertes et du scan avec la sélection active
   try {
