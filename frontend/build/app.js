@@ -7619,6 +7619,12 @@ function LiveMarket({
   const [typeTrade, setTypeTrade] = useState('auto');
   const [etroi, setEtroit] = useState(() => typeof window !== 'undefined' && window.innerWidth < 820);
   const [actifs, setActifs] = useState([]);
+  const [selectionEtat,setSelectionEtat]=useState('loading');
+  const marketEnabled=selectionEtat==='ready'&&actifs.some(a=>a.symbol===symbol&&a.provider===provider);
+  const marketKey=marketEnabled?JSON.stringify([provider,symbol,tf,profondeur,mode,strategiesChoisies]):'inactive';
+  const keyRef=useRef(marketKey);
+  keyRef.current=marketKey;
+  const pendingMarket=useRef(new Set());
   const [catalogueOuvert, setCatalogueOuvert] = useState(false);
   const [filtreCatalogue, setFiltreCatalogue] = useState('');
   const [derivModalOuvert, setDerivModalOuvert] = useState(false);
@@ -7630,15 +7636,16 @@ function LiveMarket({
   }, []);
   const dernierSignalSonoreRef = useRef(null);
   useEffect(() => {
-    if (decision && decision.decision && decision.decision !== 'HOLD' && decision.decision !== 'NEUTRE') {
+    if (marketEnabled && decision && ['ACHAT','VENTE'].includes(decision.decision)) {
       const cle = `${symbol}-${decision.decision}-${decision.levels && decision.levels.entry || ''}`;
       if (dernierSignalSonoreRef.current !== cle) {
         dernierSignalSonoreRef.current = cle;
         SoundEngine.playSignal();
       }
     }
-  }, [decision, symbol]);
+  }, [decision, symbol, marketEnabled]);
   const changerTf = nouveauTf => {
+    if(!marketEnabled)return;
     setTf(nouveauTf);
     api('/instruments/actifs/toggle', {
       method: 'POST',
@@ -7674,14 +7681,16 @@ function LiveMarket({
       try {
         const res = await (await api('/instruments/actifs')).json();
         if (res.success && Array.isArray(res.instruments)) {
+          setSelectionEtat('ready');
           setActifs(res.instruments);
-          if (res.instruments.length > 0 && !res.instruments.some(a => a.symbol === symbol)) {
+          if (res.instruments.length > 0 && !res.instruments.some(a => a.symbol === symbol && a.provider === provider)) {
             setSymbol(res.instruments[0].symbol);
             setProvider(res.instruments[0].provider);
             if (res.instruments[0].tf) setTf(res.instruments[0].tf);
           }
         }
-      } catch (e) {/* hors-ligne : garde la sélection par défaut */}
+        else setSelectionEtat('error');
+      } catch(e){setSelectionEtat('error');}
     })();
   }, []);
   const toggleInstrument = async (sym, actif, details = {}) => {
@@ -7694,28 +7703,29 @@ function LiveMarket({
         body: JSON.stringify({
           symbol: sym,
           actif: !!actif,
-          provider: details.provider || (sym.startsWith('frx') || sym.startsWith('R_') ? 'deriv' : 'binance'),
+          provider: details.provider || provider,
           label: details.label || sym,
           tv: details.tv || sym,
           tf: details.tf || '5m'
         })
       })).json();
       if (res.success && Array.isArray(res.instruments)) {
+        setSelectionEtat('ready');
         setActifs(res.instruments);
         if (actif) {
           setSymbol(sym);
           if (details.provider) setProvider(details.provider);
           if (details.tf) setTf(details.tf);
-        } else if (sym === symbol) {
+        } else if (sym === symbol && (details.provider||provider)===provider) {
           if (res.instruments.length > 0) {
             setSymbol(res.instruments[0].symbol);
             setProvider(res.instruments[0].provider);
             setTf(res.instruments[0].tf || '5m');
           }
         }
-      }
+      } else { setErr(res.error||'Sélection refusée'); }
     } catch (e) {
-      console.error('Erreur toggle instrument :', e);
+      setErr('Sélection non enregistrée : '+String(e.message||e));
     }
   };
 
@@ -7756,15 +7766,19 @@ function LiveMarket({
     setConfluence(null);
     setTicks(0);
     window.__debutAnalyse = Date.now(); // point de départ du compteur d'attente
-  }, [symbol, tf, provider]);
+      setTick(null); setLastUpdate(null); setOffline(false); setResult(null);
+  }, [symbol, tf, provider, marketEnabled]);
 
   // Bougies + structure (playbooks, vocabulaire) — rafraîchi régulièrement.
   const load = useCallback(async () => {
+    if(!marketEnabled || pendingMarket.current.has(marketKey))return;
+    pendingMarket.current.add(marketKey);
     setErr('');
     try {
       const [cb, st] = await Promise.all([api(`/market/candles?symbol=${encodeURIComponent(symbol)}&tf=${tf}&count=${profondeur}&provider=${provider}`).then(r => r.json()).catch(() => null), api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`).then(r => r.json()).catch(() => null)]);
+      if(keyRef.current!==marketKey)return;
       if (cb && cb.success && Array.isArray(cb.candles) && cb.candles.length) setCandles(cb.candles);
-      if (cb && cb.offline) setOffline(true);
+      setOffline(!cb||!cb.success||!!cb.offline);
       if (st && st.success && st.report) {
         setReport(st.report);
         if (st.vocabulaire) setVocabulaire(st.vocabulaire);
@@ -7773,17 +7787,15 @@ function LiveMarket({
       if (!cb || !cb.success) {
         setErr(cb && cb.error || 'chargement des bougies impossible');
       }
-    } catch (e) {
-      setErr(String(e.message || e));
-    }
-  }, [symbol, tf, provider, profondeur]);
+    } catch(e){if(keyRef.current===marketKey){setOffline(true);setErr(String(e.message||e));}} finally {pendingMarket.current.delete(marketKey);}
+  }, [symbol, tf, provider, profondeur, marketEnabled, marketKey]);
   useEffect(() => {
     let vivant = true;
     const recharger = () => {
       if (vivant) load();
     };
     recharger();
-    const it = setInterval(recharger, 5000);
+    const it = setInterval(recharger, 15000);
     return () => {
       vivant = false;
       clearInterval(it);
@@ -7799,18 +7811,17 @@ function LiveMarket({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [load, symbol, provider]);
+  }, [load, symbol, provider, marketEnabled]);
 
   // Décision complète du moteur (arbitrage 5 niveaux) — et alignement MTF.
   useEffect(() => {
     let vivant = true;
+    if(!marketEnabled)return;
     const chargerDecision = async () => {
       try {
         const d = await (await api(`/decision?${paramsCommuns()}`)).json();
-        if (vivant && d.success && d.decision) {
-          setDecision(d.decision);
-        }
-      } catch (e) {/* repli : le flux SSE garde le dernier verdict */}
+        if(vivant)setDecision(d.success&&d.decision?d.decision:null);
+      } catch(e){if(vivant)setDecision(null);}
     };
     const chargerVerdict = async () => {
       try {
@@ -7867,11 +7878,12 @@ function LiveMarket({
       clearInterval(iStat);
       clearInterval(iJour);
     };
-  }, [paramsCommuns]);
+  }, [paramsCommuns,marketEnabled]);
 
   // Bougies en direct (SSE).
   useEffect(() => {
     setLive(false);
+    if(!marketEnabled)return;
     const es = new EventSource(`/api/market/stream?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`);
     es.addEventListener('hello', () => setLive(true));
     es.addEventListener('candle', ev => {
@@ -7890,11 +7902,11 @@ function LiveMarket({
     });
     es.addEventListener('error', () => setLive(false));
     return () => es.close();
-  }, [symbol, tf, provider]);
+  }, [symbol, tf, provider,marketEnabled]);
 
   // Ticks bruts (prix réel).
   useEffect(() => {
-    if (!symbol) return;
+    if (!marketEnabled) return;
     setTick(null);
     setTickRate(0);
     tickPrec.current = null;
@@ -7920,11 +7932,12 @@ function LiveMarket({
       clearInterval(compteur);
       es.close();
     };
-  }, [symbol, provider]);
+  }, [symbol, provider,marketEnabled]);
 
   // Verdict en direct (SSE) : repli immédiat du Decision Center.
   useEffect(() => {
     setSse(null);
+    if(!marketEnabled)return;
     const es = new EventSource(`/api/signals/stream?${paramsCommuns()}`);
     es.addEventListener('signal', ev => {
       try {
@@ -7932,8 +7945,9 @@ function LiveMarket({
       } catch (e) {/* trame illisible */}
     });
     return () => es.close();
-  }, [paramsCommuns]);
+  }, [paramsCommuns,marketEnabled]);
   const analyser = async () => {
+    if(!marketEnabled||busy)return;
     setBusy(true);
     setErr('');
     try {
@@ -7950,7 +7964,7 @@ function LiveMarket({
         })
       })).json();
       if (!r.success) throw new Error(r.error || 'analyse impossible');
-      setResult(r);
+      if(keyRef.current===marketKey)setResult(r);
     } catch (e) {
       setErr(String(e.message || e));
     } finally {
@@ -7983,16 +7997,8 @@ function LiveMarket({
       }
     } : s;
   })();
-  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(AgentBriefingCard, null), /*#__PURE__*/React.createElement(MarketScreenerBar, {
-    actifs: actifs,
-    currentSymbol: symbol,
-    onSelect: (sym, prov, timeframe) => {
-      setSymbol(sym);
-      if (prov) setProvider(prov);
-      if (timeframe) setTf(timeframe);
-    }
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "panel",
+  return /*#__PURE__*/React.createElement(React.Fragment, null, React.createElement("div",{className:"terminal-title"},React.createElement("div",null,React.createElement("span",null,"ESPACE DE MARCHÉ"),React.createElement("h1",null,"Terminal de trading")),React.createElement("div",{className:"terminal-readonly"},React.createElement("i",{className:"fas fa-shield-halved"})," Analyse · Ordres réels désactivés")), /*#__PURE__*/React.createElement("div", {
+    className: "panel terminal-watchlist",
     style: {
       padding: '8px 12px',
       marginBottom: 12,
@@ -8025,9 +8031,9 @@ function LiveMarket({
       color: '#94a3b8'
     }
   }, "Instruments actifs (", actifs.length, ") :")), actifs.map(act => {
-    const estSelectionne = act.symbol === symbol;
+    const estSelectionne = act.symbol === symbol && act.provider===provider;
     return /*#__PURE__*/React.createElement("div", {
-      key: act.symbol,
+      key: `${act.provider}|${act.symbol}`,
       style: {
         display: 'inline-flex',
         alignItems: 'center',
@@ -8060,7 +8066,7 @@ function LiveMarket({
       title: `Retirer ${act.label || act.symbol} de l'écran live et du scan`,
       onClick: e => {
         e.stopPropagation();
-        toggleInstrument(act.symbol, false);
+        toggleInstrument(act.symbol, false,act);
       }
     }, /*#__PURE__*/React.createElement("i", {
       className: "fas fa-xmark"
@@ -8091,7 +8097,7 @@ function LiveMarket({
       border: `1px solid ${derivStatut && derivStatut.connecte ? 'rgba(34,211,138,0.4)' : 'rgba(239,68,68,0.4)'}`
     },
     onClick: () => setDerivModalOuvert(true),
-    title: "Connecter mon Token et App ID Deriv pour ex\xE9cuter des ordres en direct"
+    title:"Connexion Deriv en consultation ; ordres réels désactivés"
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-plug",
     style: {
@@ -8101,7 +8107,7 @@ function LiveMarket({
     ouvert: derivModalOuvert,
     onClose: () => setDerivModalOuvert(false),
     onRefresh: st => setDerivStatut(st)
-  }), actifs.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }), selectionEtat==='loading'&&React.createElement('div',{className:'panel terminal-placeholder',role:'status'},'Chargement des instruments…'),selectionEtat==='error'&&React.createElement('div',{className:'panel terminal-placeholder',role:'alert'},'Sélection indisponible. Rechargez la page ou ouvrez le catalogue.'),selectionEtat==='ready'&&actifs.length === 0 && /*#__PURE__*/React.createElement("div", {
     className: "panel",
     style: {
       padding: 24,
@@ -8250,9 +8256,9 @@ function LiveMarket({
         gap: 8
       }
     }, filtres.map(s => {
-      const estActif = actifs.some(a => a.symbol.toUpperCase() === s.symbol.toUpperCase());
+      const estActif = actifs.some(a => a.symbol.toUpperCase() === s.symbol.toUpperCase() && a.provider===s.provider);
       return /*#__PURE__*/React.createElement("div", {
-        key: s.symbol,
+        key: `${s.provider}|${s.symbol}`,
         style: {
           display: 'flex',
           alignItems: 'center',
@@ -8306,14 +8312,13 @@ function LiveMarket({
   }, actifs.length, " instrument(s) actif(s) sur ", meta.symbols ? meta.symbols.length : 0, " disponibles"), /*#__PURE__*/React.createElement("button", {
     className: "btn ghost sm",
     onClick: () => setCatalogueOuvert(false)
-  }, "Fermer")))), /*#__PURE__*/React.createElement("div", {
+  }, "Fermer")))), marketEnabled&&React.createElement(React.Fragment,null, /*#__PURE__*/React.createElement("div", {
     className: "panel",
     style: {
       padding: '11px 14px',
       marginBottom: 12,
-      position: 'sticky',
-      top: 0,
-      zIndex: 40,
+      position: 'relative',
+      zIndex: 20,
       background: 'var(--panel)',
       boxShadow: '0 6px 18px -12px rgba(0,0,0,.9)'
     }
@@ -8424,7 +8429,7 @@ function LiveMarket({
       setProvider(pv);
       setSymbol(sy);
     }
-  }, Object.entries((meta.symbols || []).reduce((acc, s) => {
+  }, Object.entries((actifs || []).reduce((acc, s) => {
     const k = s.providerLabel || 'Marchés';
     (acc[k] = acc[k] || []).push(s);
     return acc;
@@ -8631,35 +8636,35 @@ function LiveMarket({
     title: "BOS (Break of Structure) & CHoCH (Change of Character)"
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-draw-polygon"
-  }), " \uD83D\uDCD0 Structure BOS/CHoCH"), /*#__PURE__*/React.createElement("button", {
+  }), " Structure BOS/CHoCH"), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: `layer-btn ${calqueSweeps ? 'active' : ''}`,
     onClick: () => setCalqueSweeps(!calqueSweeps),
     title: "Prises de liquidit\xE9s (High/Low sweeps & BSL/SSL)"
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-water"
-  }), " \uD83C\uDF0A Sweeps Liquidit\xE9"), /*#__PURE__*/React.createElement("button", {
+  }), " Sweeps Liquidit\xE9"), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: `layer-btn ${calqueZones ? 'active' : ''}`,
     onClick: () => setCalqueZones(!calqueZones),
     title: "Order Blocks (OB) & Imbalances Fair Value Gaps (FVG)"
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-cube"
-  }), " \uD83D\uDCE6 Order Blocks & FVG"), /*#__PURE__*/React.createElement("button", {
+  }), " Order Blocks & FVG"), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: `layer-btn ${calqueNiveaux ? 'active' : ''}`,
     onClick: () => setCalqueNiveaux(!calqueNiveaux),
     title: "Niveaux cl\xE9s d'ex\xE9cution (Entr\xE9e, SL, TP1, TP2)"
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-crosshairs"
-  }), " \uD83C\uDFAF Niveaux Signal"), /*#__PURE__*/React.createElement("button", {
+  }), " Niveaux Signal"), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: `layer-btn ${calqueOrderFlow ? 'active' : ''}`,
     onClick: () => setCalqueOrderFlow(!calqueOrderFlow),
     title: "Flux d'ordres institutionnel : POC (Point of Control) & Value Area VAH/VAL"
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-chart-simple"
-  }), " \uD83D\uDCCA Order Flow & POC")), /*#__PURE__*/React.createElement("div", {
+  }), " Order Flow & POC")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'space-between',
@@ -8813,7 +8818,7 @@ function LiveMarket({
     }
   }, t.valeur || t.lecture))))), result && /*#__PURE__*/React.createElement(Result, {
     result: result
-  }));
+  }),React.createElement("details",{className:"panel terminal-research"},React.createElement("summary",null,"Briefing IA et contexte de recherche"),React.createElement(AgentBriefingCard,null))));
 }
 
 /* ══════════════ JOURNAL DE TRADES ══════════════ */
@@ -15654,7 +15659,7 @@ function Dashboard({
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-right-from-bracket"
   }), "D\xE9connexion")))), /*#__PURE__*/React.createElement("main", {
-    className: "wrap"
+    className: `wrap ${tab==='live'?'terminal-wrap':''}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "nav",
     style: {
