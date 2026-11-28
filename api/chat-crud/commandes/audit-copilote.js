@@ -169,9 +169,9 @@ async function preferencesMemorisees() {
 
   lignes.push(`- **Instruments surveillés par défaut :** ${actifs.length ? actifs.map(a => typeof a === 'string' ? a : `${a.symbol} (${a.provider}, ${a.tf})`).join(', ') : 'Aucun'}`);
   if (prefs && prefs.length) {
-    lignes.push(`- **Consignes et règles permanentes enregistrées :**`);
+    lignes.push(`- **Consignes et règles globales de l'instance enregistrées :**`);
     for (const p of prefs) {
-      lignes.push(`  * **[${p.categorie || 'général'}]** : ${p.consigne}`);
+      lignes.push(`  * **[${p.categorie || 'général'}]** : ${p.contenu}`);
     }
   } else {
     lignes.push(`- **Autres consignes :** Aucune préférence additionnelle personnalisée.`);
