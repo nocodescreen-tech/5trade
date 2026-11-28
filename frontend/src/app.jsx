@@ -1238,6 +1238,38 @@ function Strategies({ strategies, onDelete, onSaved }) {
   const [moteur, setMoteur] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [profilsReels,setProfilsReels]=useState(null);
+  const [etatFiltre,setEtatFiltre]=useState('all');
+  useEffect(()=>{
+    let alive=true;
+    setProfilsReels(null);
+    api('/strategies/profiles').then(async r=>{
+      const d=await r.json();
+      if(alive && r.ok && d.success && Array.isArray(d.profils))setProfilsReels(new Map(d.profils.map(p=>[p.id,p])));
+    }).catch(()=>{});
+    return()=>{alive=false;};
+  },[strategies]);
+  const readiness=s=>profilsReels?.get(s.id)?.executabilite || 'unknown';
+  const labels={all:'Toutes',executable:'Contrat exécutable',incomplete:'Incomplète',inactive:'Inactive',documentation:'Documentation',unknown:'Non vérifiée'};
+  const readinessPanel=s=>{
+    const p=profilsReels?.get(s.id);
+    const statut=readiness(s);
+    return React.createElement('div',{className:'strategy-readiness'},
+      React.createElement('div',{className:'strategy-readiness-heading'},
+        React.createElement('span',{className:'strategy-state', 'data-state':statut},labels[statut]),
+        React.createElement('span',{className:'strategy-version'},p?.version ? 'v'+p.version : 'Version non renseignée')),
+      React.createElement('div',{className:'strategy-meta'},p?.regles?.length ? 'Règles : '+p.regles.join(' · ') : 'Règles non vérifiées'),
+      p?.obligatoires?.length ? React.createElement('div',{className:'strategy-meta'},'Obligatoires : '+p.obligatoires.join(' · ')):null,
+      p?.marches?.length ? React.createElement('div',{className:'strategy-meta'},'Marchés : '+p.marches.join(' · ')):null,
+      React.createElement('div',{className:'strategy-meta'},p?.motif || 'Profil non disponible'),
+      React.createElement('div',{className:'strategy-evidence'},'Rentabilité indépendante non démontrée'));
+  };
+  const readinessToolbar=()=>React.createElement('div',{className:'strategy-toolbar'},
+    React.createElement('div',{className:'strategy-filter-heading'},'État des contrats'),
+    React.createElement('div',{className:'strategy-filter-row'},
+      ...Object.entries(labels).map(([k,label])=>React.createElement('button',{key:k,type:'button',className:'strategy-filter'+(etatFiltre===k?' selected':''),'aria-pressed':etatFiltre===k,onClick:()=>setEtatFiltre(k)},label+' · '+(k==='all'?strategies.length:strategies.filter(s=>readiness(s)===k).length)))),
+    React.createElement('p',null,profilsReels?'Un contrat exécutable ne garantit ni signal valide ni rentabilité.':'Profils en attente ou indisponibles : aucun état exécutable présumé.'));
+
 
   const MOTEUR_VIDE = {
     style: '', regles: ['R1','R2','R3','R4'], seuilForce: 0.35, seuilRegles: 2,
@@ -1298,13 +1330,14 @@ function Strategies({ strategies, onDelete, onSaved }) {
     return () => { alive = false; clearTimeout(timer); };
   }, [q]);
 
-  const list = useMemo(() => {
+  const listeRecherche = useMemo(() => {
     if (!remote) return strategies;
     const byId = new Map(strategies.map(s => [s.id, s]));
     return remote
       .map(r => { const s = byId.get(r.id); return s ? { ...s, _excerpt: r.excerpt, _score: r.score } : null; })
       .filter(Boolean);
   }, [strategies, remote]);
+  const list=listeRecherche.filter(s=>etatFiltre==='all' || readiness(s)===etatFiltre);
 
   return (
     <div>
@@ -1332,6 +1365,7 @@ function Strategies({ strategies, onDelete, onSaved }) {
         </div>
       </Reveal>
 
+      {readinessToolbar()}
       {list.length === 0 && (
         <div className="panel" style={{ padding:34, textAlign:'center', color:'var(--muted)', fontSize:13.5 }}>
           <i className="fas fa-inbox" style={{ fontSize:26, color:'var(--dim)', display:'block', marginBottom:10 }}></i>
@@ -1344,7 +1378,7 @@ function Strategies({ strategies, onDelete, onSaved }) {
       <div className="grid-auto">
         {list.map((s, i) => (
           <Reveal key={s.id} delay={Math.min(i*45, 360)}>
-            <SpotlightCard className="panel" spotlightColor="rgba(37,99,235,.2)">
+            <div className="panel strategy-library-card">
               <div style={{ padding:17, height:'100%', display:'flex', flexDirection:'column' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', gap:9, alignItems:'flex-start' }}>
                   <h3 style={{ fontSize:14.5, fontWeight:700, lineHeight:1.35 }}>{s.title}</h3>
@@ -1352,6 +1386,7 @@ function Strategies({ strategies, onDelete, onSaved }) {
                     {s.source || s.type}
                   </span>
                 </div>
+                {readinessPanel(s)}
                 {editing === s.id ? (
                   <div style={{ margin:'9px 0 11px', display:'grid', gap:8 }}>
                     <input className="fld" style={{ margin:0 }} value={form.title}
@@ -1510,7 +1545,7 @@ function Strategies({ strategies, onDelete, onSaved }) {
                   </div>
                 </div>
               </div>
-            </SpotlightCard>
+            </div>
           </Reveal>
         ))}
       </div>
