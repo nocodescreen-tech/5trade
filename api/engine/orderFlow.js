@@ -29,6 +29,10 @@ function delta(candles) {
     // volume selon la clôture dans le range, ce qui est l'estimation standard
     // quand on ne dispose que d'OHLCV.
     const volume = cur.v || 0;
+    if (cur.volumeSource === 'binance_spot' && Number.isFinite(cur.takerBuyBase) && Number.isFinite(cur.v) && cur.v >= 0 && cur.takerBuyBase >= 0 && cur.takerBuyBase <= cur.v) {
+      deltas.push(2 * cur.takerBuyBase - cur.v);
+      continue;
+    }
     const range = cur.h - cur.l;
     let deltaValue;
     if (range > 0) {
@@ -61,7 +65,7 @@ function imbalances(candles) {
     // Imbalance haussier : delta positif après un delta négatif
     if (deltas[i] > 0 && deltas[i - 1] < 0 && Math.abs(deltas[i]) > Math.abs(deltas[i - 1]) * 1.5) {
       imbalances.push({
-        index: i,
+        index: i + 1,
         type: 'bid',
         force: Math.min(Math.abs(deltas[i]) / Math.abs(deltas[i - 1]), 10),
         detail: `imbalance bid : delta ${deltas[i].toFixed(2)} après ${deltas[i - 1].toFixed(2)}`
@@ -107,14 +111,14 @@ function absorption(candles) {
     const avgVolume = recent.reduce((a, c) => a + (c.v || 0), 0) / recent.length;
 
     // Référence de volume : les 20 bougies précédentes, pas la fenêtre elle-même.
-    const base = candles.slice(Math.max(0, i - 20), i);
+    const base = candles.slice(Math.max(0, i - 25), i - 5);
     const volumeRef = base.length ? base.reduce((a, c) => a + (c.v || 0), 0) / base.length : 0;
 
     const rangeCompresse = avgRange > 0 && priceRange < avgRange * 3;
     const volumeEleve = volumeRef > 0 ? avgVolume > volumeRef * 1.5 : avgVolume > 0;
     if (rangeCompresse && volumeEleve) {
       const prix = (candles[i].h + candles[i].l) / 2;
-      const type = deltas[i] > 0 ? 'achat' : 'vente';
+      const type = deltas[i - 1] > 0 ? 'achat' : 'vente';
 
       absorptions.push({
         prix: +prix.toFixed(6),
@@ -181,11 +185,17 @@ function spoofing(candles) {
  * @returns {object} Analyse complète
  */
 function analyserOrderFlow(candles) {
+  if (!Array.isArray(candles) || candles.length < 2 || !candles.every(c => Number.isFinite(c.v) && c.v >= 0) || !candles.some(c => c.v > 0)) {
+    return { disponible: false, methode: 'indisponible', delta: [], cvd: [], imbalances: [], absorption: [], spoofing: [], raison: 'Volume inexploitable' };
+  }
+  const exact = candles.every(c => c.volumeSource === 'binance_spot' && Number.isFinite(c.takerBuyBase) && c.takerBuyBase >= 0 && c.takerBuyBase <= c.v);
+  const series = delta(candles);
+  let cumulative = 0;
   return {
-    delta: delta(candles),
-    imbalances: imbalances(candles),
-    absorption: absorption(candles),
-    spoofing: spoofing(candles)
+    disponible: true, methode: exact ? 'delta_taker_binance_spot' : 'estimation_ohlcv_ou_mixte',
+    delta: series, cvd: series.map((v,i) => ({ t: candles[i+1].t, value: cumulative += v })),
+    imbalances: imbalances(candles), absorption: absorption(candles), spoofing: spoofing(candles),
+    limites: ['Imbalance, absorption et spoofing restent des proxys ; aucune preuve de carnet d’ordres.','CVD limité à la fenêtre reçue.']
   };
 }
 
