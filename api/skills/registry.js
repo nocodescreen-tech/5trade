@@ -12,8 +12,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { validerSkill, verifierCodeSource } = require('./validator');
-const { chargerDansSandbox, executerMethodeSecurisee } = require('./sandbox');
+const { validerSkill } = require('./validator');
+const { executerMethodeSecurisee } = require('./sandbox');
 
 const DOSSIER_INSTALLES = path.join(__dirname, 'installed');
 const FICHIER_ETAT = path.join(__dirname, '..', '..', 'data', 'skills-registry.json');
@@ -64,39 +64,28 @@ function enregistrer(skill) {
  * Charge un skill depuis un dossier de manière sécurisée (analyse préalable).
  */
 function chargerDossierSkill(dossierSkill, nomDossier) {
-  const indexPath = path.join(dossierSkill, 'index.js');
-  if (!fs.existsSync(indexPath)) return false;
-
-  const codeSource = fs.readFileSync(indexPath, 'utf8');
-  // 1. Analyse statique obligatoire avant toute exécution
-  const verif = verifierCodeSource(codeSource);
-  if (!verif.securise) {
-    console.warn(`[Skills] Rejet du skill ${nomDossier} (code non sécurisé) : ${verif.violations.join(', ')}`);
-    return false;
-  }
-
-  // 2. Chargement : si skill externe/généré, charger via sandbox
-  let skillObj = null;
-  // Si c'est un skill natif contenant des requires relatifs autorisés
-  if (codeSource.includes("require('../../") || codeSource.includes("require('../../../")) {
-    try {
-      const mod = require(indexPath);
-      skillObj = typeof mod === 'function' ? mod() : mod;
-    } catch (e) {
-      console.warn(`[Skills] Échec de chargement natif ${nomDossier} : ${e.message}`);
-      return false;
-    }
+  const { compile, ID } = require('./declarative');
+  if (!ID.test(nomDossier)) return false;
+  const dossierStat = fs.lstatSync(dossierSkill);
+  if (!dossierStat.isDirectory() || dossierStat.isSymbolicLink()) return false;
+  let skillObj;
+  if (nomDossier === 'forex-session-monitor') {
+    const indexPath = path.join(dossierSkill, 'index.js');
+    const stat = fs.lstatSync(indexPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) return false;
+    // Only the built-in, version-controlled module is trusted native code.
+    skillObj = require(indexPath);
   } else {
-    // Exécution hermétique dans la sandbox
-    const sb = chargerDansSandbox(codeSource);
-    if (!sb.ok) {
-      console.warn(`[Skills] Échec sandbox ${nomDossier} : ${sb.erreur}`);
+    const jsonPath = path.join(dossierSkill, 'skill.json');
+    if (!fs.existsSync(jsonPath)) {
+      console.warn('[Skills] Ancien skill JavaScript ignoré : ' + nomDossier);
       return false;
     }
-    skillObj = sb.exports;
+    const stat = fs.lstatSync(jsonPath);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 32768) return false;
+    skillObj = compile(JSON.parse(fs.readFileSync(jsonPath,'utf8')));
   }
-
-  if (skillObj && !skillObj.id) skillObj.id = nomDossier;
+  if (skillObj.id !== nomDossier) return false;
   enregistrer(skillObj);
   return true;
 }
