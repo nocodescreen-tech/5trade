@@ -146,7 +146,7 @@ app.use((req, res, next) => {
 // avec quelques requetes. 12 Mo couvrent les captures d'ecran et les PDF joints ;
 // surchargeable pour un besoin ponctuel.
 const LIMITE_CORPS = process.env.BODY_LIMIT || '12mb';
-app.use(express.json({ limit: LIMITE_CORPS }));
+app.use(express.json({ limit: LIMITE_CORPS, inflate: false }));
 
 // ── Limitation de débit sur les routes coûteuses ──
 // Une analyse IA ou un backtest appelés en boucle épuisent le budget API et
@@ -157,7 +157,7 @@ const limiteBacktest = limiteurMiddleware(creerLimiteur({ max: 10, fenetreMs: 60
 app.use('/api/analyze', limiteAnalyse);
 app.use('/api/backtest', limiteBacktest);
 
-app.use(express.urlencoded({ extended: true, limit: LIMITE_CORPS }));
+app.use(express.urlencoded({ extended: true, limit: LIMITE_CORPS, inflate: false, parameterLimit: 1000 }));
 // Sonde de sante : permet de savoir si le serveur repond SANS traverser l'auth.
 // Sans elle, un simple controle de disponibilite devait deviner une route.
 app.get('/health', (req, res) => {
@@ -243,11 +243,11 @@ const EXTENSIONS_UPLOAD_AUTORISEES = new Set(['.pdf', '.docx', '.txt', '.md', '.
 
 const upload = multer({
   dest: UPLOADS_DIR,
-  limits: { fileSize: 15 * 1024 * 1024 }, // 15 Mo max (cohérent avec la limite globale de 12 Mo)
+  limits: { fileSize: 15 * 1024 * 1024, files: 5, fields: 20, parts: 25, fieldSize: 128 * 1024, fieldNameSize: 100 }, // 15 Mio par fichier, 5 fichiers maximum
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname || '').toLowerCase();
     if (!EXTENSIONS_UPLOAD_AUTORISEES.has(ext)) {
-      return cb(new Error(`Format ${ext || 'inconnu'} refusé : seuls PDF, DOCX, TXT, MD, PNG, JPG, WEBP sont autorisés.`));
+      return cb(Object.assign(new Error('Format de fichier refusé'), { code: 'UPLOAD_FORMAT' }));
     }
     cb(null, true);
   }
@@ -1623,7 +1623,8 @@ app.get('/api/account-exists', async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 // 1) UPLOAD de documents
 // ─────────────────────────────────────────────────────────────
-app.post('/api/upload-strategies', requireAuth, upload.array('documents'), async (req, res) => {
+const limiteUpload = limiteurMiddleware(creerLimiteur({ max: 10, fenetreMs: 60000 }), 'documents');
+app.post('/api/upload-strategies', requireAuth, limiteUpload, upload.array('documents', 5), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: 'Aucun fichier uploadé' });
@@ -1687,8 +1688,10 @@ app.post('/api/upload-strategies', requireAuth, upload.array('documents'), async
     }
     res.json({ success: true, results });
   } catch (error) {
-    console.error('Erreur upload:', error);
-    res.status(500).json({ error: error.message });
+    console.error('Erreur upload : traitement indisponible');
+    res.status(500).json({ error: 'Traitement des documents indisponible' });
+  } finally {
+    await Promise.all((req.files || []).map(f => fs.unlink(f.path).catch(() => {})));
   }
 });
 
@@ -2354,8 +2357,11 @@ Réponds en texte structuré, dense et exploitable.`;
 
     res.json({ success: true, analysis, recommendations });
   } catch (error) {
-    console.error('Erreur analyse:', error);
-    res.status(500).json({ error: error.message });
+    console.error('Erreur analyse : traitement indisponible');
+    res.status(500).json({ error: 'Analyse indisponible' });
+  } finally {
+    const uploads = [...(req.files?.charts || []), ...(req.files?.chart || [])];
+    await Promise.all(uploads.map(f => fs.unlink(f.path).catch(() => {})));
   }
 });
 
@@ -5543,6 +5549,8 @@ async function start() {
   // 0.0.0.0 en production : derrière le proxy de la plateforme, un bind sur
   // 127.0.0.1 rend le service injoignable (« listening » dans les logs, 502 au
   // health check). En local on reste sur 127.0.0.1.
+  // Mounted after all API routes (including those registered during startup).
+  require('./security/http-errors').mount(app);
   const HOST = process.env.HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
   app.listen(PORT, HOST, () => {
     console.log('═══════════════════════════════════════');
