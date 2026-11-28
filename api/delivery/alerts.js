@@ -654,7 +654,7 @@ async function verifierBrut(force = false) {
       let confluenceSurveillance = null;
       if (typeof deps.alignementMtf === 'function') {
         try {
-          const al = await deps.alignementMtf(m.symbol, m.tf, m.provider);
+          const al = await deps.alignementMtf(m.symbol, m.tf, m.provider, profil ? {...optionsMoteur,timeframes:profil.timeframes,seuilAlignes:profil.seuilAlignes} : {});
           confluenceSurveillance = (al && al.confluence) || null;
         } catch { /* une unité indisponible ne bloque pas la surveillance */ }
       }
