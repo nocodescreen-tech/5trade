@@ -192,3 +192,19 @@ test('replay frame exposes no future candles',()=>{
   assert.equal(r.asOf,bars[40].t+step);
   assert.throws(()=>Replay.frame(bars,'5m',100));
 });
+
+test('Telegram alert escapes untrusted labels, refuses invented lot sizes and null prices',()=>{
+  const A=require('../delivery/alerts');
+  const message=A.messageTelegram({direction:'BUY',strength:.8,levels:{entry:null,stop:null,target1:null,target2:null},rules:[{name:'<b>fake</b>',detail:'a & b'}]}, {symbol:'XAUUSD',tf:'5m'});
+  assert.match(message,/Entrée : <b>non chiffrée<\/b>/);
+  assert.match(message,/&lt;b&gt;fake&lt;\/b&gt;/);
+  assert.doesNotMatch(message,/Taille conseillée/);
+  assert.doesNotMatch(message,/Objectif 1/);
+});
+test('market closure preserves completed history and refuses incomplete current bars',()=>{
+  const M=require('../sources/market');
+  const bars=[{t:0,closed:true},{t:60000,closed:true}];
+  assert.deepEqual(M.marquerEnCours(bars,'1m',90000).map(c=>c.closed),[true,false]);
+  assert.deepEqual(M.marquerEnCours(bars,'1m',120000).map(c=>c.closed),[true,true]);
+  assert.equal(M.marquerEnCours([{t:0,closed:false}],'1m',120000)[0].closed,false);
+});
