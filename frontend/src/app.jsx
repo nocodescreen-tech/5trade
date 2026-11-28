@@ -7,10 +7,29 @@ const API_BASE = (window.location.port === '5173' || window.location.protocol ==
 
 // Version de l'interface (affichée en en-tête) : permet de voir d'un coup d'œil
 // si la page ouverte est bien la dernière, ou une version restée en cache.
-const UI_VERSION = 'r2026-11-14d';
+const UI_VERSION = 'r2026-11-28-knowledge';
 const api = (path, opts = {}) =>
   fetch(`${API_BASE}${path}`, { credentials: 'include', ...opts });
-const lireJsonApi = window.FiveTradeApiResponse && window.FiveTradeApiResponse.lireJson;
+async function lireJsonApi(response, contexte = 'Requête API') {
+  const type = response.headers.get('content-type') || '';
+  if (!/\b(?:application\/json|application\/[\w.+-]+\+json)\b/i.test(type)) {
+    throw new Error(contexte + ' : réponse non JSON (HTTP ' + response.status + '). Vérifie la connexion et la configuration du serveur.');
+  }
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(contexte + ' : réponse JSON invalide (HTTP ' + response.status + ').');
+  }
+  if (!response.ok || data?.success === false || data?.error) {
+    const detail = typeof data?.error === 'string' ? data.error : 'HTTP ' + response.status;
+    throw new Error(contexte + ' : ' + detail);
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(contexte + ' : format de réponse inattendu.');
+  }
+  return data;
+}
 
 const REDUCED = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -981,8 +1000,8 @@ function AddKnowledge({ refresh }) {
         method:'POST', headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ texte: decrire })
       });
-      if (!lireJsonApi) throw new Error('Client API incomplet : recharge la page');
       const d = await lireJsonApi(r, 'Analyse de strategie');
+      if (!d.strategy || !d.moteur) throw new Error('Analyse reçue sans fiche complète. Vérifie la bibliothèque avant de réessayer.');
       setFiche(d);
       refresh();
     } catch (e) { setDecrireErr(e.message); }
