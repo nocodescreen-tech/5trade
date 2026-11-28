@@ -241,7 +241,7 @@ function niveauConfirmation(signaux, options = {}) {
     // autres unités — donc la condition n'est PAS remplie. Laisser passer en
     // écrivant seulement « non vérifié » revenait à exiger pour la forme : un
     // signal confirmé restait exécutable sans qu'aucune vérification ait eu lieu.
-    if (exigerAlignement && !s.confluence) {
+    if (exigerAlignement && !confSign) {
       alignementMTF = 'non vérifié';
       // Bloquant seulement si l'appelant a RÉELLEMENT exigé l'alignement.
       if (alignementImpose) {
@@ -330,7 +330,7 @@ function niveauExecution(signaux, meta, options = {}) {
     // DIRECTION INCONNUE : la stratégie n'a pas dit ce qu'elle voit. Ce n'est
     // pas « neutre » (un avis sans biais), c'est une absence d'avis — et une
     // absence d'avis ne s'exécute pas.
-    if (s.sens === 'inconnu' || s.direction === 'UNKNOWN') {
+    if (!['long', 'short'].includes(s.sens) || s.direction === 'UNKNOWN') {
       blocages.push("direction inconnue : la stratégie n'a pas déterminé de sens, aucun trade possible");
     }
     let executable = false;
@@ -414,7 +414,7 @@ function niveauExecution(signaux, meta, options = {}) {
 
     // 3. Frais de transaction (plafond de coût)
     if (verifierFrais && Number.isFinite(entry) && Number.isFinite(stop)) {
-      const verdictFrais = Frais.plafondCout(entry, stop, meta.symbol);
+      const verdictFrais = Frais.plafondCout(entry, stop, meta.symbol, null, options.frais);
       if (verdictFrais && !verdictFrais.ok) {
         blocages.push(`coût trop élevé : ${verdictFrais.raison} (part ${(verdictFrais.part * 100).toFixed(1)}% > ${(verdictFrais.partMax * 100).toFixed(1)}%)`);
         s.ecarteFrais = verdictFrais;
