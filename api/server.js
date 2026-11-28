@@ -4062,11 +4062,8 @@ app.get('/api/decision', requireAuth, async (req, res) => {
           regime: regDetecte,
           performances: statsPerformances
         });
-        if (selection.retenues.length) {
-          const retenues = (fiches || []).filter(d => selection.retenues.includes(d.id));
-          options.profils = retenues.map(d => Signals.profilDepuisStrategie(d));
-        }
-      } catch (e) { selection = { candidates: [], retenues: [], motif: `sélection impossible : ${e.message}` }; }
+        options.profils = (fiches || []).filter(d => d.id === selection.retenues[0]).map(d => Signals.profilDepuisStrategie(d));
+      } catch (e) { options.profils = []; selection = { candidates: [], retenues: [], motif: `sélection impossible : ${e.message}` }; }
     }
 
     // LE RISQUE GARDE LA DÉCISION — le même contrôle que l'inscription au
@@ -4099,13 +4096,14 @@ app.get('/api/decision', requireAuth, async (req, res) => {
               const cl = (r.candles || []).filter(c => c.closed !== false);
               if (cl.length < 20) return null;
               return Signals.detect(cl, { symbol, timeframe: unite },
-                { profil: Signals.profilDepuisStrategie(fiche) });
+                { ...profil, strict: true });
             }
           });
           confluenceStrategie.unitesSource = (fichePourMtf !== fiche) ? 'profil (fiche non déclarante)' : 'fiche';
           selection.parStrategie = { [fiche.id]: confluenceStrategie };
         }
       } catch (e) {
+        confluenceStrategie = {aligne:false,score:0,detail:[],motif:'confluence de stratégie indisponible'};
         selection.parStrategie = { erreur: e.message };
       }
     }
@@ -4114,6 +4112,7 @@ app.get('/api/decision', requireAuth, async (req, res) => {
 
     const decision = DecisionEngine.decider(closed, { symbol, timeframe: tf }, {
       profils: options.profils || [],
+      strategieStricte: options.mode === 'auto' || Boolean(options.strategie),
       // La confluence par stratégie prime : c'est celle de la fiche retenue.
       confluence: confluenceStrategie || confluence,
       // …et elle est aussi fournie par signal : le contrôle MTF de chaque
