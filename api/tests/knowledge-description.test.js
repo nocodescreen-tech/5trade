@@ -39,3 +39,18 @@ test('expired deadline does not call either provider',async()=>{
   await assert.rejects(run([],{json:true,valider:validerFicheDescription,deadline:Date.now()-1}),e=>e.status===503);
   assert.equal(called,0);
 });
+
+test('knowledge uses chat NVIDIA model chain and never calls Gemini',async()=>{
+  for (const route of ['description-strategie','structuration-web']) {
+    const calls=[];
+    const run=cascade({nvidia:async(m)=>{calls.push(m);throw Error('unavailable')},gemini:async()=>{calls.push('gemini');return raw;}});
+    await assert.rejects(run([],{route,json:true,valider:validerFicheDescription,deadline:Date.now()+20000}),e=>e.status===503);
+    assert.deepEqual(calls,['a','b']);
+  }
+});
+test('knowledge has full NVIDIA budget even if Gemini key is configured',async()=>{
+  const calls=[];
+  const run=cascade({nvidia:async(m)=>{calls.push(m);return {contenu:raw,modele:m,usage:{}}},gemini:async()=>{throw Error('unexpected Gemini')}});
+  assert.deepEqual(JSON.parse(await run([],{route:'description-strategie',json:true,valider:validerFicheDescription,deadline:Date.now()+6000})),valid);
+  assert.deepEqual(calls,['a']);
+});

@@ -864,13 +864,16 @@ async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'i
   const raisons = [];
   const debut = Date.now();
   const reste = () => deadline == null ? Infinity : deadline - Date.now();
+  // Knowledge uses the same NVIDIA model chain as chat, without Gemini.
+  const knowledgeRoute = route === 'description-strategie' || route === 'structuration-web';
+  const geminiAutorise = !knowledgeRoute && !!process.env.GEMINI_API_KEY;
   const strictJson = typeof valider === 'function';
   const verifier = contenu => strictJson ? valider(contenu) : contenu;
 
   // 1. Essai de la chaîne NVIDIA NIM (budget de 10s max par essai pour réactivité)
   if (process.env.NVIDIA_API_KEY) {
     for (const modele of NVIDIA_MODELS) {
-      const reserveGemini = deadline != null && process.env.GEMINI_API_KEY ? 7000 : 0;
+      const reserveGemini = deadline != null && geminiAutorise ? 7000 : 0;
       const restant = Math.min(10000, NVIDIA_BUDGET_TOTAL_MS - (Date.now() - debut), reste() - reserveGemini);
       if (restant <= 2000) {
         raisons.push(`${modele}: non essayé (délai dépassé)`);
@@ -903,7 +906,7 @@ async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'i
   }
 
   // 2. Repli immédiat sur Google Gemini si disponible (temps de réponse < 2s)
-  if (process.env.GEMINI_API_KEY && reste() > 500) {
+  if (geminiAutorise && reste() > 500) {
     try {
       const rGemini = verifier(await appelGeminiTexte(messages, { maxTokens, json, strictJson,
         signal: deadline == null ? undefined : AbortSignal.timeout(Math.floor(Math.min(10000, reste()))) }));
@@ -916,8 +919,8 @@ async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'i
     }
   }
 
-  if (!process.env.NVIDIA_API_KEY && !process.env.GEMINI_API_KEY) {
-    const e = new Error('Aucune clé IA configurée (.env)');
+  if (!process.env.NVIDIA_API_KEY && !geminiAutorise) {
+    const e = new Error(knowledgeRoute ? 'NVIDIA_API_KEY non configurée pour la base de connaissance' : 'Aucune clé IA configurée (.env)');
     e.status = 503;
     throw e;
   }
@@ -3687,7 +3690,7 @@ Réponds en JSON strict, sans texte autour :
   "resume": "2 ou 3 phrases qui résument la logique de la stratégie",
   "regles": ["R1","R3"],
   "filtres": ["volatilite"],
-  "style": "scalping" | "intraday" | "swing" | null,
+  "style": "scalping",
   "timeframes": ["1m","5m","15m"],
   "seuilAlignes": 2,
   "seuilForce": 0.5,
@@ -3698,7 +3701,7 @@ Réponds en JSON strict, sans texte autour :
   "concepts": ["OB","FVG","Sweep"],
   "motsCles": ["3 à 6 mots-clés pour retrouver la fiche"]
 }
-N'invente rien : si une information n'est pas dans la description, mets null ou une liste vide.`;
+Le JSON ci-dessus est un EXEMPLE de format, pas de valeurs à recopier. Le style doit être scalping, intraday, swing ou null. Utilise des timeframes en minuscules (M1 devient 1m, M5 devient 5m). Toutes les clés de l’exemple doivent être présentes. Pour les champs facultatifs inconnus, utilise null ou une liste vide. Choisis uniquement les règles décrites, notamment R1 pour une mèche de balayage. Si aucune règle native ne correspond, ne prétends pas qu’elle existe. N’invente ni seuil, ni objectif. Réponds directement avec le JSON final, sans raisonnement.`;
 
   let fiche;
   try {
@@ -3819,7 +3822,9 @@ app.post('/api/strategies/decrire', requireAuth, async (req, res) => {
     if (!resultats.length) {
       return res.status(503).json({
         success: false, code: 'STRATEGY_ANALYSIS_UNAVAILABLE',
-        error: 'Analyse IA temporairement indisponible. Aucune fiche enregistrée. Réessaie ou utilise le mode Manuel.'
+        error: process.env.NVIDIA_API_KEY
+          ? 'Les modèles NVIDIA du chat n’ont pas produit une fiche valide dans le délai imparti. Aucune fiche enregistrée. Réessaie ou utilise le mode Manuel.'
+          : 'NVIDIA_API_KEY non configurée sur le serveur. Aucune fiche enregistrée.'
       });
     }
 
