@@ -208,3 +208,43 @@ test('market closure preserves completed history and refuses incomplete current 
   assert.deepEqual(M.marquerEnCours(bars,'1m',120000).map(c=>c.closed),[true,true]);
   assert.equal(M.marquerEnCours([{t:0,closed:false}],'1m',120000)[0].closed,false);
 });
+
+
+test('Deriv PAT account discovery is read-only and keeps the selected account stable', async () => {
+  const { verifyAccounts } = require('../deriv/client');
+  const demo = { account_id: 'DOT100', account_type: 'demo', status: 'active', currency: 'USD', balance: 0 };
+  const real = { ...demo, account_id: 'ROT200', account_type: 'real', balance: 25 };
+  const fake = async (url, options) => {
+    assert.equal(url, 'https://api.derivws.com/trading/v1/options/accounts');
+    assert.equal(options.method, 'GET');
+    assert.equal(options.redirect, 'error');
+    assert.equal(options.headers.Authorization, 'Bearer fake-test-token');
+    assert.equal(options.headers['Deriv-App-ID'], 'test-app');
+    return { ok: true, json: async () => ({ data: [real, demo] }) };
+  };
+  const first = await verifyAccounts('test-app', 'fake-test-token', null, fake);
+  assert.equal(first.ok, true);
+  assert.equal(first.account.loginid, 'DOT100');
+  assert.equal(first.account.balance, 0);
+  assert.equal(first.account.executionEnabled, false);
+  assert.deepEqual(first.account.scopes, []);
+  assert.equal((await verifyAccounts('test-app', 'fake-test-token', 'ROT200', fake)).account.loginid, 'ROT200');
+  assert.equal((await verifyAccounts('test-app', 'fake-test-token', 'missing', fake)).ok, false);
+});
+
+test('Deriv PAT failures never leak provider response or token and never invent balances', async () => {
+  const { verifyAccounts } = require('../deriv/client');
+  const secret = 'fake-private-token';
+  const denied = await verifyAccounts('test-app', secret, null, async () => ({
+    ok: false, status: 401, json: async () => { throw Error(secret); }
+  }));
+  assert.equal(denied.ok, false);
+  assert.ok(!JSON.stringify(denied).includes(secret));
+  const network = await verifyAccounts('test-app', secret, null, async () => { throw Error(secret); });
+  assert.equal(network.ok, false);
+  assert.ok(!JSON.stringify(network).includes(secret));
+  const invalid = await verifyAccounts('test-app', secret, null, async () => ({
+    ok: true, json: async () => ({ data: [{ account_id: 'DOT1', status: 'active', account_type: 'demo', currency: 'USD', balance: null }] })
+  }));
+  assert.equal(invalid.ok, false);
+});
