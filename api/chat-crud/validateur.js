@@ -21,6 +21,9 @@ const Ajusteur = require('../apprentissage/ajusteur-seuils');
  */
 async function evaluer(action) {
   const { verbe, sujet, type } = action;
+  if (type === 'skill' && ['CRÉE','ACTIVE','DÉSACTIVE'].includes(verbe)) {
+    return {niveau:'structurelle',confirmation_requise:true,raison:'Compétence : '+verbe.toLowerCase()+' — confirmer explicitement'};
+  }
 
   // Lecture : toujours OK
   if (['MONTRE', 'EXPLIQUE', 'AIDE'].includes(verbe)) {
