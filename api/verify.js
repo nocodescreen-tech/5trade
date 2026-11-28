@@ -5611,7 +5611,7 @@ function tinyPng(W = 64, H = 40) {
       /deps\.filtreNews/.test(aSrc2) && /fondamental\.bloque/.test(aSrc2));
     const srvF = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
     ok('le filtre est injecté dans la surveillance',
-      /filtreNews: filtreCalendrier/.test(srvF));
+      /filtreNews: symbol => filtreCalendrier\(symbol, \{ strict: true \}\)/.test(srvF));
   }
 
   // ── Fraîcheur des données et unités de temps obligatoires ──
