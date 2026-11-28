@@ -417,11 +417,10 @@ function loadCache() {
     if (!fs.existsSync(CACHE_FILE)) return 0;
     const data = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
     let n = 0;
-    const now = Date.now();
     for (const [k, v] of Object.entries(data)) {
-      if (Array.isArray(v) && v.length) {
+      if (Array.isArray(v) && v.length && !buffers.has(k)) {
         buffers.set(k, v);
-        bufferMaj.set(k, now);
+        bufferMaj.set(k, 0); // disk history is never a fresh live quote
         n++;
       }
     }
@@ -509,7 +508,25 @@ function assainirBougies(liste, tf) {
   return { bougies, trous, doublons: tri.length - bougies.length };
 }
 
+const requetesHistorique = new Map();
 async function getCandles(symbol, tf, count = 300, providerId) {
+  if (!Number.isInteger(count) || count < 1 || count > 10000) throw new Error('Nombre de bougies invalide');
+  const p = providerId ? providerById(providerId) : fournisseurPour(symbol);
+  const key = JSON.stringify([p.id,symbol,tf,count]);
+  let task = requetesHistorique.get(key);
+  if (!task) {
+    task = chargerBougies(symbol,tf,count,p.id);
+    requetesHistorique.set(key,task);
+  }
+  try {
+    const result = await task;
+    // Consumers cannot mutate each other's OHLC or the shared buffer.
+    return {...result,candles:result.candles.map(c=>({...c})),trous:(result.trous || []).map(t=>({...t}))};
+  } finally {
+    if (requetesHistorique.get(key) === task) requetesHistorique.delete(key);
+  }
+}
+async function chargerBougies(symbol, tf, count, providerId) {
   if (!TF_MS[tf]) throw new Error(`Timeframe inconnu : ${tf} (attendu ${TIMEFRAMES.join(', ')})`);
   // Sans fournisseur explicite, on choisit celui qui SERT réellement le symbole.
   // Avant, on prenait le fournisseur actif puis on vérifiait : R_75 demandé sans
@@ -537,10 +554,17 @@ async function getCandles(symbol, tf, count = 300, providerId) {
   }
   try {
     const a = assainirBougies(marquerEnCours(await p.candles(symbol, tf, count)), tf);
-    buffers.set(k, a.bougies);
+    if (!a.bougies.length) throw new Error('Historique vide');
+    const latest = buffers.get(k) || [];
+    const last = latest[latest.length - 1];
+    // A slow REST response must not overwrite a more recent live candle.
+    const merged = (bufferMaj.get(k) || 0) > maj && last
+      ? assainirBougies([...a.bougies,...latest.filter(c=>c.t >= a.bougies[a.bougies.length-1].t)],tf) : a;
+    buffers.set(k, merged.bougies.slice(-3000));
     bufferMaj.set(k, Date.now());
     saveCacheSoon();
-    return { candles: a.bougies, provider: p.id, source: 'rest', trous: a.trous };
+    const result = assainirBougies(merged.bougies.slice(-count),tf);
+    return { candles: result.bougies, provider: p.id, source: 'rest', trous: result.trous };
   } catch (e) {
     // HORS LIGNE : on sert ce qu'on a en mémoire, sinon sur disque.
     if (!buf || !buf.length) loadCache();
@@ -580,7 +604,7 @@ function applyCandle(providerId, symbol, tf, candle) {
  * @returns {function} arrêt de l'abonnement de cet appelant
  */
 function watch(symbol, tf, onCandle, providerId) {
-  const p = providerId ? providerById(providerId) : activeProvider();
+  const p = providerId ? providerById(providerId) : fournisseurPour(symbol);
   if (!TF_MS[tf]) throw new Error(`Timeframe inconnu : ${tf}`);
   verifierSymbole(p, symbol);
   const sub = { provider: p.id, symbol, tf, onCandle };
@@ -609,7 +633,8 @@ function watch(symbol, tf, onCandle, providerId) {
  * @returns {function} arrêt du flux
  */
 function watchTicks(symbol, onTick, providerId) {
-  const p = providerId ? providerById(providerId) : activeProvider();
+  const p = providerId ? providerById(providerId) : fournisseurPour(symbol);
+  verifierSymbole(p,symbol);
   if (typeof p.ticks !== 'function') {
     throw new Error(`${p.label} n'expose pas de flux de ticks — utilisez le graphique en bougies.`);
   }
@@ -712,13 +737,18 @@ function startPolling(sub) {
   // symbole COMEX alors que Binance est actif interrogerait la mauvaise source.
   const p = sub.provider ? providerById(sub.provider) : activeProvider();
   const every = p.poll || Math.max(15000, TF_MS[sub.tf] / 6);
+  let busy = false;
   sub._poll = setInterval(async () => {
+    if (busy || !subscribers.has(sub)) return;
+    busy = true;
     try {
-      const candles = await p.candles(sub.symbol, sub.tf, 2);
-      const last = candles[candles.length - 1];
-      if (last) { applyCandle(p.id, sub.symbol, sub.tf, { ...last, closed: false }); sub.onCandle(last); }
-    } catch {}
+      const result = await getCandles(sub.symbol,sub.tf,2,p.id);
+      if (result.offline || !subscribers.has(sub)) return;
+      const last = result.candles[result.candles.length - 1];
+      if (last && applyCandle(p.id,sub.symbol,sub.tf,last)) sub.onCandle({...last});
+    } catch {} finally { busy = false; }
   }, every);
+  sub._poll.unref?.();
 }
 
 /**
