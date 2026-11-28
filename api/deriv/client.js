@@ -3,6 +3,36 @@
 // Deriv Options REST API (PAT). Read-only account discovery and balance.
 // No OTP socket or order is requested. Deriv requires the trade scope for account listing.
 const DB = require('../core/db');
+const crypto = require('node:crypto');
+
+// A dedicated key must live outside the database and its backups.
+function encryptionKey(value = process.env.DERIV_TOKEN_ENCRYPTION_KEY) {
+  if (typeof value !== 'string' || !/^[a-fA-F0-9]{64}$/.test(value)) {
+    throw new Error('DERIV_TOKEN_ENCRYPTION_KEY doit contenir 64 caractères hexadécimaux.');
+  }
+  return Buffer.from(value, 'hex');
+}
+function sealToken(token, appId, accountId, key = encryptionKey()) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  cipher.setAAD(Buffer.from(JSON.stringify(['deriv-pat-v1', appId, accountId])));
+  const encrypted = Buffer.concat([cipher.update(token, 'utf8'), cipher.final()]);
+  return { version: 1, iv: iv.toString('hex'), tag: cipher.getAuthTag().toString('hex'), ciphertext: encrypted.toString('hex') };
+}
+function openToken(box, appId, accountId, key = encryptionKey()) {
+  if (!box || box.version !== 1 || !/^[a-f0-9]{24}$/.test(box.iv || '') ||
+      !/^[a-f0-9]{32}$/.test(box.tag || '') || !/^(?:[a-f0-9]{2}){1,4096}$/.test(box.ciphertext || '')) {
+    throw new Error('Configuration chiffrée Deriv invalide.');
+  }
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(box.iv, 'hex'));
+  decipher.setAAD(Buffer.from(JSON.stringify(['deriv-pat-v1', appId, accountId])));
+  decipher.setAuthTag(Buffer.from(box.tag, 'hex'));
+  try {
+    return Buffer.concat([decipher.update(Buffer.from(box.ciphertext, 'hex')), decipher.final()]).toString('utf8');
+  } catch {
+    throw new Error('Impossible de déchiffrer le PAT Deriv. Vérifiez la clé ou reconnectez le compte.');
+  }
+}
 const ACCOUNTS_URL = 'https://api.derivws.com/trading/v1/options/accounts';
 const DEFAULT_APP_ID = '353nKCVSd1Td4BoDbtjvr';
 
@@ -61,11 +91,15 @@ class DerivClient {
     return verifyAccounts(appId, apiToken, preferredId);
   }
 
-  async enregistrer(appId, apiToken) {
-    const test = await this.verifierEtAutoriser(appId, apiToken);
+  async enregistrer(appId, apiToken, accountId = null) {
+    let key;
+    try { key = encryptionKey(); }
+    catch (e) { return { success: false, error: e.message }; }
+    const test = await this.verifierEtAutoriser(appId, apiToken, accountId);
     if (!test.ok) return { success: false, error: test.error };
     const config = {
-      appId: appId.trim(), apiToken: apiToken.trim(), account: test.account,
+      appId: appId.trim(), account: test.account,
+      tokenBox: sealToken(apiToken.trim(), appId.trim(), test.account.loginid, key),
       updatedAt: new Date().toISOString(), actif: true
     };
     await DB.kvEcrire('deriv_config', config);
@@ -81,14 +115,17 @@ class DerivClient {
 
   async obtenirStatut() {
     const cfg = await this.lireConfig();
-    if (!cfg || !cfg.actif || !cfg.apiToken) {
+    if (!cfg || !cfg.actif) {
       return { connecte: false, appId: DEFAULT_APP_ID, executionEnabled: false,
         message: 'Aucun compte Deriv associé. Entrez un PAT et un App ID de la nouvelle API.' };
     }
-    if (cfg.account?.apiMode !== 'pat-rest') {
+    if (cfg.account?.apiMode !== 'pat-rest' || !cfg.tokenBox || cfg.apiToken) {
       return { connecte: false, appId: cfg.appId, executionEnabled: false,
-        verification: 'reconnect_required', message: 'Ancienne configuration : reconnectez avec un PAT de la nouvelle API.' };
+        verification: 'reconnect_required', message: 'Ancienne configuration non chiffrée : déconnectez puis reconnectez avec un nouveau PAT.' };
     }
+    try { openToken(cfg.tokenBox, cfg.appId, cfg.account.loginid); }
+    catch { return { connecte: false, appId: cfg.appId, executionEnabled: false,
+      verification: 'key_error', message: 'Clé de chiffrement Deriv absente ou incorrecte.' }; }
     return {
       connecte: true, appId: cfg.appId, tokenMasque: '••••••••', updatedAt: cfg.updatedAt,
       account: cfg.account || null, executionEnabled: false,
@@ -98,17 +135,18 @@ class DerivClient {
 
   async rafraichirSolde() {
     const cfg = await this.lireConfig();
-    if (!cfg || !cfg.actif || !cfg.apiToken) throw new Error('Deriv non configuré');
-    if (cfg.account?.apiMode !== 'pat-rest' || !cfg.account.loginid) {
+    if (!cfg || !cfg.actif) throw new Error('Deriv non configuré');
+    if (cfg.account?.apiMode !== 'pat-rest' || !cfg.account.loginid || !cfg.tokenBox || cfg.apiToken) {
       throw new Error('Ancienne configuration Deriv : reconnectez votre compte avec un PAT.');
     }
-    const test = await this.verifierEtAutoriser(cfg.appId, cfg.apiToken, cfg.account.loginid);
+    const token = openToken(cfg.tokenBox, cfg.appId, cfg.account.loginid);
+    const test = await this.verifierEtAutoriser(cfg.appId, token, cfg.account.loginid);
     if (!test.ok) throw new Error(test.error);
     // A balance read must not recreate a configuration that was disconnected
     // during the remote request.
     const current = await this.lireConfig();
     if (!current || !current.actif || current.appId !== cfg.appId ||
-        current.apiToken !== cfg.apiToken || current.account?.loginid !== cfg.account.loginid) {
+        JSON.stringify(current.tokenBox) !== JSON.stringify(cfg.tokenBox) || current.account?.loginid !== cfg.account.loginid) {
       throw new Error('Configuration Deriv modifiée pendant la lecture.');
     }
     // No persistence needed for a live read: avoid races with connect/disconnect.
@@ -128,3 +166,7 @@ class DerivClient {
 
 module.exports = new DerivClient();
 module.exports.verifyAccounts = verifyAccounts;
+
+module.exports.sealToken = sealToken;
+module.exports.openToken = openToken;
+module.exports.encryptionKey = encryptionKey;
