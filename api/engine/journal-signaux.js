@@ -140,8 +140,15 @@ function enregistrer(signaux, meta = {}, options = {}) {
     // chiffre qui l'explique.
     // État calculé ici seulement, au premier signal réellement candidat.
     const etatIci = options.ignorerRisque ? null : etatDuCompte();
+    let risqueValide = null;
     if (etatIci) {
-      const verdict = Risque.verifierPrise({ entree: e, stop: st, symbol: meta.symbol }, etatCourant);
+      let verdict;
+      try {
+        const contraintes = require('../memoire/preferences').obtenirContraintesActivesSync();
+        verdict = Risque.verifierPrise({ entree: e, stop: st, symbol: meta.symbol }, etatCourant, { contraintes });
+      } catch {
+        verdict = {ok:false,raison:'Préférences de risque non vérifiées'};
+      }
       if (!verdict.ok) {
         refusesRisque.push({
           cle, nom: s.nom, sens: s.sens, symbol: meta.symbol || null,
@@ -150,6 +157,7 @@ function enregistrer(signaux, meta = {}, options = {}) {
         ignores++;
         continue;
       }
+      risqueValide = {taille:verdict.taille,risqueMontant:verdict.risqueMontant,exposition:verdict.exposition,capital:etatIci.capital,risquePct:verdict.risquePct};
       // On met à jour l'état LOCAL : sinon dix signaux de la même fournée
       // passeraient tous les plafonds en étant chacun le premier.
       const sym = meta.symbol || '?';
@@ -196,17 +204,7 @@ function enregistrer(signaux, meta = {}, options = {}) {
       // Dimensionnement AU MOMENT de l'émission : la taille qu'on aurait prise
       // avec le capital courant. C'est ce qui transforme le journal en registre
       // de paper-trading plutôt qu'en liste de prédictions.
-      risque: (() => {
-        const d = Risque.dimensionner(e, st);
-        if (d.taille === null) return null;
-        return {
-          taille: d.taille,
-          risqueMontant: d.risqueMontant,
-          exposition: d.exposition,
-          capital: Risque.configuration().capital,
-          risquePct: d.risquePct
-        };
-      })(),
+      risque: risqueValide, // snapshot validé à l'inscription ; null pour les imports sans contrôle
       structure: s.structureContexte ? {
         alignement: s.structureContexte.alignement,
         position: s.structureContexte.position,
