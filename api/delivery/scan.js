@@ -80,14 +80,12 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
     const bruts = typeof symbolesAutorises === 'function' ? symbolesAutorises() : symbolesAutorises;
     const cibles = Array.isArray(bruts) ? bruts : actifs;
     if (!cibles || !cibles.length) {
-      return {
-        at: new Date().toISOString(), tf, marches: 0, signaux: [],
-        erreurs: ['Aucun instrument actif : scan automatique suspendu'], dureeMs: 0
-      };
+      etat.dernier = {at:new Date().toISOString(),tf,marches:0,signaux:0,resultats:[],erreurs:['Aucun instrument actif : scan automatique suspendu'],dureeMs:0};
+      etat.erreurs=etat.dernier.erreurs;
+      return etat.dernier;
     }
-    const selection = new Set(actifs.map(s => String(s.symbol || s).toUpperCase()));
-    const autorisesSet = new Set(cibles.map(s => String(s.symbol || s).toUpperCase()).filter(s => selection.has(s)));
-    symboles = symboles.filter(s => autorisesSet.has(String(s.symbol || s).toUpperCase()));
+    const sameSymbol=(a,b)=>String(a.symbol||a).toUpperCase()===String(b.symbol||b).toUpperCase();
+    symboles=symboles.filter(s=>actifs.some(a=>sameSymbol(a,s)&&a.provider===s.provider)&&cibles.some(a=>sameSymbol(a,s)&&(!a.provider||a.provider===s.provider)));
   }
   const signaux = [];
   const erreurs = [];
@@ -109,6 +107,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
     seuilForce: p.seuilForce,
     seuilRegles: p.seuilRegles,
     parametres: p.parametres,
+    filtres:p.filtres, timeframes:p.timeframes, seuilAlignes:p.seuilAlignes,
     profils: [p],
     strategie: { id: p.id, titre: p.titre, version: p.version || null }
   } : {});
@@ -155,6 +154,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
         const { classifier } = require('../market-intelligence/instrument-classifier');
         const classe = classifier(symbole, { provider }).classe;
         const moteur = Moteurs.pour(classe);
+        if (mode !== MODES_SCAN.EXPLORATION && (classe==='inconnu' || (r.provider && provider && r.provider!==provider))) { erreurs.push(`${symbole} ${unite} : classe ou fournisseur non vérifié`); continue; }
         // Paramètres réellement appliqués : instrument, famille ou classe. Un
         // signal issu d'un simple profil de classe ne doit pas se lire comme
         // une analyse calibrée sur cet instrument.
@@ -179,6 +179,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
             erreurs.push(`${symbole} ${unite} : stratégie incomplète ou non exécutable (${passe.profil.id})`);
             continue;
           }
+          if (mode!==MODES_SCAN.EXPLORATION && passe.profil && (!passe.profil.supportedMarkets?.includes(classe) || (passe.profil.executionTimeframes?.length && !passe.profil.executionTimeframes.includes(unite)))) { erreurs.push(`${symbole} ${unite} : marché ou unité non déclaré dans ${passe.profil.id}`); continue; }
           let v = null;
           let refusMoteur = null;
           // Unification du moteur : le scan et le rejeu fidèle partagent le même cerveau décisionnel
@@ -260,10 +261,15 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
             } : null
           };
           ligne.contrat = Contrat.normaliser(ligne, { source: 'scan' });
-          if (macro && macro.applicable && (!macro.ok || !macro.verifie) && mode !== MODES_SCAN.EXPLORATION) {
+          if (mode !== MODES_SCAN.EXPLORATION && classe!=='synthetique' && (!macro || !macro.ok || !macro.verifie)) {
             ligne.decision = 'ATTENTE';
             ligne.status = 'surveiller';
-            ligne.raison = macro.detail || 'Calendrier non vérifié';
+            ligne.raison = macro?.detail || 'Calendrier non vérifié';
+            ligne.direction='NEUTRAL';
+            ligne.contrat.direction='NEUTRAL';
+            ligne.contrat.sens='neutre';
+            ligne.contrat.entree=null; ligne.contrat.stop=null; ligne.contrat.objectifs=[]; ligne.contrat.rr=null;
+            ligne.levels=null;
             ligne.contrat.status = 'surveiller';
           }
           signaux.push(ligne);
