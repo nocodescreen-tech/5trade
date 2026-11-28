@@ -74,6 +74,11 @@ function selectionner({ candles, meta, strategies, regime = null, max = 3, perfo
         motif: profil.motif || 'aucune règle exécutable' };
     }
 
+    if (profil.partiel || profil.reglesEcartees?.length || profil.filtresEcartes?.length || profil.timeframesRefusees?.length ||
+        (doc.moteur && (!Array.isArray(doc.moteur.regles) || !doc.moteur.regles.length ||
+          (doc.moteur.obligatoires || []).some(r => !profil.regles.includes(r))))) {
+      return {...base,compatible:false,retenue:false,score:0,statut:'incomplet',motif:'contrat incomplet : conditions déclarées non exécutables'};
+    }
     // 2. Marché incompatible : écartée avec la raison du contrat.
     if (refusees.has(doc.id)) {
       return { ...base, compatible: false, retenue: false, score: 0,
@@ -86,15 +91,15 @@ function selectionner({ candles, meta, strategies, regime = null, max = 3, perfo
     // 4. Évaluation INDÉPENDANTE : cette fiche seule, ses règles seules.
     let verdict = null;
     try {
-      verdict = Signals.detect(candles, meta || {}, { ...profil, profils: [profil] });
+      verdict = Signals.detect(candles, meta || {}, { ...profil, profils: [profil], strict:true });
     } catch (e) {
       return { ...base, compatible: declare, retenue: false, score: 0,
         motif: `évaluation impossible : ${e.message}` };
     }
 
     const statut = (verdict && verdict.status) || 'inconnu';
-    const force = Number.isFinite(verdict && verdict.force) ? verdict.force : 0;
-    const reglesActives = (verdict && verdict.reglesActives) || [];
+    const force = Number.isFinite(verdict && verdict.force) ? Math.max(0,Math.min(1,verdict.force)) : 0;
+    const reglesActives = [...new Set((Array.isArray(verdict?.reglesActives) ? verdict.reglesActives : []).filter(r=>base.regles.includes(r)))];
     const manquantes = Math.max(0, (profil.seuilRegles || 1) - reglesActives.length);
 
     // 5. Le setup est-il seulement présent ?
@@ -151,7 +156,7 @@ function selectionner({ candles, meta, strategies, regime = null, max = 3, perfo
         const esp = statsStrat.total > 0 ? ((Number(statsStrat.r) || 0) / statsStrat.total) : 0;
         if (esp >= 0.15) {
           multiplicateurPerformance = 1.20;
-          motif += ` · performance validée hors échantillon (+${esp.toFixed(2)} R/trade sur ${statsStrat.total} prises)`;
+          motif += ` · performance historique observée (validation hors échantillon non établie) (+${esp.toFixed(2)} R/trade sur ${statsStrat.total} prises)`;
         } else if (esp < -0.10) {
           multiplicateurPerformance = 0.50;
           motif += ` · performance défavorable sur historique (${esp.toFixed(2)} R/trade sur ${statsStrat.total} prises)`;
@@ -170,7 +175,7 @@ function selectionner({ candles, meta, strategies, regime = null, max = 3, perfo
       statut, direction: (verdict && verdict.direction) || null,
       force: +force.toFixed(3), score,
       reglesActives, seuilRegles: profil.seuilRegles || null,
-      retenue: statut === 'confirme' && declare && !regimeIncompatible,
+      retenue: statut === 'confirme' && ['BUY','SELL'].includes(verdict?.direction) && manquantes === 0 && (profil.obligatoires || []).every(r=>reglesActives.includes(r)) && declare && !regimeIncompatible,
       motif
     };
   });
@@ -192,7 +197,9 @@ function selectionner({ candles, meta, strategies, regime = null, max = 3, perfo
     if (!parSignature.has(sig)) parSignature.set(sig, c);
     else doublons.push({ id: c.id, memeReglesQue: parSignature.get(sig).id, regles: c.regles });
   }
-  const retenues = [...parSignature.values()].slice(0, max).map(c => c.id);
+  const retenues = [...parSignature.values()].slice(0, Math.max(0,Math.min(10,Number.isFinite(max)?Math.floor(max):3))).map(c => c.id);
+  const idsRetenus = new Set(retenues);
+  for (const c of tri) if (c.retenue && !idsRetenus.has(c.id)) { c.retenue=false; c.motif += ' · non retenue après classement/dédoublonnage'; }
 
   return {
     candidates: tri,
