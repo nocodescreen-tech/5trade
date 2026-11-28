@@ -3568,7 +3568,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
                   </button>
                 </div>
                 <div style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4 }}>
-                  Crée ton token avec les autorisations <b>Lecture (Read)</b> et <b>Trading (Trade)</b> sur ton tableau de bord Deriv.
+                  Crée un token avec la seule autorisation <b>Lecture (Read)</b>. Ne donne pas la permission Trading.
                 </div>
               </div>
 
@@ -3587,7 +3587,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
             <b style={{ color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <i className="fas fa-shield-halved"></i>Sécurité & Confidentialité
             </b>
-            Ton token est chiffré et stocké localement sur ton instance 5TRADE. Les ordres sont passés directement entre ton serveur et l'API WebSocket sécurisée de Deriv sans intermédiaire.
+            Utilise uniquement un jeton de consultation. L’exécution des ordres réels est désactivée sur 5TRADE.
           </div>
         </div>
       </div>
