@@ -1,0 +1,159 @@
+/* 5TRADE — workstation layout. Loaded after legacy inline CSS.
+   Deliberately scoped to the authenticated dashboard; auth screens retain their layout. */
+.pad-mobile {
+  --bg:#0c1017;
+  --panel:#121821;
+  --panel2:#181f2a;
+  --panel3:#202a36;
+  --border:#293341;
+  --border2:#394757;
+  --txt:#e8edf4;
+  --muted:#a4b0c0;
+  --dim:#8997aa;
+  --radius:8px;
+  --radius-sm:6px;
+  --shadow:none;
+  --shadow-lg:0 12px 32px rgba(0,0,0,.28);
+  background:var(--bg);
+  font-variant-numeric:tabular-nums;
+}
+.shell > .pad-mobile { animation:none; transform:none; }
+.pad-mobile > header {
+  background:var(--panel)!important;
+  backdrop-filter:none!important;
+}
+.pad-mobile > header .hdr {
+  max-width:none!important;
+  padding:10px 20px!important;
+  min-height:60px;
+}
+.pad-mobile .logo-5trade span { font-size:1.25rem; letter-spacing:-.045em; }
+.pad-mobile > main.wrap { max-width:1920px; padding:16px 20px 48px; }
+.pad-mobile .panel { box-shadow:none; border-radius:var(--radius); }
+.pad-mobile .panel:hover { transform:none; box-shadow:none; }
+.pad-mobile main.wrap .panel { animation:none; }
+.pad-mobile .btn { min-height:36px; box-shadow:none; border-radius:6px; }
+.pad-mobile .btn:hover:not(:disabled) { transform:none; box-shadow:none; }
+.pad-mobile .fld { min-height:36px; max-width:100%; padding:8px 11px; }
+.pad-mobile .nav-item { font-size:13px; font-weight:500; }
+.pad-mobile .nav-item.on { background:var(--panel2); color:#a9c9ff; }
+.pad-mobile .workstation-grid {
+  grid-template-columns:minmax(0,1fr) minmax(300px,360px);
+  gap:12px;
+  align-items:start;
+}
+.pad-mobile .workstation-left,.pad-mobile .workstation-right { gap:12px; min-width:0; }
+.pad-mobile .workstation-right { position:static; }
+.pad-mobile .chart-pro-panel {
+  background:#0c1119;
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  box-shadow:none;
+  min-width:0;
+}
+.pad-mobile .smc-layers-bar {
+  background:var(--panel);
+  border-color:var(--border);
+  padding:9px 12px;
+  gap:6px;
+  flex-wrap:nowrap;
+  overflow-x:auto;
+  scrollbar-width:thin;
+}
+.pad-mobile .smc-layers-title {
+  flex:none;
+  color:var(--muted);
+  font-size:10px;
+  font-weight:600;
+  letter-spacing:.06em;
+  white-space:nowrap;
+}
+.pad-mobile .layer-btn {
+  flex:none;
+  min-height:30px;
+  white-space:nowrap;
+  font-weight:500;
+  box-shadow:none;
+  border-radius:5px;
+  transition:background-color 150ms ease,border-color 150ms ease;
+}
+.pad-mobile .layer-btn.active { color:#b5d3ff; background:#172c47; border-color:#385b85; box-shadow:none; }
+.pad-mobile .stat-grid,.pad-mobile .grid-auto { gap:12px; }
+.pad-mobile .chart-mobile { min-width:0; }
+.pad-mobile .chart-mobile:has(> .chart-mobile) { height:auto!important; }
+.pad-mobile .chart-mobile > .chart-mobile { height:revert-layer; }
+.pad-mobile table { font-variant-numeric:tabular-nums; }
+@media(min-width:1360px) {
+  .pad-mobile > header { position:sticky!important; top:0; }
+  .pad-mobile > main.wrap {
+    width:calc(100% - 204px);
+    margin-left:204px;
+    padding:18px 20px 40px;
+  }
+  .pad-mobile > main.wrap > .nav {
+    position:fixed;
+    top:61px;
+    bottom:0;
+    left:0;
+    width:204px;
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+    padding:18px 12px;
+    margin:0!important;
+    overflow:auto;
+    border:0;
+    border-right:1px solid var(--border);
+    border-radius:0;
+    background:var(--panel);
+    z-index:35;
+  }
+  .pad-mobile > main.wrap > .nav .nav-item {
+    flex:0 0 auto;
+    justify-content:flex-start;
+    min-height:40px;
+    padding:10px 12px;
+    text-align:left;
+    gap:11px;
+    border-radius:6px;
+  }
+  .pad-mobile > main.wrap > .nav .nav-item i { width:18px; text-align:center; }
+  .pad-mobile > main.wrap > .nav .nav-item.on { box-shadow:inset 2px 0 #6fa4fb; }
+}
+@media(max-width:1150px) {
+  .pad-mobile .workstation-grid { grid-template-columns:minmax(0,1fr); }
+  .pad-mobile .workstation-left,.pad-mobile .workstation-right { display:contents; }
+  .pad-mobile .workstation-left > * { order:20; min-width:0; }
+  .pad-mobile .workstation-left > :first-child { order:0; }
+  .pad-mobile .workstation-left > .chart-pro-panel { order:1; }
+  .pad-mobile .workstation-right > * { order:10; min-width:0; }
+}
+@media(max-width:820px) {
+  .pad-mobile > main.wrap { padding:12px 12px calc(94px + env(safe-area-inset-bottom)); }
+  .pad-mobile > header { position:relative!important; }
+  .pad-mobile > header .hdr { padding:10px 12px!important; gap:8px!important; }
+  .pad-mobile > header .hdr > div { flex-wrap:wrap; gap:8px!important; min-width:0; }
+  .pad-mobile > main.wrap > .nav { display:none; }
+  .pad-mobile .nav { max-width:100%; }
+  /* Only dashboard navigation disappears; nested tab controls remain usable. */
+  .pad-mobile main .nav:not(:first-child) { display:flex; }
+  .pad-mobile .mobile-nav { background:var(--panel); backdrop-filter:none; }
+  .pad-mobile .mobile-plus { background:var(--panel); max-height:65dvh; overflow:auto; }
+  .pad-mobile .panel { border-radius:8px; }
+  .pad-mobile .btn,.pad-mobile .layer-btn { min-height:40px; }
+  .pad-mobile .fld { font-size:16px; }
+  .pad-mobile .stat-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .pad-mobile .chart-pro-panel .chart-mobile { height:auto!important; }
+  .pad-mobile .chart-pro-panel .chart-mobile > .chart-mobile { height:300px!important; }
+  .pad-mobile .chart-pro-panel .chart-mobile:only-child { min-height:300px; }
+  .pad-mobile .smc-layers-bar { padding:7px 8px; }
+}
+@media(max-width:360px) {
+  .pad-mobile .stat-grid { grid-template-columns:minmax(0,1fr); }
+}
+@media(prefers-reduced-motion:reduce) {
+  .pad-mobile *, .pad-mobile *::before, .pad-mobile *::after {
+    animation-duration:.001ms!important;
+    transition-duration:.001ms!important;
+  }
+}
