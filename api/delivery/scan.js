@@ -72,21 +72,20 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
   const debut = Date.now();
   let symboles = market.listSymbols() || [];
 
-  // Filtrage strict par les instruments actifs ou autorisés
-  const InstrumentsActifs = require('../core/instruments-actifs');
-  const actifs = InstrumentsActifs.obtenirActifs();
-
+  // An explicit empty selection is not permission to scan the default market.
   if (mode === MODES_SCAN.TRADING_AUTORISE || mode === MODES_SCAN.SURVEILLANCE) {
     const bruts = typeof symbolesAutorises === 'function' ? symbolesAutorises() : symbolesAutorises;
-    const cibles = Array.isArray(bruts) && bruts.length ? bruts : actifs;
-    if (!cibles || !cibles.length) {
-      return {
-        at: new Date().toISOString(), tf, marches: 0, signaux: [],
-        erreurs: ['Aucun instrument actif : scan automatique suspendu'], dureeMs: 0
-      };
+    const cibles = (bruts == null ? require('../core/instruments-actifs').obtenirActifs() : bruts);
+    if (!Array.isArray(cibles)) throw new Error('Sélection de marchés invalide');
+    const autorises = cibles.filter(s=>s && s.actif !== false);
+    symboles = symboles.filter(s => autorises.some(a =>
+      String(a.symbol || a).toUpperCase() === String(s.symbol || s).toUpperCase()
+      && (!a.provider || a.provider === s.provider)));
+    if (!symboles.length) {
+      etat.dernier = {at:new Date().toISOString(),tf,tfs:[],strategies:[],marches:0,signaux:0,resultats:[],erreurs:['Aucun instrument actif : scan automatique suspendu'],dureeMs:Date.now()-debut,mode};
+      etat.erreurs = etat.dernier.erreurs;
+      return etat.dernier;
     }
-    const autorisesSet = new Set(cibles.map(s => String(s.symbol || s).toUpperCase()));
-    symboles = symboles.filter(s => autorisesSet.has(String(s.symbol || s).toUpperCase()));
   }
   const signaux = [];
   const erreurs = [];
@@ -101,8 +100,11 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
   if (demandees.length > MAX_STRATEGIES) {
     erreurs.push(`${demandees.length} stratégies demandées : ${MAX_STRATEGIES} évaluées au maximum`);
   }
-  const profils = demandees.slice(0, MAX_STRATEGIES);
+  const profils = demandees.slice(0, MAX_STRATEGIES).filter(p=>p && p.executable !== false && !p.partiel && !p.reglesEcartees?.length && !p.filtresEcartes?.length && Array.isArray(p.regles) && p.regles.length);
+  if (demandees.length && !profils.length) erreurs.push('Aucun profil demandé exécutable');
   const optionsDe = p => (p ? {
+    profils: [p], strategieStricte: true, strict: true,
+    filtres: p.filtres || [],
     regles: p.regles,
     obligatoires: p.obligatoires || [],
     seuilForce: p.seuilForce,
@@ -112,7 +114,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
   } : {});
   const passes = profils.length
     ? profils.map(p => ({ profil: p, options: optionsDe(p) }))
-    : [{ profil: null, options: {} }];
+    : (demandees.length ? [] : [{ profil: null, options: {} }]);
 
   // Unités de temps d'un symbole : l'unité de travail du scan, PLUS celles sous
   // lesquelles il est surveillé. Sans cela, les deux parcours pouvaient juger le
@@ -131,6 +133,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
       unitesVues.add(unite);
       try {
         const r = await market.getCandles(symbole, unite, BOUGIES, provider);
+        if (r.offline === true || r.source === 'cache') { erreurs.push(symbole+' '+unite+' : historique hors ligne, signal non évalué'); continue; }
         const closes = (r.candles || []).filter(c => c.closed !== false);
         const q = Qualite.analyser(r.candles || [], { timeframe: unite });
         if (!q.ok) {
@@ -171,19 +174,20 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
         // seuils — sinon le scan annoncerait des signaux que la stratégie refuse.
         // Les bougies, elles, ont été chargées une seule fois.
         for (const passe of passes) {
+          if (passe.profil?.marches?.length && !passe.profil.marches.includes(classe) && !passe.profil.marches.includes('*')) { erreurs.push(symbole+' '+unite+' : stratégie incompatible avec '+classe); continue; }
           let v = null;
           let refusMoteur = null;
           // Unification du moteur : le scan et le rejeu fidèle partagent le même cerveau décisionnel
           if (typeof signals.decider === 'function' && passe.options.moteurBrut !== true) {
-            const dec = signals.decider(closes, { symbol: symbole, timeframe: unite, verifierSession: true }, passe.options);
+            const dec = signals.decider(closes, { symbol: symbole, provider, timeframe: unite, verifierSession: true }, passe.options);
             if (dec) {
               if (dec.decision === 'ACHAT' || dec.decision === 'VENTE' || dec.decision === 'ATTENTE') {
-                const sig = dec.signal || (dec.arbitrage && dec.arbitrage.signauxRetenus && dec.arbitrage.signauxRetenus[0]);
+                const sig = dec.signal || dec.meilleurSignal || (dec.arbitrage && dec.arbitrage.signauxRetenus && dec.arbitrage.signauxRetenus[0]);
                 const objs = (sig && Array.isArray(sig.objectifs)) ? sig.objectifs : [];
                 v = {
                   direction: dec.decision === 'ACHAT' ? 'BUY' : (dec.decision === 'VENTE' ? 'SELL' : 'NEUTRAL'),
                   status: sig ? (sig.status || 'confirme') : (dec.decision === 'ACHAT' || dec.decision === 'VENTE' ? 'confirme' : 'surveiller'),
-                  force: sig && typeof sig.force === 'number' ? sig.force : 0.6,
+                  force: sig && typeof sig.force === 'number' ? sig.force : 0,
                   trend: sig ? sig.trend : null,
                   confirmations: (dec.confirmation && dec.confirmation.details) ? dec.confirmation.details.length : 1,
                   raison: dec.raison,
@@ -219,6 +223,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
           // consommateur ne doit pas avoir à connaître les deux.
           const ligne = {
             symbole,
+            autorisationExecution:false, // scanner informatif, aucun ordre ni validation du compte
             provider: provider || null,
             tf: unite,
             direction: v.direction,
@@ -259,6 +264,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
   etat.dernier = {
     at: new Date().toISOString(),
     tf,
+    mode,
     // Unités réellement parcourues : l'écran peut dire sur quoi le scan a porté.
     tfs: [...unitesVues],
     // Stratégies réellement évaluées (vide = moteur générique, simple repérage).
