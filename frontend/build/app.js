@@ -6158,8 +6158,10 @@ function DerivModal({
   onClose,
   onRefresh
 }) {
-  const [appId, setAppId] = useState('353nKCVSd1Td4BoDbtjvr');
+  const [appId, setAppId] = useState('');
   const [token, setToken] = useState('');
+  const [accountId, setAccountId] = useState('');
+  const [accounts, setAccounts] = useState([]);
   const [showToken, setShowToken] = useState(false);
   const [chargement, setChargement] = useState(false);
   const [statut, setStatut] = useState(null);
@@ -6185,8 +6187,8 @@ function DerivModal({
   if (!ouvert) return null;
   const handleConnecter = async e => {
     e.preventDefault();
-    if (!token.trim()) {
-      setErreur('Veuillez entrer votre Token API Deriv.');
+    if (!appId.trim() || !token.trim()) {
+      setErreur('Renseignez votre App ID PAT et votre token.');
       return;
     }
     setChargement(true);
@@ -6199,7 +6201,7 @@ function DerivModal({
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          appId: appId.trim() || '353nKCVSd1Td4BoDbtjvr',
+          appId: appId.trim(), accountId: accountId.trim() || null,
           apiToken: token.trim()
         })
       })).json();
@@ -6208,6 +6210,7 @@ function DerivModal({
         setToken('');
         await rafraichirStatut();
       } else {
+        setAccounts(Array.isArray(res.accounts) ? res.accounts : []);
         setErreur(res.error || 'Échec de connexion à Deriv.');
       }
     } catch (err) {
@@ -6406,7 +6409,7 @@ function DerivModal({
       textTransform: 'uppercase',
       letterSpacing: '.04em'
     }
-  }, "Solde en direct"), /*#__PURE__*/React.createElement("div", {
+  }, "Dernier solde vérifié"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 26,
       fontWeight: 900,
@@ -6495,7 +6498,7 @@ function DerivModal({
       width: '100%',
       fontFamily: 'monospace'
     },
-    placeholder: "353nKCVSd1Td4BoDbtjvr",
+    placeholder: "Votre App ID PAT",
     value: appId,
     onChange: e => setAppId(e.target.value)
   }), /*#__PURE__*/React.createElement("div", {
@@ -6504,7 +6507,7 @@ function DerivModal({
       color: 'var(--dim)',
       marginTop: 4
     }
-  }, "L'identifiant par d\xE9faut ", /*#__PURE__*/React.createElement("code", null, "353nKCVSd1Td4BoDbtjvr"), " est celui de votre application 5trade.")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, "Utilisez l’App ID de votre application PAT enregistrée sur developers.deriv.com.")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'space-between',
@@ -6518,7 +6521,7 @@ function DerivModal({
       color: '#e2e8f0'
     }
   }, "2. Token API Deriv"), /*#__PURE__*/React.createElement("a", {
-    href: "https://app.deriv.com/account/api-token",
+    href: "https://developers.deriv.com/",
     target: "_blank",
     rel: "noopener noreferrer",
     style: {
@@ -6565,7 +6568,7 @@ function DerivModal({
       color: 'var(--dim)',
       marginTop: 4
     }
-  }, "Cr\xE9e ton token avec les autorisations ", /*#__PURE__*/React.createElement("b", null, "Lecture (Read)"), " et ", /*#__PURE__*/React.createElement("b", null, "Trading (Trade)"), " sur ton tableau de bord Deriv.")), /*#__PURE__*/React.createElement("div", {
+  }, "Créez un PAT avec la permission trade dans le portail développeur.")), React.createElement("div", null, React.createElement("label", {htmlFor:"deriv-account-id"}, "Compte Options (facultatif)"), React.createElement("input", {id:"deriv-account-id", className:"fld", style:{width:"100%"}, value:accountId, onChange:e=>setAccountId(e.target.value), placeholder:"Compte démo par défaut"}), accounts.length > 0 && React.createElement("select", {className:"fld", value:accountId, onChange:e=>setAccountId(e.target.value)}, React.createElement("option",{value:""},"Compte démo automatique"), accounts.map(a=>React.createElement("option",{key:a.loginid,value:a.loginid},a.typeCompte+" — "+a.loginid)))), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 6
     }
@@ -6603,7 +6606,7 @@ function DerivModal({
     }
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-shield-halved"
-  }), "S\xE9curit\xE9 & Confidentialit\xE9"), "Ton token est chiffr\xE9 et stock\xE9 localement sur ton instance 5TRADE. Les ordres sont pass\xE9s directement entre ton serveur et l'API WebSocket s\xE9curis\xE9e de Deriv sans interm\xE9diaire."))));
+  }), "S\xE9curit\xE9 & Confidentialit\xE9"), "Le PAT est transmis au serveur 5TRADE. Les ordres sont suspendus pendant la migration. Ne partagez jamais votre token."))));
 }
 
 // ── Historique des signaux (confirmés / rejetés / expirés) ───────────────
