@@ -832,6 +832,10 @@ const MOTIFS_REGLE = [
 ];
 
 function profilDepuisStrategie(doc) {
+  const declared = doc.supportedMarkets || doc.marches || doc.structured?.supportedMarkets || doc.structured?.marches || doc.structured?.rules?.marches;
+  const supportedMarkets = Array.isArray(declared) ? declared.map(x=>String(x).toLowerCase().trim()) : typeof declared==='string' ? [declared.toLowerCase().trim()] : [];
+  const execution = doc.timeframes?.execution || doc.structured?.rules?.timeframes?.execution;
+  const executionTimeframes = Array.isArray(execution) ? execution : null;
   const regimesDeclares = Array.isArray(doc.supportedRegimes) ? doc.supportedRegimes
     : (Array.isArray(doc.regimes) ? doc.regimes
       : (doc.structured && Array.isArray(doc.structured.supportedRegimes)
@@ -846,7 +850,8 @@ function profilDepuisStrategie(doc) {
     const regles = m.regles.length ? m.regles : Object.keys(TOUTES_REGLES);
     return {
       id: doc.id || null,
-      titre: doc.title || null,
+      titre: doc.title || doc.name || null,
+      supportedMarkets, executionTimeframes,
       regles,
       // Ce que la stratégie DEMANDAIT sans l'obtenir (typiquement R5). Sans cette
       // remontée, une stratégie qui réclamait R5 semblait l'appliquer alors que le
@@ -932,7 +937,8 @@ function profilDepuisStrategie(doc) {
 
   return {
     id: doc.id || null,
-    titre: doc.title || null,
+    titre: doc.title || doc.name || null,
+    supportedMarkets, executionTimeframes,
     regles,
     seuilRegles: regles.length >= 2 ? 2 : 1,
     seuilForce: regles.length >= 2 ? 0.35 : 0.6,
