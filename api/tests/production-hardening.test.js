@@ -169,3 +169,26 @@ test('journal never counts an already processed candle twice',()=>{
   J.evaluer(sig,[...bars,{t:3,o:103,h:106,l:101,c:105,closed:true}]);
   assert.equal(sig.bougiesSuivies,2);
 });
+
+test('calendar normalizes currency codes and rejects local timestamps',()=>{
+  const N=require('../sources/news');
+  assert.equal(N.normaliserEvenement({country:'USD',date:'2026-11-24T13:00:00Z',impact:'High'}).devise,'USD');
+  assert.equal(N.normaliserEvenement({country:'US',date:'2026-11-24T13:00:00',impact:'High'}).date,null);
+  assert.deepEqual(Fundamentals.devisesDuSymbole('GER40').devises,['EUR']);
+  assert.equal(Fundamentals.verdictDevise([{devise:'USD',timestamp:null,date:null,heure:null,impact:'high'}],'USD',{maintenant:new Date(now)}).verifie,false);
+});
+test('FRED observation parser keeps dates and skips missing values',()=>{
+  const M=require('../sources/gold-macro');
+  const csv='observation_date,DFII10\n2026-11-17,1.1\n2026-11-18,1.2\n2026-11-19,1.3\n2026-11-20,.\n2026-11-21,1.4\n2026-11-22,1.5\n2026-11-23,1.6\n2026-12-01,9';
+  const m=M.parseCSV(csv,'DFII10',now);
+  assert.equal(m.latest,1.6);assert.equal(m.change5,.5);assert.equal(m.available,true);
+});
+test('replay frame exposes no future candles',()=>{
+  const Replay=require('../engine/market-replay');
+  const bars=Array.from({length:100},(_,i)=>({t:(i+1)*step,o:100,h:102,l:98,c:101,closed:true}));
+  const r=Replay.frame(bars,'5m',40);
+  assert.equal(r.visible.at(-1).t,bars[40].t);
+  assert.equal(r.visible.length,41);
+  assert.equal(r.asOf,bars[40].t+step);
+  assert.throws(()=>Replay.frame(bars,'5m',100));
+});
