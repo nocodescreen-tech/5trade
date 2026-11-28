@@ -5574,7 +5574,7 @@ function tinyPng(W = 64, H = 40) {
       eur.devises.join('/') || 'aucune');
     const or = F.devisesDuSymbole('frxXAUUSD');
     ok('un symbole préfixé par le courtier est décomposé correctement',
-      or.devises.includes('USD') && or.devises.some(d => d === 'XAU'),
+      or.applicable && or.devises.length === 1 && or.devises[0] === 'USD',
       `${or.devises.join('/')} (au lieu de « FRX »)`);
     const btc = F.devisesDuSymbole('BTCUSDT');
     ok('USDT est ramené au dollar', btc.devises.includes('USD'), btc.devises.join('/'));
