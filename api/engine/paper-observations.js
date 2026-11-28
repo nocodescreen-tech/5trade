@@ -17,7 +17,7 @@ function buildObservation(row, profile, candles, costs, tfMs, now = Date.now()) 
   const snapshot = JSON.parse(JSON.stringify(profile));
   const fingerprint = crypto.createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
   const id = crypto.createHash('sha256').update(JSON.stringify([row.provider, row.symbole, row.tf, profile.id, fingerprint, last.t, c.sens])).digest('hex');
-  const startAt = Math.ceil(now / tfMs) * tfMs;
+  const startAt = last.t + Math.ceil((now-last.t)/tfMs)*tfMs;
   return {
     id, symbol: row.symbole, provider: row.provider, timeframe: row.tf, tfMs,
     observedAt: now, candleAt: last.t, observedPrice: last.c, startAt, expiresAt: startAt + 60 * tfMs,
@@ -54,7 +54,7 @@ function evaluate(obs, candles, now = Date.now()) {
       if (entry) touched = true;
       continue;
     }
-    if (sl && (target1 || target2)) return { status: 'ambiguous_exit_bar', at: c.t, tp1Touched: tp1 };
+    if (sl && ((!tp1 && target1) || target2)) return { status: 'ambiguous_exit_bar', at: c.t, tp1Touched: tp1 };
     if (sl) return { status: 'stop_touched', at: c.t, tp1Touched: tp1 };
     if (target1) tp1 = true;
     if (target2 || (target1 && obs.targets.length === 1)) return { status: target2 ? 'tp2_touched' : 'tp1_touched', at: c.t, tp1Touched: true };
