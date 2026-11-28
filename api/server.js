@@ -1804,74 +1804,9 @@ app.post('/api/knowledge', requireAuth, async (req, res) => {
  * pouvait viser `localhost`, une IP privée ou le service de métadonnées cloud
  * (169.254.169.254), et le serveur répondait en relais.
  */
-function urlAutorisee(url) {
-  let u;
-  try { u = new URL(String(url)); } catch { return { ok: false, raison: 'URL illisible' }; }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-    return { ok: false, raison: `protocole « ${u.protocol} » refusé (http/https seulement)` };
-  }
-  const hote = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (hote === 'localhost' || hote.endsWith('.localhost') || hote.endsWith('.internal')) {
-    return { ok: false, raison: 'hôte local refusé' };
-  }
-  // IPv4 littérale
-  const v4 = hote.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (v4) {
-    const [a1, b1] = [Number(v4[1]), Number(v4[2])];
-    const prive = a1 === 10 || a1 === 127 || a1 === 0
-      || (a1 === 169 && b1 === 254)            // link-local + métadonnées cloud
-      || (a1 === 172 && b1 >= 16 && b1 <= 31)
-      || (a1 === 192 && b1 === 168)
-      || (a1 === 100 && b1 >= 64 && b1 <= 127); // CGNAT
-    if (prive) return { ok: false, raison: `adresse privée ${hote} refusée` };
-  }
-  // IPv6 locale / loopback
-  if (hote === '::1' || hote.startsWith('fc') || hote.startsWith('fd') || hote.startsWith('fe80')) {
-    return { ok: false, raison: `adresse IPv6 locale ${hote} refusée` };
-  }
-  return { ok: true };
-}
-
+const PublicWeb = require('./security/public-web');
 async function fetchPageText(url) {
-  const garde = urlAutorisee(url);
-  if (!garde.ok) throw new Error(`URL refusée : ${garde.raison}`);
-
-  // Redirections suivies À LA MAIN : `redirect: 'follow'` laissait un site
-  // public rediriger vers 127.0.0.1, ce qui contournait le filtre ci-dessus.
-  let cible = String(url);
-  let res = null;
-  for (let saut = 0; saut < 4; saut++) {
-    const g = urlAutorisee(cible);
-    if (!g.ok) throw new Error(`URL refusée en redirection : ${g.raison}`);
-    res = await fetch(cible, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) 5trade/1.0',
-        'Accept': 'text/html,application/xhtml+xml'
-      },
-      redirect: 'manual',
-      signal: AbortSignal.timeout(20000) // 20s max
-    });
-    if (res.status >= 300 && res.status < 400) {
-      const suite = res.headers.get('location');
-      if (!suite) throw new Error('redirection sans destination');
-      cible = new URL(suite, cible).toString();
-      continue;
-    }
-    break;
-  }
-  if (!res) throw new Error('aucune réponse');
-  if (res.status >= 300 && res.status < 400) throw new Error('trop de redirections');
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-  // Plafond de taille : une réponse de plusieurs centaines de Mo saturerait la
-  // mémoire du serveur pour un simple texte de stratégie.
-  const MAX_OCTETS = 2 * 1024 * 1024;
-  const annonce = Number(res.headers.get('content-length') || 0);
-  if (annonce > MAX_OCTETS) throw new Error(`réponse trop volumineuse (${Math.round(annonce / 1024)} Ko)`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.length > MAX_OCTETS) throw new Error(`réponse trop volumineuse (${Math.round(buf.length / 1024)} Ko)`);
-  const html = buf.toString('utf8');
-
+  const html = await PublicWeb.readPage(url);
   let cheerio;
   try { cheerio = require('cheerio'); } catch { cheerio = null; }
 
@@ -1934,11 +1869,12 @@ Réponds en JSON strict:
   }
 }
 
-app.post('/api/scrape-strategies', requireAuth, async (req, res) => {
+const limiteImportWeb = limiteurMiddleware(creerLimiteur({max:5,fenetreMs:60000}), 'import-web');
+app.post('/api/scrape-strategies', requireAuth, limiteImportWeb, async (req, res) => {
   try {
     const { urls } = req.body;
-    if (!urls || !Array.isArray(urls)) {
-      return res.status(400).json({ error: 'urls requis (tableau)' });
+    if (!Array.isArray(urls) || !urls.length || urls.length > 5 || urls.some(u=>typeof u!=='string'||u.length>2048)) {
+      return res.status(400).json({ error: 'Entre 1 et 5 URL valides sont requises' });
     }
     const results = [];
     for (const url of urls) {
@@ -1983,9 +1919,10 @@ async function webSearch(query, limit = 8) {
         'Content-Type': 'application/x-www-form-urlencoded'
       },
       body: `q=${encodeURIComponent(query)}`,
-      signal: AbortSignal.timeout(15000) // 15s max
+      redirect: 'error', signal: AbortSignal.timeout(15000) // 15s max
     });
-    const html = await res.text();
+    if(!res.ok)throw Error('Recherche indisponible');
+    const html = (await PublicWeb.readBounded(res.body, res.headers.get('content-length'))).toString('utf8');
     let cheerio;
     try { cheerio = require('cheerio'); } catch { cheerio = null; }
     if (cheerio) {
@@ -2007,10 +1944,10 @@ async function webSearch(query, limit = 8) {
   return results;
 }
 
-app.post('/api/search-and-save', requireAuth, async (req, res) => {
+app.post('/api/search-and-save', requireAuth, limiteImportWeb, async (req, res) => {
   try {
     const { query, limit = 5, autoSave = true } = req.body;
-    if (!query) return res.status(400).json({ error: 'query requis' });
+    if (typeof query!=='string'||!query.trim()||query.length>500||!Number.isInteger(limit)||limit<1||limit>5||typeof autoSave!=='boolean') return res.status(400).json({ error: 'Recherche invalide (1 à 5 résultats)' });
 
     const found = await webSearch(query, Math.max(limit, 5));
     if (found.length === 0) {
@@ -2069,10 +2006,11 @@ const FORUM_SOURCES = {
   investopedia: 'site:investopedia.com trading strategy technical analysis'
 };
 
-app.post('/api/scrape-forums', requireAuth, async (req, res) => {
+app.post('/api/scrape-forums', requireAuth, limiteImportWeb, async (req, res) => {
   try {
     const { forum, keywords = '', limit = 5 } = req.body;
-    const base = FORUM_SOURCES[forum];
+    if(typeof keywords!=='string'||keywords.length>500||!Number.isInteger(limit)||limit<1||limit>5)return res.status(400).json({error:'Recherche invalide'});
+    const base = Object.hasOwn(FORUM_SOURCES,forum) ? FORUM_SOURCES[forum] : null;
     if (!base) {
       return res.status(400).json({
         error: 'Forum non supporté',
