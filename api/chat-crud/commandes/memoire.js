@@ -64,7 +64,7 @@ async function apprendre(sujet, ctx) {
     cle,
     contenu: texte,
     categorie,
-    source: ctx && ctx.user ? ctx.user : 'utilisateur'
+    source: ctx?.utilisateur || ctx?.user || 'utilisateur'
   });
 
   if (!res.ok) {
@@ -86,10 +86,10 @@ async function apprendre(sujet, ctx) {
       impacts.push(`interdiction d'exécution le ${contraintesDetectees.joursInterdits.map(j => noms[j]).join(', ')}`);
     }
     if (contraintesDetectees.risqueMaxPct !== null) {
-      impacts.push(`plafond de risque ajusté à ${contraintesDetectees.risqueMaxPct} % par prise`);
+      impacts.push(`plafond de risque demandé : ${contraintesDetectees.risqueMaxPct} % (application au sizing non vérifiée)`);
     }
     if (impacts.length > 0) {
-      impactMoteur = `\n• Application active au Decision Engine : ${impacts.join(' · ')}.`;
+      impactMoteur = `\n• Contraintes détectées : ${impacts.join(' · ')}.`;
     }
   }
 
@@ -110,7 +110,7 @@ async function apprendre(sujet, ctx) {
       `• Consigne active : « ${texte} »\n` +
       `• Catégorie : ${categorie}\n` +
       `• Clé de référence : ${cle}.${impactMoteur}${detailException}\n` +
-      `Cette consigne ne sera pas oubliée et s'applique immédiatement à mes décisions et analyses.`
+      `Mémoire globale de cette instance. Seules les contraintes reconnues et intégrées au moteur sont exécutables ; une note libre ne crée pas de tâche automatique.`
   };
 }
 
