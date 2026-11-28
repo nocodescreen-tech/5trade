@@ -111,3 +111,35 @@ test('Deriv live authorization probe', { skip: process.env.DERIV_LIVE_TEST !== '
   assert.equal(result.ok, false);
   assert.match(result.error, /401|403/);
 });
+
+
+test('multiple active demo accounts require explicit selection', async () => {
+  const rest = DerivClient._rest;
+  try {
+    DerivClient._rest = async () => ({ data: ['DEMO1','DEMO2'].map(account_id => ({account_id,account_type:'demo',status:'active',currency:'USD'})) });
+    const result = await DerivClient.verifierEtAutoriser('app','test-token');
+    assert.equal(result.ok,false);
+    assert.equal(result.accounts.length,2);
+  } finally { DerivClient._rest = rest; }
+});
+
+test('balance refresh does not resurrect a disconnected configuration', async () => {
+  const read = DB.kvLire, write = DB.kvEcrire, verify = DerivClient.verifierEtAutoriser;
+  const oldKey = process.env.DERIV_TOKEN_KEY;
+  process.env.DERIV_TOKEN_KEY = 'ab'.repeat(32);
+  let config = {appId:'app',apiToken:'test-token',account:{loginid:'DEMO1'},actif:true};
+  try {
+    DB.kvLire = async () => config;
+    DB.kvEcrire = async (_key,value) => {config=value;};
+    DerivClient.verifierEtAutoriser = async () => {
+      await DerivClient.deconnecter();
+      return {ok:true,account:{loginid:'DEMO1',balance:10}};
+    };
+    await assert.rejects(DerivClient.rafraichirSolde(), /configuration modifiée/);
+    assert.equal(config,null);
+  } finally {
+    DB.kvLire=read; DB.kvEcrire=write; DerivClient.verifierEtAutoriser=verify;
+    DerivClient._cachedConfig=null;
+    if(oldKey===undefined) delete process.env.DERIV_TOKEN_KEY; else process.env.DERIV_TOKEN_KEY=oldKey;
+  }
+});
