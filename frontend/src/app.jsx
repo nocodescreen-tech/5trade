@@ -4146,8 +4146,8 @@ function AgentBriefingCard() {
         <div style={{
           marginTop: 10, fontSize: 12, lineHeight: 1.6, color: 'var(--text)',
           background: 'rgba(0,0,0,.35)', padding: '12px 14px', borderRadius: 8,
-          border: '1px solid rgba(148,163,184,.15)'
-        }} dangerouslySetInnerHTML={{ __html: briefing.texte }} />
+          border: '1px solid rgba(148,163,184,.15)', whiteSpace: 'pre-wrap'
+        }}>{String(briefing.texte || '').replace(/<\/?(?:b|i|code)>/g, '').replace(/&(amp|lt|gt|quot|#39);/g, (_, k) => ({amp:'&',lt:'<',gt:'>',quot:'"','#39':"'"})[k])}</div>
       )}
     </div>
   );

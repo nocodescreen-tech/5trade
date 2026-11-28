@@ -124,12 +124,14 @@ app.use(cors({
   credentials: true,
   origin(origine, cb) {
     if (!origine) return cb(null, true);                                  // même origine, curl
-    if (ORIGINES_LOCALES.test(origine)) return cb(null, true);            // l'appli elle-même
+    if (process.env.NODE_ENV !== 'production' && ORIGINES_LOCALES.test(origine)) return cb(null, true);            // l'appli elle-même
     if (process.env.APP_ORIGIN && origine === process.env.APP_ORIGIN) return cb(null, true);
-    if (process.env.CORS_LIBRE === '1') return cb(null, true);            // demande explicite
+    if (process.env.NODE_ENV !== 'production' && process.env.CORS_LIBRE === '1') return cb(null, true);            // demande explicite
     cb(null, false);                                                      // tout le reste : non
   }
 }));
+app.use('/api', require('./security/browser-origin').guard);
+app.disable('x-powered-by');
 // Compression applicative retirée ; utiliser la compression du proxy après validation.
 
 // En-tetes de securite, poses a la main plutot que via helmet : cinq lignes
@@ -196,7 +198,7 @@ app.get('/healthz', async (req, res) => {
 // sans lancer une analyse complète. Fermée par défaut : sans le drapeau,
 // la route n'existe pas (404).
 if (process.env.IA_SELFTEST === '1') {
-  app.get('/api/ia-selftest', async (req, res) => {
+  app.get('/api/ia-selftest', requireAuth, async (req, res) => {
     const messages = [{
       role: 'user',
       content: 'Reponds uniquement un JSON: {"ok":true,"modele":"ton nom de modele"}'
