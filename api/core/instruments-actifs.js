@@ -82,15 +82,17 @@ function definirActifs(liste) {
   const propres = [];
   const vus = new Set();
   for (const item of liste) {
-    if (!item) continue;
-    const sym = String(item.symbol || item).trim();
-    if (!sym || vus.has(sym.toUpperCase())) continue;
-    vus.add(sym.toUpperCase());
+    if (!item || typeof item!=='object' || Array.isArray(item) || typeof item.symbol!=='string' || !item.symbol.trim() || typeof item.provider!=='string' || !item.provider.trim()) throw Error('Chaque instrument doit déclarer un symbole et un fournisseur');
+    const sym = item.symbol.trim();
+    const provider=item.provider.trim().toLowerCase();
+    const key=provider+'|'+sym.toUpperCase();
+    if (vus.has(key)) continue;
+    vus.add(key);
     propres.push({
       symbol: sym,
-      provider: item.provider || (sym.startsWith('frx') || sym.startsWith('R_') || sym.startsWith('1HZ') ? 'deriv' : 'binance'),
+      provider,
       label: item.label || sym,
-      tv: item.tv || (item.provider === 'deriv' ? `DERIV:${sym.replace(/^frx/, '')}` : sym),
+      tv: item.tv || (provider === 'deriv' ? `DERIV:${sym.replace(/^frx/, '')}` : sym),
       tf: item.tf || '5m',
       famille: item.famille || (sym.includes('XAU') || sym.includes('XAG') ? 'metaux' : sym.startsWith('R_') ? 'synthetique' : 'forex'),
       actif: true,
@@ -110,7 +112,8 @@ function ajouterInstrument(inst) {
   if (!inst || !inst.symbol) return obtenirActifs();
   const actifs = obtenirActifs();
   const sym = String(inst.symbol).trim().toUpperCase();
-  const deja = actifs.find(a => a.symbol.toUpperCase() === sym);
+  const provider=inst.provider || 'deriv';
+  const deja = actifs.find(a => a.symbol.toUpperCase() === sym && a.provider===provider);
   if (deja) {
     if (inst.tf && deja.tf !== inst.tf) {
       deja.tf = inst.tf;
@@ -120,7 +123,7 @@ function ajouterInstrument(inst) {
   }
   actifs.push({
     symbol: inst.symbol,
-    provider: inst.provider || 'deriv',
+    provider,
     label: inst.label || inst.symbol,
     tv: inst.tv || inst.symbol,
     tf: inst.tf || '5m',
@@ -134,10 +137,10 @@ function ajouterInstrument(inst) {
 /**
  * Retire un instrument de la sélection active (sans toucher au journal des trades).
  */
-function retirerInstrument(symbole) {
+function retirerInstrument(symbole,provider) {
   if (!symbole) return obtenirActifs();
   const sym = String(symbole).trim().toUpperCase();
-  const actifs = obtenirActifs().filter(a => a.symbol.toUpperCase() !== sym);
+  const actifs = obtenirActifs().filter(a => a.symbol.toUpperCase() !== sym || (provider && a.provider!==provider));
   return definirActifs(actifs);
 }
 
