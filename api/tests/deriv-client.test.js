@@ -1,52 +1,61 @@
-const assert = require('assert');
+const test = require('node:test');
+const assert = require('node:assert/strict');
 const DerivClient = require('../deriv/client');
 const DB = require('../core/db');
 
-async function runTests() {
-  console.log('[Test Deriv] Démarrage des vérifications...');
-  await DB.init();
+test('Deriv refuses an empty token without network access', async () => {
+  const result = await DerivClient.verifierEtAutoriser('1089', '');
+  assert.equal(result.ok, false);
+  assert.match(result.error, /manquant/i);
+});
 
-  // 1. Rejet d'un token manquant ou vide
-  const testVide = await DerivClient.verifierEtAutoriser('1089', '');
-  assert.strictEqual(testVide.ok, false);
-  assert.match(testVide.error, /manquant/i);
-  console.log('  ✓ Token vide rejeté immédiatement');
+test('Deriv distinguishes authorization rejection from network failure', async () => {
+  const connect = DerivClient._connectCluster;
+  const ask = DerivClient._ask;
+  let closed = false;
+  try {
+    DerivClient._connectCluster = async () => ({ close() { closed = true; } });
+    DerivClient._ask = async () => { throw new Error('Invalid token'); };
+    const denied = await DerivClient.verifierEtAutoriser('1089', 'FAUX_TOKEN_XYZ_123');
+    assert.equal(denied.ok, false);
+    assert.match(denied.error, /invalid|token/i);
+    assert.equal(closed, true);
+    DerivClient._connectCluster = async () => { throw new Error('Network unavailable'); };
+    const unavailable = await DerivClient.verifierEtAutoriser('1089', 'FAUX_TOKEN_XYZ_123');
+    assert.equal(unavailable.ok, false);
+    assert.match(unavailable.error, /network unavailable/i);
+  } finally {
+    DerivClient._connectCluster = connect;
+    DerivClient._ask = ask;
+  }
+});
 
-  // 2. Rejet propre d'un token invalide par les serveurs officiels Deriv
-  const testFaux = await DerivClient.verifierEtAutoriser('1089', 'FAUX_TOKEN_XYZ_123');
-  assert.strictEqual(testFaux.ok, false);
-  assert.match(testFaux.error, /invalid|token/i);
-  console.log('  ✓ Rejet officiel reçu de Deriv :', testFaux.error);
+test('Deriv masks stored tokens and disconnects without touching persistent accounts', async () => {
+  const read = DB.kvLire;
+  const write = DB.kvEcrire;
+  const cached = DerivClient._cachedConfig;
+  let config = null;
+  try {
+    DB.kvLire = async () => config;
+    DB.kvEcrire = async (_key, value) => { config = value; };
+    DerivClient._cachedConfig = null;
+    assert.equal((await DerivClient.obtenirStatut()).connecte, false);
+    config = { appId: '1089', apiToken: 'secretTokenDeTest123456789', account: { loginid: 'VRTC123456', isVirtual: true }, actif: true };
+    const status = await DerivClient.obtenirStatut();
+    assert.equal(status.connecte, true);
+    assert.match(status.tokenMasque, /••••••••/);
+    assert.ok(!JSON.stringify(status).includes(config.apiToken));
+    await DerivClient.deconnecter();
+    assert.equal((await DerivClient.obtenirStatut()).connecte, false);
+  } finally {
+    DB.kvLire = read;
+    DB.kvEcrire = write;
+    DerivClient._cachedConfig = cached;
+  }
+});
 
-  // 3. Statut initial (non connecté)
-  await DerivClient.deconnecter();
-  const statutInitial = await DerivClient.obtenirStatut();
-  assert.strictEqual(statutInitial.connecte, false);
-  console.log('  ✓ Statut initial propre (non connecté)');
-
-  // 4. Masquage de sécurité du token
-  await DB.kvEcrire('deriv_config', {
-    appId: '1089',
-    apiToken: 'secretTokenDeTest123456789',
-    account: { loginid: 'CR123456', balance: 1500, currency: 'USD', isVirtual: false, typeCompte: 'Réel' },
-    actif: true
-  });
-  const statutConnecte = await DerivClient.obtenirStatut();
-  assert.strictEqual(statutConnecte.connecte, true);
-  assert.strictEqual(statutConnecte.tokenMasque.includes('••••••••'), true);
-  assert.strictEqual(statutConnecte.tokenMasque.includes('secretTokenDeTest'), false);
-  console.log('  ✓ Token masqué de façon sécurisée :', statutConnecte.tokenMasque);
-
-  // 5. Nettoyage après test
-  await DerivClient.deconnecter();
-  const statutFinal = await DerivClient.obtenirStatut();
-  assert.strictEqual(statutFinal.connecte, false);
-  console.log('  ✓ Déconnexion propre validée');
-
-  console.log('Tous les tests Deriv ont réussi !');
-}
-
-runTests().catch(e => {
-  console.error('Échec du test Deriv :', e);
-  process.exit(1);
+test('Deriv live authorization probe', { skip: process.env.DERIV_LIVE_TEST !== '1' }, async () => {
+  const result = await DerivClient.verifierEtAutoriser(process.env.DERIV_APP_ID, 'FAUX_TOKEN_XYZ_123');
+  assert.equal(result.ok, false);
+  assert.match(result.error, /invalid|token/i);
 });
