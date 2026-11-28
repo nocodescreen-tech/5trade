@@ -11,11 +11,12 @@ const Signals = require('../engine/signals');
 const Validite = require('../core/validite');
 const { filtrerParClasse } = require('../strategy-engine/strategy-contract');
 
+const { rValide } = require('../engine/performance');
 const CLOS = new Set(['tp1', 'tp2', 'be', 'sl', 'expire']);
 
 function statistiques(resultat) {
   const rendements = ((resultat && resultat.trades) || [])
-    .filter(t => CLOS.has(t.resultat) && Number.isFinite(Number(t.r)))
+    .filter(t => CLOS.has(t.resultat) && rValide(t.r))
     .map(t => Number(t.r));
   const totalR = rendements.reduce((a, r) => a + r, 0);
   return {
