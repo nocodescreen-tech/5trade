@@ -7,7 +7,7 @@ const API_BASE = (window.location.port === '5173' || window.location.protocol ==
 
 // Version de l'interface (affichée en en-tête) : permet de voir d'un coup d'œil
 // si la page ouverte est bien la dernière, ou une version restée en cache.
-const UI_VERSION = 'r2026-11-28-knowledge';
+const UI_VERSION = 'r2026-11-28-terminal';
 const api = (path, opts = {}) =>
   fetch(`${API_BASE}${path}`, { credentials: 'include', ...opts });
 async function lireJsonApi(response, contexte = 'Requête API') {
@@ -4670,7 +4670,7 @@ function LiveMarket({ onToJournal }) {
 
   return (
     <>
-      <AgentBriefingCard />
+      <WorkstationMetrics activeCount={actifs.length} price={prix} live={live} offline={offline} tickRate={tickRate} decision={decision} symbol={symbol} />
 
       {/* ── Ruban Screener Multi-Marchés en direct ── */}
       <MarketScreenerBar actifs={actifs} currentSymbol={symbol}
@@ -5148,6 +5148,7 @@ function LiveMarket({ onToJournal }) {
         </details>
       )}
 
+      <AgentBriefingCard />
       {result && <Result result={result} />}
     </>
   );
@@ -8477,6 +8478,34 @@ function Pilote() {
   );
 }
 
+// Shared workstation chrome: only real routes and measured terminal state.
+function WorkstationNav({ items, current, onNavigate }) {
+  const [query, setQuery] = useState('');
+  const h = React.createElement;
+  const normalized = query.trim().toLocaleLowerCase('fr');
+  const filtered = items.filter(n => !normalized || n.label.toLocaleLowerCase('fr').includes(normalized));
+  return h('aside', {className:'workspace-sidebar', 'aria-label':'Navigation du terminal'},
+    h('button',{className:'workspace-brand',type:'button',onClick:()=>onNavigate('live')},h('span',null,'5'), 'TRADE',h('small',null,'TERMINAL')),
+    h('label',{className:'workspace-search'},h('i',{className:'fas fa-search','aria-hidden':true}),h('input',{type:'search',value:query,onChange:e=>setQuery(e.target.value),placeholder:'Rechercher une page','aria-label':'Rechercher une page'})),
+    h('div',{className:'workspace-nav-heading'},'ESPACE DE TRAVAIL'),
+    h('nav',{className:'workspace-nav-list'},filtered.map(n=>h('button',{key:n.id,type:'button',className:'workspace-nav-link'+(current===n.id?' is-active':''),'aria-current':current===n.id?'page':undefined,onClick:()=>{onNavigate(n.id);setQuery('');}},h('i',{className:'fas '+n.icon,'aria-hidden':true}),h('span',null,n.label))),
+      !filtered.length&&h('p',{className:'workspace-nav-empty'},'Aucune page trouvée')),
+    h('div',{className:'workspace-sidebar-footer'},h('span',{className:'workspace-lock'},h('i',{className:'fas fa-shield-halved','aria-hidden':true}),' Observation & recherche'),h('small',null,'Ordres Deriv suspendus'))
+  );
+}
+function WorkstationMetrics({activeCount, price, live, offline, tickRate, decision, symbol}) {
+  const h=React.createElement;
+  const entries=[
+    ['fa-layer-group','Marchés actifs',String(activeCount),'Sélection du terminal'],
+    ['fa-chart-line','Instrument',symbol==='frxXAUUSD'?'XAUUSD':symbol,'Marché sélectionné'],
+    ['fa-coins','Dernier prix',Number.isFinite(price)?ttFmt(price):'—','Dernière cotation reçue'],
+    ['fa-satellite-dish','Flux',offline?'Cache':live?'Connecté':'En attente',offline?'Données hors ligne':'Connexion du flux'],
+    ['fa-wave-square','Ticks / seconde',live&&!offline?String(tickRate):'—','Mesure locale du flux'],
+    ['fa-shield-halved','Décision',decision?.decision||'—','Analyse, pas un ordre']
+  ];
+  return h('section',{className:'workspace-metrics','aria-label':'Indicateurs du terminal'},entries.map(([icon,label,value,description])=>h('div',{className:'workspace-metric',key:label},h('div',{className:'workspace-metric-label'},h('i',{className:'fas '+icon,'aria-hidden':true}),label),h('strong',null,value),h('small',null,description))));
+}
+
 function Dashboard({ user, onLogout }) {
   const [tab, setTab] = useState('live');
   // Sur mobile, la barre du bas ne garde que l'essentiel ; le reste s'ouvre ici.
@@ -8562,7 +8591,7 @@ function Dashboard({ user, onLogout }) {
   const NAV_SECONDAIRE = ['pilote', 'add', 'history', 'news', 'termes', 'alerts', 'outils', 'systeme'];
 
   const NAV = [
-    { id:'live',       label:'Direct',    icon:'fa-satellite-dish' },
+    { id:'live',       label:'Terminal',    icon:'fa-satellite-dish' },
     { id:'analyze',    label:'Analyse',   icon:'fa-crosshairs' },
     // Le pilote conversationnel est une entrée de premier niveau : c'est le seul
     // endroit où l'on pilote réellement le système (CRUD complet) sans chercher
@@ -8593,9 +8622,7 @@ function Dashboard({ user, onLogout }) {
                 justifyContent:'space-between', alignItems:'center', gap:14, flexWrap:'wrap' }}>
                 <div style={{ display:'flex', alignItems:'center', gap:14 }}>
                   {/* Logo 5trade : le mot en toutes lettres, rien à côté */}
-                  <a className="logo-5trade" href="/" title="5trade — Accueil">
-                    <span>5trade</span>
-                  </a>
+                  <div className="workspace-page-title"><span className="workspace-mobile-brand">5TRADE</span><h1>{tab==='live'?'Centre de trading':NAV.find(n=>n.id===tab)?.label}</h1><p>Analyse de marché · Recherche · Gestion du risque</p></div>
                   <span className="badge" style={{ background:'rgba(16,185,129,.12)', color:'#34d399' }}>
                     Espace de travail
                   </span>
@@ -8643,14 +8670,7 @@ function Dashboard({ user, onLogout }) {
             </header>
 
       <main className="wrap">
-              <div className="nav" style={{ marginBottom:20 }}>
-                {NAV.map(n => (
-                  <button key={n.id}
-                    aria-current={tab===n.id ? 'page' : undefined} className={`nav-item ${tab===n.id?'on':''}`} onClick={()=>setTab(n.id)}>
-                    <i className={`fas ${n.icon}`}></i>{n.label}
-                  </button>
-                ))}
-              </div>
+              <WorkstationNav items={NAV} current={tab} onNavigate={setTab} />
 
         {loading ? (
           <div style={{ display:'grid', gap:14 }}>
