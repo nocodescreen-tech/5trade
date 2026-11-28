@@ -727,5 +727,5 @@ module.exports = {
   loadCache, cacheInfo,
   // Exposé pour le canonique : l'ordre et la continuité des bougies sont ce que
   // tout le moteur suppose, ils doivent être testables.
-  assainirBougies
+  assainirBougies, marquerEnCours
 };
