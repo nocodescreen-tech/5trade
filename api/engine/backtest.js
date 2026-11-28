@@ -23,6 +23,7 @@
  */
 
 const Multi = require('./signaux');
+const Decision = require('./DecisionEngine');
 const Journal = require('./journal-signaux');
 const Frais = require('../core/frais');
 // Nature de l'instrument : un backtest sur un RNG ne prouve rien.
@@ -137,6 +138,26 @@ function lancer(candles, meta = {}, options = {}) {
     // Même politique de sélection que l'arbitrage en direct : aucun repli générique.
     const strategieStricte = options.strategieStricte !== false && profils.length > 0;
     if (strategieStricte) r.signaux = (r.signaux || []).filter(s => s.source === 'strategie');
+
+    // Mode normal : mêmes portes de validation, confirmation et exécution que le direct.
+    // Le mode exploratoire explicite conserve les anciens signaux à surveiller.
+    if (options.accepterSurveiller !== true) {
+      const candidats = r.signaux || [];
+      const validation = Decision.niveauValidation(candidats, options);
+      const valides = candidats.map((s, j) => ({ ...s, valide: validation.details[j]?.ok === true }));
+      const confirmation = Decision.niveauConfirmation(valides, options);
+      const confirmes = valides.map((s, j) => ({
+        ...s, confirme: confirmation.details[j]?.ok === true,
+        status: confirmation.details[j]?.statusFinal || s.status
+      }));
+      const execution = Decision.niveauExecution(confirmes, meta, options);
+      const executables = confirmes.map((s, j) => ({ ...s, executable: execution.details[j]?.ok === true }));
+      const arbitrage = Decision.niveauArbitrage(executables, meta, { ...options, profils });
+      const retenus = new Set(arbitrage.signauxRetenus.map(s => JSON.stringify([s.id, s.nom, s.source, s.sens])));
+      r.signaux = ['ACHAT', 'VENTE'].includes(arbitrage.decision)
+        ? executables.filter(s => s.valide && s.confirme && s.executable && retenus.has(JSON.stringify([s.id, s.nom, s.source, s.sens])))
+        : [];
+    }
 
     const futurs = serie.slice(i + 1);
     // Plusieurs détecteurs peuvent décrire le MÊME trade sur cette bougie
