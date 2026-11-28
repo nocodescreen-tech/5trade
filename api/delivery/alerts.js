@@ -313,7 +313,7 @@ function messageTelegram(v, m, qualite = {}) {
   // Niveaux : on affiche le prix ET l'écart, en R, parce qu'un prix seul ne dit
   // pas si le stop est à 3 pips ou 30. Un niveau absent est dit absent — la
   // version précédente affichait « — » sans expliquer pourquoi.
-  const num = x => (Number.isFinite(Number(x)) ? Number(x) : null);
+  const num = x => (x != null && x !== '' && Number.isFinite(Number(x)) ? Number(x) : null);
   // Prix lisibles : « 3861.253698 » sur l'or n'aide personne. Les décimales
   // suivent l'ordre de grandeur (2 sur l'or, 5 sur EURUSD, 3 sur USDJPY).
   const prixTxt = x => {
@@ -330,37 +330,9 @@ function messageTelegram(v, m, qualite = {}) {
   const risque = entree !== null && stop !== null ? Math.abs(entree - stop) : null;
   const enR = cible => (risque && cible !== null ? ` (${((Math.abs(cible - entree)) / risque).toFixed(2)} R)` : '');
 
-  // Dimensionnement dynamique du lot selon capital et risque réel configuré
-  let lotTexte = null;
-  try {
-    const Risque = require('../risk/risque');
-    const cfgRisque = Risque.charger();
-    const capital = cfgRisque.capital || 1000;
-    const risquePct = cfgRisque.risquePct || 1;
-    const montantRisque = (capital * risquePct) / 100;
-    if (risque && risque > 0) {
-      let tickVal = 1;
-      let tickTaille = 0.01;
-      const s = String(m.symbol || '').toUpperCase();
-      if (s.includes('XAU') || s.includes('GOLD')) {
-        tickVal = 10;
-        tickTaille = 0.1;
-      } else if (s.includes('BTC') || s.includes('CRY')) {
-        tickVal = 1;
-        tickTaille = 1;
-      } else if (s.includes('JPY')) {
-        tickVal = 1000;
-        tickTaille = 0.01;
-      } else if (s.startsWith('FRX') || s.includes('EUR') || s.includes('GBP')) {
-        tickVal = 100000;
-        tickTaille = 0.0001;
-      }
-      const distanceTicks = Math.max(1, risque / tickTaille);
-      const lotsEstimes = Math.max(0.01, Math.min(50, Number((montantRisque / (distanceTicks * (tickVal * tickTaille))).toFixed(2))));
-      lotTexte = `Taille conseillée : <b>${lotsEstimes} lot(s)</b> (risque ${risquePct}% = $${montantRisque.toFixed(1)} sur $${capital})`;
-    }
-  } catch { /* si indisponible on omet */ }
-
+  // No inferred tick values or broker lot sizes. Only validated sizing may be displayed.
+  const lotTexte = 'Taille en lots : non vérifiée auprès du courtier.';
+ 
   const lignes = [
     `<b>${sens} confirmé — ${m.symbol} ${m.tf}</b>${pct}`,
     '',
@@ -433,6 +405,8 @@ async function envoyerTelegram(c, v, m, qualite = {}) {
     const corps = await r.text().catch(() => '');
     throw new Error(`Telegram ${r.status}${corps ? ' : ' + corps.slice(0, 120) : ''}`);
   }
+  const body = await r.json();
+  if (body.ok !== true || !body.result?.message_id) throw new Error('Telegram : livraison non confirmée');
   return true;
 }
 
@@ -1025,8 +999,8 @@ async function verifierBrut(force = false) {
       const msg = compose(v, m, r.candles[r.candles.length - 1].c, { confluence: decision?.confluence, rr: rr, multi: decision ? { signaux: decision.signaux, synthese: decision.synthese, carte: decision.carte } : multi });
       let emailOk = false;
       if (c.email) {
-        await deps.sendMail({ to: c.email, subject: msg.subject, html: msg.html });
-        emailOk = true;
+        try { await deps.sendMail({ to: c.email, subject: msg.subject, html: msg.html }); emailOk = true; }
+        catch { dire({verdict:'échec du canal email'}); }
       }
       // Push navigateur : un canal en panne ne bloque jamais l'autre.
       let pushOk = 0;
@@ -1038,15 +1012,14 @@ async function verifierBrut(force = false) {
           })) || 0;
         } catch { /* le mail déjà parti reste valide */ }
       }
-      const aUnCanal = !!c.email || pushOk > 0 || !!(c.telegramToken && c.telegramChat);
-      if (!aUnCanal) {
-        dire({ verdict: 'aucun canal disponible' });
-        continue;
-      }
-      // Telegram : priorité directe sur téléphone
+      let telegramOk = false;
       if (c.telegramToken && c.telegramChat) {
-        try { await envoyerTelegram(c, v, m, { confluence, rr, multi }); }
-        catch (e) { dire({ verdict: 'alerte envoyée, Telegram en échec : ' + e.message }); }
+        try { telegramOk = await envoyerTelegram(c, v, m, { confluence, rr, multi }); }
+        catch { dire({ verdict: 'échec du canal Telegram' }); }
+      }
+      if (!emailOk && !pushOk && !telegramOk) {
+        dire({ verdict: 'aucune livraison confirmée — nouvelle tentative possible' });
+        continue;
       }
       c.deja.push(cle);
       c.dejaAt = { ...(c.dejaAt || {}), [cle]: Date.now() };
