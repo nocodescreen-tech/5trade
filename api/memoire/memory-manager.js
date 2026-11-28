@@ -15,6 +15,8 @@
 const fs = require('fs');
 const path = require('path');
 const preferences = require('./preferences');
+const {randomUUID} = require('node:crypto');
+const {DATA_DIR} = require('../core/dossiers');
 
 const TYPES_MEMOIRE = {
   FAIT_TEMPORAIRE: 'fait_temporaire',
@@ -24,7 +26,7 @@ const TYPES_MEMOIRE = {
   CONNAISSANCE_VALIDEE: 'connaissance_validee'
 };
 
-const FICHIER_MEMOIRE_UNIFIEE = path.join(__dirname, '..', '..', 'data', 'memoire-unifiee.json');
+const FICHIER_MEMOIRE_UNIFIEE = process.env.MEMOIRE_UNIFIEE_FICHIER || path.join(DATA_DIR, 'memoire-unifiee.json');
 
 /**
  * Charge tous les souvenirs unifiés.
@@ -35,7 +37,7 @@ function chargerSouvenirs() {
       const data = JSON.parse(fs.readFileSync(FICHIER_MEMOIRE_UNIFIEE, 'utf8'));
       if (Array.isArray(data)) return data;
     }
-  } catch {}
+  } catch (e) { if (e.code !== 'ENOENT') throw e; }
   return [];
 }
 
@@ -44,7 +46,9 @@ function chargerSouvenirs() {
  */
 function sauvegarderSouvenirs(souvenirs) {
   fs.mkdirSync(path.dirname(FICHIER_MEMOIRE_UNIFIEE), { recursive: true });
-  fs.writeFileSync(FICHIER_MEMOIRE_UNIFIEE, JSON.stringify(souvenirs, null, 2), 'utf8');
+  const tmp = FICHIER_MEMOIRE_UNIFIEE+'.'+randomUUID()+'.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(souvenirs, null, 2), {encoding:'utf8',mode:0o600});
+  fs.renameSync(tmp,FICHIER_MEMOIRE_UNIFIEE);
 }
 
 /**
@@ -63,9 +67,13 @@ async function memoriser({ type, contenu, source = 'utilisateur', portee = 'glob
     throw new Error('Contenu de mémoire manquant');
   }
 
-  const typeValide = Object.values(TYPES_MEMOIRE).includes(type) ? type : TYPES_MEMOIRE.PREFERENCE_PERMANENTE;
+  if (!Object.values(TYPES_MEMOIRE).includes(type)) throw new Error('Type de mémoire invalide');
+  if (contenu.trim().length === 0 || contenu.length > 4000) throw new Error('Contenu de mémoire invalide');
+  if (type === TYPES_MEMOIRE.FAIT_TEMPORAIRE && (!Number.isFinite(ttlMs) || ttlMs <= 0)) throw new Error('TTL positif requis');
+  if (type === TYPES_MEMOIRE.CONNAISSANCE_VALIDEE) throw new Error('Validation indépendante requise avant promotion en connaissance');
+  const typeValide = type;
   const maintenant = new Date();
-  const id = `mem_${maintenant.getTime()}_${Math.random().toString(36).slice(2, 7)}`;
+  const id = 'mem_'+randomUUID();
   const expireLe = (typeValide === TYPES_MEMOIRE.FAIT_TEMPORAIRE && ttlMs)
     ? new Date(maintenant.getTime() + ttlMs).toISOString()
     : null;
@@ -89,13 +97,14 @@ async function memoriser({ type, contenu, source = 'utilisateur', portee = 'glob
 
   // Si c'est une préférence permanente ou une instruction tactique, synchroniser avec preferences.js
   if (typeValide === TYPES_MEMOIRE.PREFERENCE_PERMANENTE || typeValide === TYPES_MEMOIRE.INSTRUCTION_TACTIQUE) {
-    await preferences.enregistrer({
+    const result = await preferences.enregistrer({
       categorie: portee === 'globale' ? 'regles_trading' : 'symboles',
       cle: id,
-      valeur: contenu.trim(),
+      contenu: contenu.trim(),
       source,
       commentaire: `Synchronisé via MemoryManager (${typeValide})`
     });
+    if (!result.ok) return {ok:false,id,type:typeValide,statut:'enregistre_non_synchronise',raison:result.raison};
   }
 
   return {
