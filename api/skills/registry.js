@@ -71,7 +71,8 @@ function chargerDossierSkill(dossierSkill, nomDossier) {
   const indexPath = path.join(dossierSkill, 'index.js');
   if (!fs.existsSync(indexPath)) return false;
   const raw = fs.readFileSync(indexPath);
-  const sha = crypto.createHash('sha1').update('blob ' + raw.length + '\0').update(raw).digest('hex');
+  const normalized = Buffer.from(raw.toString('utf8').replace(/\r\n/g,'\n'),'utf8');
+  const sha = crypto.createHash('sha1').update('blob ' + normalized.length + '\0').update(normalized).digest('hex');
   if (sha !== APPROVED[nomDossier]) {
     console.warn('[Skills] Compétence modifiée hors revue : ' + nomDossier);
     return false;
@@ -200,7 +201,6 @@ function supprimer(id) {
 
 module.exports = {
   charger,
-  enregistrer,
   supprimer,
   lister,
   obtenir,
