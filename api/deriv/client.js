@@ -1,61 +1,66 @@
 /**
- * 5trade — Connecteur Officiel Broker Deriv (WebSocket API v3)
+ * 5trade — Connecteur Deriv (REST PAT + WebSocket OTP)
  * 
  * Permet l'authentification avec App ID et Token API,
  * la vérification du compte (solde, loginid, réel/démo),
- * le streaming de cotations et le passage d'ordres automatisés.
+ * sans passage d'ordres pendant la migration.
  */
 
 const path = require('path');
 const WebSocket = require(require.resolve('ws', { paths: [path.join(__dirname, '..')] }));
 const DB = require('../core/db');
 
-// Endpoints Deriv avec bascule automatique en cluster haute disponibilité
-const DERIV_CLUSTERS = [
-  'wss://red.derivws.com/websockets/v3',
-  'wss://green.derivws.com/websockets/v3',
-  'wss://blue.derivws.com/websockets/v3',
-  'wss://ws.derivws.com/websockets/v3'
-];
-
-const DEFAULT_APP_ID = '353nKCVSd1Td4BoDbtjvr';
+const DEFAULT_APP_ID = process.env.DERIV_APP_ID || '';
+const BASE = 'https://api.derivws.com';
+const ACCOUNTS = '/trading/v1/options/accounts';
 
 class DerivClient {
   constructor() {
-    this._activeSocket = null;
     this._cachedConfig = null;
   }
 
-  /**
-   * Établit une connexion avec bascule automatique entre les clusters Deriv
-   */
-  async _connectCluster(appId = DEFAULT_APP_ID, timeoutMs = 8000) {
-    let dernierErr = null;
-    for (const cluster of DERIV_CLUSTERS) {
-      const url = `${cluster}?app_id=${encodeURIComponent(appId)}&l=fr&brand=deriv`;
-      try {
-        const ws = await new Promise((resolve, reject) => {
-          const socket = new WebSocket(url);
-          const timer = setTimeout(() => {
-            try { socket.terminate(); } catch {}
-            reject(new Error(`Délai dépassé pour ${cluster}`));
-          }, timeoutMs);
-
-          socket.on('open', () => {
-            clearTimeout(timer);
-            resolve(socket);
-          });
-          socket.on('error', err => {
-            clearTimeout(timer);
-            reject(err);
-          });
-        });
-        return ws;
-      } catch (err) {
-        dernierErr = err;
-      }
+  async _rest(appId, token, endpoint, method = 'GET') {
+    let response;
+    try {
+      response = await fetch(BASE + endpoint, {
+        method, redirect: 'error', signal: AbortSignal.timeout(12000),
+        headers: { Authorization: 'Bearer ' + token, 'Deriv-App-ID': appId, Accept: 'application/json' }
+      });
+    } catch {
+      throw new Error('Deriv : réseau REST indisponible ou délai dépassé');
     }
-    throw new Error(`Impossible de joindre les serveurs Deriv : ${dernierErr ? dernierErr.message : 'réseau inaccessible'}`);
+    if (!response.ok) {
+      const reasons = { 401: 'PAT ou App ID invalide', 403: 'permission trade manquante ou accès refusé', 429: 'limite de requêtes atteinte', 404: 'compte Options introuvable' };
+      throw new Error('Deriv HTTP ' + response.status + ' : ' + (reasons[response.status] || 'service indisponible ou requête refusée'));
+    }
+    try { return await response.json(); }
+    catch { throw new Error('Deriv : réponse REST non JSON'); }
+  }
+
+  async _connectCluster(url, timeoutMs = 10000) {
+    const target = new URL(url);
+    if (target.protocol !== 'wss:' || target.host !== 'api.derivws.com' ||
+        !['/trading/v1/options/ws/demo', '/trading/v1/options/ws/real'].includes(target.pathname) ||
+        !target.searchParams.get('otp') || target.username || target.password) {
+      throw new Error('Deriv : URL OTP invalide');
+    }
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(target.toString(), { handshakeTimeout: timeoutMs });
+      const timer = setTimeout(() => { ws.terminate(); reject(new Error('Deriv : délai WebSocket dépassé')); }, timeoutMs);
+      // Ne jamais propager une erreur susceptible de contenir l'URL OTP.
+      ws.on('error', () => { clearTimeout(timer); reject(new Error('Deriv : connexion WebSocket impossible')); });
+      ws.once('open', () => { clearTimeout(timer); resolve(ws); });
+      ws.once('close', () => { clearTimeout(timer); reject(new Error('Deriv : WebSocket fermé')); });
+    });
+  }
+
+  async _openAccount(appId, token, account) {
+    const result = await this._rest(appId, token, ACCOUNTS + '/' + encodeURIComponent(account.loginid) + '/otp', 'POST');
+    const url = result?.data?.url;
+    if (typeof url !== 'string') throw new Error('Deriv : URL OTP absente');
+    const expected = '/trading/v1/options/ws/' + (account.isVirtual ? 'demo' : 'real');
+    if (new URL(url).pathname !== expected) throw new Error('Deriv : type de compte OTP incohérent');
+    return this._connectCluster(url);
   }
 
   /**
@@ -74,11 +79,12 @@ class DerivClient {
       const onMessage = (raw) => {
         let msg;
         try { msg = JSON.parse(raw.toString()); } catch { return; }
-        if (msg.req_id === reqId || (msgTypeExpected && msg.msg_type === msgTypeExpected)) {
+        if (msg.req_id === reqId) {
           cleanup();
           if (msg.error) {
             return reject(new Error(msg.error.message || `Erreur Deriv ${msg.error.code}`));
           }
+          if (msgTypeExpected && msg.msg_type !== msgTypeExpected) return reject(new Error('Deriv : réponse inattendue'));
           resolve(msg);
         }
       };
@@ -110,50 +116,39 @@ class DerivClient {
    * Vérifie et autorise un compte avec son App ID et son Token API
    * Renvoie les informations complètes du compte en cas de succès
    */
-  async verifierEtAutoriser(appId, apiToken) {
-    if (!apiToken || typeof apiToken !== 'string' || !apiToken.trim()) {
-      return { ok: false, error: 'Token API Deriv manquant ou invalide' };
-    }
-    const cleanAppId = String(appId || DEFAULT_APP_ID).trim() || DEFAULT_APP_ID;
-    const cleanToken = apiToken.trim();
-
-    let ws = null;
+  async verifierEtAutoriser(appId, apiToken, accountId = null) {
+    if (typeof apiToken !== 'string' || !apiToken.trim()) return { ok: false, error: 'Token API Deriv manquant' };
+    const id = String(appId || DEFAULT_APP_ID).trim();
+    if (!id) return { ok: false, error: 'App ID Deriv manquant' };
+    let ws;
     try {
-      ws = await this._connectCluster(cleanAppId);
-      const res = await this._ask(ws, { authorize: cleanToken, req_id: 1 }, 'authorize', 9000);
-      if (res && res.authorize) {
-        const auth = res.authorize;
-        return {
-          ok: true,
-          account: {
-            loginid: auth.loginid,
-            balance: Number(auth.balance) || 0,
-            currency: auth.currency || 'USD',
-            email: auth.email || '',
-            fullname: auth.fullname || '',
-            isVirtual: !!auth.is_virtual,
-            typeCompte: auth.is_virtual ? 'Démo' : 'Réel',
-            country: auth.country || '',
-            scopes: auth.scopes || ['read', 'trade'],
-            landingCompany: auth.landing_company_name || ''
-          }
-        };
-      }
-      return { ok: false, error: 'Réponse Deriv inattendue' };
+      const result = await this._rest(id, apiToken.trim(), ACCOUNTS);
+      if (!Array.isArray(result?.data)) throw new Error('Deriv : liste de comptes inattendue');
+      const accounts = result.data.filter(a => a && typeof a.account_id === 'string' &&
+        ['demo', 'real'].includes(a.account_type) && a.status === 'active').map(a => ({
+          loginid: a.account_id, currency: a.currency, isVirtual: a.account_type === 'demo',
+          typeCompte: a.account_type === 'demo' ? 'Démo' : 'Réel'
+        }));
+      const account = accountId ? accounts.find(a => a.loginid === accountId) : accounts.find(a => a.isVirtual);
+      if (!account) return { ok: false, error: 'Deriv : aucun compte démo actif ou compte sélectionné introuvable', accounts };
+      ws = await this._openAccount(id, apiToken.trim(), account);
+      const res = await this._ask(ws, { balance: 1, req_id: 1 }, 'balance');
+      const balance = res?.balance?.balance;
+      if (balance == null || balance === '' || !Number.isFinite(Number(balance))) throw new Error('Deriv : solde absent ou invalide');
+      if (res.balance.loginid && res.balance.loginid !== account.loginid) throw new Error('Deriv : compte retourné incohérent');
+      return { ok: true, account: { ...account, balance: Number(balance), currency: res.balance.currency || account.currency }, accounts };
     } catch (err) {
       return { ok: false, error: err.message };
     } finally {
-      if (ws) {
-        try { ws.close(); } catch {}
-      }
+      if (ws) try { ws.close(); } catch {}
     }
   }
 
   /**
    * Enregistre la configuration Deriv dans la couche de persistance
    */
-  async enregistrer(appId, apiToken) {
-    const test = await this.verifierEtAutoriser(appId, apiToken);
+  async enregistrer(appId, apiToken, accountId = null) {
+    const test = await this.verifierEtAutoriser(appId, apiToken, accountId);
     if (!test.ok) {
       return { success: false, error: test.error };
     }
@@ -217,7 +212,7 @@ class DerivClient {
     if (!cfg || !cfg.actif || !cfg.apiToken) {
       throw new Error('Deriv non configuré');
     }
-    const test = await this.verifierEtAutoriser(cfg.appId, cfg.apiToken);
+    const test = await this.verifierEtAutoriser(cfg.appId, cfg.apiToken, cfg.account?.loginid);
     if (test.ok && test.account) {
       cfg.account = test.account;
       cfg.updatedAt = new Date().toISOString();
@@ -232,73 +227,10 @@ class DerivClient {
    * Exécute un ordre de trade sur Deriv
    * Supporte les contrats Multipliers ou Rise/Fall (Call/Put)
    */
-  async executerTrade({ symbol, direction, amount = 10, type = null, duration = 5, durationUnit = 'm' }) {
-    const cfg = await this.lireConfig();
-    if (!cfg || !cfg.actif || !cfg.apiToken) {
-      return { success: false, error: 'Compte Deriv non connecté. Active d\'abord ton token dans les paramètres.' };
-    }
-
-    const sensAchat = direction === 'BUY' || direction === 'long';
-    // Mapping du type de contrat : si non spécifié, utilise CALL ou PUT
-    const contractType = type || (sensAchat ? 'CALL' : 'PUT');
-
-    let ws = null;
-    try {
-      ws = await this._connectCluster(cfg.appId);
-      // 1. Authentification
-      await this._ask(ws, { authorize: cfg.apiToken }, 'authorize', 9000);
-
-      // 2. Demande de proposition de prix (Proposal)
-      const propReq = {
-        proposal: 1,
-        amount: Number(amount) || 10,
-        basis: 'stake',
-        contract_type: contractType,
-        currency: (cfg.account && cfg.account.currency) || 'USD',
-        duration: Number(duration) || 5,
-        duration_unit: durationUnit || 'm',
-        symbol: symbol || 'R_75',
-        req_id: 2
-      };
-
-      const propRes = await this._ask(ws, propReq, 'proposal', 8000);
-      if (!propRes || !propRes.proposal || !propRes.proposal.id) {
-        throw new Error('Deriv n\'a pas retourné de cotation valide pour cet ordre');
-      }
-
-      // 3. Achat effectif du contrat
-      const buyRes = await this._ask(ws, {
-        buy: propRes.proposal.id,
-        price: propRes.proposal.ask_price,
-        req_id: 3
-      }, 'buy', 8000);
-
-      if (buyRes && buyRes.buy) {
-        const b = buyRes.buy;
-        // Met à jour le solde dans la config
-        if (b.balance_after) {
-          cfg.account.balance = Number(b.balance_after);
-          await DB.kvEcrire('deriv_config', cfg);
-          this._cachedConfig = cfg;
-        }
-        return {
-          success: true,
-          contractId: b.contract_id,
-          transactionId: b.transaction_id,
-          buyPrice: b.buy_price,
-          payout: b.payout,
-          balanceAfter: b.balance_after,
-          account: cfg.account
-        };
-      }
-      return { success: false, error: 'Achat non confirmé par Deriv' };
-    } catch (err) {
-      return { success: false, error: err.message };
-    } finally {
-      if (ws) {
-        try { ws.close(); } catch {}
-      }
-    }
+  async executerTrade() {
+    // La connexion et le solde sont migrés; les ordres doivent attendre
+    // la validation du nouveau contrat de trading et du contrôle de risque.
+    return { success: false, error: 'Exécution Deriv suspendue pendant la migration API OTP' };
   }
 
   /**
