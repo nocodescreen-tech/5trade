@@ -4341,9 +4341,12 @@ function tinyPng(W = 64, H = 40) {
       // Échéance forcée dans le passé : un bon bilan ouvre une revue humaine,
       // mais ne modifie jamais les seuils de lui-même.
       const shadowDoc = JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'apprentissage', 'shadow.json'), 'utf8'));
-      for (const c of shadowDoc.candidats) c.applicable_at = new Date(Date.now() - 1000).toISOString();
+      for (const c of shadowDoc.candidats) {c.decide_at=new Date(Date.now()-86400000*4).toISOString();c.applicable_at=new Date(Date.now()-1000).toISOString();}
       fs.writeFileSync(path.join(process.env.DATA_DIR, 'apprentissage', 'shadow.json'), JSON.stringify(shadowDoc, null, 2));
-      const aRevoir = await Aj.promouvoirEchues({ expectancyR: 0.35, trades: 25 });
+      const preuveShadow=shadowDoc.candidats[0];
+      const sansPreuve=await Aj.promouvoirEchues({expectancyR:0.35,trades:25});
+      ok('ajusteur : bilan agrégé seul ne valide aucune candidature',sansPreuve.every(p=>p.decision!=='revue_requise'));
+      const aRevoir = await Aj.promouvoirEchues({candidates:[{id:preuveShadow.id,baselineVersion:preuveShadow.baselineVersion,expectancyR:0.35,baselineExpectancyR:0.1,trades:25,outOfSample:true,costsKnown:true,from:Date.parse(preuveShadow.decide_at),to:Date.now()}]});
       const seuilsAvantRevue = await Aj.charger();
       ok('ajusteur : un shadow positif attend une revue humaine sans modifier les seuils',
         aRevoir.some(p => p.decision === 'revue_requise')
@@ -4369,9 +4372,10 @@ function tinyPng(W = 64, H = 40) {
       // Bilan négatif → abandon, jamais promotion.
       await Aj.proposerBascule('killzones.london.actif', false, { trades: 25, n: 25 });
       const doc2 = JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'apprentissage', 'shadow.json'), 'utf8'));
-      for (const c of doc2.candidats) if (c.statut === 'shadow') c.applicable_at = new Date(Date.now() - 1000).toISOString();
+      for (const c of doc2.candidats) if (c.statut === 'shadow') {c.decide_at=new Date(Date.now()-86400000*4).toISOString();c.applicable_at=new Date(Date.now()-1000).toISOString();}
       fs.writeFileSync(path.join(process.env.DATA_DIR, 'apprentissage', 'shadow.json'), JSON.stringify(doc2, null, 2));
-      const bilanNegatif = await Aj.promouvoirEchues({ expectancyR: -0.2, trades: 25 });
+      const candidatNeg=doc2.candidats.find(c=>c.statut==='shadow');
+      const bilanNegatif = await Aj.promouvoirEchues({candidates:[{id:candidatNeg.id,baselineVersion:candidatNeg.baselineVersion,expectancyR:-0.2,baselineExpectancyR:0.1,trades:25,outOfSample:true,costsKnown:true,from:Date.parse(candidatNeg.decide_at),to:Date.now()+1-1}]});
       const seuilsNeg = await Aj.charger();
       ok('ajusteur : un shadow déficitaire est abandonné et laisse une trace',
         bilanNegatif.some(p => p.decision === 'abandonnee')
