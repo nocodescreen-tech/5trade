@@ -395,12 +395,7 @@ function StatTile({
       fontSize: 30,
       letterSpacing: '-1px'
     }
-  }, Counter ? /*#__PURE__*/React.createElement(Counter, {
-    value: value,
-    decimals: decimals,
-    suffix: suffix,
-    fontSize: 30
-  }) : `${value}${suffix}`)))));
+  }, typeof value !== 'number' || !Number.isFinite(value) ? '—' : `${value.toFixed(decimals)}${suffix}`)))));
 }
 
 /* ══════════════ MASCOTTE ANIMÉE ══════════════ */
