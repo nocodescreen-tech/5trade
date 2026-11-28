@@ -125,7 +125,7 @@ function devisesDuSymbole(symbol) {
   if (!brut) return { devises: [], applicable: false, raison: 'symbole vide' };
 
   // Indices synthétiques Deriv : R_10..R_100, BOOM/CRASH/STEP, 1HZ…
-  if (/^(R|BOOM|CRASH|STEP|JD|STPRNG)\d*\d*$/.test(brut) || /^(BOOM|CRASH|STEP)\d+$/.test(brut)) {
+  if (require('../market-intelligence/instrument-classifier').classifier(symbol).classe === 'synthetique' || /^(R|BOOM|CRASH|STEP|JD|STPRNG)\d*\d*$/.test(brut)) {
     return { devises: [], applicable: false, raison: 'indice synthétique : aucune devise, calendrier non applicable' };
   }
 
@@ -148,10 +148,13 @@ function devisesDuSymbole(symbol) {
   // Métaux précieux : XAU/XAG ne sont pas des devises du calendrier, mais leur
   // cotation (USD le plus souvent) l'est — et c'est elle qui porte le risque news.
   const metal = sansPrefixe.match(/^(XAU|XAG)([A-Z]{3})$/);
-  if (metal) return { devises: [metal[1], metal[2] === 'USDT' ? 'USD' : metal[2]], applicable: true, raison: 'métal coté en devises' };
+  if (metal) return { devises: [metal[2]], applicable: true, raison: 'métal coté en devises' };
 
   // Crypto / actions / matières premières sans paire de devises explicite.
-  if (/^(BTC|ETH|XAU|XAG|US30|NAS|SPX|GER|UK100|JP225)/.test(sansPrefixe)) {
+  if (/^(GER|DAX)/.test(sansPrefixe)) return {devises:['EUR','USD'],applicable:true,raison:'indice européen'};
+  if (/^UK100/.test(sansPrefixe)) return {devises:['GBP','USD'],applicable:true,raison:'indice britannique'};
+  if (/^JP225/.test(sansPrefixe)) return {devises:['JPY','USD'],applicable:true,raison:'indice japonais'};
+  if (/^(BTC|ETH|XAU|XAG|US30|NAS|SPX)/.test(sansPrefixe)) {
     return { devises: ['USD'], applicable: true, raison: 'instrument coté en dollars' };
   }
   return { devises: [], applicable: false, raison: `devises non identifiables pour « ${symbol} »` };
@@ -292,14 +295,14 @@ async function filtreCalendrier(symbol, { strict = false } = {}) {
     if (!r.verifie) {
       if (strict) {
         return {
-          ok: false, verifie: false, bloque: true, applicable: true, devises,
+          ok: false, verifie: false, bloque: true, applicable: true, statut:'NEWS_UNKNOWN', devises,
           detail: r.raison,
           politiquePrudence: true,
           lecture: 'filtre économique NON vérifié : calendrier indisponible (politique de prudence stricte : signal bloqué)'
         };
       }
       return {
-        ok: true, verifie: false, bloque: false, applicable: true, devises,
+        ok: true, verifie: false, bloque: false, applicable: true, statut:'NEWS_UNKNOWN', devises,
         detail: r.raison,
         lecture: 'filtre économique NON vérifié : calendrier indisponible — le signal n\'est pas bloqué, mais la prudence est requise'
       };
