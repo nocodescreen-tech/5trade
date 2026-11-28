@@ -3033,12 +3033,21 @@ app.get('/api/instruments/actifs', requireAuth, (req, res) => {
   }
 });
 
+// Canonicalize the selected identity from the provider catalog, never user metadata.
+function selectionInstrument(item){
+  if(!item||typeof item.symbol!=='string'||typeof item.provider!=='string')throw Error('Symbole et fournisseur requis');
+  const match=Market.listSymbols().find(x=>x.provider===item.provider&&x.symbol.toUpperCase()===item.symbol.trim().toUpperCase());
+  if(!match)throw Error('Instrument absent du catalogue fournisseur');
+  const tf=item.tf||'5m';
+  if(!Market.TF_MS[tf])throw Error('Unité de temps invalide');
+  return {...match,tf,famille:require('./market-intelligence/instrument-classifier').classifier(match.symbol,{provider:match.provider}).classe};
+}
 app.post('/api/instruments/actifs', requireAuth, (req, res) => {
   try {
     const InstrumentsActifs = require('./core/instruments-actifs');
     const liste = req.body && req.body.instruments;
     if (!Array.isArray(liste)) return res.status(400).json({ success:false,error:'instruments doit être un tableau explicite' });
-    const instruments = InstrumentsActifs.definirActifs(liste);
+    const instruments = InstrumentsActifs.definirActifs(liste.map(selectionInstrument));
     res.json({ success: true, instruments });
   } catch (e) {
     res.status(400).json({ success: false, error: e.message });
@@ -3052,9 +3061,10 @@ app.post('/api/instruments/actifs/toggle', requireAuth, (req, res) => {
     if (typeof symbol !== 'string' || !symbol.trim() || typeof actif !== 'boolean') return res.status(400).json({ success: false, error: 'symbol et actif booléen requis' });
     let instruments;
     if (actif === false) {
-      instruments = InstrumentsActifs.retirerInstrument(symbol);
+      if(typeof provider!=='string'||!provider.trim()) return res.status(400).json({success:false,error:'Fournisseur requis'});
+      instruments = InstrumentsActifs.retirerInstrument(symbol,provider);
     } else {
-      instruments = InstrumentsActifs.ajouterInstrument({ symbol, provider, tf, label, tv });
+      instruments = InstrumentsActifs.ajouterInstrument(selectionInstrument({symbol,provider,tf}));
     }
     res.json({ success: true, instruments });
   } catch (e) {
