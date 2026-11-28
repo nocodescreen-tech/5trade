@@ -1102,8 +1102,12 @@ function tinyPng(W = 64, H = 40) {
   //      n'était alimenté que par le flux temps réel — flux mort = bougie morte.
   {
     const mSrc = fs.readFileSync(path.join(__dirname, 'sources/market.js'), 'utf8');
-    ok('la dernière bougie d\'un historique est marquée EN COURS',
-      /function marquerEnCours/.test(mSrc) && /liste\[liste\.length - 1\]\.closed = false/.test(mSrc));
+    ok('la clôture dépend de l’horodatage réel, même pendant une fermeture', (() => {
+      const M = require('./sources/market');
+      const bars=[{t:0,closed:true},{t:60000,closed:true}];
+      return M.marquerEnCours(bars,'1m',120000).every(c=>c.closed) &&
+        !M.marquerEnCours(bars,'1m',90000).at(-1).closed;
+    })());
     ok('un seul point de correction, pour tous les fournisseurs',
       (mSrc.match(/marquerEnCours\(await p\.candles/g) || []).length === 1);
     ok('le buffer a une durée de fraîcheur', /const FRAICHEUR_MS = \d+/.test(mSrc));
@@ -1114,12 +1118,10 @@ function tinyPng(W = 64, H = 40) {
 
     // Vérification directe du comportement, sans réseau : la marque s'applique
     // bien à la dernière bougie et seulement à elle.
-    ok('la marque « en cours » ne touche que la dernière', (() => {
-      const liste = [{ t: 1, closed: true }, { t: 2, closed: true }, { t: 3, closed: true }];
-      // On rejoue la règle exacte du module sur une copie.
-      liste[liste.length - 1].closed = false;
-      return liste[0].closed === true && liste[1].closed === true && liste[2].closed === false;
-    })() && /function marquerEnCours/.test(mSrc));
+    ok('une bougie future ou explicitement incomplète reste non clôturée', (() => {
+      const M=require('./sources/market');
+      return M.marquerEnCours([{t:0,closed:false},{t:120000,closed:true}],'1m',90000).every(c=>!c.closed);
+    })());
 
     // Et le front rafraîchit bien les bougies, pas seulement les zones.
     ok('le front recharge les bougies toutes seules',
