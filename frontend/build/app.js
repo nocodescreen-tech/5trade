@@ -6051,6 +6051,8 @@ function DerivModal({
 }) {
   const [appId, setAppId] = useState('353nKCVSd1Td4BoDbtjvr');
   const [token, setToken] = useState('');
+  const [accounts, setAccounts] = useState([]);
+  const [accountId, setAccountId] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [chargement, setChargement] = useState(false);
   const [statut, setStatut] = useState(null);
@@ -6067,6 +6069,7 @@ function DerivModal({
     } catch {}
   }, [onRefresh]);
   useEffect(() => {
+    if (!ouvert) { setToken(''); setShowToken(false); setAccounts([]); setAccountId(''); }
     if (ouvert) {
       rafraichirStatut();
       setMessage('');
@@ -6091,14 +6094,17 @@ function DerivModal({
         },
         body: JSON.stringify({
           appId: appId.trim() || '353nKCVSd1Td4BoDbtjvr',
-          apiToken: token.trim()
+          apiToken: token.trim(), accountId: accountId || null
         })
       })).json();
       if (res.success) {
         setMessage(res.message || 'Compte Deriv connecté avec succès !');
         setToken('');
+        setAccounts([]);
+        setAccountId('');
         await rafraichirStatut();
       } else {
+        setAccounts(res.code === 'ACCOUNT_SELECTION_REQUIRED' && Array.isArray(res.accounts) ? res.accounts : []);
         setErreur(res.error || 'Échec de connexion à Deriv.');
       }
     } catch (err) {
@@ -6388,7 +6394,7 @@ function DerivModal({
     },
     placeholder: "353nKCVSd1Td4BoDbtjvr",
     value: appId,
-    onChange: e => setAppId(e.target.value)
+    onChange: e => { setAppId(e.target.value); setAccounts([]); setAccountId(''); }
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10.5,
@@ -6436,7 +6442,7 @@ function DerivModal({
     type: showToken ? 'text' : 'password',
     placeholder: "Colle ton token API Deriv ici (ex: a1b2c3d4e5f6)",
     value: token,
-    onChange: e => setToken(e.target.value)
+    onChange: e => { setToken(e.target.value); setAccounts([]); setAccountId(''); }
   }), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "btn ghost sm",
@@ -6456,7 +6462,13 @@ function DerivModal({
       color: 'var(--dim)',
       marginTop: 4
     }
-  }, "Crée un PAT pour la nouvelle API avec la portée ", React.createElement("b",null,"trade"), ". Cette portée est requise par Deriv pour lister les comptes Options.")), /*#__PURE__*/React.createElement("div", {
+  }, "Crée un PAT pour la nouvelle API avec la portée ", React.createElement("b",null,"trade"), ". Cette portée est requise par Deriv pour lister les comptes Options.")), React.createElement("div", null,
+    React.createElement("label", {htmlFor:"deriv-account-id"}, "Compte Options (facultatif)"),
+    accounts.length ? React.createElement("select", {id:"deriv-account-id",className:"fld",value:accountId,onChange:e=>setAccountId(e.target.value)},
+      React.createElement("option",{value:""},"Sélectionner un compte"),
+      accounts.map(a=>React.createElement("option",{key:a.loginid,value:a.loginid},a.loginid+" — "+(a.isVirtual?"Démo":"Réel")+" / "+a.currency))
+    ) : React.createElement("input",{id:"deriv-account-id",className:"fld",value:accountId,onChange:e=>setAccountId(e.target.value),placeholder:"Identifiant du compte si souhaité"})
+  ), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 6
     }
