@@ -19,6 +19,12 @@
  */
 
 const PATTERNS = [
+  { regex: /^(?:liste|montre|affiche)\s+(?:les\s+)?(?:skills|compétences)\s*$/i, verbe: 'MONTRE', sujet: 'skills_liste', type:'skill' },
+  { regex: /^(?:crée|cree|ajoute|génère|genere)\s+(?:(?:un|une)\s+)?(?:skill|compétence)\s+([\s\S]+)$/i, verbe:'CRÉE', type:'skill' },
+  { regex: /^active\s+(?:skill|compétence)\s+([a-z0-9_-]{3,50})$/i, verbe:'ACTIVE', type:'skill' },
+  { regex: /^(?:désactive|desactive)\s+(?:skill|compétence)\s+([a-z0-9_-]{3,50})$/i, verbe:'DÉSACTIVE', type:'skill' },
+  { regex: /^(?:calcule|exécute|execute)\s+skill\s+([\s\S]+)$/i, verbe:'MONTRE', type:'skill_calcul' },
+
   // 5 QUESTIONS D'AUDIT & PILOTAGE DIRECT
   // 1. « Quels marchés surveilles-tu ? » / « qu'as-tu scanné ? »
   { regex: /^(?:quels?\s+march[ée]s?\s+surveilles?-tu|qu'as-tu\s+(?:r[ée]ellement\s+)?scann[ée]|quels?\s+sont\s+les\s+march[ée]s?\s+actifs?|march[ée]s?\s+surveill[ée]s?)\b/i, verbe: 'MONTRE', sujet: 'marches_surveilles' },
