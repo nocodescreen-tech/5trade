@@ -242,15 +242,15 @@ module.exports = function monterAlertes(app, deps) {
         return res.status(400).json({ success: false, error: 'Telegram non configuré (jeton ou chat_id manquant)' });
       }
       const briefing = await genererBriefingTelegram(c, { DB });
-      const NotificationTracker = require('../delivery/notification-tracker');
-      const envoi = await NotificationsendOnce(
+      const { sendOnce } = require('../delivery/telegram-outbox');
+      const envoi = await sendOnce(
         c.telegramToken,
         c.telegramChat,
         briefing.texte,
         { parse_mode: 'HTML', reply_markup: { inline_keyboard: briefing.inline_keyboard } }
       );
       if (!envoi.ok) {
-        return res.status(400).json({ success: false, error: envoi.erreur });
+        return res.status(400).json({ success: false, error: 'Livraison Telegram non confirmée' });
       }
       res.json({ success: true, message: 'Briefing envoyé avec succès sur Telegram !' });
     } catch (e) {
@@ -281,6 +281,7 @@ module.exports = function monterAlertes(app, deps) {
 /**
  * Génère le contenu complet du briefing matinal avec statistiques réelles du journal et du compte
  */
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 async function genererBriefingTelegram(c, depsRef = {}) {
   const Risque = require('../risk/risque');
   const JournalSignaux = require('../engine/journal-signaux');
@@ -321,15 +322,15 @@ async function genererBriefingTelegram(c, depsRef = {}) {
   const texte = `☀️ <b>Briefing Matinal & Récapitulatif 5trade</b>\n`
     + `📅 <i>${dateStr} (${heureStr})</i>\n\n`
     + `💼 <b>Positions en cours</b> : <b>${openTrades.length}</b> ouverte(s)\n`
-    + (openTrades.length ? openTrades.map(t => `   • <code>${t.pair || t.symbol}</code> (${t.direction}) — Entrée: ${t.entry} | SL: ${t.sl}`).join('\n') + '\n' : '   • Aucune position active — Capital 100% disponible\n')
+    + (openTrades.length ? openTrades.map(t => `   • <code>${escapeHtml(t.pair || t.symbol)}</code> (${escapeHtml(t.direction)}) — Entrée: ${escapeHtml(t.entry)} | SL: ${escapeHtml(t.sl)}`).join('\n') + '\n' : '   • Aucune position active — Disponibilité du capital non confirmée\n')
     + `\n📊 <b>Bilan du Journal Récent</b> :\n`
-    + `   • Prises clôturées : <b>${statsJournal.total}</b> (✅ ${statsJournal.gagnes} W / ❌ ${statsJournal.perdus} L)\n`
+    + `   • Prises clôturées : <b>${escapeHtml(statsJournal.total)}</b> (✅ ${escapeHtml(statsJournal.gagnes)} W / ❌ ${escapeHtml(statsJournal.perdus)} L)\n`
     + `   • Performance nette cumulée : ${pnlEmoji} <b>${rSigne} R</b>\n\n`
     + `🛡️ <b>Gestion du Risque</b> :\n`
-    + `   • Capital de référence : <b>$${capital.toLocaleString('fr-FR')}</b>\n`
-    + `   • Risque max/trade : <b>${risqueMax}%</b> ($${((capital * risqueMax) / 100).toFixed(2)})\n`
+    + `   • Capital de référence : <b>$${escapeHtml(capital.toLocaleString('fr-FR'))}</b>\n`
+    + `   • Risque max/trade : <b>${escapeHtml(risqueMax)}%</b> ($${((capital * risqueMax) / 100).toFixed(2)})\n`
     + `   • Filtres Sentinelle & RR ≥ 1.5 : <b>Actifs</b>\n\n`
-    + `🎯 <b>Marchés Surveillés</b> : <code>${marches}</code>\n\n`
+    + `🎯 <b>Marchés Surveillés</b> : <code>${escapeHtml(marches)}</code>\n\n`
     + `<i>Tapez /recap pour consulter le briefing. Modifications depuis le terminal authentifié.</i>`;
 
   const inline_keyboard = [
@@ -343,3 +344,4 @@ async function genererBriefingTelegram(c, depsRef = {}) {
 }
 
 module.exports.genererBriefingTelegram = genererBriefingTelegram;
+module.exports.escapeHtml = escapeHtml;

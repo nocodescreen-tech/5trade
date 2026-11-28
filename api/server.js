@@ -119,15 +119,12 @@ const { DATA_DIR, KNOWLEDGE_BASE_DIR, DOCUMENTS_DIR, UPLOADS_DIR } = require('./
 // courant) redevenait ouvert à tout le web. C'est l'inverse qu'il faut : seules
 // les origines connues passent, et l'ouverture totale se DEMANDE explicitement
 // (CORS_LIBRE=1), pour une session de travail assumée.
-const ORIGINES_LOCALES = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+const BrowserSecurity = require('./security/browser-origin');
+app.use('/api', BrowserSecurity.guard);
 app.use(cors({
   credentials: true,
   origin(origine, cb) {
-    if (!origine) return cb(null, true);                                  // même origine, curl
-    if (ORIGINES_LOCALES.test(origine)) return cb(null, true);            // l'appli elle-même
-    if (process.env.APP_ORIGIN && origine === process.env.APP_ORIGIN) return cb(null, true);
-    if (process.env.CORS_LIBRE === '1') return cb(null, true);            // demande explicite
-    cb(null, false);                                                      // tout le reste : non
+    cb(null, !origine || BrowserSecurity.configuredOrigin(origine, process.env.APP_ORIGIN));
   }
 }));
 // Compression applicative retirée ; utiliser la compression du proxy après validation.
@@ -139,6 +136,9 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');                 // l'appli ne s'affiche pas dans une iframe
   res.setHeader('Referrer-Policy', 'same-origin');          // pas de fuite d'URL vers l'exterieur
   res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
+  if(req.path.startsWith('/api/')) res.setHeader('Cache-Control','no-store');
   next();
 });
 
