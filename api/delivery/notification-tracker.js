@@ -11,22 +11,26 @@ const path = require('path');
 const { fetchAvecReprise } = require('../core/reseau');
 const { DATA_DIR } = require('../core/dossiers');
 
-const FICHIER_TRACKER = path.join(DATA_DIR, 'notifications-journal.json');
+const FICHIER_TRACKER = process.env.NOTIFICATIONS_JOURNAL_FICHIER || path.join(DATA_DIR, 'notifications-journal.json');
 
 function lireJournal() {
   try {
     if (fs.existsSync(FICHIER_TRACKER)) {
-      return JSON.parse(fs.readFileSync(FICHIER_TRACKER, 'utf8'));
+      const data = JSON.parse(fs.readFileSync(FICHIER_TRACKER, 'utf8'));
+      if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Journal invalide');
+      return data;
     }
-  } catch {}
+  } catch { throw new Error('Journal des notifications illisible'); }
   return {};
 }
 
 function ecrireJournal(journal) {
   try {
     fs.mkdirSync(path.dirname(FICHIER_TRACKER), { recursive: true });
-    fs.writeFileSync(FICHIER_TRACKER, JSON.stringify(journal, null, 2), 'utf8');
-  } catch {}
+    const tmp = FICHIER_TRACKER + '.' + process.pid + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(journal, null, 2), 'utf8');
+    fs.renameSync(tmp, FICHIER_TRACKER);
+  } catch { throw new Error('Persistance des notifications impossible'); }
 }
 
 /**
@@ -47,9 +51,9 @@ function estDejaEnvoye(cle) {
 function marquerEnvoye(cle, metadata = {}) {
   const journal = lireJournal();
   journal[cle] = {
+    ...metadata,
     at: new Date().toISOString(),
-    succes: true,
-    ...metadata
+    succes: true
   };
   ecrireJournal(journal);
 }
@@ -87,8 +91,8 @@ async function envoyerTelegramSecurise(token, chatId, texte, opts = {}) {
     let data = {};
     try { data = JSON.parse(texteBrut); } catch {}
 
-    if (!res.ok || data.ok !== true) {
-      const motif = data.description || `HTTP ${res.status} ${texteBrut.slice(0, 100)}`;
+    if (!res.ok || data.ok !== true || !Number.isInteger(data.result?.message_id)) {
+      const motif = `Telegram : livraison non confirmée (HTTP ${res.status})`;
       console.error(`[Telegram] Rejet d'envoi : ${motif}`);
       return { ok: false, erreur: motif };
     }
@@ -98,8 +102,8 @@ async function envoyerTelegramSecurise(token, chatId, texte, opts = {}) {
       messageId: data.result ? data.result.message_id : null
     };
   } catch (e) {
-    console.error(`[Telegram] Échec réseau définitif : ${e.message}`);
-    return { ok: false, erreur: e.message };
+    console.error('[Telegram] Échec réseau définitif');
+    return { ok: false, erreur: 'Échec réseau Telegram' };
   }
 }
 
