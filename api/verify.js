@@ -1089,7 +1089,7 @@ function tinyPng(W = 64, H = 40) {
     ok('netteté sur écran haute densité', /devicePixelRatio/.test(jsx));
     ok('le rapport est transmis au graphique', /<PriceChart candles=\{candles\} report=\{report\}/.test(jsx));
     // Et les zones se rafraîchissent : sinon elles resteraient figées.
-    ok('les zones se rechargent toutes seules', /setInterval\(recharger, 5000\)/.test(jsx));
+    ok('les zones se rechargent toutes seules sans chevauchement ni réponse périmée', /setInterval\(recharger, 15000\)/.test(jsx) && /pendingMarket\.current\.has\(marketKey\)/.test(jsx) && /keyRef\.current!==marketKey/.test(jsx));
     ok('le rechargement met bien à jour rapport ET vocabulaire',
       /setReport\(st\.report\)/.test(jsx) && /setVocabulaire\(st\.vocabulaire\)/.test(jsx));
     // Deux causes possibles pour « les zones n'apparaissent pas » : le calque
