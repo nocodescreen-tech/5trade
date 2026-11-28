@@ -762,7 +762,7 @@ function decider(candles, meta, options = {}) {
 
   // 0. On récupère TOUS les signaux (stratégies + motifs + structure)
   const multi = require('./signaux').detecterTout(candles, meta, options);
-  const signaux = multi.signaux || [];
+  const signaux = options.strategieStrict === true && Array.isArray(options.profils) && options.profils.length ? (multi.signaux || []).filter(s => s.source==='strategie' && options.profils.some(p=>s.id==='strat:'+p.id)) : (multi.signaux || []);
 
   // Enrichir chaque signal avec les infos nécessaires aux niveaux suivants
   const signauxEnrichis = signaux.map(s => ({
