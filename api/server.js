@@ -5236,8 +5236,9 @@ async function start() {
   // sans confirmation explicite ("oui"/"ok") en retour.
   app.post('/api/chat', requireAuth, async (req, res) => {
     try {
+      if (!req.session?.username) return res.status(403).json({error:'Identité de conversation absente'});
       const message = String(req.body.message || '').trim();
-      if (!message) return res.status(400).json({ error: 'message requis' });
+      if (!message || message.length > 8000) return res.status(400).json({ error: 'message requis (8000 caractères maximum)' });
       const r = await ChatCrud.executer(message, {
         utilisateur: req.session.username,
         ip: req.ip,
@@ -5255,11 +5256,11 @@ async function start() {
       try {
         const H = require('./chat-crud/historique');
         const texteReponse = (r && (r.texte || (r.resultat && r.resultat.texte))) || '';
-        await H.enregistrer({ role: 'user', texte: message,
+        await H.enregistrer({ utilisateur: req.session.username, role: 'user', texte: message,
           verbe: r && r.action ? r.action.verbe : null,
           sujet: r && r.action ? r.action.sujet : null });
         if (texteReponse) {
-          await H.enregistrer({ role: 'assistant', texte: texteReponse,
+          await H.enregistrer({ utilisateur: req.session.username, role: 'assistant', texte: texteReponse,
             verbe: r && r.action ? r.action.verbe : null,
             action: r && r.action ? r.action : null });
         }
@@ -5273,8 +5274,9 @@ async function start() {
   // GET /api/chat/historique — les derniers échanges, du plus ancien au récent.
   app.get('/api/chat/historique', requireAuth, async (req, res) => {
     try {
+      if (!req.session?.username) return res.status(403).json({error:'Identité de conversation absente'});
       const H = require('./chat-crud/historique');
-      const messages = await H.lister({ limite: Number(req.query.limite) || 60 });
+      const messages = await H.lister({ utilisateur: req.session.username, limite: Number(req.query.limite) || 60 });
       res.json({ success: true, total: messages.length, messages });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -5282,8 +5284,10 @@ async function start() {
   // DELETE /api/chat/historique — effacer la conversation (action explicite).
   app.delete('/api/chat/historique', requireAuth, async (req, res) => {
     try {
+      if (!req.session?.username) return res.status(403).json({error:'Identité de conversation absente'});
       const H = require('./chat-crud/historique');
-      res.json({ success: true, ...(await H.effacer()) });
+      const result = await H.effacer({utilisateur:req.session.username});
+      res.status(result.ok ? 200 : 503).json({success:result.ok,...result});
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
