@@ -216,24 +216,31 @@ const FICHIER_CONFIRMATIONS = () =>
 function lireConfirmations() {
   try {
     const j = JSON.parse(fs.readFileSync(FICHIER_CONFIRMATIONS(), 'utf8'));
-    return j && typeof j === 'object' ? j : {};
-  } catch { return {}; }
-}
-
-function ecrireConfirmations(doc) {
-  const fichier = FICHIER_CONFIRMATIONS();
-  const tmp = `${fichier}.${process.pid}.tmp`;
-  try {
-    fs.mkdirSync(path.dirname(fichier), { recursive: true });
-    fs.writeFileSync(tmp, JSON.stringify(doc, null, 2));
-    fs.renameSync(tmp, fichier);          // écriture atomique : jamais de JSON tronqué
-  } catch (e) {
-    // Disque indisponible : on ne bloque pas l'action, on le dit.
-    console.error('[chat] confirmations non persistées :', e.message);
+    if (!j || typeof j !== 'object' || Array.isArray(j)) throw Error('format invalide');
+    return Object.assign(Object.create(null),j);
+  } catch(e) {
+    if(e.code==='ENOENT') return Object.create(null);
+    throw Error('Stockage des confirmations indisponible ou corrompu');
   }
 }
 
-const cleDe = ctx => ctx.utilisateur || 'anon';
+function ecrireConfirmations(doc) {
+  const fichier=FICHIER_CONFIRMATIONS();
+  const tmp=fichier+'.'+process.pid+'.'+require('node:crypto').randomUUID()+'.tmp';
+  try {
+    fs.mkdirSync(path.dirname(fichier),{recursive:true});
+    fs.writeFileSync(tmp,JSON.stringify(doc,null,2),{mode:0o600,flag:'wx'});
+    fs.renameSync(tmp,fichier);
+  } catch(e) {
+    try {fs.unlinkSync(tmp);}catch{}
+    throw Error('Impossible de persister la confirmation');
+  }
+}
+
+const cleDe = ctx => {
+  if(typeof ctx.utilisateur!=='string' || !ctx.utilisateur.trim() || ctx.utilisateur.length>200) throw Error('Identité requise pour confirmer une action');
+  return ctx.utilisateur;
+};
 
 function poserConfirmation(ctx, action) {
   const doc = lireConfirmations();
@@ -249,7 +256,7 @@ function prendreConfirmation(ctx) {
   if (!entree) return null;
   delete doc[cle];
   ecrireConfirmations(doc);
-  if (!entree.timestamp || Date.now() - entree.timestamp > DUREE_CONFIRMATION_MS) return null;
+  if (!Number.isFinite(entree.timestamp) || entree.timestamp > Date.now() || Date.now() - entree.timestamp > DUREE_CONFIRMATION_MS) return null;
   return entree.action || null;
 }
 
@@ -318,6 +325,7 @@ async function executerAction(action, ctx) {
         detail: { verbe: action.verbe, sujet: action.sujet }
       }, action),
       action,
+      confirmation_requise:true,
       validation
     };
   }
