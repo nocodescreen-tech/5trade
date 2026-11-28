@@ -723,7 +723,7 @@ function appendHistory(entry) {
 // DeepSeek a été retiré du chemin d'analyse : il n'y a plus d'appel payant.
 // Le nettoyage JSON vit dans json-ia.js.
 
-async function appelNvidia(modele, messages, { maxTokens = 2000, json = false, timeoutMs } = {}) {
+async function appelNvidia(modele, messages, { maxTokens = 2000, json = false, timeoutMs, signal, strictJson = false } = {}) {
   const key = process.env.NVIDIA_API_KEY;
   if (!key) {
     const e = new Error('NVIDIA_API_KEY non configurée dans .env');
@@ -776,7 +776,7 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false, t
         max_tokens: tokens,
         temperature: 0.3
       }),
-      signal: AbortSignal.timeout(delaiPour(modele, timeoutMs))
+      signal: signal || AbortSignal.timeout(delaiPour(modele, timeoutMs))
     });
 
     const brut = await res.text();
@@ -792,7 +792,7 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false, t
   let data = await envoyer(budget());
   let choix = (data.choices || [])[0] || {};
   let msg = choix.message || {};
-  let contenu = msg.content || msg.reasoning_content;
+  let contenu = msg.content || (json ? '' : msg.reasoning_content);
 
   if ((!contenu || !String(contenu).trim()) && choix.finish_reason === 'length') {
     const elargi = budget() * 3;
@@ -800,15 +800,16 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false, t
     data = await envoyer(elargi);
     choix = (data.choices || [])[0] || {};
     msg = choix.message || {};
-    contenu = msg.content || msg.reasoning_content;
+    contenu = msg.content || (json ? '' : msg.reasoning_content);
   }
 
   if (!contenu || !String(contenu).trim()) {
     throw new Error(`NVIDIA ${modele} : réponse vide (finish=${choix.finish_reason || '?'})`);
   }
   contenu = String(contenu);
+  if (strictJson && choix.finish_reason === 'length') throw new Error('Réponse IA tronquée');
   return {
-    contenu: json ? extraireJSON(contenu) : contenu,
+    contenu: strictJson ? contenu : (json ? extraireJSON(contenu) : contenu),
     modele: `nim:${modele}`,
     usage: data.usage || {}
   };
@@ -825,10 +826,10 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false, t
 /**
  * Repli ultrarapide Google Gemini pour texte et JSON (si NVIDIA est lent ou saturé).
  */
-async function appelGeminiTexte(messages, { maxTokens = 2000, json = false } = {}) {
+async function appelGeminiTexte(messages, { maxTokens = 2000, json = false, signal, strictJson = false } = {}) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error('GEMINI_API_KEY non configurée');
-  const modele = process.env.GEMINI_TEXT_MODEL || 'gemini-1.5-flash';
+  const modele = process.env.GEMINI_TEXT_MODEL || process.env.GEMINI_VISION_MODEL || 'gemini-1.5-flash';
   const prompt = messages.map(m => `${String(m.role || 'user').toUpperCase()}:\n${m.content}`).join('\n\n');
   const body = {
     contents: [{ parts: [{ text: prompt }] }],
@@ -844,34 +845,41 @@ async function appelGeminiTexte(messages, { maxTokens = 2000, json = false } = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(10000)
+    signal: signal || AbortSignal.timeout(10000)
   });
   if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
   const data = await res.json();
   const cand = data?.candidates?.[0];
-  const text = cand?.content?.parts?.[0]?.text;
+  const text = (cand?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
   if (!text) throw new Error('Réponse vide de Gemini');
-  return json ? extraireJSON(text) : text;
+  if (strictJson && cand.finishReason === 'MAX_TOKENS') throw new Error('Réponse IA tronquée');
+  return strictJson ? text : (json ? extraireJSON(text) : text);
 }
 
 /**
  * Point d'entrée IA UNIQUE de l'app — NVIDIA NIM en cascade, avec repli Gemini ultra rapide.
  */
 let dernierFournisseur = 'aucun';
-async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'ia' } = {}) {
+async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'ia', deadline, valider } = {}) {
   const raisons = [];
   const debut = Date.now();
+  const reste = () => deadline == null ? Infinity : deadline - Date.now();
+  const strictJson = typeof valider === 'function';
+  const verifier = contenu => strictJson ? valider(contenu) : contenu;
 
   // 1. Essai de la chaîne NVIDIA NIM (budget de 10s max par essai pour réactivité)
   if (process.env.NVIDIA_API_KEY) {
     for (const modele of NVIDIA_MODELS) {
-      const restant = Math.min(10000, NVIDIA_BUDGET_TOTAL_MS - (Date.now() - debut));
+      const reserveGemini = deadline != null && process.env.GEMINI_API_KEY ? 7000 : 0;
+      const restant = Math.min(10000, NVIDIA_BUDGET_TOTAL_MS - (Date.now() - debut), reste() - reserveGemini);
       if (restant <= 2000) {
         raisons.push(`${modele}: non essayé (délai dépassé)`);
         break;
       }
       try {
-        const r = await appelNvidia(modele, messages, { maxTokens, json, timeoutMs: restant });
+        const r = await appelNvidia(modele, messages, { maxTokens, json, timeoutMs: restant, strictJson,
+          signal: deadline == null ? undefined : AbortSignal.timeout(Math.floor(restant)) });
+        const contenuValide = verifier(r.contenu);
         try {
           Couts.enregistrer({
             route,
@@ -885,7 +893,7 @@ async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'i
           console.log(`[IA] ${modele} a répondu (${route}).`);
         }
         dernierFournisseur = `nim:${modele}`;
-        return r.contenu;
+        return contenuValide;
       } catch (e) {
         if (e.status === 400) throw e;
         raisons.push(`${modele}: ${e.message}`);
@@ -895,9 +903,10 @@ async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'i
   }
 
   // 2. Repli immédiat sur Google Gemini si disponible (temps de réponse < 2s)
-  if (process.env.GEMINI_API_KEY) {
+  if (process.env.GEMINI_API_KEY && reste() > 500) {
     try {
-      const rGemini = await appelGeminiTexte(messages, { maxTokens, json });
+      const rGemini = verifier(await appelGeminiTexte(messages, { maxTokens, json, strictJson,
+        signal: deadline == null ? undefined : AbortSignal.timeout(Math.floor(Math.min(10000, reste()))) }));
       dernierFournisseur = 'gemini:flash';
       console.log(`[IA] Gemini Flash a pris le relais avec succès (${route}).`);
       return rGemini;
@@ -3640,7 +3649,8 @@ function decouperEnSections(texte, maxParFiche = 15000) {
  * Transforme UN texte de strategie en fiche exploitable, sans l'enregistrer.
  * Sortie de la route pour pouvoir traiter plusieurs sections d'un document.
  */
-async function structurerTexte(texte) {
+const { validerFicheDescription } = require('./core/knowledge-description');
+async function structurerTexte(texte, deadline) {
   try {
   const consigne = `Tu transformes la description d'un trader en FICHE DE STRATÉGIE exploitable par un moteur d'analyse.
 
@@ -3692,7 +3702,10 @@ N'invente rien : si une information n'est pas dans la description, mets null ou 
 
   let fiche;
   try {
-    const out = await analyserIA([{ role: 'user', content: consigne }], { maxTokens: 2000, json: true, route: 'description-strategie' });
+    const out = await analyserIA([{ role: 'user', content: consigne }], {
+      maxTokens: 2000, json: true, route: 'description-strategie', deadline,
+      valider: validerFicheDescription
+    });
     fiche = JSON.parse(out);
   } catch (e) {
     throw new Error(`L'analyse du texte a échoué (${e.message}).`)
@@ -3791,18 +3804,22 @@ app.post('/api/strategies/decrire', requireAuth, async (req, res) => {
 
     const resultats = [];
     const echecs = [];
+    // Budget partagé : ne pas empiler les délais des fournisseurs et sections.
+    const deadline = Date.now() + 20000;
     for (const section of liste) {
       try {
-        resultats.push(await structurerTexte(section));
+        if (Date.now() >= deadline) throw new Error('Budget de temps épuisé');
+        resultats.push(await structurerTexte(section, deadline));
       } catch (e) {
         // Une section en échec ne doit pas faire perdre les autres.
-        echecs.push({ extrait: section.slice(0, 70) + '…', erreur: e.message });
+        console.warn('[Knowledge] Analyse section échouée :', e.message);
+        echecs.push({ extrait: section.slice(0, 70) + '…', erreur: 'Analyse IA indisponible ou fiche incomplète.' });
       }
     }
     if (!resultats.length) {
-      return res.status(502).json({
-        error: `L'analyse du texte a échoué (${echecs[0] ? echecs[0].erreur : 'service d\'IA indisponible'}).`
-          + ' Vérifie que le service d\'IA répond, puis réessaie.'
+      return res.status(503).json({
+        success: false, code: 'STRATEGY_ANALYSIS_UNAVAILABLE',
+        error: 'Analyse IA temporairement indisponible. Aucune fiche enregistrée. Réessaie ou utilise le mode Manuel.'
       });
     }
 
