@@ -3957,7 +3957,7 @@ function LiveStatusIndicator({
     }
   }, /*#__PURE__*/React.createElement(TtPill, {
     tone: live && !offline ? 'ok' : 'warn'
-  }, /*#__PURE__*/React.createElement("span", {
+  }, live && !offline && /*#__PURE__*/React.createElement("span", {
     className: "dot-live",
     style: {
       width: 6,
@@ -15266,9 +15266,7 @@ function Dashboard({
       background: 'rgba(16,185,129,.12)',
       color: '#34d399'
     }
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "dot-live"
-  }), "Espace de travail"), /*#__PURE__*/React.createElement("span", {
+  }, "Espace de travail"), /*#__PURE__*/React.createElement("span", {
     className: "badge",
     style: {
       background: 'rgba(148,163,184,.1)',
