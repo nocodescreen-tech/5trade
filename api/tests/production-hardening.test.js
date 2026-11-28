@@ -248,3 +248,18 @@ test('Deriv PAT failures never leak provider response or token and never invent 
   }));
   assert.equal(invalid.ok, false);
 });
+
+
+test('Deriv candles are closed only after their period and malformed OHLC is rejected', () => {
+  const deriv = require('../sources/market').providerById('deriv');
+  const candle = { epoch: 1700000000, open: '100', high: '103', low: '98', close: '102' };
+  const t = candle.epoch * 1000;
+  assert.equal(deriv._toCandles([candle], '1m', t + 59999)[0].closed, false);
+  assert.equal(deriv._toCandles([candle], '1m', t + 60000)[0].closed, true);
+  for (const close of [null, '', undefined, false, 'NaN', '999', 0]) {
+    assert.throws(() => deriv._toCandles([{ ...candle, close }], '1m', t + 60000), /invalide/);
+  }
+  assert.throws(() => deriv._toCandles([], '1m', t + 60000), /vide/);
+  assert.equal(deriv.parse({msg_type:'ohlc',ohlc:{ ...candle, symbol:'R_75', close:null }}), null);
+  assert.equal(deriv.parse({msg_type:'ohlc',ohlc:{ ...candle, symbol:'R_75' }}).candle.closed, false);
+});
