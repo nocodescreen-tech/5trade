@@ -2448,7 +2448,15 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
   const [durationVal, setDurationVal] = useState(5);
   const [optionsDeriv, setOptionsDeriv] = useState(false);
   const lv = signal && signal.levels ? signal.levels : null;
-  const ok = lv && Number.isFinite(Number(lv.entry)) && Number.isFinite(Number(lv.stop));
+  const prixValide = x => x != null && x !== '' && Number.isFinite(Number(x)) && Number(x)>0;
+  const long = signal?.sens === 'long' || signal?.direction === 'BUY' || signal?.direction === 'long';
+  const short = signal?.sens === 'short' || signal?.direction === 'SELL' || signal?.direction === 'short';
+  const ok = lv && [lv.entry,lv.stop,lv.target1,lv.target2].every(prixValide)
+    && ((long && !short && +lv.stop < +lv.entry && +lv.entry < +lv.target1 && +lv.target1 < +lv.target2)
+      || (short && !long && +lv.stop > +lv.entry && +lv.entry > +lv.target1 && +lv.target1 > +lv.target2));
+  const autoriseSimulation = !!(ok && signal?.id && decision?.signal?.id === signal.id && decision.risque?.ok === true
+    && (long ? decision.decision === 'ACHAT' : decision.decision === 'VENTE')
+    && decision.signauxRetenus?.some(x=>x.id === signal.id && x.executable === true));
   if (!ok) {
     const enCours = !decision;
     const motifMoteur = decision
@@ -2468,7 +2476,7 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
               {enCours
                 ? 'Le moteur évalue les bougies et structures institutionnelles…'
-                : `Motif : ${motifMoteur}. 5TRADE ne déclenche un signal que lorsque les 4 niveaux stricts (Entrée, SL, TP1, TP2) sont garantis.`}
+                : `Motif : ${motifMoteur}. Les quatre niveaux (entrée, SL, TP1, TP2) doivent être présents et ordonnés.`}
             </div>
           </div>
         </div>
@@ -2524,7 +2532,7 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 16, fontWeight: 900, color: col, letterSpacing: '.02em' }}>
-                SETUP {achat ? 'ACHAT (BUY)' : 'VENTE (SELL)'}
+                {autoriseSimulation ? 'SETUP VALIDÉ' : 'PLAN À VÉRIFIER'} · {achat ? 'BUY' : 'SELL'}
               </span>
               {rr && (
                 <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 7px', borderRadius: 5, background: 'rgba(16,185,129,.2)', color: '#34d399', border: '1px solid rgba(16,185,129,.4)' }}>
@@ -2574,9 +2582,9 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
               } finally {
                 setTimeout(() => setDemoStatus(''), 3000);
               }
-            }} title="Prendre immédiatement ce trade en compte démo">
+            }} disabled={!autoriseSimulation || demoStatus === 'En cours…'} title="Enregistrer une simulation locale après validation du moteur">
             <i className="fas fa-play" style={{ marginRight: 5 }}></i>
-            {demoStatus || 'Exécuter Démo'}
+            {demoStatus || 'Simuler au journal'}
           </button>
 
           <button className="btn sm" style={{ padding: '5px 10px', fontSize: 11, background: '#ef4444', color: '#fff', border: '1px solid #dc2626' }}
@@ -2605,13 +2613,13 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
               } finally {
                 setTimeout(() => setDerivTradeMsg(''), 4500);
               }
-            }} title="Passer cet ordre sur Deriv (Websocket officiel)">
+            }} disabled title="Exécution Deriv suspendue : intégration courtier non validée">
             <i className="fas fa-bolt" style={{ marginRight: 5 }}></i>
-            {derivTradeMsg || `Trader Deriv ($${stake})`}
+            {derivTradeMsg || 'Ordres Deriv suspendus'}
           </button>
 
           <button className="btn sm ghost" style={{ padding: '5px 8px', fontSize: 11 }}
-            onClick={() => setOptionsDeriv(!optionsDeriv)} title="Réglages de mise et durée Deriv">
+            disabled onClick={() => setOptionsDeriv(!optionsDeriv)} title="Réglages de mise et durée Deriv">
             <i className="fas fa-gear"></i>
           </button>
 
@@ -2622,7 +2630,7 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
                 entry: Number(lv.entry), sl: Number(lv.stop),
                 tp: Number.isFinite(Number(lv.target1)) ? Number(lv.target1) : null,
                 timeframe: tf, provider, providerLabel,
-                signalStatus: 'confirme', signalStrength: signal.force,
+                signalStatus: autoriseSimulation ? 'confirme' : 'surveiller', signalStrength: signal.force,
                 notes: `Setup ${achat ? 'achat' : 'vente'} — ${signal.nom || 'moteur'}`
               })} title="Enregistrer dans le journal de trading">
               <i className="fas fa-floppy-disk" style={{ marginRight: 5 }}></i>Journal
