@@ -150,7 +150,7 @@ class DerivClient {
   async enregistrer(appId, apiToken, accountId = null) {
     const test = await this.verifierEtAutoriser(appId, apiToken, accountId);
     if (!test.ok) {
-      return { success: false, error: test.error };
+      return { success: false, error: test.error, accounts: test.accounts || [] };
     }
     const config = {
       appId: String(appId || DEFAULT_APP_ID).trim() || DEFAULT_APP_ID,
