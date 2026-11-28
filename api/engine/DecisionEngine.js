@@ -562,7 +562,13 @@ function niveauArbitrage(signaux, meta, options = {}) {
       id: s.id, nom: s.nom, source: s.source, sens: s.sens,
       direction: s.direction || (s.sens === 'long' ? 'BUY' : s.sens === 'short' ? 'SELL'
         : s.sens === 'neutre' ? 'NEUTRAL' : 'UNKNOWN'),
-      force: s.force, rr: s.rr
+      force: s.force, rr: s.rr,
+      status: s.statusFinal || s.status,
+      entree: s.entree ?? s.levels?.entry,
+      stop: s.stop ?? s.levels?.stop,
+      objectifs: s.objectifs || [s.levels?.target1,s.levels?.target2].filter(Number.isFinite),
+      levels:s.levels, at:s.at, conditions:s.conditions,
+      modele:s.modele, structureContexte:s.structureContexte
     })),
     meilleurSignal: meilleurSignal ? {
       id: meilleurSignal.id,
