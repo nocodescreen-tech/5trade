@@ -78,6 +78,8 @@ test('Deriv masks stored tokens and disconnects without touching persistent acco
   const write = DB.kvEcrire;
   const cached = DerivClient._cachedConfig;
   let config = null;
+  const previousKey = process.env.DERIV_TOKEN_KEY;
+  process.env.DERIV_TOKEN_KEY = 'ab'.repeat(32);
   try {
     DB.kvLire = async () => config;
     DB.kvEcrire = async (_key, value) => { config = value; };
@@ -87,13 +89,20 @@ test('Deriv masks stored tokens and disconnects without touching persistent acco
     const status = await DerivClient.obtenirStatut();
     assert.equal(status.connecte, true);
     assert.match(status.tokenMasque, /••••••••/);
-    assert.ok(!JSON.stringify(status).includes(config.apiToken));
+    assert.equal(config.apiToken, undefined);
+    assert.equal(config.tokenEncrypted.v, 1);
+    assert.ok(!JSON.stringify(config).includes('secretTokenDeTest123456789'));
+    assert.ok(!JSON.stringify(status).includes('secretTokenDeTest123456789'));
+    DerivClient._cachedConfig = null;
+    assert.equal((await DerivClient.lireConfig()).apiToken, 'secretTokenDeTest123456789');
     await DerivClient.deconnecter();
     assert.equal((await DerivClient.obtenirStatut()).connecte, false);
   } finally {
     DB.kvLire = read;
     DB.kvEcrire = write;
     DerivClient._cachedConfig = cached;
+    if (previousKey === undefined) delete process.env.DERIV_TOKEN_KEY;
+    else process.env.DERIV_TOKEN_KEY = previousKey;
   }
 });
 
