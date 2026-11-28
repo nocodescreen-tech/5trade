@@ -30,3 +30,20 @@ test('skill generation rejects arbitrary model code and invalid specifications',
     assert.ok(result.erreur);
   }
 });
+
+
+test('legacy sandbox refuses arbitrary and apparently benign JavaScript',()=>{
+ const S=require('../skills/sandbox');
+ assert.equal(S.chargerDansSandbox('module.exports = {value:1}').ok,false);
+ assert.throws(()=>S.creerContexteSecurise(),/désactivée/);
+});
+test('declarative skills reject unsupported operations and prototype output keys',()=>{
+ const {compile}=require('../skills/declarative');
+ const base={id:'test-calculator',nom:'Calcul test',description:'Calcul numérique borné',version:'1.0.0',actions:['calc']};
+ assert.throws(()=>compile({...base,outputs:{calc:{result:{op:'exec',args:[1,2]}}}}));
+ assert.throws(()=>compile({...base,outputs:{calc:JSON.parse('{"constructor":1}')}}));
+ const skill=compile({...base,outputs:{calc:{result:{op:'div',args:[{input:'a'},{input:'b'}]}}}});
+ assert.equal(skill.actif,false);
+ assert.throws(()=>skill.executer({a:1,b:0}),/Division par zéro/);
+ assert.deepEqual(skill.executer({a:8,b:2}),{result:4});
+});

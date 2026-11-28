@@ -11,6 +11,8 @@
  */
 
 const fs = require('fs');
+const crypto = require('node:crypto');
+const APPROVED_NATIVE = '4e6812190b2eb27610064ee6d231c7c942e47f5f';
 const path = require('path');
 const { validerSkill } = require('./validator');
 const { executerMethodeSecurisee } = require('./sandbox');
@@ -73,6 +75,10 @@ function chargerDossierSkill(dossierSkill, nomDossier) {
     const indexPath = path.join(dossierSkill, 'index.js');
     const stat = fs.lstatSync(indexPath);
     if (!stat.isFile() || stat.isSymbolicLink()) return false;
+    // Native code must match the reviewed Git blob; proposals remain declarative.
+    const bytes = Buffer.from(fs.readFileSync(indexPath,'utf8').replace(/\r\n/g,'\n'),'utf8');
+    const digest = crypto.createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');
+    if (digest !== APPROVED_NATIVE) return false;
     // Only the built-in, version-controlled module is trusted native code.
     skillObj = require(indexPath);
   } else {

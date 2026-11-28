@@ -8123,7 +8123,7 @@ function tinyPng(W = 64, H = 40) {
       ok('sessions : un instrument de classe inconnue est refusé par défaut',
         stInconnuStrict.ouvert === false && stInconnuStrict.statut === 'inconnu');
 
-      // 11. Sandbox sécurisée (node:vm)
+      // 11. Refus de tout JavaScript généré
       const Sandbox = require('./skills/sandbox');
       const codeMalveillant = 'module.exports = { id: "bad", executer: () => { return process.env; } };';
       const resSandboxMal = Sandbox.chargerDansSandbox(codeMalveillant);
@@ -8132,8 +8132,8 @@ function tinyPng(W = 64, H = 40) {
 
       const codeSain = 'module.exports = { id: "calculateur", nom: "Calcul", version: "1.0.0", description: "Skill de calcul mathématique pur", actions: ["add"], executer: (p) => ({ resultat: (p.a || 0) + (p.b || 0) }) };';
       const resSandboxSain = Sandbox.chargerDansSandbox(codeSain);
-      ok('skill sandbox : exécute hermétiquement un skill valide',
-        resSandboxSain.ok === true && resSandboxSain.exports.id === 'calculateur');
+      ok('skill sandbox : refuse également le JavaScript apparemment valide',
+        resSandboxSain.ok === false);
 
       // 12. Generated skills are declarative data, never arbitrary JavaScript.
       const Factory = require('./skills/factory');
