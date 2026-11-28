@@ -272,6 +272,7 @@ function resetDedup() { config.deja = []; save(); return config; }
  * et la force. Les rejetés sont comptés, pas listés (le message resterait
  * illisible) — ils restent visibles dans l'app.
  */
+const escTelegram = value => String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 function blocSignaux(multi) {
   if (!multi || !Array.isArray(multi.signaux) || !multi.signaux.length) return '';
   const retenus = multi.signaux.filter(s => s.status === 'confirme' || s.status === 'surveiller');
@@ -282,7 +283,7 @@ function blocSignaux(multi) {
     const src = s.source === 'strategie' ? (s.strategie || s.nom) : s.nom;
     const sens = s.sens === 'long' ? 'achat' : s.sens === 'short' ? 'vente' : 'neutre';
     const etat = s.status === 'confirme' ? '' : ' (à surveiller)';
-    return `• <b>${src}</b> — ${sens}${etat} · force ${Math.round((s.force || 0) * 100)} %`;
+    return `• <b>${escTelegram(src)}</b> — ${sens}${etat} · force ${Math.round((s.force || 0) * 100)} %`;
   });
   const reste = retenus.length > 10 ? `\n… et ${retenus.length - 10} autre(s)` : '';
   return `\n\n<b>Signaux détectés (${retenus.length})</b>\n${lignes.join('\n')}${reste}`;
@@ -296,8 +297,8 @@ function blocContexte(multi) {
   const z = k.zoneLaPlusProche;
   const morceaux = [
     `tendance ${tend}`,
-    pos ? `prix en ${pos}` : null,
-    z ? `${z.type} à ${z.distanceAtr} ATR` : null,
+    pos ? `prix en ${escTelegram(pos)}` : null,
+    z ? `${escTelegram(z.type)} à ${escTelegram(z.distanceAtr)} ATR` : null,
     Number.isFinite(k.atr) ? `ATR ${k.atr}` : null
   ].filter(Boolean);
   return morceaux.length ? `\nContexte : ${morceaux.join(' · ')}` : '';
@@ -306,14 +307,14 @@ function blocContexte(multi) {
 function messageTelegram(v, m, qualite = {}) {
   const L = v.levels || {};
   const sens = v.direction === 'BUY' ? 'ACHAT' : 'VENTE';
-  const prix = Number.isFinite(Number(v.price)) ? Number(v.price) : null;
+  const prix = Number.isFinite(v.price) ? v.price : null;
   const pct = v.strength ? ` · force ${Math.round(v.strength * 100)} %` : '';
   const nbRegles = Number.isFinite(v.confirmations) ? v.confirmations : (v.rules || []).length;
 
   // Niveaux : on affiche le prix ET l'écart, en R, parce qu'un prix seul ne dit
   // pas si le stop est à 3 pips ou 30. Un niveau absent est dit absent — la
   // version précédente affichait « — » sans expliquer pourquoi.
-  const num = x => (Number.isFinite(Number(x)) ? Number(x) : null);
+  const num = x => (Number.isFinite(x) ? x : null);
   // Prix lisibles : « 3861.253698 » sur l'or n'aide personne. Les décimales
   // suivent l'ordre de grandeur (2 sur l'or, 5 sur EURUSD, 3 sur USDJPY).
   const prixTxt = x => {
@@ -323,46 +324,18 @@ function messageTelegram(v, m, qualite = {}) {
     const d = a >= 1000 ? 2 : a >= 100 ? 3 : a >= 10 ? 3 : 5;
     return v.toFixed(d);
   };
-  const entree = num(L.entry) ?? prix;
+  const entree = num(L.entry);
   const stop = num(L.stop);
   const tp1 = num(L.target1);
   const tp2 = num(L.target2);
   const risque = entree !== null && stop !== null ? Math.abs(entree - stop) : null;
   const enR = cible => (risque && cible !== null ? ` (${((Math.abs(cible - entree)) / risque).toFixed(2)} R)` : '');
 
-  // Dimensionnement dynamique du lot selon capital et risque réel configuré
-  let lotTexte = null;
-  try {
-    const Risque = require('../risk/risque');
-    const cfgRisque = Risque.charger();
-    const capital = cfgRisque.capital || 1000;
-    const risquePct = cfgRisque.risquePct || 1;
-    const montantRisque = (capital * risquePct) / 100;
-    if (risque && risque > 0) {
-      let tickVal = 1;
-      let tickTaille = 0.01;
-      const s = String(m.symbol || '').toUpperCase();
-      if (s.includes('XAU') || s.includes('GOLD')) {
-        tickVal = 10;
-        tickTaille = 0.1;
-      } else if (s.includes('BTC') || s.includes('CRY')) {
-        tickVal = 1;
-        tickTaille = 1;
-      } else if (s.includes('JPY')) {
-        tickVal = 1000;
-        tickTaille = 0.01;
-      } else if (s.startsWith('FRX') || s.includes('EUR') || s.includes('GBP')) {
-        tickVal = 100000;
-        tickTaille = 0.0001;
-      }
-      const distanceTicks = Math.max(1, risque / tickTaille);
-      const lotsEstimes = Math.max(0.01, Math.min(50, Number((montantRisque / (distanceTicks * (tickVal * tickTaille))).toFixed(2))));
-      lotTexte = `Taille conseillée : <b>${lotsEstimes} lot(s)</b> (risque ${risquePct}% = $${montantRisque.toFixed(1)} sur $${capital})`;
-    }
-  } catch { /* si indisponible on omet */ }
+  // Aucun lot estimé sans spécification de contrat vérifiée et devise du compte.
+  const lotTexte = 'Taille de position : à calculer avec les spécifications vérifiées du courtier.';
 
   const lignes = [
-    `<b>${sens} confirmé — ${m.symbol} ${m.tf}</b>${pct}`,
+    `<b>${sens} confirmé — ${escTelegram(m.symbol)} ${escTelegram(m.tf)}</b>${pct}`,
     '',
     entree !== null ? `Entrée : <b>${prixTxt(entree)}</b>` : 'Entrée : <b>non chiffrée</b>',
     stop !== null ? `Invalidation : <b>${prixTxt(stop)}</b>${risque ? ` (risque ${risque.toFixed(risque < 1 ? 5 : 2)})` : ''}`
@@ -371,26 +344,26 @@ function messageTelegram(v, m, qualite = {}) {
     tp2 !== null ? `Objectif 2 : <b>${prixTxt(tp2)}</b>${enR(tp2)}` : null,
     lotTexte,
     Number.isFinite(qualite.rr) ? `Gain/risque : ${qualite.rr.toFixed(2)} pour 1` : null,
-    nbRegles ? `Règles : ${(v.rules || []).map(r => r.name).filter(Boolean).join(' + ') || nbRegles + ' confirmée(s)'}` : null,
+    nbRegles ? `Règles : ${(v.rules || []) .map(r => escTelegram(r.name)).filter(Boolean).join(' + ') || nbRegles + ' confirmée(s)'}` : null,
     qualite.confluence
-      ? `Alignement : ${qualite.confluence.nbAlignes}/${qualite.confluence.detail.length} unités d'accord`
+      ? `Alignement : ${qualite.confluence.nbAlignes}/${(qualite.confluence.detail || []).length} unités d'accord`
       : null
   ].filter(x => x !== null);
 
   // Les conditions vérifiées : c'est ce qui permet de juger le signal, pas
   // seulement de le recevoir.
   if (Array.isArray(v.checklist) && v.checklist.length) {
-    const cochees = v.checklist.map(x => `${x.ok ? '✓' : '✗'} ${x.label || ''}`).join(' · ');
-    lignes.push('', `<b>Conditions</b>\n${cochees}`.slice(0, 900));
+    const cochees = v.checklist.map(x => `${x.ok ? '✓' : '✗'} ${escTelegram(String(x.label || '').slice(0,100))}`).join(' · ');
+    lignes.push('', `<b>Conditions</b>\n${cochees}`);
   }
   // Le détail des règles (2 lignes max, tronquées) : la raison du signal.
   const details = (v.rules || []).filter(r => r && r.detail).slice(0, 3)
-    .map(r => `• ${r.name} : ${String(r.detail).slice(0, 140)}`);
+    .map(r => `• ${escTelegram(r.name)} : ${escTelegram(String(r.detail).slice(0, 140))}`);
   if (details.length) lignes.push('', `<b>Pourquoi</b>\n${details.join('\n')}`);
   // Alignement, unité par unité.
   if (qualite.confluence && Array.isArray(qualite.confluence.detail)) {
     lignes.push('', qualite.confluence.detail
-      .map(t => `${t.tf} : ${t.tendance || '?'} · ${t.status || '?'}${t.direction && t.direction !== 'NEUTRE' ? ' ' + t.direction : ''}`)
+      .map(t => `${escTelegram(t.tf)} : ${escTelegram(t.tendance || '?')} · ${escTelegram(t.status || '?')}${t.direction && t.direction !== 'NEUTRE' ? ' ' + escTelegram(t.direction) : ''}`)
       .join('\n'));
   }
 
@@ -398,7 +371,7 @@ function messageTelegram(v, m, qualite = {}) {
   lignes.push('5trade — outil d\'analyse, pas un conseil en investissement.');
 
   let texte = lignes.join('\n') + blocContexte(qualite.multi) + blocSignaux(qualite.multi);
-  if (texte.length > 3900) texte = texte.slice(0, 3900) + '\n… (tronqué)';
+  if (texte.length > 3900) { const essential=lignes.slice(0,9).join('\n'); texte=essential.length<3700 ? essential+'\n… Détails disponibles dans 5trade.' : 'Signal confirmé. Consulter les niveaux et les détails dans 5trade.'; }
   return texte;
 }
 
@@ -797,12 +770,13 @@ async function verifierBrut(force = false) {
         }
         // Par défaut, une vérification impossible BLOQUE : on ne prend pas une
         // position sur un marché macro sans savoir ce qui est publié.
-        if (fondamental && fondamental.statut === 'NEWS_UNKNOWN' && c.accepterNewsNonVerifiee !== true) {
-          dire({ verdict: `signal bloqué — ${fondamental.lecture} (accepterNewsNonVerifiee pour passer outre)`, fondamental });
+        if (classe !== 'synthetique' && (!fondamental || fondamental.verifie !== true || fondamental.ok !== true)) {
+          dire({ verdict: `signal bloqué — ${fondamental?.lecture || 'Calendrier non vérifié'}`, fondamental });
           continue;
         }
       }
-      if (v.strength < c.forceMin) {
+      if (classe !== 'synthetique' && (!fondamental || fondamental.verifie !== true || fondamental.ok !== true)) { dire({verdict:'signal bloqué — calendrier non vérifié'}); continue; }
+      if (!Number.isFinite(v.strength) || v.strength < c.forceMin) {
         dire({ verdict: `confirmé mais force ${Number(v.strength).toFixed(2)}/1 (${v.forceNiveau || '—'}) < seuil` });
         continue;
       }
