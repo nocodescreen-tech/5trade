@@ -67,7 +67,7 @@ async function contexteTempsReel() {
     const J = require('../engine/journal-signaux');
     const journal = J.charger();
     const ouvertes = (journal.signaux || []).filter(s => s.resultat === 'ouvert');
-    lignes.push(`Positions ouvertes : ${ouvertes.length}`);
+    lignes.push(`Positions simulées du journal (pas des ordres courtier) : ${ouvertes.length}`);
     for (const s of ouvertes.slice(0, 8)) {
       const age = s.at ? ((Date.now() - s.at) / 3600000).toFixed(1) : '?';
       lignes.push(`- ${s.symbol || '?'} ${s.timeframe || '?'} ${s.sens} : entrée ${num(s.entree)}, `
@@ -94,7 +94,7 @@ async function contexteTempsReel() {
     const InstrumentsActifs = require('../core/instruments-actifs');
     const Scan = require('../delivery/scan');
     const actifs = InstrumentsActifs.obtenirActifs();
-    lignes.push(`Marchés surveillés enregistrés : ${actifs.length ? actifs.join(', ') : 'aucun'}`);
+    lignes.push(`Marchés surveillés enregistrés : ${actifs.length ? actifs.map(a => (a.symbol || String(a)) + (a.tf ? ' '+a.tf : '')).join(', ') : 'aucun'}`);
     const ds = Scan.dernierScan();
     if (ds && ds.dernier) {
       const d = ds.dernier;
@@ -111,9 +111,8 @@ async function contexteTempsReel() {
   // 4. Calendrier économique & Filtre Macro (Heure de Kinshasa WAT)
   try {
     const Fund = require('../sources/fundamentals');
-    const cal = await Fund.getCalendar();
-    const vCPI = Fund.verdictDevise(cal, 'USD', { fenetreMin: 30 });
-    lignes.push(`Filtre macro USD/CPI : ${vCPI.bloque ? 'BLOQUÉ' : 'Dégagé'} (Phase : ${vCPI.phase || 'Neutre'}, Kinshasa : ${vCPI.heureKinshasa || 'N/A'})`);
+    const cal = await Fund.filtreCalendrier('frxXAUUSD', { strict:true });
+    lignes.push(`Filtre macro USD : ${cal.verifie ? (cal.bloque ? 'BLOQUÉ' : 'vérifié') : 'NON VÉRIFIÉ — aucune autorisation'} ; ${cal.detail || ''}`);
   } catch { /* ignorer */ }
 
   // 5. Consignes et préférences persistées en mémoire
@@ -123,7 +122,7 @@ async function contexteTempsReel() {
     if (prefs && prefs.length) {
       lignes.push(`Consignes persistées en mémoire (${prefs.length}) :`);
       for (const p of prefs.slice(0, 5)) {
-        lignes.push(`- [${p.categorie || 'règle'}] ${p.consigne}`);
+        lignes.push(`- [${p.categorie || 'règle'}] ${p.contenu || p.consigne || 'contenu indisponible'}`);
       }
     }
   } catch { /* ignorer */ }
@@ -135,6 +134,8 @@ async function contexteTempsReel() {
     if (r) lignes.push('Derniers événements :\n' + r);
   } catch { /* idem */ }
 
+  lignes.push('Exécution courtier : désactivée. Les observations prospectives ne sont pas des ordres. Les skills générés nécessitent une revue humaine.');
+  try { const M = require('../moteurs'); lignes.push('Couverture moteurs : '+M.etat().map(m=>m.classe+': '+m.niveau).join(', ')); } catch { lignes.push('Couverture moteurs indisponible'); }
   return lignes.join('\n');
 }
 
