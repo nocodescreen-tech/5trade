@@ -5220,7 +5220,7 @@ async function start() {
     DecisionEngine,
     // Alignement multi-unités : la décision l'exige, donc la surveillance reçoit
     // le MÊME calcul que l'écran et le direct — un seul chiffre, trois parcours.
-    alignementMtf: (symbole, unite, prov) => alignementMtf(symbole, unite, prov),
+    alignementMtf: (symbole, unite, prov, options) => alignementMtf(symbole, unite, prov, options),
     // Garde-fou de compte : la surveillance refuse ce que la décision refuse.
     verificateurRisque: verificateurRisqueCompte,
     // Traçabilité phase 2 : conditions nommées et preuves en base. Absent ou en
