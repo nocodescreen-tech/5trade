@@ -27,6 +27,9 @@ jobs:
       - name: Porte de vérification (racine du dépôt)
         run: npm test
 
+      - name: Tests de non-régression Node.js
+        run: node --test api/tests/*.test.js
+
       # Les tests qui dépendent du réseau (R2, Gemini, SMTP) se marquent
       # « non testés » quand les clés sont absentes : c'est voulu, un CI sans
       # secrets ne doit pas faire semblant de les avoir vérifiés.
