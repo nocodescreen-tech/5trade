@@ -153,7 +153,7 @@ function versContrat(verdict, meta = {}) {
     preuves: Array.isArray(v.preuves) ? v.preuves : [],
     entree: l && estNombre(l.entry) ? l.entry : null,
     stop: l && estNombre(l.stop) ? l.stop : null,
-    objectifs: l ? [l.target1, l.target2].filter(estNombre) : [],
+    objectifs: l ? objectifsNormalises({}, l) : [],
     // Le Math.abs portait sur TOUTE la fraction : un objectif placé du mauvais
     // côté de l'entrée affichait un RR positif. Il porte désormais sur chaque
     // distance — un RR ne peut plus cacher une cible incohérente.
@@ -166,7 +166,7 @@ function versContrat(verdict, meta = {}) {
     // Ni l'une ni l'autre ne dit que la DÉCISION autorise l'entrée : c'est le rôle
     // de DecisionEngine, et de lui seul.
     reglesAlignees: v.status === 'confirme',
-    executablePossible: !!(l && estNombre(l.entry) && estNombre(l.stop) && estNombre(l.target1)),
+    executablePossible: !!(l && estNombre(l.entry) && estNombre(l.stop) && estNombre(l.target1) && (v.direction === 'BUY' ? l.stop < l.entry && l.target1 > l.entry && (l.target2 == null || (estNombre(l.target2) && l.target2 > l.target1)) : v.direction === 'SELL' && l.stop > l.entry && l.target1 < l.entry && (l.target2 == null || (estNombre(l.target2) && l.target2 < l.target1)))),
     base: l ? (l.base || null) : null,
     raison: v.summary || null
   });
@@ -211,8 +211,9 @@ function directionDe(sens) {
 }
 
 function objectifsNormalises(b, l) {
+  const t1 = b.target1 ?? l.target1, t2 = b.target2 ?? l.target2;
   const brut = Array.isArray(b.objectifs) ? b.objectifs
-    : [b.target1 ?? l.target1, b.target2 ?? l.target2].filter(v => v !== undefined && v !== null);
+    : t2 != null ? [t1, t2] : t1 != null ? [t1] : [];
   return brut.map(nombreOuNull);
 }
 
