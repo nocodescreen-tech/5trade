@@ -3701,7 +3701,7 @@ Réponds en JSON strict, sans texte autour :
   "concepts": ["OB","FVG","Sweep"],
   "motsCles": ["3 à 6 mots-clés pour retrouver la fiche"]
 }
-Le JSON ci-dessus est un EXEMPLE de format, pas de valeurs à recopier. Le style doit être scalping, intraday, swing ou null. Utilise des timeframes en minuscules (M1 devient 1m, M5 devient 5m). Toutes les clés de l’exemple doivent être présentes. Pour les champs facultatifs inconnus, utilise null ou une liste vide. Choisis uniquement les règles décrites, notamment R1 pour une mèche de balayage. Si aucune règle native ne correspond, ne prétends pas qu’elle existe. N’invente ni seuil, ni objectif. Réponds directement avec le JSON final, sans raisonnement.`;
+Le JSON ci-dessus est un EXEMPLE de format, pas de valeurs à recopier. Le style doit être scalping, intraday, swing ou null. Utilise des timeframes en minuscules (M1 devient 1m, M5 devient 5m). Toutes les clés de l’exemple doivent être présentes. Pour les champs facultatifs inconnus, utilise null ou une liste vide. Choisis uniquement les règles décrites, notamment R1 pour une mèche de balayage. Si aucune règle native ne correspond, ne prétends pas qu’elle existe. N'invente rien : ni seuil, ni objectif, ni condition absente du texte. Réponds directement avec le JSON final, sans raisonnement.`;
 
   let fiche;
   try {
