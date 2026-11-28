@@ -336,11 +336,31 @@ function simuler(signaux, options = {}) {
   const ouvertes = [];     // {sortie, risque, marche}
   const courbe = [];
 
-  for (const t of trades) {
-    // 1. Libérer ce qui s'est clôturé avant cette entrée.
-    for (let i = ouvertes.length - 1; i >= 0; i--) {
-      if (ouvertes[i].sortie <= t.at) ouvertes.splice(i, 1);
+  const jours = new Map();
+  const jourCle = at => { const d = new Date(at); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  function jour(at) {
+    const cle = jourCle(at);
+    if (!jours.has(cle)) jours.set(cle, { capitalDebut: capital, pnl: 0 });
+    return jours.get(cle);
+  }
+  function solder(jusqua) {
+    ouvertes.sort((a, b) => a.sortie - b.sortie);
+    while (ouvertes.length && ouvertes[0].sortie <= jusqua) {
+      const p = ouvertes.shift();
+      const bilan = jour(p.sortie);
+      const pnl = p.risque * p.r;
+      capital = Math.max(0, capital + pnl);
+      bilan.pnl += pnl;
+      pic = Math.max(pic, capital);
+      if (pic > 0) pireDrawdown = Math.min(pireDrawdown, (capital - pic) / pic);
+      if (p.sortie >= debutJourMs) rJour += p.r;
+      courbe.push({ at: p.sortie, r: p.r, capital: +capital.toFixed(2) });
     }
+  }
+  for (const t of trades) {
+    // Le résultat futur ne devient disponible qu'à la clôture effective.
+    solder(t.at);
+    const bilan = jour(t.at);
     // 2. État à cet instant, calculé sur les positions encore ouvertes.
     const risqueParMarche = {};
     const expositionParMarche = {};
@@ -353,7 +373,8 @@ function simuler(signaux, options = {}) {
     }
     const instantane = {
       capital, positionsOuvertes: ouvertes.length, risqueEngage, risqueParMarche,
-      expositionTotale, expositionParMarche, perteJourPct: 0
+      expositionTotale, expositionParMarche,
+      perteJourPct: bilan.capitalDebut > 0 ? Math.max(0, -100 * bilan.pnl / bilan.capitalDebut) : 100
     };
     // 3. Vérifier les plafonds.
     const verdict = verifierPrise(
@@ -377,17 +398,14 @@ function simuler(signaux, options = {}) {
       sortie: horizon,
       risque: verdict.risqueMontant || 0,
       exposition: verdict.exposition || 0,
-      marche: t.symbol || '?'
+      marche: t.symbol || '?',
+      r: t.r
     });
-    capital *= (1 + (t.r * pct) / 100);
-    pic = Math.max(pic, capital);
-    if (pic > 0) pireDrawdown = Math.min(pireDrawdown, (capital - pic) / pic);
     prises++;
-    // La perte du jour ne compte QUE les trades que le compte a réellement pris.
-    // Sinon le stop journalier se déclenche sur des pertes qu'on n'a pas subies.
-    if ((t.leveLe || t.at) >= debutJourMs) rJour += t.r;
-    courbe.push({ at: t.at, r: t.r, capital: +capital.toFixed(2) });
   }
+  solder(Infinity);
+  const bilanJour = jours.get(jourCle(Date.now()));
+  const perteJourPct = bilanJour && bilanJour.capitalDebut > 0 ? Math.max(0, -100 * bilanJour.pnl / bilanJour.capitalDebut) : 0;
 
   return {
     capitalInitial: capital0,
@@ -404,7 +422,7 @@ function simuler(signaux, options = {}) {
     // Perte du jour RÉELLEMENT subie (trades pris seulement) : c'est elle qui
     // doit arrêter la journée, pas la somme de tout ce qui a été détecté.
     rJour: +rJour.toFixed(2),
-    perteJourPct: +(-(rJour * pct)).toFixed(2),
+    perteJourPct: +perteJourPct.toFixed(2),
     plafonds: cfg,
     courbe: courbe.slice(-200),
     // Comparaison : ce que donnerait la composition naïve (sans plafonds).
