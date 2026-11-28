@@ -19,6 +19,8 @@ This branch is intentionally not deployed before verification.
 ## Verification
 Run `npm --prefix api ci`, then `node --test api/tests/production-hardening.test.js` and `npm test`. Validate PostgreSQL migrations/outbox on a disposable database, Telegram with a test bot, and authenticated UI using a test account. No broker order should be sent.
 
+The legacy HTTP verification is disabled by default. To exercise it, start a dedicated local test server on a separate port (not 3001), with disposable storage and synthetic accounts, and explicitly set `VERIFY_HTTP_URL=http://127.0.0.1:3101` before running verification. An explicitly configured but unreachable server now fails the check instead of being counted as skipped. Do not use a live application instance or production credentials.
+
 ## Local handoff
 Use a fresh Git worktree on the hardening branch with no production .env or database credentials. Run the canonical tests before merging. Check frontend rendering and migrations on a disposable database. The frontend bundle was patched in parallel with the source, not rebuilt by a compiler in the remote session. Full live market-data validation, broker fills, full charting-terminal redesign, broker fills and autonomous strategy learning are not yet complete. Never enable real broker execution on the strength of historical results alone.
 
