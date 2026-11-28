@@ -151,3 +151,21 @@ test('replay capital is settled once rather than credited twice',()=>{
   assert.equal(run.stats.capitalFinal,1020);
   assert.equal(run.stats.positionsMaxSimultanees,1);
 });
+
+test('TP2 cannot substitute for missing TP1',()=>{
+  const raw={direction:'BUY',status:'confirme',strength:.8,levels:{entry:100,stop:95,target2:120}};
+  const contract=C.normaliser(raw,{source:'scan'});
+  assert.deepEqual(contract.objectifs,[null,120]);
+  assert.equal(C.validerSignal(contract).ok,false);
+  assert.equal(C.versContrat(raw).executablePossible,false);
+});
+test('journal never counts an already processed candle twice',()=>{
+  const J=require('../engine/journal-signaux');
+  const sig={at:1,symbol:'TEST',sens:'long',entree:100,stop:95,objectifs:[110,120],resultat:'ouvert'};
+  const bars=[{t:2,o:100,h:104,l:99,c:103,closed:true}];
+  J.evaluer(sig,bars);
+  J.evaluer(sig,bars);
+  assert.equal(sig.bougiesSuivies,1);
+  J.evaluer(sig,[...bars,{t:3,o:103,h:106,l:101,c:105,closed:true}]);
+  assert.equal(sig.bougiesSuivies,2);
+});
