@@ -4893,10 +4893,11 @@ app.get('/api/performance', requireAuth, (req, res) => {
     const limite = Math.min(Number(req.query.limite) || 2000, 5000);
     const bruts = JournalSignaux.lister({ limite });
     const trades = (bruts || [])
-      .filter(s => Number.isFinite(Number(s.r)))
+      .filter(s => ['tp1','tp2','be','sl','expire'].includes(s.resultat) && Performance.rValide(s.r))
       .map(s => ({
         id: s.cle, r: Number(s.r),
-        at: typeof s.at === 'number' ? new Date(s.at).toISOString() : s.at,
+        at: Number.isFinite(Performance.instant(s.at)) ? new Date(Performance.instant(s.at)).toISOString() : null,
+        closAt: Number.isFinite(Performance.instant(s.leveLe)) ? new Date(Performance.instant(s.leveLe)).toISOString() : null,
         strategie: s.strategie || (s.source === 'strategie' ? s.nom : null),
         symbole: s.symbol, timeframe: s.timeframe
       }));
@@ -4916,6 +4917,8 @@ app.get('/api/performance', requireAuth, (req, res) => {
       // d'une stratégie. Sans cette précision, les chiffres se lisent de travers.
       couverture: { avecStrategie, sansStrategie: trades.length - avecStrategie },
       // Rappel explicite : ces chiffres décrivent le passé, pas une probabilité.
+      provenance: 'journal_signaux_simule',
+      ordresCourtier: false,
       avertissement: trades.length && avecStrategie === 0
         ? 'Aucun trade n\'est rattaché à une stratégie : ces chiffres décrivent les signaux GÉNÉRIQUES (motifs et structure), pas une stratégie nommée.'
         : 'Performance passée sur trades tranchés : ne garantit aucun résultat futur.'
