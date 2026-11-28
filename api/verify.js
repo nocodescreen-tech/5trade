@@ -1210,7 +1210,7 @@ function tinyPng(W = 64, H = 40) {
     ok('les tableaux larges défilent au lieu de casser la page',
       /table\{display:block;overflow-x:auto/.test(htmlSrc));
     ok('le graphique s\'adapte en hauteur sur petit écran',
-      /\.chart-mobile\{height:\d+px!important\}/.test(htmlSrc) && /className="chart-mobile"/.test(jsx));
+      /height=\{big \? \(etroi \? 460 : 620\) : \(etroi \? 300 : 430\)\}/.test(jsx) && /className="chart-mobile"/.test(jsx) && /terminal\.css/.test(htmlSrc));
     ok('le défilement au doigt est fluide', /-webkit-overflow-scrolling:touch/.test(htmlSrc));
   }
 
