@@ -678,7 +678,7 @@ function tinyPng(W = 64, H = 40) {
     // prouver l'envoi d'un signal, pas la tolérance aux synthétiques.
     Al.update({ actif: false, email: 'a@b.co', marches: [{ symbol: 'frxXAUUSD', tf: '15m', provider: 'deriv' }] });
     Al.start({ market: faux, signals: Sig, sendMail: async m => envois.push(m), labelOf: () => 'test',
-      DecisionEngine: fauxDE });
+      DecisionEngine: fauxDE, filtreNews: async () => ({ applicable:true, verifie:true, ok:true, bloque:false }) });
     let rr = await Al.verifier(false);
     ok('alertes : désactivées → aucun contrôle', rr.controle === false && envois.length === 0);
 
@@ -693,6 +693,15 @@ function tinyPng(W = 64, H = 40) {
           && /Entrée/.test(envois[0].html) && /Invalidation/.test(envois[0].html),
         envois[0].subject);
     }
+    Al.stop();
+    Al.start({market:faux,signals:Sig,sendMail:async m=>envois.push(m),DecisionEngine:fauxDE,filtreNews:async()=>({applicable:true,verifie:false,ok:false,bloque:true})});
+    Al.resetDedup();
+    const avantBlocage=envois.length;
+    const refuseMacro=await Al.verifier(true);
+    ok('alertes : un calendrier non vérifié interdit réellement tout envoi', refuseMacro.envoyes===0&&envois.length===avantBlocage);
+    Al.stop();
+    Al.start({market:faux,signals:Sig,sendMail:async m=>envois.push(m),DecisionEngine:fauxDE,filtreNews:async()=>({applicable:true,verifie:true,ok:true,bloque:false})});
+    await Al.verifier(true);
     const avant = envois.length;
     rr = await Al.verifier(true);
     ok('alertes : le même signal ne repart pas', rr.envoyes === 0 && envois.length === avant,
@@ -3464,7 +3473,7 @@ function tinyPng(W = 64, H = 40) {
         const s = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
         return /deps\.alignementMtf/.test(a)
           && /confluence: confluenceSurveillance/.test(a)
-          && /alignementMtf: \(symbole, unite, prov\) => alignementMtf/.test(s);
+          && /alignementMtf: \(symbole, unite, prov, options\) => alignementMtf\(symbole, unite, prov, options\)/.test(s);
       })());
 
     // ── RISK ENGINE : un plafond atteint doit GARDER la décision ──────────
