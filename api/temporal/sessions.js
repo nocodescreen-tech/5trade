@@ -61,6 +61,7 @@ function statutMarche(symbol, dateOuTs = Date.now(), options = {}) {
   const ts = d.getTime();
   const info = classifier(symbol);
   const classe = info.classe || 'inconnu';
+  if (!Number.isFinite(ts)) return {ouvert:false,statut:'inconnu',classe,continu:false,weekend:false,raison:'Horodatage invalide',prochaineOuverture:null,prochaineFermeture:null,dst:false};
   const dst = estHeureEteUS(d);
 
   // 1. Marchés continus 24h/24, 7j/7
@@ -93,33 +94,21 @@ function statutMarche(symbol, dateOuTs = Date.now(), options = {}) {
     ? options.reouvertureDimancheUTC
     : (dst ? 21 : 22);
 
-  // Calcul du prochain dimanche à l'heure d'ouverture
-  function getProchainDimancheOuverture(fromTime) {
+  // Resolve DST on the TARGET day, not on the day the request was made.
+  function prochaineEcheance(fromTime, jourCible, surcharge) {
     const target = new Date(fromTime);
-    target.setUTCMinutes(0, 0, 0);
-    target.setUTCHours(heureOuvertureForex);
-    const day = target.getUTCDay();
-    const diff = (7 - day) % 7;
-    target.setUTCDate(target.getUTCDate() + diff);
+    target.setUTCHours(12,0,0,0);
+    target.setUTCDate(target.getUTCDate() + (jourCible - target.getUTCDay() + 7) % 7);
+    const ajuster = () => target.setUTCHours(Number.isFinite(surcharge) ? surcharge : (estHeureEteUS(target) ? 21 : 22),0,0,0);
+    ajuster();
     if (target.getTime() <= fromTime) {
       target.setUTCDate(target.getUTCDate() + 7);
+      ajuster();
     }
     return target;
   }
-
-  // Calcul du prochain vendredi à l'heure de fermeture
-  function getProchainVendrediFermeture(fromTime) {
-    const target = new Date(fromTime);
-    target.setUTCMinutes(0, 0, 0);
-    target.setUTCHours(heureFermetureForex);
-    const day = target.getUTCDay();
-    let diff = 5 - day;
-    if (diff < 0 || (diff === 0 && target.getTime() <= fromTime)) {
-      diff += 7;
-    }
-    target.setUTCDate(target.getUTCDate() + diff);
-    return target;
-  }
+  const getProchainDimancheOuverture = fromTime => prochaineEcheance(fromTime,0,options.reouvertureDimancheUTC);
+  const getProchainVendrediFermeture = fromTime => prochaineEcheance(fromTime,5,options.fermetureVendrediUTC);
 
   // 2. Forex et Métaux
   if (classe === 'forex' || classe === 'metaux' || classe === 'energies') {
@@ -136,7 +125,7 @@ function statutMarche(symbol, dateOuTs = Date.now(), options = {}) {
         classe,
         continu: false,
         weekend: true,
-        raison: `Marché ${info.libelle} fermé le week-end (fermeture vendredi ${heureFermetureForex}:00 UTC, réouverture dimanche ${heureOuvertureForex}:00 UTC${dst ? ' · heure d\'été EDT' : ''})`,
+        raison: `Marché ${info.libelle} fermé le week-end (fermeture vendredi ${heureFermetureForex}:00 UTC, réouverture dimanche ${reouverture.getUTCHours()}:00 UTC${dst ? ' · heure d\'été EDT' : ''})`,
         prochaineOuverture: reouverture,
         prochaineFermeture: null,
         dst
