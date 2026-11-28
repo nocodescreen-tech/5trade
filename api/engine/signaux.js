@@ -266,7 +266,19 @@ function conditionsMotif(motif) {
  * autres. C'est le correctif central : cinq stratégies = cinq évaluations.
  */
 function signalStrategie(candles, meta, profil) {
+  const invalide = profil.executable === false || profil.partiel || profil.reglesEcartees?.length || profil.filtresEcartes?.length ||
+    profil.timeframesRefusees?.length || !Array.isArray(profil.regles) || !profil.regles.length ||
+    profil.regles.some(r=>!Object.hasOwn(Signals.TOUTES_REGLES,r)) ||
+    (profil.obligatoires || []).some(r=>!profil.regles.includes(r));
+  if (invalide) return {
+    id:'strat:'+ (profil.id || profil.titre),source:'strategie',nom:profil.titre || profil.id || 'Stratégie',
+    strategie:profil.titre || null,tf:meta.timeframe || null,sens:'neutre',status:'refuse',
+    force:0,conditions:[],preuves:[],entree:null,stop:null,objectifs:[],rr:null,
+    raison:profil.motif || 'Contrat de stratégie incomplet ou désactivé',
+    regles:profil.regles || [],timeframesStrategie:profil.timeframes || null
+  };
   const opts = {
+    strict:true,
     regles: profil.regles,
     seuilForce: profil.seuilForce,
     seuilRegles: profil.seuilRegles,
