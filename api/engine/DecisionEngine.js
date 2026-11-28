@@ -713,13 +713,15 @@ function decider(candles, meta, options = {}) {
   if (options.ignorerPreferences !== true && meta && meta.symbol) {
     try {
       const Prefs = require('../memoire/preferences');
-      const horodatage = options.date || (candles && candles.length ? (candles[candles.length - 1].time || candles[candles.length - 1].epoch * 1000) : Date.now());
+      const last = candles?.[candles.length - 1];
+      const horodatage = options.date ?? last?.t ?? last?.time ?? (Number.isFinite(last?.epoch) ? last.epoch * 1000 : Date.now());
       const d = new Date(horodatage);
-      const jour = d.getUTCDay();
+      if (!Number.isFinite(d.getTime())) throw new Error('Horodatage des contraintes invalide');
+      const jour = new Date(d.getTime() + 3600000).getUTCDay(); // Kinshasa UTC+1
       const contraintes = options.contraintes || (typeof Prefs.obtenirContraintesActivesSync === 'function' ? Prefs.obtenirContraintesActivesSync() : null);
 
       if (contraintes) {
-        if (contraintes.symbolesInterdits && contraintes.symbolesInterdits.has(meta.symbol.toUpperCase())) {
+        if (contraintes.symbolesInterdits && [...contraintes.symbolesInterdits].some(sym => String(sym).toUpperCase().replace(/^FRX/, '') === String(meta.symbol).toUpperCase().replace(/^FRX/, ''))) {
           return {
             decision: 'NO_TRADE',
             raison: `Consigne permanente utilisateur : trading interdit sur ${meta.symbol.toUpperCase()}`,
@@ -752,7 +754,17 @@ function decider(candles, meta, options = {}) {
           };
         }
       }
-    } catch { /* contraintes non-bloquantes si mémoire indisponible */ }
+    } catch {
+      return {
+        decision: 'NO_TRADE', biais: 'neutre', raison: 'Mémoire des consignes indisponible ou non synchronisée', consigneBloquante: true,
+        detection: {ok:false,details:[],resume:'Préférences non vérifiées'},
+        validation: {ok:false,details:[],resume:'Préférences non vérifiées'},
+        confirmation: {ok:false,details:[]}, execution: {ok:false,details:[]},
+        arbitrage: {decision:'NO_TRADE',raison:'Préférences non vérifiées',biais:'neutre',signauxRetenus:[]},
+        risque: {etat:{consulte:false,motif:'préférences non vérifiées'}},
+        traçabilite: {detection:0,validation:0,confirmation:0,execution:0,arbitrage:'NO_TRADE',risque:'ignore'}
+      };
+    }
   }
 
   // 0. On récupère TOUS les signaux (stratégies + motifs + structure)
