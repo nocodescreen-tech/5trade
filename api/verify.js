@@ -1097,7 +1097,7 @@ function tinyPng(W = 64, H = 40) {
     ok('un buffer périmé repart en appel source',
       /\(Date\.now\(\) - maj\) < FRAICHEUR_MS/.test(mSrc));
     ok('le flux temps réel rafraîchit la date du buffer',
-      /applyCandle[\s\S]{0,220}bufferMaj\.set\(k, Date\.now\(\)\)/.test(mSrc));
+      /function applyCandle[\s\S]{0,700}bufferMaj\.set\(k, Date\.now\(\)\)/.test(mSrc));
 
     // Vérification directe du comportement, sans réseau : la marque s'applique
     // bien à la dernière bougie et seulement à elle.
@@ -2041,13 +2041,13 @@ function tinyPng(W = 64, H = 40) {
   {
     const mSrc = fs.readFileSync(path.join(__dirname, 'sources/market.js'), 'utf8');
     ok('l\'erreur de flux n\'est plus avalée en silence',
-      !/ws\.on\('error', \(\) => \{\}\)/.test(mSrc) && /erreur socket/.test(mSrc));
+      /socket\.on\('error', e => console\.error/.test(mSrc));
     ok('la reconnexion a un compteur de tentatives',
-      /essaisFlux/.test(mSrc) && /MAX_ESSAIS_FLUX/.test(mSrc));
+      /state\.attempts\+\+/.test(mSrc) && /MAX_ESSAIS_FLUX/.test(mSrc));
     ok('l\'attente croît avec les tentatives (backoff)',
-      /Math\.min\(3000 \* essaisFlux/.test(mSrc));
-    ok('le compteur repart à zéro quand le flux s\'ouvre',
-      /essaisFlux = 0/.test(mSrc));
+      /Math\.min\(3000 \* state\.attempts, 30000\)/.test(mSrc));
+    ok('le compteur repart à zéro après réception d’une cotation valide',
+      /if \(!parsed \|\| !symbols\.includes\(parsed\.symbol\)\) return;\s*state\.attempts = 0/.test(mSrc));
   }
 
   // ── Compteurs d'OTP : un compteur de sécurité ne peut pas être perdu ──
