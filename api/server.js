@@ -2546,7 +2546,7 @@ app.post('/api/trades', requireAuth, async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// ─── Connecteur Broker Deriv (WebSocket API v3) ───
+// ─── Connecteur Broker Deriv (REST PAT + WebSocket OTP) ───
 const DerivBroker = require('./deriv/client');
 
 app.get('/api/deriv/status', requireAuth, async (req, res) => {
@@ -2560,11 +2560,15 @@ app.get('/api/deriv/status', requireAuth, async (req, res) => {
 
 app.post('/api/deriv/config', requireAuth, async (req, res) => {
   try {
-    const { appId, apiToken } = req.body || {};
+    const { appId, apiToken, accountId } = req.body || {};
+    if (typeof appId !== 'string' || !appId.trim() || appId.length > 128 || typeof apiToken !== 'string' || !apiToken.trim() || apiToken.length > 8192 || (accountId != null && (typeof accountId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(accountId)))) {
+      return res.status(400).json({ success: false, error: 'App ID PAT, token ou identifiant de compte invalide' });
+    }
+    res.set('Cache-Control', 'no-store');
     if (!apiToken) {
       return res.status(400).json({ success: false, error: 'Token API Deriv requis' });
     }
-    const r = await DerivBroker.enregistrer(appId, apiToken);
+    const r = await DerivBroker.enregistrer(appId.trim(), apiToken.trim(), accountId || null);
     if (!r.success) {
       return res.status(400).json(r);
     }
