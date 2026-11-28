@@ -44,17 +44,17 @@ async function getCalendarAvecEtat() {
           !Array.isArray(flux.evenements) || !flux.evenements.length) {
         throw new Error('Calendrier structuré indisponible ou périmé');
       }
-      const events = flux.evenements.filter(e => Number.isFinite(e.date)).map(e => ({
-        timestamp: e.date,
-        date: new Date(e.date).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }),
-        heure: new Date(e.date).toLocaleTimeString('en-US', { timeZone: 'UTC', hour: 'numeric', minute: '2-digit', hour12: true }),
+      const events = flux.evenements.map(e => ({
+        timestamp: Number.isFinite(e.date) ? e.date : null,
+        date: Number.isFinite(e.date) ? new Date(e.date).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }) : null,
+        heure: Number.isFinite(e.date) ? new Date(e.date).toLocaleTimeString('en-US', { timeZone: 'UTC', hour: 'numeric', minute: '2-digit', hour12: true }) : null,
         devise: String(e.devise || '').toUpperCase(),
         impact: e.impactNiveau >= 3 ? 'high' : e.impactNiveau === 2 ? 'medium' : e.impactNiveau === 1 ? 'low' : 'unknown',
         titre: e.titre || '',
         precedent: e.precedent ?? null, consigne: e.prevision ?? null, reel: e.reel ?? null,
         source: e.source || flux.source || null
       }));
-      if (!events.length) throw new Error('Aucun événement horodaté');
+      if (!events.some(e=>Number.isFinite(e.timestamp))) throw new Error('Aucun événement horodaté');
       cache = events;
       cacheTime = flux.at;
     }
