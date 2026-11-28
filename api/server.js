@@ -4727,6 +4727,42 @@ async function executerBacktest(src = {}) {
   return resultat;
 }
 
+// Validation chronologique explicite : une seule fiche figée, sans optimisation.
+let validationChronologiqueEnCours = false;
+app.post('/api/backtest/validation', requireAuth, async (req,res) => {
+  if (validationChronologiqueEnCours) return res.status(429).json({success:false,error:'Validation déjà en cours'});
+  const src=req.body || {};
+  const symbol=String(src.symbol || '').trim();
+  const tf=String(src.tf || '5m').trim();
+  const id=String(src.strategyId || '').trim();
+  const count=Number(src.bougies ?? 800);
+  if (!symbol || !id || !Market.TF_MS[tf] || !Number.isInteger(count) || count<200 || count>800) {
+    return res.status(400).json({success:false,error:'Symbole, timeframe, stratégie et 200 à 800 bougies requis'});
+  }
+  validationChronologiqueEnCours=true;
+  try {
+    const docs=await loadAllStrategies();
+    const doc=(docs || []).find(d=>d.id===id);
+    if (!doc) return res.status(404).json({success:false,error:'Stratégie introuvable'});
+    const profil=Signals.profilDepuisStrategie(doc);
+    const compatible=require('./strategy-engine/strategy-contract').filtrerParClasse([doc],symbol);
+    if (doc.actif===false || profil.executable===false || profil.partiel || !compatible.compatibles.length) {
+      return res.status(422).json({success:false,error:'Stratégie incomplète, inactive ou incompatible'});
+    }
+    const data=await Market.getCandles(symbol,tf,count,src.provider || undefined);
+    if (data.offline || data.source==='cache') return res.status(503).json({success:false,error:'Historique source indisponible'});
+    const r=require('./engine/validation-chronologique').valider(data.candles,{symbol,timeframe:tf},profil,{
+      ratio:src.ratio===undefined?undefined:Number(src.ratio),
+      pas:src.pas===undefined?undefined:Number(src.pas),
+      initialCapital:src.initialCapital===undefined?undefined:Number(src.initialCapital),
+      riskPct:src.riskPct===undefined?undefined:Number(src.riskPct)
+    });
+    return res.json({success:true,...r});
+  } catch(e) {
+    return res.status(422).json({success:false,error:e.message});
+  } finally {validationChronologiqueEnCours=false;}
+});
+
 app.get('/api/backtest', requireAuth, async (req, res) => {
   try { res.json(await executerBacktest(req.query)); }
   catch (e) { res.status(e.code || 500).json({ success: false, error: e.message }); }
