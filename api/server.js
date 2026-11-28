@@ -926,7 +926,9 @@ async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'i
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 jours
 let sessions = {};          // token → { username, expires }
-const loginAttempts = {};   // ip → { count, until }
+const loginAttempts = Object.create(null);   // ip → { count, until }
+const AuthChallenge = require('./security/auth-challenge');
+const challenges = AuthChallenge.create({ ttlMs: 20 * 60 * 1000, max: 256 });
 
 async function loadSessions() {
   sessions = await DB.loadSessions();
@@ -944,19 +946,10 @@ function createSession(username) {
   return token;
 }
 
-function parseCookies(req) {
-  const out = {};
-  const raw = req.headers.cookie;
-  if (!raw) return out;
-  raw.split(';').forEach(p => {
-    const i = p.indexOf('=');
-    if (i > -1) out[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim());
-  });
-  return out;
-}
+function parseCookies(req) { return AuthChallenge.parseCookies(req.headers.cookie); }
 
 function setSessionCookie(res, token) {
-  res.setHeader('Set-Cookie',
+  res.append('Set-Cookie',
     // `Secure` interdit l'envoi du cookie en HTTP clair. On l'active dès que le
     // serveur est en production (ou sur demande explicite) ; en développement
     // local en http, l'activer empêcherait la session de s'établir.
@@ -964,13 +957,13 @@ function setSessionCookie(res, token) {
       (process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true' ? '; Secure' : ''));
 }
 function clearSessionCookie(res) {
-  res.setHeader('Set-Cookie', 's5_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
+  res.append('Set-Cookie', 's5_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' + (process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true' ? '; Secure' : ''));
 }
 
 function getSession(req) {
   const token = parseCookies(req).s5_session;
-  if (!token) return null;
-  const s = sessions[token];
+  if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) return null;
+  const s = Object.hasOwn(sessions,token) ? sessions[token] : null;
   if (!s) return null;
   if (s.expires < Date.now()) { delete sessions[token]; saveSessions(); return null; }
   return { token, ...s };
@@ -1004,7 +997,7 @@ function rateLimitLogin(req, res, next) {
 // vider le crédit en quelques minutes. Par COMPTE et non par IP : c'est
 // l'utilisateur authentifié qui consomme, et plusieurs navigateurs peuvent
 // partager une IP. Généreux — 15 analyses / 5 min suffisent à l'usage normal.
-const analysesParCompte = {};
+const analysesParCompte = Object.create(null);
 function rateLimitAnalyse(req, res, next) {
   const compte = (req.session && req.session.username) || req.ip || 'x';
   const now = Date.now();
@@ -1208,7 +1201,7 @@ function verifyOtp(username, code, purpose) {
 async function issueOtpBrut(username, purpose, { enforceCooldown = true } = {}) {
   const store = await DB.loadOtp();
   const now = Date.now();
-  const rec = store[username] || { sends: [] };
+  const rec = Object.hasOwn(store,username) ? store[username] : { sends: [] };
   rec.sends = (rec.sends || []).filter(t => now - t < 3600_000);
 
   if (enforceCooldown && rec.sends.length) {
@@ -1235,7 +1228,7 @@ async function issueOtpBrut(username, purpose, { enforceCooldown = true } = {}) 
   };
   await DB.saveOtp(store);
   if (process.env.NODE_ENV !== 'production') {
-    console.log(`[DEV] OTP ${purpose} pour ${username} : ${code}`);
+    console.log('[DEV] Code OTP émis');
   }
   return code;
 }
@@ -1244,16 +1237,16 @@ async function verifyOtpBrut(username, code, purpose) {
   if (!/^\d{6}$/.test(String(code || ''))) throw httpError('Le code doit contenir 6 chiffres.', 400);
 
   const store = await DB.loadOtp();
-  const rec = store[username];
-  if (!rec) throw httpError('Aucun code en attente. Demandez un nouveau code.', 400);
+  const rec = Object.hasOwn(store,username) ? store[username] : null;
+  if (!rec || !rec.hash) throw httpError('Aucun code en attente. Demandez un nouveau code.', 400);
   if (rec.purpose !== purpose) throw httpError('Code invalide pour cette action.', 400);
 
   if (rec.expires < Date.now()) {
-    delete store[username]; await DB.saveOtp(store);
+    store[username] = { sends: rec.sends || [] }; await DB.saveOtp(store);
     throw httpError('Code expiré. Demandez un nouveau code.', 400);
   }
   if (rec.attempts >= OTP_MAX_ATTEMPTS) {
-    delete store[username]; await DB.saveOtp(store);
+    store[username] = { sends: rec.sends || [] }; await DB.saveOtp(store);
     throw httpError('Trop de tentatives. Demandez un nouveau code.', 429);
   }
 
@@ -1267,7 +1260,7 @@ async function verifyOtpBrut(username, code, purpose) {
     throw httpError(`Code incorrect (${OTP_MAX_ATTEMPTS - rec.attempts} essai(s) restant(s)).`, 401);
   }
 
-  delete store[username]; // usage unique
+  store[username] = { sends: rec.sends || [] }; // usage unique, quota conservé
   await DB.saveOtp(store);
   return true;
 }
@@ -1292,19 +1285,20 @@ async function sendOtpEmail(account, code, purpose) {
 
 // ─── Validation d'entrée robuste ───
 function validateUsername(u) {
-  if (!u || !/^[A-Za-z0-9_.-]{3,32}$/.test(u)) {
+  if (typeof u !== 'string' || !/^[A-Za-z0-9_.-]{3,32}$/.test(u) || ['__proto__','constructor','prototype'].includes(u.toLowerCase())) {
     return "Nom d'utilisateur invalide (3-32 caractères : lettres, chiffres, . _ -)";
   }
   return null;
 }
 function validateEmail(e) {
   if (!e) return null; // email optionnel -> celui du propriétaire
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) return 'Adresse email invalide';
+  if (typeof e !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) return 'Adresse email invalide';
   if (e.length > 254) return 'Adresse email trop longue';
   return null;
 }
 function passwordIssues(p) {
   const out = [];
+  if (typeof p !== 'string' || p.length > 1024) return ['un mot de passe valide (1024 caractères maximum)'];
   if (!p || p.length < 8) out.push('au moins 8 caractères');
   if (!/[A-Z]/.test(p || '')) out.push('une majuscule');
   if (!/[a-z]/.test(p || '')) out.push('une minuscule');
@@ -1355,6 +1349,7 @@ app.post('/api/signup', rateLimitLogin, async (req, res) => {
 
     // Envoi du code OTP
     const code = await issueOtp(account.username, 'signup', { enforceCooldown: false });
+    challenges.issue(res, account.username, 'signup');
     try {
       await sendOtpEmail(account, code, 'signup');
     } catch (mailErr) {
@@ -1384,7 +1379,7 @@ app.post('/api/signup', rateLimitLogin, async (req, res) => {
 app.post('/api/verify-otp', rateLimitLogin, async (req, res) => {
   try {
     const { username, code, purpose } = req.body;
-    if (!username || !code || !purpose) {
+    if (typeof username !== 'string' || typeof code !== 'string' || !['signup','login'].includes(purpose)) {
       return res.status(400).json({ error: 'Données incomplètes' });
     }
     const account = await DB.getAccount();
@@ -1392,7 +1387,11 @@ app.post('/api/verify-otp', rateLimitLogin, async (req, res) => {
       return res.status(404).json({ error: 'Compte introuvable' });
     }
 
+    const challenge = challenges.check(req, username, purpose);
+    if (!challenge || (purpose === 'signup' ? account.verified === true : account.verified !== true)) return res.status(401).json({error:'Tentative de connexion expirée. Recommencez la connexion.'});
     await verifyOtp(username, code, purpose);
+    if (!challenges.consume(challenge)) return res.status(401).json({error:'Tentative de connexion expirée'});
+    challenges.clear(res);
 
     if (purpose === 'signup') {
       account.verified = true;
@@ -1420,6 +1419,7 @@ app.post('/api/resend-otp', rateLimitLogin, async (req, res) => {
     if (!account || account.username !== username) {
       return res.status(404).json({ error: 'Compte introuvable' });
     }
+    if (!challenges.check(req,username,purpose) || (purpose === 'signup' ? account.verified === true : account.verified !== true)) return res.status(401).json({error:'Tentative de connexion expirée. Recommencez la connexion.'});
     const code = await issueOtp(username, purpose);
     await sendOtpEmail(account, code, purpose);
     res.json({ success: true, email: maskEmail(account.email), message: 'Nouveau code envoyé.' });
@@ -1430,7 +1430,8 @@ app.post('/api/resend-otp', rateLimitLogin, async (req, res) => {
 
 app.post('/api/login', rateLimitLogin, async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { username, password } = req.body || {};
+    if (typeof username !== 'string' || username.length > 254 || typeof password !== 'string' || !password.length || password.length > 1024) return res.status(400).json({error:'Identifiants invalides'});
     const account = await DB.getAccount();
     if (!account) {
       return res.status(404).json({ error: 'Aucun compte. Inscrivez-vous d\'abord.' });
@@ -1464,6 +1465,7 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
     }
 
     const code = await issueOtp(account.username, purpose);
+    challenges.issue(res,account.username,purpose);
     try {
       await sendOtpEmail(account, code, purpose);
     } catch (mailErr) {
@@ -1472,8 +1474,7 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
       // cause (sans secret) : configuration incomplète, SMTP filtré, API refusée.
       return res.status(502).json({
         error: "Impossible d'envoyer le code par email.",
-        cause: mailErr.code || null,
-        detail: String(mailErr.message || '').slice(0, 300)
+        cause: 'EMAIL_DELIVERY_FAILED'
       });
     }
 
@@ -1493,6 +1494,8 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
 app.post('/api/logout', (req, res) => {
   const s = getSession(req);
   if (s) { delete sessions[s.token]; saveSessions(); }
+  challenges.revoke(req);
+  challenges.clear(res);
   clearSessionCookie(res);
   res.json({ success: true });
 });
