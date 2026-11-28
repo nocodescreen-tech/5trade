@@ -3551,7 +3551,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
                   <label style={{ fontSize: 11.5, fontWeight: 700, color: '#e2e8f0' }}>
                     2. Token API Deriv
                   </label>
-                  <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noopener noreferrer"
+                  <a href="https://developers.deriv.com/" target="_blank" rel="noopener noreferrer"
                     style={{ fontSize: 11, color: '#38bdf8', textDecoration: 'none' }}>
                     <i className="fas fa-external-link-alt" style={{ marginRight: 4 }}></i>Créer mon Token Deriv
                   </a>
@@ -3568,7 +3568,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
                   </button>
                 </div>
                 <div style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4 }}>
-                  Crée un token avec la seule autorisation <b>Lecture (Read)</b>. Ne donne pas la permission Trading.
+                  Crée un PAT pour la nouvelle API avec la portée <b>trade</b>. Cette portée est requise par Deriv pour lister les comptes Options.
                 </div>
               </div>
 
@@ -3587,7 +3587,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
             <b style={{ color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <i className="fas fa-shield-halved"></i>Sécurité & Confidentialité
             </b>
-            Utilise uniquement un jeton de consultation. L’exécution des ordres réels est désactivée sur 5TRADE.
+            Le PAT peut autoriser des transactions chez Deriv : conserve-le comme un secret. L’exécution des ordres réels est désactivée sur 5TRADE.
           </div>
         </div>
       </div>
