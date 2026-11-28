@@ -392,9 +392,10 @@ function niveauExecution(signaux, meta, options = {}) {
         if (!long && target1 >= entry) blocages.push('objectif 1 du mauvais côté (vente)');
       }
 
-      if (target2 && long && target2 <= entry) blocages.push('objectif 2 du mauvais côté (achat)');
-      if (target2 && !long && target2 >= entry) blocages.push('objectif 2 du mauvais côté (vente)');
-      if (target1 && target2) {
+      if (!Number.isFinite(target2)) blocages.push('objectif 2 absent ou invalide : plan incomplet');
+      if (Number.isFinite(target2) && long && target2 <= entry) blocages.push('objectif 2 du mauvais côté (achat)');
+      if (Number.isFinite(target2) && !long && target2 >= entry) blocages.push('objectif 2 du mauvais côté (vente)');
+      if (Number.isFinite(target1) && Number.isFinite(target2)) {
         if (long && target2 <= target1) blocages.push('objectif 2 doit être supérieur à objectif 1 (achat)');
         if (!long && target2 >= target1) blocages.push('objectif 2 doit être inférieur à objectif 1 (vente)');
       }
