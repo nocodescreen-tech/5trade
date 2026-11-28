@@ -17,14 +17,16 @@
  * @returns {{ poc: number, vah: number, val: number, profile: Array, maxVolume: number }}
  */
 function volumeProfile(candles, { nbBuckets = 30, valueAreaPct = 70 } = {}) {
-  if (!candles || candles.length < 2) {
-    return { poc: 0, vah: 0, val: 0, profile: [], maxVolume: 0 };
-  }
+  const unavailable = raison => ({ poc: null, vah: null, val: null, profile: [], maxVolume: 0, disponible: false, raison });
+  if (!Array.isArray(candles) || candles.length < 2) return unavailable('Historique insuffisant');
+  if (!candles.every(c => Number.isFinite(c.v) && c.v >= 0 && Number.isFinite(c.h) && Number.isFinite(c.l) && c.h >= c.l) || !candles.some(c => c.v > 0)) return unavailable('Volume ou prix indisponible');
+  nbBuckets = Math.min(200, Math.max(2, Math.floor(Number(nbBuckets) || 30)));
+  valueAreaPct = Math.min(100, Math.max(1, Number(valueAreaPct) || 70));
 
   const high = Math.max(...candles.map(c => c.h));
   const low = Math.min(...candles.map(c => c.l));
   const range = high - low;
-  if (range === 0) return { poc: 0, vah: 0, val: 0, profile: [], maxVolume: 0 };
+  if (range === 0) return unavailable('Amplitude nulle');
 
   const bucketSize = range / nbBuckets;
   const buckets = [];
@@ -115,7 +117,8 @@ function volumeProfile(candles, { nbBuckets = 30, valueAreaPct = 70 } = {}) {
     vah: +vah.toFixed(6),
     val: +val.toFixed(6),
     profile: buckets,
-    maxVolume
+    maxVolume, disponible: true, methode: 'estimation_ohlcv',
+    note: 'Répartition estimée du volume sur les amplitudes, pas un profil transaction par transaction.'
   };
 }
 
