@@ -4530,7 +4530,7 @@ app.get('/api/signaux', requireAuth, async (req, res) => {
  * dépêches, 30 min sur le calendrier.
  */
 // Authoritative application status, not a broker-session guarantee.
-app.get('/api/market/status', requireAuth, async (req,res) => {
+app.get('/api/market/session-status', requireAuth, async (req,res) => {
   const symbol=String(req.query.symbol || '').trim();
   if (!symbol || symbol.length>64 || !/^[a-z0-9_.:-]+$/i.test(symbol)) return res.status(400).json({success:false,error:'Instrument invalide'});
   res.set('Cache-Control','no-store');
