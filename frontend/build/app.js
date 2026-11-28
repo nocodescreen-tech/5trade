@@ -7337,12 +7337,10 @@ function AgentBriefingCard() {
       background: 'rgba(0,0,0,.35)',
       padding: '12px 14px',
       borderRadius: 8,
-      border: '1px solid rgba(148,163,184,.15)'
-    },
-    dangerouslySetInnerHTML: {
-      __html: briefing.texte
+      border: '1px solid rgba(148,163,184,.15)',
+      whiteSpace: 'pre-wrap'
     }
-  }));
+  }, String(briefing.texte || '').replace(/<\/?(?:b|i|code)>/g, '')));
 }
 
 // ── Modale des Raccourcis Clavier Pro ──────────────────────────────────
