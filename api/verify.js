@@ -27,7 +27,17 @@ const uiSrc = () => {
   return uiSrc();
 };
 const ENV = path.join(ROOT, '.env');
-const API = 'http://localhost:3001';
+const API = (() => {
+  const value = process.env.VERIFY_HTTP_URL;
+  if (!value) return null;
+  const url = new URL(value);
+  if (url.protocol !== 'http:' || !['localhost','127.0.0.1','[::1]'].includes(url.hostname) ||
+      !url.port || url.port === '3001' || url.username || url.password ||
+      url.pathname !== '/' || url.search || url.hash) {
+    throw new Error('VERIFY_HTTP_URL : serveur de test local dédié, port différent de 3001.');
+  }
+  return url.origin;
+})();
 
 // Le journal des signaux ne doit JAMAIS écrire dans les données de production
 // pendant les tests — même leçon qu'ALERTS_FICHIER : un canonique qui écrase un
@@ -199,7 +209,8 @@ function tinyPng(W = 64, H = 40) {
 
   // ── 4. HTTP ──
   section('[4] Endpoints HTTP');
-  try {
+  if (!API) { skipped('endpoints HTTP', 'VERIFY_HTTP_URL absent : aucun serveur sondé'); }
+  else try {
     const call = async (p, opts) => {
       const r = await fetch(API + p, opts);
       let body = null; try { body = await r.json(); } catch {}
@@ -224,7 +235,7 @@ function tinyPng(W = 64, H = 40) {
       body: JSON.stringify({ username: 'rene', code: '000000', purpose: 'login' })
     })).status >= 400);
   } catch (e) {
-    skipped('endpoints HTTP', `serveur arrêté (${e.message}) — lancez node server.js puis relancez`);
+    ok('endpoints HTTP du serveur de test configuré', false, e.message);
   }
 
   // ── 5. Stockage S3 (Cloudflare R2) : aller-retour réel, nettoyé ──
