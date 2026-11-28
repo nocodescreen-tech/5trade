@@ -533,8 +533,7 @@ async function verifierBrut(force = false) {
   if (!actifsEnregistres || !actifsEnregistres.length) {
     return { controle: false, envoyes: 0, marches: [], raison: 'aucun instrument actif (surveillance suspendue)' };
   }
-  const actifsSet = new Set(actifsEnregistres.map(a => String(a.symbol || a).toUpperCase()));
-  const marchesAInspecter = (c.marches || []).filter(m => m && actifsSet.has(String(m.symbol).toUpperCase()));
+  const marchesAInspecter = (c.marches || []).filter(m => m && actifsEnregistres.some(a=>String(a.symbol).toUpperCase()===String(m.symbol).toUpperCase() && a.provider===m.provider));
 
   if (!marchesAInspecter.length) {
     return { controle: false, envoyes: 0, marches: [], raison: 'aucun marché surveillé dans la sélection active' };
@@ -622,6 +621,8 @@ async function verifierBrut(force = false) {
         // pouvoir dire « c'est SMC/ICT qui a refusé », pas un « neutre » anonyme.
         const etiquette = profil ? (profil.titre || profil.id) : null;
         const dire = (obj) => resultats.push({ ...m, strategie: etiquette, ...obj });
+      const classe = require('../market-intelligence/instrument-classifier').classifier(m.symbol,{provider:m.provider}).classe;
+      if(classe==='inconnu' || (profil && (!profil.supportedMarkets?.includes(classe) || (profil.executionTimeframes?.length && !profil.executionTimeframes.includes(m.tf))))) {dire({verdict:'Marché ou unité non déclaré par la stratégie'});continue;}
       const optionsMoteur = profil ? {
         regles: profil.regles,
         obligatoires: profil.obligatoires || [],
