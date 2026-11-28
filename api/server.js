@@ -3204,7 +3204,7 @@ app.get('/api/market/gold-context', requireAuth, async (req,res) => {
 // Bounded, read-only educational replay. Snapshot kept server-side, so
 // advancing never reveals future candles or changes the historical dataset.
 const replaySessions = new Map();
-const replayOwner = req => String(req.session?.user?.id || req.session?.user || req.sessionID || '');
+const replayOwner = req => req.session?.token ? require('node:crypto').createHash('sha256').update(req.session.token).digest('hex') : '';
 const replayPrune = () => {
   for(const [id,s] of replaySessions)if(s.expires<Date.now())replaySessions.delete(id);
 };
