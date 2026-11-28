@@ -3407,8 +3407,10 @@ function OrderFlowPanel({ report }) {
 
 // ── Modale de Connexion Broker Deriv (API Token + App ID) ───────────────
 function DerivModal({ ouvert, onClose, onRefresh }) {
-  const [appId, setAppId] = useState('353nKCVSd1Td4BoDbtjvr');
+  const [appId, setAppId] = useState('');
   const [token, setToken] = useState('');
+  const [accountId, setAccountId] = useState('');
+  const [accounts, setAccounts] = useState([]);
   const [showToken, setShowToken] = useState(false);
   const [chargement, setChargement] = useState(false);
   const [statut, setStatut] = useState(null);
@@ -3438,8 +3440,8 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
 
   const handleConnecter = async (e) => {
     e.preventDefault();
-    if (!token.trim()) {
-      setErreur('Veuillez entrer votre Token API Deriv.');
+    if (!appId.trim() || !token.trim()) {
+      setErreur('Renseignez votre App ID PAT et votre token.');
       return;
     }
     setChargement(true);
@@ -3449,7 +3451,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
       const res = await (await api('/deriv/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appId: appId.trim() || '353nKCVSd1Td4BoDbtjvr', apiToken: token.trim() })
+        body: JSON.stringify({ appId: appId.trim(), accountId: accountId.trim() || null, apiToken: token.trim() })
       })).json();
 
       if (res.success) {
@@ -3457,6 +3459,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
         setToken('');
         await rafraichirStatut();
       } else {
+        setAccounts(Array.isArray(res.accounts) ? res.accounts : []);
         setErreur(res.error || 'Échec de connexion à Deriv.');
       }
     } catch (err) {
@@ -3568,7 +3571,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid ' + TT.line, paddingBottom: 12 }}>
                 <div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Solde en direct</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Dernier solde vérifié</div>
                   <div style={{ fontSize: 26, fontWeight: 900, color: '#38bdf8', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
                     ${Number(acc.balance).toFixed(2)} <span style={{ fontSize: 14, color: '#94a3b8' }}>{acc.currency}</span>
                   </div>
@@ -3600,10 +3603,10 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
                   1. Deriv App ID
                 </label>
                 <input className="fld" style={{ width: '100%', fontFamily: 'monospace' }}
-                  placeholder="353nKCVSd1Td4BoDbtjvr"
+                  placeholder="Votre App ID PAT"
                   value={appId} onChange={e => setAppId(e.target.value)} />
                 <div style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4 }}>
-                  L'identifiant par défaut <code>353nKCVSd1Td4BoDbtjvr</code> est celui de votre application 5trade.
+                  Utilisez l'App ID de votre application PAT enregistrée sur developers.deriv.com.
                 </div>
               </div>
 
@@ -3612,7 +3615,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
                   <label style={{ fontSize: 11.5, fontWeight: 700, color: '#e2e8f0' }}>
                     2. Token API Deriv
                   </label>
-                  <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noopener noreferrer"
+                  <a href="https://developers.deriv.com/" target="_blank" rel="noopener noreferrer"
                     style={{ fontSize: 11, color: '#38bdf8', textDecoration: 'none' }}>
                     <i className="fas fa-external-link-alt" style={{ marginRight: 4 }}></i>Créer mon Token Deriv
                   </a>
@@ -3629,10 +3632,15 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
                   </button>
                 </div>
                 <div style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4 }}>
-                  Crée ton token avec les autorisations <b>Lecture (Read)</b> et <b>Trading (Trade)</b> sur ton tableau de bord Deriv.
+                  Créez un PAT avec la permission <b>trade</b> dans le portail développeur.
                 </div>
               </div>
 
+              <div>
+                <label htmlFor="deriv-account-id">Compte Options (facultatif)</label>
+                <input id="deriv-account-id" className="fld" style={{ width: '100%' }} value={accountId} onChange={e => setAccountId(e.target.value)} placeholder="Compte démo par défaut" />
+                {accounts.length > 0 && <select className="fld" value={accountId} onChange={e => setAccountId(e.target.value)}><option value="">Compte démo automatique</option>{accounts.map(a => <option key={a.loginid} value={a.loginid}>{a.typeCompte} — {a.loginid}</option>)}</select>}
+              </div>
               <div style={{ marginTop: 6 }}>
                 <button type="submit" className="btn primary" style={{ width: '100%', padding: '10px 16px', fontSize: 13, justifyContent: 'center' }}
                   disabled={chargement}>
@@ -3648,7 +3656,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
             <b style={{ color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <i className="fas fa-shield-halved"></i>Sécurité & Confidentialité
             </b>
-            Ton token est chiffré et stocké localement sur ton instance 5TRADE. Les ordres sont passés directement entre ton serveur et l'API WebSocket sécurisée de Deriv sans intermédiaire.
+            Le PAT est transmis au serveur 5TRADE. Les ordres sont suspendus pendant la migration. Ne partagez jamais votre token.
           </div>
         </div>
       </div>
