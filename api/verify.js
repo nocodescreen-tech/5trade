@@ -7065,7 +7065,7 @@ function tinyPng(W = 64, H = 40) {
 
     const frontSrc = uiSrc();
     ok('l\'écran affiche le statut en direct',
-      /function StatutDirectPanel/.test(frontSrc) && /<StatutDirectPanel \/>/.test(frontSrc));
+      /function StatutDirectPanel/.test(frontSrc) && (/<StatutDirectPanel \/>/.test(frontSrc) || /React\.createElement\(StatutDirectPanel\)/.test(frontSrc)));
     ok('l\'écran distingue stratégie, motif et structure',
       /s\.source === 'strategie' \? 'stratégie'/.test(frontSrc));
 
