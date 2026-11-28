@@ -7988,8 +7988,8 @@ function tinyPng(W = 64, H = 40) {
         candles, meta: { symbol: 'EURUSD', timeframe: '15m' }, strategies: fiches,
         performances: { ict_test: { total: 20, r: 6 } }
       });
-      ok('sélecteur adaptatif : valide et amplifie une performance prouvée sur historique',
-        selValide.candidates[0] && /performance validée hors échantillon/.test(selValide.candidates[0].motif),
+      ok('sélecteur adaptatif : distingue historique observé et validation hors échantillon',
+        selValide.candidates[0] && /performance historique observée.*validation hors échantillon non établie/.test(selValide.candidates[0].motif),
         selValide.candidates[0] && selValide.candidates[0].motif);
     }
 
