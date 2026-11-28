@@ -21,6 +21,7 @@ const TABLE = process.env.CHAT_HISTORIQUE_TABLE || 'chat_messages';
 const FICHIER = process.env.CHAT_HISTORIQUE_FICHIER
   || path.join(dossiers.DATA_DIR, 'chat-historique.json');
 const MAX_MEMOIRE = 500;
+const scope = utilisateur => utilisateur == null ? null : (typeof utilisateur === 'string' && utilisateur.trim() && utilisateur.length <= 200 ? utilisateur : (() => { throw new Error('Identité de conversation invalide'); })());
 
 let pret = false;
 
@@ -31,6 +32,7 @@ async function init() {
     await sql`
       create table if not exists ${sql(TABLE)} (
         id        bigserial primary key,
+        utilisateur text,
         role      text not null,
         texte     text not null,
         verbe     text,
@@ -38,7 +40,8 @@ async function init() {
         action    jsonb,
         cree_at   timestamptz default now()
       )`;
-    await sql`create index if not exists chat_messages_at_idx on ${sql(TABLE)} (cree_at desc)`;
+    await sql`alter table ${sql(TABLE)} add column if not exists utilisateur text`;
+    await sql`create index if not exists ${sql(TABLE + '_user_id_idx')} on ${sql(TABLE)} (utilisateur, id desc)`;
     pret = true;
     return true;
   } catch (e) {
@@ -58,7 +61,7 @@ function ecrireFichier(liste) {
   try {
     fs.mkdirSync(path.dirname(FICHIER), { recursive: true });
     const tmp = `${FICHIER}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(liste.slice(-MAX_MEMOIRE), null, 1));
+    fs.writeFileSync(tmp, JSON.stringify(liste, null, 1));
     fs.renameSync(tmp, FICHIER);          // écriture atomique
     return true;
   } catch (e) { console.error('chat/historique écriture :', e.message); return false; }
@@ -67,29 +70,34 @@ function ecrireFichier(liste) {
 /**
  * @param {'user'|'assistant'} role
  */
-async function enregistrer({ role, texte, verbe = null, sujet = null, action = null }) {
-  if (!role || !texte) return { ok: false, raison: 'role et texte requis' };
+async function enregistrer({ role, texte, verbe = null, sujet = null, action = null, utilisateur = null }) {
+  utilisateur = scope(utilisateur);
+  if (!['user','assistant'].includes(role) || !texte) return { ok: false, raison: 'role et texte requis' };
   await assurer();
   if (dispo() && pret) {
     try {
       const sql = DB.client();
       await sql`
-        insert into ${sql(TABLE)} (role, texte, verbe, sujet, action)
-        values (${role}, ${String(texte).slice(0, 8000)}, ${verbe}, ${sujet},
+        insert into ${sql(TABLE)} (utilisateur, role, texte, verbe, sujet, action)
+        values (${utilisateur}, ${role}, ${String(texte).slice(0, 8000)}, ${verbe}, ${sujet},
           ${action ? sql.json(action) : null})`;
       return { ok: true, stockage: 'postgresql' };
-    } catch (e) { /* on bascule sur le fichier */ }
+    } catch (e) { return { ok:false, raison:'Écriture PostgreSQL impossible' }; }
   }
+  if (dispo()) return {ok:false,raison:'Initialisation historique indisponible'};
   const liste = lireFichier();
   liste.push({
-    role, texte: String(texte).slice(0, 8000), verbe, sujet, action,
+    utilisateur, role, texte: String(texte).slice(0, 8000), verbe, sujet, action,
     cree_at: new Date().toISOString()
   });
-  return { ok: ecrireFichier(liste), stockage: 'fichier' };
+  const propres = liste.filter(m => (m.utilisateur ?? null) === utilisateur);
+  const exces = new Set(propres.slice(0, Math.max(0, propres.length - MAX_MEMOIRE)));
+  return { ok: ecrireFichier(liste.filter(m => !exces.has(m))), stockage: 'fichier' };
 }
 
 /** Les N derniers messages, du plus ancien au plus récent. */
-async function lister({ limite = 60 } = {}) {
+async function lister({ limite = 60, utilisateur = null } = {}) {
+  utilisateur = scope(utilisateur);
   const max = Math.min(300, Math.max(1, Number(limite) || 60));
   await assurer();
   if (dispo() && pret) {
@@ -97,24 +105,27 @@ async function lister({ limite = 60 } = {}) {
       const sql = DB.client();
       const r = await sql`
         select id, role, texte, verbe, sujet, action, cree_at as "creeAt"
-        from ${sql(TABLE)} order by id desc limit ${max}`;
+        from ${sql(TABLE)} where utilisateur is not distinct from ${utilisateur} order by id desc limit ${max}`;
       return r.map(x => ({ ...x, creeAt: x.creeAt })).reverse();
-    } catch (e) { /* repli */ }
+    } catch (e) { throw new Error('Lecture historique PostgreSQL impossible'); }
   }
-  return lireFichier().slice(-max);
+  if (dispo()) throw new Error('Initialisation historique indisponible');
+  return lireFichier().filter(m => (m.utilisateur ?? null) === utilisateur).slice(-max);
 }
 
 /** Effacer la conversation (action explicite de l'utilisateur). */
-async function effacer() {
+async function effacer({ utilisateur = null } = {}) {
+  utilisateur = scope(utilisateur);
   await assurer();
   if (dispo() && pret) {
     try {
       const sql = DB.client();
-      await sql`delete from ${sql(TABLE)}`;
+      await sql`delete from ${sql(TABLE)} where utilisateur is not distinct from ${utilisateur}`;
       return { ok: true, stockage: 'postgresql' };
-    } catch (e) { /* repli */ }
+    } catch (e) { return {ok:false,raison:'Suppression PostgreSQL impossible'}; }
   }
-  return { ok: ecrireFichier([]), stockage: 'fichier' };
+  if (dispo()) return {ok:false,raison:'Initialisation historique indisponible'};
+  return { ok: ecrireFichier(lireFichier().filter(m => (m.utilisateur ?? null) !== utilisateur)), stockage: 'fichier' };
 }
 
 module.exports = { init, enregistrer, lister, effacer, TABLE, FICHIER };
