@@ -108,7 +108,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
     seuilRegles: p.seuilRegles,
     parametres: p.parametres,
     filtres:p.filtres, timeframes:p.timeframes, seuilAlignes:p.seuilAlignes,
-    profils: [p], motifs:false, structure:false, strategieStrict:true,
+    profils: [p], strategieStrict:true,
     strategie: { id: p.id, titre: p.titre, version: p.version || null }
   } : {});
   const passes = profils.length
