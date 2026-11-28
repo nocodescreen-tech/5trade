@@ -143,3 +143,30 @@ test('balance refresh does not resurrect a disconnected configuration', async ()
     if(oldKey===undefined) delete process.env.DERIV_TOKEN_KEY; else process.env.DERIV_TOKEN_KEY=oldKey;
   }
 });
+
+
+test('Deriv rejects malformed credentials before network requests', async () => {
+  const old=DerivClient._rest;
+  let calls=0;
+  try {
+    DerivClient._rest=async()=>{calls++;throw Error('unexpected');};
+    for(const args of [['app\ninvalid','token'],['app','bad token'],['app','token',{}]]) {
+      assert.equal((await DerivClient.verifierEtAutoriser(...args)).ok,false);
+    }
+    assert.equal(calls,0);
+  } finally { DerivClient._rest=old; }
+});
+
+test('Deriv rejects boolean and whitespace balances instead of inventing zero',async()=>{
+  const rest=DerivClient._rest, open=DerivClient._openAccount, ask=DerivClient._ask;
+  try {
+    DerivClient._rest=async()=>({data:[{account_id:'DEMO1',account_type:'demo',status:'active',currency:'USD'}]});
+    DerivClient._openAccount=async()=>({close(){}});
+    for(const balance of [false,true,'   ',null,[],{}]){
+      DerivClient._ask=async()=>({balance:{balance,currency:'USD'}});
+      assert.equal((await DerivClient.verifierEtAutoriser('app','token')).ok,false);
+    }
+    DerivClient._ask=async()=>({balance:{balance:0,currency:'USD'}});
+    assert.equal((await DerivClient.verifierEtAutoriser('app','token')).account.balance,0);
+  }finally{DerivClient._rest=rest;DerivClient._openAccount=open;DerivClient._ask=ask;}
+});
