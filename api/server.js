@@ -5385,6 +5385,10 @@ async function start() {
   });
 
   // GET /api/chat/aide — liste des commandes disponibles.
+  app.get('/api/chat/capabilities', requireAuth, async (req,res)=>{
+    try{res.json({success:true,...await require('./chat-crud/capabilities').inspect()});}
+    catch{res.status(503).json({success:false,error:'Inventaire indisponible'});}
+  });
   app.get('/api/chat/aide', requireAuth, (req, res) => {
     const Repondeur = require('./chat-crud/repondeur');
     res.json({ success: true, aide: Repondeur.aide() });
