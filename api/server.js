@@ -2555,11 +2555,11 @@ app.get('/api/deriv/status', requireAuth, async (req, res) => {
 
 app.post('/api/deriv/config', requireAuth, async (req, res) => {
   try {
-    const { appId, apiToken } = req.body || {};
+    const { appId, apiToken, accountId = null } = req.body || {};
     if (!apiToken) {
       return res.status(400).json({ success: false, error: 'Token API Deriv requis' });
     }
-    const r = await DerivBroker.enregistrer(appId, apiToken);
+    const r = await DerivBroker.enregistrer(appId, apiToken, accountId);
     if (!r.success) {
       return res.status(400).json(r);
     }
