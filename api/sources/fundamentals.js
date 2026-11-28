@@ -150,10 +150,13 @@ function devisesDuSymbole(symbol) {
   if (metal) return { devises: [metal[2]], applicable: true, raison: 'métal coté en devises' };
 
   // Crypto / actions / matières premières sans paire de devises explicite.
-  if (/^(BTC|ETH|XAU|XAG|US30|NAS|SPX|GER|UK100|JP225)/.test(sansPrefixe)) {
+  if (/^(GER|DE40|DAX|EU50|FRA|FR40)/.test(sansPrefixe)) return {devises:['EUR'],applicable:true,raison:'indice européen'};
+  if (/^(UK100|FTSE)/.test(sansPrefixe)) return {devises:['GBP'],applicable:true,raison:'indice britannique'};
+  if (/^(JP225|NIKKEI)/.test(sansPrefixe)) return {devises:['JPY'],applicable:true,raison:'indice japonais'};
+  if (/^(BTC|ETH|SOL|XRP|XAU|XAG|PAXG|XAUT|US30|NAS|SPX|US500|US100|WTI|BRENT|XTI|XBR|NGAS|NATGAS)/.test(sansPrefixe)) {
     return { devises: ['USD'], applicable: true, raison: 'instrument coté en dollars' };
   }
-  return { devises: [], applicable: false, raison: `devises non identifiables pour « ${symbol} »` };
+  return { devises: [], applicable: true, raison: `devises non identifiables pour « ${symbol} »` };
 }
 
 /**
@@ -217,20 +220,24 @@ function verdictDevise(events, devise, { maintenant = new Date(), fenetreMin = 3
   for (const ev of events || []) {
     if (!['high', 'unknown'].includes(ev.impact)) continue;
     const concernes = String(ev.devise || '').toUpperCase().split(/[^A-Z]+/).filter(Boolean);
-    if (!concernes.includes(code)) continue;
+    if (!concernes.includes(code) && concernes.length) continue;
 
     const t = instantEvenement(ev, maintenant);
-    if (t === null || ev.impact === 'unknown') { horaireInconnu = true; continue; }
+    if (t === null) { horaireInconnu = true; continue; }
+    if (ev.impact === 'unknown' || !concernes.length) {
+      if (t-now >= -fenetreApresMin*60000 && t-now <= fenetreMin*60000) horaireInconnu = true;
+      continue;
+    }
 
-    const diff = Math.round((t - now) / 60000);
+    const diff = (t - now) / 60000;
     // Fenêtre de blocage élargie : de fenetreMin avant l'annonce à fenetreApresMin après
     if (diff >= -fenetreApresMin && diff <= fenetreMin) {
       const dateSourceISO = new Date(t).toISOString();
       const heureKinshasa = new Date(t + 3600000).toISOString().slice(11, 16) + ' (Kinshasa WAT)';
       let phase = '';
-      if (diff > 0) phase = `Avant l'annonce (T - ${diff} min)`;
+      if (diff > 0) phase = `Avant l'annonce (T - ${Math.ceil(diff)} min)`;
       else if (diff === 0) phase = `Pendant la publication (T 0)`;
-      else phase = `Après l'annonce (T + ${-diff} min)`;
+      else phase = `Après l'annonce (T + ${Math.ceil(-diff)} min)`;
 
       const newsEnrichie = {
         ...ev,
@@ -283,8 +290,12 @@ async function filtreCalendrier(symbol, { strict = false } = {}) {
     };
   }
 
-  for (const devise of devises) {
-    const r = await newsImminente(devise, 30);
+  if (!devises.length) return {ok:!strict,bloque:strict,verifie:false,applicable:true,devises,detail:raison,lecture:raison};
+  const calendar = await getCalendarAvecEtat();
+  const results = devises.map(devise=>({devise,r:calendar.sourceDisponible ? verdictDevise(calendar.events,devise) : {verifie:false,bloque:false,raison:'calendrier indisponible'}}));
+  // Known high-impact events take precedence over unknown results.
+  results.sort((a,b)=>Number(b.r.bloque)-Number(a.r.bloque));
+  for (const {devise,r} of results) {
     if (!r.verifie) {
       if (strict) {
         return {
