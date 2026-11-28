@@ -2535,7 +2535,9 @@ function tinyPng(W = 64, H = 40) {
     const TF2 = 1700000000000;
     const base = { entree: 100, stop: 98, symbol: 'R_75', at: TF2 };
     const trois = [
-      { ...base, resultat: 'tp2', r: 2 }, { ...base, resultat: 'sl', r: -1 }, { ...base, resultat: 'tp1', r: 1 }
+      { ...base, resultat: 'tp2', r: 2, leveLe: TF2 + 1000 },
+      { ...base, at: TF2 + 2000, resultat: 'sl', r: -1, leveLe: TF2 + 3000 },
+      { ...base, at: TF2 + 4000, resultat: 'tp1', r: 1, leveLe: TF2 + 5000 }
     ];
     R.configurer({ maxRisqueMarchePct: 100, maxRisqueTotalPct: 100 });
     const e = R.etat(trois, { capital: 1000, risquePct: 1 });
@@ -2872,9 +2874,9 @@ function tinyPng(W = 64, H = 40) {
       const profilsT = [{ id: 'p', titre: 'T', regles: ['R1', 'R2', 'R3', 'R4'],
         seuilRegles: 1, seuilForce: 0, filtres: [], timeframes: ['1d'], parametres: {} }];
       const sans = B.lancer(serieT, { symbol: 'TEST', timeframe: '1d' },
-        { profils: profilsT, pas: 1, maxBougies: 300, limiteTrades: 1000 });
+        { profils: profilsT, pas: 1, maxBougies: 300, limiteTrades: 1000, strategieStricte: false, accepterSurveiller: true });
       const avec = B.lancer(serieT, { symbol: 'TEST', timeframe: '1d' },
-        { profils: profilsT, pas: 1, maxBougies: 300, limiteTrades: 1000, regime: true });
+        { profils: profilsT, pas: 1, maxBougies: 300, limiteTrades: 1000, regime: true, strategieStricte: false, accepterSurveiller: true });
 
       ok('BUG-13 : le filtre de tendance est exposé', avec.regime === true);
       ok('BUG-13 : le filtre écarte réellement des signaux',
@@ -3928,8 +3930,11 @@ function tinyPng(W = 64, H = 40) {
 
       const srcDE = fs.readFileSync(path.join(__dirname, 'engine', 'DecisionEngine.js'), 'utf8');
       ok('une direction inconnue interdit l exécution',
-        /sens === 'inconnu' \|\| s\.direction === 'UNKNOWN'/.test(srcDE)
-        && /direction inconnue/.test(srcDE));
+        (() => {
+          const D = require('./engine/DecisionEngine');
+          const r = D.niveauExecution([{ nom: 'Inconnu', sens: 'inconnu', direction: 'UNKNOWN', status: 'confirme', confirme: true, entree: 100, stop: 102, objectifs: [98, 96] }], { symbol: 'TEST' }, { verifierFrais: false, verifierModele: false });
+          return r.details[0].ok === false && r.details[0].blocages.some(b => b.includes('direction inconnue'));
+        })());
 
       ok('le conflit entre stratégies est publié, pas seulement arbitré',
         /conflit = \{/.test(srcDE) && /conflit: arbitrage\.conflit/.test(srcDE)
@@ -5270,7 +5275,7 @@ function tinyPng(W = 64, H = 40) {
       serie.push(c(i, base, base + 0.6, base - 0.6, base + (i % 2 ? 0.3 : -0.2)));
     }
     const profils = [{ id: 'p', titre: 'Test', regles: ['R1', 'R2'], seuilRegles: 1, seuilForce: 0.2, filtres: [], timeframes: ['5m'], parametres: {} }];
-    const r = B.lancer(serie, { symbol: 'TEST', timeframe: '5m' }, { profils, pas: 3, maxBougies: 120, accepterSurveiller: true });
+    const r = B.lancer(serie, { symbol: 'TEST', timeframe: '5m' }, { profils, pas: 3, maxBougies: 120, accepterSurveiller: true, strategieStricte: false });
     ok('le backtest produit des prises', !r.indisponible && r.total > 0, `${r.total} prise(s)`);
 
     // Le filtre par SOURCE, et la ventilation qui l'accompagne.
