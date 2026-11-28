@@ -5209,6 +5209,50 @@ function StatutDirectPanel() {
   );
 }
 
+function ResearchTerminalPanel() {
+  const h=React.createElement;
+  const [gold,setGold]=useState(null),[replay,setReplay]=useState(null),[busy,setBusy]=useState(''),[error,setError]=useState('');
+  const [tf,setTf]=useState('1h');
+  async function request(path,body,kind){
+    setBusy(kind);setError('');
+    try{
+      const r=await api(path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{});
+      const d=await r.json();
+      if(!r.ok||!d.success)throw Error(d.error||'Service indisponible');
+      if(kind==='gold')setGold(d);else setReplay(d);
+    }catch(e){setError(e.message);}finally{setBusy('');}
+  }
+  const rows=replay?.visible||[];
+  const low=rows.length?Math.min(...rows.map(c=>c.l)):0;
+  const high=rows.length?Math.max(...rows.map(c=>c.h)):1;
+  const y=p=>10+(high-p)/Math.max(high-low,1e-8)*180;
+  const fmt=v=>Number.isFinite(v)?v.toLocaleString('fr-FR',{maximumFractionDigits:4}):'—';
+  const btn=(label,fn,disabled=false)=>h('button',{type:'button',className:'btn sm ghost',onClick:fn,disabled:!!busy||disabled},label);
+  return h('section',{className:'panel',style:{padding:18,marginBottom:18}},
+    h('header',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap'}},
+      h('div',null,h('h3',{style:{margin:0,fontSize:17}},'Terminal de recherche'),h('p',{style:{fontSize:12,color:'var(--muted)',margin:'4px 0'}},'XAUUSD · données macro et rejeu éducatif · aucun ordre')),
+      btn(busy==='gold'?'Chargement…':'Actualiser le contexte or',()=>request('/market/gold-context?tf='+tf,null,'gold'))),
+    error&&h('p',{role:'alert',style:{color:'#eab308'}},error),
+    gold&&h('div',{style:{padding:'12px 0',borderBottom:'1px solid var(--border,#333)'}},
+      h('p',null,'Calendrier : '+(gold.macro?.verifie?(gold.macro.bloque?'Bloqué':'Vérifié'):'Non vérifié')),
+      h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(145px,1fr))',gap:12}},(gold.goldMacro?.series||[]).map(s=>h('div',{key:s.id,style:{border:'1px solid var(--border,#333)',padding:12,borderRadius:8}},
+        h('div',{style:{fontSize:11,color:'var(--muted)'}},s.label),h('strong',{style:{fontSize:21}},s.available?fmt(s.latest):'Indisponible'),h('div',{style:{fontSize:11}},s.date||'Date inconnue'),h('div',{style:{fontSize:12}},'Variation 5 observations : '+fmt(s.change5))))),
+      h('p',{style:{fontSize:11,color:'var(--muted)'}},gold.goldMacro?.note)),
+    h('div',{style:{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',margin:'16px 0'}},
+      h('label',null,'Unité : ',h('select',{value:tf,disabled:!!busy,onChange:e=>{setTf(e.target.value);setReplay(null);setGold(null);}},['5m','15m','1h','4h','1d'].map(t=>h('option',{key:t,value:t},t)))),
+      btn('Nouveau rejeu',()=>request('/replay/start',{symbol:'frxXAUUSD',provider:'deriv',tf},'replay')),
+      replay&&btn('−1',()=>request('/replay/step',{id:replay.id,delta:-1},'replay'),replay.cursor<=30),
+      replay&&btn('+1 bougie',()=>request('/replay/step',{id:replay.id,delta:1},'replay'),replay.done),
+      replay&&btn('+5',()=>request('/replay/step',{id:replay.id,delta:5},'replay'),replay.done)),
+    replay&&h('div',null,
+      h('p',{style:{fontSize:12}},new Date(replay.asOf).toLocaleString('fr-FR',{timeZone:'Africa/Kinshasa'})+' Kinshasa · '+(replay.cursor+1)+' / '+replay.total),
+      h('svg',{viewBox:'0 0 720 210',width:'100%',role:'img','aria-label':'Bougies historiques révélées progressivement'},
+        rows.map((c,i)=>{const w=690/rows.length,x=10+(i+.5)*w,color=c.c>=c.o?'#16a34a':'#dc2626';return h('g',{key:c.t},h('line',{x1:x,x2:x,y1:y(c.h),y2:y(c.l),stroke:color,strokeWidth:1}),h('rect',{x:x-w*.3,y:Math.min(y(c.o),y(c.c)),width:Math.max(1,w*.6),height:Math.max(1,Math.abs(y(c.o)-y(c.c))),fill:color}));}),
+        h('text',{x:715,y:10,textAnchor:'end',fill:'currentColor',fontSize:10},fmt(high)),h('text',{x:715,y:207,textAnchor:'end',fill:'currentColor',fontSize:10},fmt(low))),
+      h('p',{style:{fontSize:12,color:'var(--muted)'}},'Dernière clôture : '+fmt(rows.at(-1)?.c)+' · Les bougies futures ne sont pas transmises.')),
+    busy&&h('p',{role:'status',style:{fontSize:12}},'Chargement…'));
+}
+
 function PaperObservationsPanel() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -6177,6 +6221,7 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
       {/* Le devenir des signaux du moteur, en tête du journal : c'est la seule
           partie qui ne dépend pas d'une saisie manuelle. */}
       <StatutDirectPanel />
+      <ResearchTerminalPanel />
       <PaperObservationsPanel />
       <JournalSignauxPanel />
       <BacktestPanel />
