@@ -8123,29 +8123,25 @@ function tinyPng(W = 64, H = 40) {
       ok('skill sandbox : exécute hermétiquement un skill valide',
         resSandboxSain.ok === true && resSandboxSain.exports.id === 'calculateur');
 
-      // 12. Skill Factory autonome (Cycle complet création -> test sandbox -> installation -> exécution -> désinstallation)
+      // 12. Generated skills are declarative data, never arbitrary JavaScript.
       const Factory = require('./skills/factory');
-      const codeGenere = 'module.exports = { id: "pivot_detector", nom: "Détecteur de Pivot", version: "1.0.0", description: "Calculateur de pivot point", actions: ["calcul"], executer: (p) => ({ pivot: (p.h + p.l + p.c) / 3 }) };';
-      const installRes = await Factory.installerNouveauSkill({
-        id: 'pivot_detector',
-        nom: 'Détecteur de Pivot',
-        version: '1.0.0',
-        description: 'Calculateur de pivot point',
-        codeSource: codeGenere,
-        tests: [
-          { params: { h: 10, l: 5, c: 6 }, assertion: (r) => r && r.pivot === 7 }
-        ]
-      });
-      ok('skill factory : test en sandbox et installation atomique réussie',
-        installRes.ok === true && installRes.id === 'pivot_detector');
-
-      const execDyn = await Skills.executer('pivot_detector', { h: 10, l: 5, c: 6 });
-      ok('skill factory : le skill dynamique est immédiatement exécutable par le registre',
-        execDyn.ok === true && execDyn.resultat && execDyn.resultat.pivot === 7);
-
+      const legacy = await Factory.installerNouveauSkill({ id:'pivot_detector', codeSource:'module.exports = {}' });
+      ok('skill factory : refuse le JavaScript généré', legacy.ok === false);
+      const specification = { id:'pivot_detector', nom:'Détecteur de Pivot', version:'1.0.0',
+        description:'Calculateur de pivot point', actions:['calcul'],
+        outputs:{calcul:{pivot:{op:'div',args:[{op:'add',args:[{op:'add',args:[{input:'h'},{input:'l'}]},{input:'c'}]},3]}}} };
+      const installRes = await Factory.installerNouveauSkill({ id:'pivot_detector', specification,
+        tests:[{params:{h:10,l:5,c:6},attendu:{pivot:7}}] });
+      ok('skill factory : test déclaratif et installation atomique réussie', installRes.ok === true && installRes.actif === false);
+      const blocked = await Skills.executer('pivot_detector', {h:10,l:5,c:6});
+      ok('skill factory : activation explicite obligatoire', blocked.ok === false);
+      Skills.activer('pivot_detector');
+      const execDyn = await Skills.executer('pivot_detector', {h:10,l:5,c:6});
+      ok('skill factory : calcul déclaratif correct après activation', execDyn.ok === true && execDyn.resultat.pivot === 7);
+      ok('skill factory : interdit la traversée de répertoires et la suppression native',
+        Factory.desinstallerSkill('../').ok === false && Factory.desinstallerSkill('forex-session-monitor').ok === false);
       const cleanRes = Factory.desinstallerSkill('pivot_detector');
-      ok('skill factory : désinstallation et nettoyage complet du skill',
-        cleanRes.ok === true);
+      ok('skill factory : désinstallation et nettoyage complet du skill', cleanRes.ok === true);
 
       // 13. Application active des consignes au DecisionEngine
       const MemoirePref = require('./memoire/preferences');
