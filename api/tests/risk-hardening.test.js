@@ -27,3 +27,22 @@ test('missing TP2 blocks execution', () => {
   assert.equal(result.details[0].ok, false);
   assert.ok(result.details[0].blocages.some(x => x.includes('objectif 2')));
 });
+
+test('remembered risk limit tightens but never increases position risk', () => {
+  const e = {capital:1000,pic:1000,perteJourPct:0,positionsOuvertes:0,risqueEngage:0,expositionTotale:0,risqueParMarche:{}};
+  const trade = {entree:100,stop:98,symbol:'XAUUSD'};
+  const small = Risk.verifierPrise(trade,e,{contraintes:{risqueMaxPct:0.5}});
+  assert.equal(small.ok,true);
+  assert.equal(small.risqueMontant,5);
+  assert.equal(small.taille,2.5);
+  const large = Risk.verifierPrise(trade,e,{contraintes:{risqueMaxPct:10}});
+  assert.equal(large.risqueMontant,10);
+  assert.equal(Risk.verifierPrise(trade,e,{contraintes:{risqueMaxPct:0}}).ok,false);
+});
+test('remembered drawdown ceiling blocks new risk at threshold or when unverified', () => {
+  const e = {capital:950,pic:1000,perteJourPct:0,positionsOuvertes:0,risqueEngage:0,expositionTotale:0,risqueParMarche:{}};
+  const trade = {entree:100,stop:98,symbol:'XAUUSD'};
+  assert.equal(Risk.verifierPrise(trade,e,{contraintes:{drawdownMaxPct:5}}).ok,false);
+  assert.equal(Risk.verifierPrise(trade,e,{contraintes:{drawdownMaxPct:6}}).ok,true);
+  assert.equal(Risk.verifierPrise(trade,{...e,pic:null},{contraintes:{drawdownMaxPct:6}}).ok,false);
+});
