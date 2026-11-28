@@ -14716,121 +14716,68 @@ function Pilote() {
     const el = filRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   };
-  const vusRef = useRef(new Set()); // ids déjà affichés : aucun doublon
-
-  // Une seule lecture, utilisée au montage ET par la veille périodique. Les
-  // événements du système (stop touché, TP atteint, retournement de biais,
-  // scénario expiré) arrivent donc ici comme des messages, sans recharger.
-  const chargerFil = useCallback(async ({
-    silencieux = false
-  } = {}) => {
-    try {
-      const r = await api('/chat/historique?limite=80');
-      if (r.status === 401) {
-        setEtat('hors ligne');
-        return;
-      }
-      const d = await r.json();
-      const liste = (d.messages || []).map(m => ({
-        id: m.id,
-        role: m.role,
-        texte: m.texte,
-        heure: piloteHeure(m.creeAt),
-        action: m.action,
-        evenement: m.verbe === 'ÉVÉNEMENT'
-      }));
-      if (!liste.length) {
-        if (!silencieux) setMessages([{
-          role: 'assistant',
-          texte: "Bonjour. Je pilote le système : je lis l'état, les trades, les stratégies, " + 'les scénarios, les paramètres, la mémoire et l\'apprentissage — et je te préviens ' + 'ici quand un stop est touché, un objectif atteint ou un biais se retourne.\n' + 'Tape « aide » pour la liste des commandes.',
-          heure: piloteHeure()
-        }]);
-      } else {
-        const nouveaux = liste.filter(m => m.id !== undefined && !vusRef.current.has(m.id));
-        for (const m of nouveaux) vusRef.current.add(m.id);
-        // Au premier passage on remplace tout ; ensuite on n'ajoute que le neuf.
-        setMessages(prev => prev.length && silencieux ? [...prev, ...nouveaux] : liste);
-      }
+  const verrou=useRef(false);
+  const generation=useRef(0);
+  const nonPersiste=useRef([]);
+  const [confirmationActive,setConfirmationActive]=useState(false);
+  const chargerFil=useCallback(async()=>{
+    const version=++generation.current;
+    try{
+      const r=await api('/chat/historique?limite=80');
+      const d=await r.json();
+      if(!r.ok || !d.success || !Array.isArray(d.messages)) throw Error(d.error || 'Historique indisponible');
+      if(version!==generation.current)return;
+      const liste=d.messages.map(m=>({id:m.id,role:m.role,texte:m.texte,heure:piloteHeure(m.creeAt),action:m.action,evenement:m.verbe==='ÉVÉNEMENT'}));
+      const next=[...liste,...nonPersiste.current];
+      setMessages(prev=>JSON.stringify(prev)===JSON.stringify(next)?prev:next);
       setEtat('en ligne');
-    } catch (e) {
-      setEtat('hors ligne');
-    }
-  }, []);
-  useEffect(() => {
+    }catch(e){if(version===generation.current){setEtat('hors ligne');setErreur(e.message);}}
+  },[]);
+  useEffect(()=>{
     chargerFil();
-    // Toutes les 10 s : le fil se met à jour tout seul quand le moteur publie.
-    const t = setInterval(() => chargerFil({
-      silencieux: true
-    }), 10000);
-    return () => clearInterval(t);
-  }, [chargerFil]);
-  useEffect(descendre, [messages, busy]);
-  const envoyer = async texte => {
-    const t = String(texte || '').trim();
-    if (!t || busy) return;
-    setErreur('');
-    setSaisie('');
-    setMessages(m => [...m, {
-      role: 'user',
-      texte: t,
-      heure: piloteHeure()
-    }]);
-    setBusy(true);
-    try {
-      const r = await api('/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          message: t
-        })
-      });
-      const d = await r.json();
-      const reponse = d.texte || d.resultat && d.resultat.texte || d.error || (d.success ? 'Action exécutée.' : 'Réponse vide.');
-      setMessages(m => [...m, {
-        role: 'assistant',
-        texte: reponse,
-        heure: piloteHeure(),
-        action: d.action
-      }]);
-      // Une écriture a réussi : les autres onglets doivent relire leurs données.
-      if (d.success && d.action && !/Confirmer \? \(oui\/non\)/i.test(reponse)) {
-        window.dispatchEvent(new Event('5trade-refresh'));
-      }
+    const timer=setInterval(()=>{if(!verrou.current)chargerFil();},10000);
+    return()=>{clearInterval(timer);generation.current++;};
+  },[chargerFil]);
+  useEffect(descendre,[messages,busy]);
+  const envoyer=async texte=>{
+    const t=String(texte || '').trim();
+    if(!t || verrou.current)return;
+    verrou.current=true;generation.current++;
+    setConfirmationActive(false);setErreur('');setSaisie('');setBusy(true);
+    const question={role:'user',texte:t,heure:piloteHeure()};
+    setMessages(m=>[...m,question]);
+    try{
+      const r=await api('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:t})});
+      const d=await r.json();
+      if(!r.ok || !d.success)throw Error(d.error || 'Commande refusée');
+      const answer={role:'assistant',texte:d.texte || d.resultat?.texte || 'Réponse indisponible',heure:piloteHeure(),action:d.action};
+      setMessages(m=>[...m,answer]);
+      setConfirmationActive(d.confirmation_requise===true);
+      if(d.historiquePersiste===true)await chargerFil();
+      else {nonPersiste.current.push(question,answer);setErreur('Réponse reçue, historique non confirmé.');}
+      if(d.action && d.resultat && !d.resultat.erreur && !d.confirmation_requise)window.dispatchEvent(new Event('5trade-refresh'));
       setEtat('en ligne');
-    } catch (e) {
-      setMessages(m => [...m, {
-        role: 'assistant',
-        texte: 'Erreur réseau : ' + e.message,
-        heure: piloteHeure()
-      }]);
-      setEtat('hors ligne');
-    } finally {
-      setBusy(false);
-      if (champRef.current) champRef.current.focus();
-    }
+    }catch(e){
+      const answer={role:'assistant',texte:'Résultat de la commande non confirmé : '+e.message,heure:piloteHeure()};
+      nonPersiste.current.push(question,answer);
+      setMessages(m=>[...m,answer]);setEtat('hors ligne');
+    }finally{verrou.current=false;setBusy(false);champRef.current?.focus();}
   };
-  const effacer = async () => {
-    if (busy) return;
-    if (!window.confirm('Effacer tout l’historique de conversation ?')) return;
-    try {
-      await api('/chat/historique', {
-        method: 'DELETE'
-      });
-      setMessages([{
-        role: 'assistant',
-        texte: 'Historique effacé.',
-        heure: piloteHeure()
-      }]);
-      setErreur('');
-    } catch (e) {
-      setErreur('Effacement impossible : ' + e.message);
-    }
+  const effacer=async()=>{
+    if(verrou.current || !window.confirm('Effacer tout l’historique de conversation ?'))return;
+    verrou.current=true;generation.current++;setBusy(true);setConfirmationActive(false);
+    try{
+      const r=await api('/chat/historique',{method:'DELETE'});
+      const d=await r.json();
+      if(!r.ok || !d.success)throw Error(d.raison || d.error || 'Suppression non confirmée');
+      nonPersiste.current=[];setMessages([]);setErreur('');
+    }catch(e){setErreur('Effacement impossible : '+e.message);}
+    finally{verrou.current=false;setBusy(false);}
   };
+
   const point = etat === 'en ligne' ? 'var(--ok)' : etat === 'hors ligne' ? 'var(--bad)' : 'var(--warn)';
   return /*#__PURE__*/React.createElement("div", {
-    className: "panel",
+    className: "panel pilote-workspace",
     style: {
       padding: 0,
       overflow: 'hidden',
@@ -14902,7 +14849,7 @@ function Pilote() {
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-eraser"
   }), "Effacer"))), /*#__PURE__*/React.createElement("div", {
-    ref: filRef,
+    className:"pilote-thread", ref: filRef, role:"log",
     "aria-live": "polite",
     style: {
       flex: 1,
@@ -14914,9 +14861,9 @@ function Pilote() {
     }
   }, messages.map((m, i) => {
     const moi = m.role === 'user';
-    const confirmation = !moi && /Confirmer \? \(oui\/non\)/i.test(m.texte || '');
+    const confirmation = !moi && confirmationActive && i===messages.length-1 && !!m.action;
     return /*#__PURE__*/React.createElement("div", {
-      key: i,
+      key: m.id || i,
       style: {
         display: 'flex',
         gap: 10,
