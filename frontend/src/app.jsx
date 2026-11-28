@@ -7,10 +7,29 @@ const API_BASE = (window.location.port === '5173' || window.location.protocol ==
 
 // Version de l'interface (affichée en en-tête) : permet de voir d'un coup d'œil
 // si la page ouverte est bien la dernière, ou une version restée en cache.
-const UI_VERSION = 'r2026-11-14d';
+const UI_VERSION = 'r2026-11-28-workstation';
 const api = (path, opts = {}) =>
   fetch(`${API_BASE}${path}`, { credentials: 'include', ...opts });
-const lireJsonApi = window.FiveTradeApiResponse && window.FiveTradeApiResponse.lireJson;
+async function lireJsonApi(response, contexte = 'Requête API') {
+  const type = response.headers.get('content-type') || '';
+  if (!/\b(?:application\/json|application\/[\w.+-]+\+json)\b/i.test(type)) {
+    throw new Error(contexte + ' : réponse non JSON (HTTP ' + response.status + '). Vérifie la connexion et la configuration du serveur.');
+  }
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(contexte + ' : réponse JSON invalide (HTTP ' + response.status + ').');
+  }
+  if (!response.ok || data?.success === false || data?.error) {
+    const detail = typeof data?.error === 'string' ? data.error : 'HTTP ' + response.status;
+    throw new Error(contexte + ' : ' + detail);
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(contexte + ' : format de réponse inattendu.');
+  }
+  return data;
+}
 
 const REDUCED = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -981,8 +1000,8 @@ function AddKnowledge({ refresh }) {
         method:'POST', headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ texte: decrire })
       });
-      if (!lireJsonApi) throw new Error('Client API incomplet : recharge la page');
       const d = await lireJsonApi(r, 'Analyse de strategie');
+      if (!d.strategy || !d.moteur) throw new Error('Analyse reçue sans fiche complète. Vérifie la bibliothèque avant de réessayer.');
       setFiche(d);
       refresh();
     } catch (e) { setDecrireErr(e.message); }
@@ -4651,6 +4670,7 @@ function LiveMarket({ onToJournal }) {
 
   return (
     <>
+      {React.createElement(WorkstationMetrics,{actifs,symbol,price:prix,decision,live,offline,lastUpdate,tickRate})}
       <AgentBriefingCard />
 
       {/* ── Ruban Screener Multi-Marchés en direct ── */}
@@ -8458,6 +8478,75 @@ function Pilote() {
   );
 }
 
+
+/* Shared workstation shell; all navigation targets remain existing application pages. */
+function WorkstationChrome({nav,tab,choose,drawer,setDrawer,user,logout,broker,openBroker,muted,toggleMute,shortcuts}) {
+  const h=React.createElement;
+  const [query,setQuery]=useState('');
+  const [searchOpen,setSearchOpen]=useState(false);
+  const searchRef=useRef(null);
+  const current=nav.find(n=>n.id===tab);
+  const groups=[
+    {label:'MARCHÉS',ids:['live','analyze','strategies','journal','news']},
+    {label:'RECHERCHE & IA',ids:['pilote','add','history','termes']},
+    {label:'GESTION',ids:['alerts','outils','systeme']}
+  ];
+  const labels={live:'Tableau de bord',analyze:'Analyse',pilote:'Copilote IA',add:'Base de connaissances',strategies:'Stratégies',journal:'Journal',news:'Calendrier & news',history:'Historique',termes:'Formation',alerts:'Alertes',outils:'Outils',systeme:'Risque & système'};
+  const name=n=>labels[n.id]||n.label;
+  const matches=nav.filter(n=>name(n).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').includes(query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')));
+  const select=id=>{choose(id);setDrawer(false);setQuery('');setSearchOpen(false);};
+  useEffect(()=>{
+    const onKey=e=>{
+      if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();searchRef.current?.focus();}
+      if(e.key==='Escape'){setSearchOpen(false);setDrawer(false);}
+    };
+    window.addEventListener('keydown',onKey);
+    return ()=>window.removeEventListener('keydown',onKey);
+  },[setDrawer]);
+  const icon=n=>h('i',{className:'fas '+n,'aria-hidden':true});
+  return h(React.Fragment,null,
+    h('button',{type:'button',className:'ws-scrim'+(drawer?' is-open':''),onClick:()=>setDrawer(false),'aria-label':'Fermer le menu',tabIndex:-1}),
+    h('aside',{className:'ws-sidebar'+(drawer?' is-open':''),id:'ws-sidebar'},
+      h('button',{type:'button',className:'ws-brand',onClick:()=>select('live'),'aria-label':'5TRADE, tableau de bord'},h('span',null,'5'), 'TRADE'),
+      h('div',{className:'ws-brand-sub'},'WORKSTATION'),
+      h('nav',{'aria-label':'Navigation principale',className:'ws-navigation'},groups.map(g=>h('section',{key:g.label,className:'ws-nav-group'},
+        h('div',{className:'ws-nav-label'},g.label),
+        g.ids.map(id=>nav.find(n=>n.id===id)).filter(Boolean).map(n=>h('button',{key:n.id,type:'button',className:'ws-nav-link'+(tab===n.id?' active':''),'aria-current':tab===n.id?'page':undefined,onClick:()=>select(n.id)},icon(n.icon),h('span',null,name(n))))))),
+      h('div',{className:'ws-sidebar-footer'},h('span',{className:'ws-mode-dot'}),h('div',null,h('strong',null,'Analyse & recherche'),h('small',null,'Exécution réelle suspendue')))),
+    h('header',{className:'ws-header'},
+      h('div',{className:'ws-heading'},h('button',{type:'button',className:'ws-icon-button ws-menu-toggle',onClick:()=>setDrawer(!drawer),'aria-controls':'ws-sidebar','aria-expanded':drawer,'aria-label':drawer?'Fermer la navigation':'Ouvrir la navigation'},icon(drawer?'fa-xmark':'fa-bars')),
+        h('div',null,h('h1',null,tab==='live'?'Trading Command Center':current?name(current):'5TRADE'),h('p',null,'Marchés / Analyse / Recherche'))),
+      h('div',{className:'ws-search',onBlur:e=>{if(!e.currentTarget.contains(e.relatedTarget))setSearchOpen(false);}},
+        icon('fa-magnifying-glass'),
+        h('input',{ref:searchRef,value:query,onFocus:()=>setSearchOpen(true),onChange:e=>{setQuery(e.target.value);setSearchOpen(true);},onKeyDown:e=>{if(e.key==='Enter'&&matches.length){e.preventDefault();select(matches[0].id);}},placeholder:'Rechercher une page…','aria-label':'Rechercher une page'}),
+        h('kbd',null,'Ctrl K'),
+        searchOpen&&h('div',{className:'ws-search-results'},matches.length?matches.map(n=>h('button',{key:n.id,type:'button',onClick:()=>select(n.id)},icon(n.icon),name(n))):h('p',null,'Aucune page correspondante'))),
+      h('div',{className:'ws-header-actions'},
+        h('button',{type:'button',className:'ws-broker'+(broker?.connecte?' connected':''),onClick:openBroker,title:'Configurer Deriv'},h('span',{className:'ws-status-dot'}),'Deriv ',broker?.connecte?'associé':'non associé'),
+        h('button',{type:'button',className:'ws-icon-button',onClick:()=>select('alerts'),'aria-label':'Alertes',title:'Alertes'},icon('fa-bell')),
+        h('button',{type:'button',className:'ws-icon-button',onClick:toggleMute,'aria-label':muted?'Activer le son':'Couper le son',title:'Son des alertes'},icon(muted?'fa-volume-xmark':'fa-volume-high')),
+        h('button',{type:'button',className:'ws-icon-button ws-shortcuts',onClick:shortcuts,'aria-label':'Raccourcis clavier',title:'Raccourcis clavier'},icon('fa-keyboard')),
+        h('div',{className:'ws-user'},icon('fa-circle-user'),h('span',null,user?.username||'Compte')),
+        h('button',{type:'button',className:'ws-icon-button',onClick:logout,'aria-label':'Déconnexion',title:'Déconnexion'},icon('fa-right-from-bracket'))))
+  );
+}
+
+function WorkstationMetrics({actifs,symbol,price,decision,live,offline,lastUpdate,tickRate}) {
+  const h=React.createElement;
+  const active=Array.isArray(actifs)?actifs.length:null;
+  const count=Array.isArray(decision?.signaux)?decision.signaux.filter(s=>s.status==='confirme').length:null;
+  const verdict=decision?.decision||'En attente';
+  const data=[
+    ['fa-chart-column','Marchés actifs',active??'—','Sélection personnelle'],
+    ['fa-coins','Instrument',String(symbol||'—').replace(/^frx/i,''),'Marché sélectionné'],
+    ['fa-chart-line','Dernier cours',ttFmt(price),'Cotation reçue'],
+    ['fa-signal','Signaux confirmés',count??'—','Analyse courante'],
+    ['fa-shield-halved','Décision',verdict,'Aucun ordre automatique'],
+    ['fa-satellite-dish','Flux marché',offline?'Cache':live?'En direct':'En attente',lastUpdate?'Dernière réception : '+ttHeure(lastUpdate):'Aucune réception']
+  ];
+  return h('section',{className:'ws-metrics','aria-label':'Indicateurs du terminal'},data.map(([i,label,value,detail])=>h('article',{className:'ws-metric',key:label},h('div',{className:'ws-metric-label'},h('i',{className:'fas '+i,'aria-hidden':true}),label),h('strong',null,value),h('small',null,detail))));
+}
+
 function Dashboard({ user, onLogout }) {
   const [tab, setTab] = useState('live');
   // Sur mobile, la barre du bas ne garde que l'essentiel ; le reste s'ouvre ici.
@@ -8566,73 +8655,10 @@ function Dashboard({ user, onLogout }) {
   ];
 
     return (
-    <div style={{ minHeight:'100vh' }} className="pad-mobile">
+    <div style={{ minHeight:'100vh' }} className="pad-mobile ws-shell">
 
-      <header style={{ position:'sticky', top:0, zIndex:40, borderBottom:'1px solid var(--border)',
-              background:'rgba(9,13,20,.82)', backdropFilter:'blur(16px)' }}>
-              <div className="hdr" style={{ maxWidth:1240, margin:'0 auto', padding:'12px 20px', display:'flex',
-                justifyContent:'space-between', alignItems:'center', gap:14, flexWrap:'wrap' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-                  {/* Logo 5trade : le mot en toutes lettres, rien à côté */}
-                  <a className="logo-5trade" href="/" title="5trade — Accueil">
-                    <span>5trade</span>
-                  </a>
-                  <span className="badge" style={{ background:'rgba(16,185,129,.12)', color:'#34d399' }}>
-                    Espace de travail
-                  </span>
-                  <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--dim)' }}
-                    title="Version de l'interface. Si elle ne correspond pas à la dernière livrée, rechargez avec Ctrl+Maj+R.">
-                    {UI_VERSION}
-                  </span>
-                  {stats && (
-                    <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--muted)' }}>
-                      <i className="fas fa-database"></i>{stats.total} stratégies
-                    </span>
-                  )}
-                </div>
-                <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                  <button className="btn sm" style={{
-                    padding: '4px 10px', fontSize: 11,
-                    background: derivStatutGlobal && derivStatutGlobal.connecte ? 'rgba(34,211,138,0.18)' : 'rgba(239,68,68,0.15)',
-                    color: derivStatutGlobal && derivStatutGlobal.connecte ? '#34d399' : '#f87171',
-                    border: `1px solid ${derivStatutGlobal && derivStatutGlobal.connecte ? 'rgba(34,211,138,0.4)' : 'rgba(239,68,68,0.4)'}`
-                  }} onClick={() => setDerivModalGlobal(true)} title="Broker Deriv : Token & App ID">
-                    <i className="fas fa-plug" style={{ marginRight: 5 }}></i>
-                    {derivStatutGlobal && derivStatutGlobal.connecte
-                      ? `Deriv : ${derivStatutGlobal.account ? derivStatutGlobal.account.loginid : 'Connecté'} ($${Number(derivStatutGlobal.account ? derivStatutGlobal.account.balance : 0).toFixed(0)})`
-                      : 'Broker Deriv'}
-                  </button>
-                  <button className="btn ghost sm" style={{ padding: '4px 8px', fontSize: 11 }}
-                    onClick={() => { const m = SoundEngine.toggleMute(); setSonMuet(m); }}
-                    title={sonMuet ? 'Activer le son des alertes et ordres (Touche M)' : 'Couper le son (Touche M)'}>
-                    <i className={`fas ${sonMuet ? 'fa-volume-xmark' : 'fa-volume-high'}`} style={{ color: sonMuet ? '#f87171' : '#38bdf8' }}></i>
-                  </button>
-                  <button className="btn ghost sm" style={{ padding: '4px 8px', fontSize: 11 }}
-                    onClick={() => setRaccourcisModal(true)} title="Raccourcis clavier pro">
-                    <i className="fas fa-keyboard" style={{ marginRight: 4 }}></i>Touches
-                  </button>
-                  <span style={{ fontSize:12.5, color:'var(--muted)' }}>
-                    <i className="fas fa-user-astronaut" style={{ marginRight:6 }}></i>
-                    {user.username}
-                    {user.handle && <span style={{ color:'var(--dim)' }}> · {user.handle}</span>}
-                  </span>
-                  <button className="btn ghost sm" onClick={onLogout}>
-                    <i className="fas fa-right-from-bracket"></i>Déconnexion
-                  </button>
-                </div>
-              </div>
-            </header>
-
-      <main className="wrap">
-              <div className="nav" style={{ marginBottom:20 }}>
-                {NAV.map(n => (
-                  <button key={n.id}
-                    aria-current={tab===n.id ? 'page' : undefined} className={`nav-item ${tab===n.id?'on':''}`} onClick={()=>setTab(n.id)}>
-                    <i className={`fas ${n.icon}`}></i>{n.label}
-                  </button>
-                ))}
-              </div>
-
+      {React.createElement(WorkstationChrome,{nav:NAV,tab,choose:setTab,drawer:plusOuvert,setDrawer:setPlusOuvert,user,logout:onLogout,broker:derivStatutGlobal,openBroker:()=>setDerivModalGlobal(true),muted:sonMuet,toggleMute:()=>setSonMuet(SoundEngine.toggleMute()),shortcuts:()=>setRaccourcisModal(true)})}
+      <main className="wrap ws-content" id="ws-main">
         {loading ? (
           <div style={{ display:'grid', gap:14 }}>
             <div className="stat-grid">
@@ -8672,32 +8698,6 @@ function Dashboard({ user, onLogout }) {
           </Garde>
         </>)}
       </main>
-
-      {/* Barre mobile : cinq cibles au maximum, la norme pour un pouce.
-          Les onglets secondaires vivent dans « Plus » au lieu de s'entasser. */}
-      <nav className="mobile-nav">
-        {NAV.filter(n => NAV_PRINCIPAL.includes(n.id)).map(n => (
-          <button key={n.id} className={`mnav-btn ${tab===n.id?'on':''}`}
-            onClick={()=>{setTab(n.id);setPlusOuvert(false);}}>
-            <i className={`fas ${n.icon}`} style={{ fontSize:16 }}></i>{n.label}
-          </button>
-        ))}
-        <button className={`mnav-btn ${plusOuvert || NAV_SECONDAIRE.includes(tab) ? 'on' : ''}`}
-          onClick={()=>setPlusOuvert(o=>!o)}>
-          <i className={`fas ${plusOuvert ? 'fa-xmark' : 'fa-ellipsis'}`} style={{ fontSize:16 }}></i>
-          {plusOuvert ? 'Fermer' : 'Plus'}
-        </button>
-      </nav>
-      {plusOuvert && (
-        <div className="mobile-plus">
-          {NAV.filter(n => NAV_SECONDAIRE.includes(n.id)).map(n => (
-            <button key={n.id} className={tab===n.id?'on':''}
-              onClick={()=>{setTab(n.id);setPlusOuvert(false);}}>
-              <i className={`fas ${n.icon}`}></i>{n.label}
-            </button>
-          ))}
-        </div>
-      )}
 
       <DerivModal ouvert={derivModalGlobal} onClose={() => setDerivModalGlobal(false)} onRefresh={st => setDerivStatutGlobal(st)} />
       <RaccourcisModal ouvert={raccourcisModal} onClose={() => setRaccourcisModal(false)} />

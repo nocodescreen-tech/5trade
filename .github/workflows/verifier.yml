@@ -27,6 +27,11 @@ jobs:
       - name: Porte de vérification (racine du dépôt)
         run: npm test
 
+      - name: Vérifier le bundle frontend livré
+        run: node --check frontend/build/app.js
+      - name: Compiler le frontend depuis les sources
+        run: node frontend/build.js && node --check frontend/build/app.js
+
       - name: Tests de non-régression Node.js
         run: node --test api/tests/*.test.js
 
