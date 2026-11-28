@@ -8274,7 +8274,7 @@ function tinyPng(W = 64, H = 40) {
         toutVide.length === 0);
 
       // Scan avec zéro instrument actif -> suspension automatique
-      const MarketMock = { listSymbols: () => [{ symbol: 'frxXAUUSD' }, { symbol: 'R_75' }] };
+      const MarketMock = { listSymbols: () => [{ symbol: 'frxXAUUSD', provider:'deriv' }, { symbol: 'R_75',provider:'deriv' }] };
       const SignalsMock = {};
       const resScanVide = await Scan.scanComplet({
         market: MarketMock,
