@@ -1,7 +1,7 @@
 'use strict';
 
 // Deriv Options REST API (PAT). Read-only account discovery and balance.
-// No OTP socket or trading permission is used by this connector.
+// No OTP socket or order is requested. Deriv requires the trade scope for account listing.
 const DB = require('../core/db');
 const ACCOUNTS_URL = 'https://api.derivws.com/trading/v1/options/accounts';
 const DEFAULT_APP_ID = '353nKCVSd1Td4BoDbtjvr';
@@ -85,10 +85,14 @@ class DerivClient {
       return { connecte: false, appId: DEFAULT_APP_ID, executionEnabled: false,
         message: 'Aucun compte Deriv associé. Entrez un PAT et un App ID de la nouvelle API.' };
     }
+    if (cfg.account?.apiMode !== 'pat-rest') {
+      return { connecte: false, appId: cfg.appId, executionEnabled: false,
+        verification: 'reconnect_required', message: 'Ancienne configuration : reconnectez avec un PAT de la nouvelle API.' };
+    }
     return {
       connecte: true, appId: cfg.appId, tokenMasque: '••••••••', updatedAt: cfg.updatedAt,
       account: cfg.account || null, executionEnabled: false,
-      verification: cfg.account?.apiMode === 'pat-rest' ? 'last_success' : 'reconnect_required'
+      verification: 'last_success'
     };
   }
 
