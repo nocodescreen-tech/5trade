@@ -476,7 +476,8 @@ function niveauArbitrage(signaux, meta, options = {}) {
   // absolus sur les simples figures géométriques génériques (motifs, structure).
   // Une simple Pin bar ou un BOS générique ne doit JAMAIS écraser ou contredire une stratégie choisie par l'utilisateur.
   const stratsExecutables = executables.filter(s => s.source === 'strategie');
-  const pool = stratsExecutables.length > 0 ? stratsExecutables : executables;
+  const strategieStricte = options.strategieStricte !== false && Array.isArray(options.profils) && options.profils.some(Boolean);
+  const pool = strategieStricte || stratsExecutables.length > 0 ? stratsExecutables : executables;
 
   const longs = pool.filter(s => s.sens === 'long' || s.direction === 'BUY');
   const shorts = pool.filter(s => s.sens === 'short' || s.direction === 'SELL');
@@ -534,7 +535,7 @@ function niveauArbitrage(signaux, meta, options = {}) {
     }
   } else {
     decision = 'NO_TRADE';
-    raison = 'aucun signal exécutable après tous les filtres';
+    raison = strategieStricte ? 'Aucune stratégie sélectionnée exécutable après tous les filtres' : 'aucun signal exécutable après tous les filtres';
     biais = 'neutre';
   }
 
