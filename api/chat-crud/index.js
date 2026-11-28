@@ -161,7 +161,7 @@ async function repondreLibre(message, ctx, raison) {
   let historique = [];
   try {
     const H = require('./historique');
-    const l = await H.lister({ limite: 50 });
+    const l = await H.lister({ limite: 50, utilisateur: ctx.utilisateur || null });
     historique = (l || [])
       // Les anciennes réponses « je n'ai pas reconnu » n'apprennent rien au
       // modèle et l'incitaient à les recopier : on ne les renvoie pas.
