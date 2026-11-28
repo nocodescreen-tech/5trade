@@ -6,7 +6,7 @@ This branch is intentionally not deployed before verification.
 - Set `TELEGRAM_WEBHOOK_SECRET` to a random 24–256 character URL-safe secret. Register the same value as Telegram's webhook secret_token. Only the configured private chat and its owner are authorized; group chats and unconfigured webhooks are rejected.
 - Account mutations via Telegram are suspended. Manual briefings require authentication and POST. The periodic scheduler uses PostgreSQL's telegram_outbox; credentials are not stored in jobs.
 - Pending jobs can expire, confirmed sends carry a message id, explicit 429 can be retried, and uncertain sends are not blindly retried. GET /api/alerts/outbox is authenticated.
-- The existing legacy direct alerts are not migrated to this outbox yet. Telegram's API has no end-to-end exactly-once guarantee.
+- The production surveillance signal path now enqueues Telegram delivery in the outbox. Manual webhook responses and manual briefings remain direct. A queued message is not an acknowledged delivery. Telegram's API has no end-to-end exactly-once guarantee.
 
 ## Research
 - Paper observations are OHLC touch observations, not broker fills.
@@ -18,3 +18,6 @@ This branch is intentionally not deployed before verification.
 
 ## Verification
 Run `npm --prefix api ci`, then `node --test api/tests/production-hardening.test.js` and `npm test`. Validate PostgreSQL migrations/outbox on a disposable database, Telegram with a test bot, and authenticated UI using a test account. No broker order should be sent.
+
+## Local handoff
+Use a fresh Git worktree on the hardening branch with no production .env or database credentials. Run the canonical tests before merging. Check frontend rendering and migrations on a disposable database. The frontend bundle was patched in parallel with the source, not rebuilt by a compiler in the remote session. Full live market-data validation, broker fills, advanced market replay, agent learning and UI redesign are not yet complete. Never enable real broker execution on the strength of historical results alone.
