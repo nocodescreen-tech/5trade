@@ -843,7 +843,15 @@ function profilDepuisStrategie(doc) {
   // écrit comment sa stratégie fonctionne, on l'applique tel quel (borné).
   if (doc.moteur && typeof doc.moteur === 'object') {
     const m = normaliserMoteur(doc.moteur);
-    const regles = m.regles.length ? m.regles : Object.keys(TOUTES_REGLES);
+    const regles = m.regles;
+    const erreurs = [];
+    if (!regles.length) erreurs.push('aucune règle implémentée');
+    if (m.reglesEcartees.length) erreurs.push('règles inconnues : '+m.reglesEcartees.join(', '));
+    if (m.filtresEcartes.length) erreurs.push('filtres inconnus : '+m.filtresEcartes.join(', '));
+    if (m.timeframesRefusees?.length) erreurs.push('timeframes inconnus : '+m.timeframesRefusees.join(', '));
+    if (Array.isArray(doc.moteur.obligatoires) && doc.moteur.obligatoires.some(r=>!regles.includes(r))) erreurs.push('condition obligatoire non implémentée');
+    if (m.seuilRegles > regles.length) erreurs.push('seuil supérieur au nombre de règles');
+    if (doc.actif === false) erreurs.push('stratégie désactivée');
     return {
       id: doc.id || null,
       titre: doc.title || null,
@@ -870,13 +878,15 @@ function profilDepuisStrategie(doc) {
         impulsion: m.impulsion,
         atrStop: m.atrStop
       },
-      executable: true,
+      executable: erreurs.length === 0,
+      erreurs,
+      timeframesRefusees: m.timeframesRefusees,
       // Version de la fiche : c'est elle qui est enregistrée avec chaque
       // évaluation, pour prouver QUELLES règles ont produit le signal.
       version: doc.version || null,
       obligatoires: Array.isArray(m.obligatoires) ? m.obligatoires : [],
       deduitDuTexte: false,
-      motif: 'moteur défini explicitement'
+      motif: erreurs.length ? erreurs.join(' · ') : 'moteur défini explicitement'
     };
   }
 
