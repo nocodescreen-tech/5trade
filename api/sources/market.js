@@ -402,12 +402,12 @@ const bufferMaj = new Map();
 // Au-dela de ce delai, on redemande la source plutot que de servir le buffer.
 const FRAICHEUR_MS = 3000;
 const subscribers = new Set();      // {provider, symbol, tf, onCandle}
-let ws = null, wsProvider = null, wsSymbols = [], wsTf = null, pingTimer = null;
+const streams = new Map(); // fournisseur + timeframe => connexion indépendante
 // Reconnexion du flux : on compte les tentatives CONSECUTIVES pour espacer les
 // essais (3 s, 6 s, 9 s… plafonnees a 30 s) et abandonner au-dela. Sans borne, un
 // fournisseur durablement injoignable etait martele toutes les 3 s, indefiniment.
 const MAX_ESSAIS_FLUX = 8;
-let essaisFlux = 0;
+
 
 const keyOf = (p, s, tf) => `${p}|${s}|${tf}`;
 
@@ -560,17 +560,19 @@ async function getCandles(symbol, tf, count = 300, providerId) {
 function applyCandle(providerId, symbol, tf, candle) {
   const k = keyOf(providerId, symbol, tf);
   const buf2 = buffers.get(k);
-  // Une bougie du flux vaut mise a jour : le buffer est frais.
+  if (!candle || !Number.isFinite(candle.t) || candle.t <= 0) return false;
+  const buf = buf2;
+  const last = buf?.[buf.length - 1];
+  if (last && (candle.t < last.t || (candle.t === last.t && last.closed && !candle.closed))) return false;
   bufferMaj.set(k, Date.now());
-  let buf = buf2;
-  if (!buf || !buf.length) { buffers.set(k, [candle]); saveCacheSoon(); return; }
-  const last = buf[buf.length - 1];
+  if (!buf || !buf.length) { buffers.set(k, [candle]); saveCacheSoon(); return true; }
   if (last.t === candle.t) buf[buf.length - 1] = candle;
-  else if (candle.t > last.t) {
-    if (buf.length > 3000) buf.shift();
+  else {
+    if (buf.length >= 3000) buf.shift();
     buf.push(candle);
     saveCacheSoon();
   }
+  return true;
 }
 
 /**
@@ -580,6 +582,7 @@ function applyCandle(providerId, symbol, tf, candle) {
 function watch(symbol, tf, onCandle, providerId) {
   const p = providerId ? providerById(providerId) : activeProvider();
   if (!TF_MS[tf]) throw new Error(`Timeframe inconnu : ${tf}`);
+  verifierSymbole(p, symbol);
   const sub = { provider: p.id, symbol, tf, onCandle };
   subscribers.add(sub);
 
@@ -587,7 +590,7 @@ function watch(symbol, tf, onCandle, providerId) {
   // sur un relevé périodique. La vérification doit porter sur la présence de la
   // méthode, pas seulement sur son résultat.
   const hasWs = typeof p.streamUrl === 'function' && p.streamUrl([symbol], tf);
-  if (hasWs) ensureStream(p, symbol, tf);
+  if (hasWs) ensureStream(p, tf);
   else startPolling(sub);
 
   return () => {
@@ -595,7 +598,7 @@ function watch(symbol, tf, onCandle, providerId) {
     if (sub._poll) clearInterval(sub._poll);
     // Plus aucun abonné : on libère la connexion temps réel au lieu de la
     // laisser ouverte indéfiniment (une seule suffit, mais pas zéro abonné).
-    if (subscribers.size === 0) closeStream();
+    if (hasWs) ensureStream(p, tf);
   };
 }
 
@@ -613,89 +616,93 @@ function watchTicks(symbol, onTick, providerId) {
   return p.ticks(symbol, onTick);
 }
 
-function ensureStream(p, symbol, tf) {
-  const sameTf = ws && wsProvider === p.id && wsTf === tf;
-  if (sameTf) {
-    if (!wsSymbols.includes(symbol)) {
-      wsSymbols.push(symbol);
-      if (p.id === 'binance') reopenStream(p, wsSymbols, tf);
-      else if (p.onOpen) p.onOpen(ws, [symbol], tf);
-    }
-    return;
+function streamKey(p, tf) { return p.id + ':' + tf; }
+
+function disposeStream(state) {
+  if (!state) return;
+  state.disposed = true;
+  clearTimeout(state.retry);
+  clearInterval(state.ping);
+  const socket = state.socket;
+  state.socket = null;
+  if (socket) {
+    try { if (socket.readyState === WebSocket.CONNECTING) socket.terminate(); else socket.close(); } catch {}
   }
-  reopenStream(p, [...new Set([symbol, ...(wsProvider === p.id ? wsSymbols : [])])], tf);
 }
 
-function reopenStream(p, symbols, tf) {
-  closeStream();
-  wsProvider = p.id; wsSymbols = symbols; wsTf = tf;
-  try { ws = new WebSocket(p.streamUrl(symbols, tf)); }
-  catch (e) { console.error('   Marché     : flux indisponible —', e.message); ws = null; return; }
+function ensureStream(p, tf) {
+  const key = streamKey(p, tf);
+  const symbols = [...new Set([...subscribers].filter(s => s.provider === p.id && s.tf === tf).map(s => s.symbol))].sort();
+  const old = streams.get(key);
+  if (!symbols.length) {
+    streams.delete(key);
+    disposeStream(old);
+    return;
+  }
+  if (old && old.symbols.join(',') === symbols.join(',')) return;
+  disposeStream(old);
+  const state = { key, p, tf, symbols, socket: null, ping: null, retry: null, attempts: 0, disposed: false };
+  streams.set(key, state);
+  openStream(state);
+}
 
-  ws.on('open', () => {
-    // Le flux est reparti : les tentatives precedentes ne comptent plus.
-    essaisFlux = 0;
-    console.log(`   Marché     : direct ${p.id} ${symbols.join(',')} ${tf}`);
-    if (p.onOpen) p.onOpen(ws, symbols, tf);
-    // Binance coupe une connexion inactive : on ping toutes les 3 minutes.
-    pingTimer = setInterval(() => { try { ws.ping(); } catch {} }, 180000);
+function openStream(state) {
+  if (state.disposed || streams.get(state.key) !== state) return;
+  const { p, symbols, tf } = state;
+  const retry = () => {
+    if (state.disposed || streams.get(state.key) !== state || state.retry) return;
+    state.attempts++;
+    const delay = state.attempts > MAX_ESSAIS_FLUX ? 60000 : Math.min(3000 * state.attempts, 30000);
+    state.retry = setTimeout(() => {
+      state.retry = null;
+      openStream(state);
+    }, delay);
+  };
+  let socket;
+  try { socket = new WebSocket(p.streamUrl(symbols, tf), { handshakeTimeout: 12000 }); }
+  catch (e) { console.error('Marché : flux indisponible', p.id, tf, e.message); retry(); return; }
+  state.socket = socket;
+  const current = () => !state.disposed && streams.get(state.key) === state && state.socket === socket;
+  let alive = true;
+  socket.on('pong', () => { alive = true; });
+  socket.on('open', () => {
+    if (!current()) return;
+    try { if (p.onOpen) p.onOpen(socket, symbols, tf); }
+    catch (e) { console.error('Marché : abonnement impossible', p.id, tf, e.message); socket.terminate(); return; }
+    state.ping = setInterval(() => {
+      if (!current()) return;
+      if (!alive) { socket.terminate(); return; }
+      alive = false;
+      try { socket.ping(); } catch { socket.terminate(); }
+    }, 30000);
   });
-  ws.on('message', raw => {
-    let msg; try { msg = JSON.parse(raw); } catch { return; }
-    const parsed = p.parse(msg);
-    if (!parsed) return;
-    applyCandle(p.id, parsed.symbol, tf, parsed.candle);
+  socket.on('message', raw => {
+    if (!current()) return;
+    let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
+    if (msg.error) { console.error('Marché : erreur fournisseur', p.id, tf, msg.error.code || 'inconnue'); return; }
+    let parsed; try { parsed = p.parse(msg); } catch { return; }
+    if (!parsed || !symbols.includes(parsed.symbol)) return;
+    state.attempts = 0;
+    if (!applyCandle(p.id, parsed.symbol, tf, parsed.candle)) return;
     for (const s of subscribers) {
       if (s.provider === p.id && s.tf === tf && s.symbol === parsed.symbol) {
         try { s.onCandle(parsed.candle); } catch {}
       }
     }
   });
-  // ⚠️ NE PAS avaler l'erreur : un WebSocket peut mourir en silence et le flux
-  // s'arrête sans que rien ne le dise — le panneau des ticks se fige, et le
-  // graphique avec lui, sans une ligne de log pour l'expliquer. On la trace.
-  ws.on('error', (e) => {
-    console.error(`   Marché     : flux ${p.id} ${tf} — erreur socket : ${(e && e.message) || e}`);
-  });
-  ws.on('close', () => {
-    if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
-    // Reconnexion si des abonnés attendent encore ce flux.
-    // Backoff progressif ET borné : une boucle de reconnexion toutes les 3 s sans
-    // limite martèle le fournisseur indéfiniment quand il est durablement down.
-    if (subscribers.size && wsProvider === p.id && wsTf === tf) {
-      essaisFlux += 1;
-      if (essaisFlux > MAX_ESSAIS_FLUX) {
-        console.error(`   Marché     : flux ${p.id} ${tf} pause après ${MAX_ESSAIS_FLUX} tentatives`
-          + ' — repli temporaire sur REST/cache. Prochaine tentative dans 60s.');
-        setTimeout(() => {
-          if (subscribers.size) {
-            essaisFlux = 0;
-            reopenStream(p, wsSymbols, wsTf);
-          }
-        }, 60000);
-        return;
-      }
-      const attente = Math.min(3000 * essaisFlux, 30000);
-      setTimeout(() => { if (subscribers.size) reopenStream(p, wsSymbols, wsTf); }, attente);
-    }
+  socket.on('error', e => console.error('Marché : flux', p.id, tf, e.message));
+  socket.on('close', () => {
+    if (!current()) return;
+    clearInterval(state.ping);
+    state.ping = null;
+    state.socket = null;
+    retry();
   });
 }
 
 function closeStream() {
-  if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
-  const sock = ws;
-  ws = null;                       // plus aucune référence active
-  if (!sock) return;
-  // PIÈGE (bug vécu) : un socket encore en cours de connexion ne peut pas être
-  // « close ». close() émet alors une erreur 'WebSocket was closed before the
-  // connection was established' et, si plus aucun écouteur 'error' n'est
-  // attaché, cette erreur devient non gérée et TUE le process Node.
-  // → on coupe net avec terminate(), et on ne retire jamais les écouteurs.
-  try {
-    if (sock.readyState === 0 /* CONNECTING */) sock.terminate();
-    else sock.close();
-  } catch { /* socket déjà mort : rien à faire */ }
-  console.log('   Marché     : flux temps réel libéré');
+  for (const state of streams.values()) disposeStream(state);
+  streams.clear();
 }
 
 /** Fournisseur sans WebSocket : on rafraîchit par polling REST. */
