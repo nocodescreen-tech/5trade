@@ -81,7 +81,6 @@
 .pad-mobile .stat-grid,.pad-mobile .grid-auto { gap:12px; }
 .pad-mobile .chart-mobile { min-width:0; }
 .pad-mobile .chart-mobile:has(> .chart-mobile) { height:auto!important; }
-.pad-mobile .chart-mobile > .chart-mobile { height:revert-layer; }
 .pad-mobile table { font-variant-numeric:tabular-nums; }
 @media(min-width:1360px) {
   .pad-mobile > header { position:sticky!important; top:0; }
@@ -136,16 +135,13 @@
   .pad-mobile > main.wrap > .nav { display:none; }
   .pad-mobile .nav { max-width:100%; }
   /* Only dashboard navigation disappears; nested tab controls remain usable. */
-  .pad-mobile main .nav:not(:first-child) { display:flex; }
+  .pad-mobile main .nav { display:flex; }
   .pad-mobile .mobile-nav { background:var(--panel); backdrop-filter:none; }
   .pad-mobile .mobile-plus { background:var(--panel); max-height:65dvh; overflow:auto; }
   .pad-mobile .panel { border-radius:8px; }
   .pad-mobile .btn,.pad-mobile .layer-btn { min-height:40px; }
   .pad-mobile .fld { font-size:16px; }
   .pad-mobile .stat-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .pad-mobile .chart-pro-panel .chart-mobile { height:auto!important; }
-  .pad-mobile .chart-pro-panel .chart-mobile > .chart-mobile { height:300px!important; }
-  .pad-mobile .chart-pro-panel .chart-mobile:only-child { min-height:300px; }
   .pad-mobile .smc-layers-bar { padding:7px 8px; }
 }
 @media(max-width:360px) {
