@@ -98,16 +98,17 @@ function selectionner({ candles, meta, strategies, regime = null, max = 3, perfo
     }
 
     const statut = (verdict && verdict.status) || 'inconnu';
-    const force = Number.isFinite(verdict && verdict.force) ? Math.max(0,Math.min(1,verdict.force)) : 0;
-    const reglesActives = [...new Set((Array.isArray(verdict?.reglesActives) ? verdict.reglesActives : []).filter(r=>base.regles.includes(r)))];
-    const manquantes = Math.max(0, (profil.seuilRegles || 1) - reglesActives.length);
+    const force = Number.isFinite(verdict?.strength) ? Math.max(0,Math.min(1,verdict.strength)) : 0;
+    const reglesActives = [...new Set((Array.isArray(verdict?.reglesPour) ? verdict.reglesPour : []).filter(r=>base.regles.includes(r)))];
+    const preuves = Number.isInteger(verdict?.confirmations) && verdict.confirmations >= 0 ? Math.min(verdict.confirmations,reglesActives.length) : 0;
+    const manquantes = Math.max(0, (profil.seuilRegles || 1) - preuves);
 
     // 5. Le setup est-il seulement présent ?
     let motif = null;
     if (statut === 'confirme') motif = 'setup confirmé sur ses propres règles';
     else if (statut === 'surveiller') {
       motif = manquantes
-        ? `${reglesActives.length}/${profil.seuilRegles || 1} règles réunies : configuration en observation`
+        ? `${preuves}/${profil.seuilRegles || 1} preuves distinctes réunies : configuration en observation`
         : 'configuration en observation (régime ou confirmation incomplète)';
     } else if (statut === 'rejete') {
       motif = `conditions non remplies : ${reglesActives.length} règle(s) sur ${profil.seuilRegles || 1} exigée(s)`;
@@ -174,8 +175,8 @@ function selectionner({ candles, meta, strategies, regime = null, max = 3, perfo
       regimeIncompatible,
       statut, direction: (verdict && verdict.direction) || null,
       force: +force.toFixed(3), score,
-      reglesActives, seuilRegles: profil.seuilRegles || null,
-      retenue: statut === 'confirme' && ['BUY','SELL'].includes(verdict?.direction) && manquantes === 0 && (profil.obligatoires || []).every(r=>reglesActives.includes(r)) && declare && !regimeIncompatible,
+      reglesActives, preuvesDistinctes:preuves, seuilRegles: profil.seuilRegles || null,
+      retenue: statut === 'confirme' && ['BUY','SELL'].includes(verdict?.direction) && manquantes === 0 && force >= (profil.seuilForce ?? 0) && (profil.obligatoires || []).every(r=>reglesActives.includes(r)) && declare && !regimeIncompatible,
       motif
     };
   });
