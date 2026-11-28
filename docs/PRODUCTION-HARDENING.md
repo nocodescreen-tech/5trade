@@ -1,0 +1,20 @@
+# Production hardening — delivery, research and validation
+
+This branch is intentionally not deployed before verification.
+
+## Telegram
+- Set `TELEGRAM_WEBHOOK_SECRET` to a random 24–256 character URL-safe secret. Register the same value as Telegram's webhook secret_token. Only the configured private chat and its owner are authorized; group chats and unconfigured webhooks are rejected.
+- Account mutations via Telegram are suspended. Manual briefings require authentication and POST. The periodic scheduler uses PostgreSQL's telegram_outbox; credentials are not stored in jobs.
+- Pending jobs can expire, confirmed sends carry a message id, explicit 429 can be retried, and uncertain sends are not blindly retried. GET /api/alerts/outbox is authenticated.
+- The existing legacy direct alerts are not migrated to this outbox yet. Telegram's API has no end-to-end exactly-once guarantee.
+
+## Research
+- Paper observations are OHLC touch observations, not broker fills.
+- /api/performance excludes unresolved/null returns and identifies simulated data.
+- Historical capital is settled once at exit, not at entry. The existing historical exit model still assumes a trade entry; it does not simulate matching or liquidity.
+- To run rolling research offline: `node api/cli/walk-forward.js input.json output.json`. Input: symbol, timeframe, candles (closed chronological OHLCV), strategies (explicit compatible versioned documents), optional train/test sizes. Costs for that specific symbol must be configured. The CLI refuses overwrite of output.
+- Rolling validation windows do not overlap. Only training results select each candidate. The model is isolated-window historical validation, not a production guarantee, and does not reproduce full MTF histories or historical macro data.
+- Binance Spot taker volume supports measured delta/CVD for the received window. For other data, OHLC-derived order flow is an estimate; missing volume produces no profile. Volume profile remains an OHLC approximation, not a trade-level profile.
+
+## Verification
+Run `npm --prefix api ci`, then `node --test api/tests/production-hardening.test.js` and `npm test`. Validate PostgreSQL migrations/outbox on a disposable database, Telegram with a test bot, and authenticated UI using a test account. No broker order should be sent.
