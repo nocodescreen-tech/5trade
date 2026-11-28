@@ -9,7 +9,7 @@
  * annualiser supposerait un nombre de trades par an que nous ne connaissons pas.
  */
 
-const { metriques } = require('./performance');
+const { metriques, exploitables } = require('./performance');
 
 /** Générateur pseudo-aléatoire reproductible (LCG) : même graine, même résultat. */
 function aleatoire(graine = 42) {
@@ -20,9 +20,7 @@ function aleatoire(graine = 42) {
   };
 }
 
-const serie = trades => (trades || [])
-  .filter(t => t && Number.isFinite(Number(t.r)))
-  .map(t => Number(t.r));
+const serie = trades => exploitables(trades).map(t => t.r);
 
 /**
  * @param {Array} trades
@@ -40,7 +38,7 @@ function ratios(trades) {
   const ecart = Math.sqrt(r.reduce((a, v) => a + (v - moyenne) ** 2, 0) / (n - 1));
   const baisse = r.filter(v => v < 0);
   const ecartBaisse = baisse.length
-    ? Math.sqrt(baisse.reduce((a, v) => a + v * v, 0) / baisse.length)
+    ? Math.sqrt(baisse.reduce((a, v) => a + v * v, 0) / n)
     : 0;
 
   // metriques() attend des objets { r } : on emballe, sinon n vaut 0 et le
@@ -81,7 +79,7 @@ function ratios(trades) {
  */
 function monteCarlo(trades, options = {}) {
   const r = serie(trades);
-  const iterations = Number.isFinite(options.iterations) ? Math.max(100, Math.min(20000, options.iterations)) : 2000;
+  const iterations = Number.isFinite(options.iterations) ? Math.max(100, Math.min(20000, Math.floor(options.iterations))) : 2000;
   if (r.length < 10) {
     return { ok: false, raison: `${r.length} trade(s) : un Monte Carlo en dessous de 10 ne dit rien` };
   }
@@ -140,7 +138,7 @@ function monteCarlo(trades, options = {}) {
  */
 function marcheAvant(trades, options = {}) {
   const r = serie(trades);
-  const blocs = Number.isFinite(options.blocs) ? Math.max(2, Math.min(10, options.blocs)) : 4;
+  const blocs = Number.isFinite(options.blocs) ? Math.max(2, Math.min(10, Math.floor(options.blocs))) : 4;
   if (r.length < blocs * 10) {
     return { ok: false, raison: `${r.length} trade(s) pour ${blocs} blocs : chaque bloc serait trop mince` };
   }
@@ -156,7 +154,9 @@ function marcheAvant(trades, options = {}) {
   return {
     ok: true, blocs: resultats, positifs,
     stable: positifs === blocs,
-    lecture: `${positifs}/${blocs} bloc(s) à espérance positive`
+    methode: 'stabilite_blocs_historiques',
+    horsEchantillon: false,
+    lecture: `${positifs}/${blocs} bloc(s) à espérance positive ; ce découpage ne constitue pas un walk-forward avec réentraînement.`
   };
 }
 
