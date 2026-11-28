@@ -3956,14 +3956,14 @@ function LiveStatusIndicator({
       flexWrap: 'wrap'
     }
   }, /*#__PURE__*/React.createElement(TtPill, {
-    tone: live ? 'ok' : 'warn'
+    tone: live && !offline ? 'ok' : 'warn'
   }, /*#__PURE__*/React.createElement("span", {
     className: "dot-live",
     style: {
       width: 6,
       height: 6
     }
-  }), live ? 'EN DIRECT' : 'CONNEXION…'), offline && /*#__PURE__*/React.createElement(TtPill, {
+  }), offline ? 'HORS LIGNE' : live ? 'FLUX CONNECTÉ' : 'FLUX NON CONNECTÉ'), offline && /*#__PURE__*/React.createElement(TtPill, {
     tone: "warn",
     title: "R\xE9seau absent : bougies servies du cache local."
   }, "CACHE"), lastUpdate && /*#__PURE__*/React.createElement("span", {
@@ -4083,113 +4083,34 @@ function LatenceCotation({
 }
 
 // ── Statut de la session métaux (XAUUSD / spot gold) ───────────────────────
-function SessionMarcheMetaux({
-  symbol
-}) {
-  const [statut, setStatut] = React.useState({
-    session: 'Londres',
-    ouvert: true,
-    alerte: null
-  });
-  React.useEffect(() => {
-    const check = () => {
-      const d = new Date();
-      const jour = d.getUTCDay();
-      const h = d.getUTCHours();
-      if (jour === 6 || jour === 5 && h >= 22 || jour === 0 && h < 22) {
-        setStatut({
-          session: 'Fermé (Weekend)',
-          ouvert: false,
-          alerte: 'Marché fermé jusqu\'à dimanche 22h UTC'
-        });
-        return;
-      }
-      if (h === 21) {
-        setStatut({
-          session: 'Pause CME Métaux (21h-22h UTC)',
-          ouvert: false,
-          alerte: 'Cotation suspendue — réouverture à 22h00 UTC'
-        });
-        return;
-      }
-      if (h >= 8 && h < 13) {
-        setStatut({
-          session: 'Londres (Fixing AM 10:30 UTC)',
-          ouvert: true,
-          alerte: null
-        });
-      } else if (h >= 13 && h < 17) {
-        setStatut({
-          session: 'Londres-NY (Fixing PM 15:00 UTC)',
-          ouvert: true,
-          alerte: 'Liquidité & volatilité maximales'
-        });
-      } else if (h >= 17 && h < 21) {
-        setStatut({
-          session: 'New York (Session US)',
-          ouvert: true,
-          alerte: null
-        });
-      } else {
-        setStatut({
-          session: 'Asie / Pacifique',
-          ouvert: true,
-          alerte: 'Liquidité modérée sur l\'or'
-        });
-      }
+function SessionMarcheMetaux({symbol}) {
+  const [result,setResult]=React.useState(null);
+  React.useEffect(()=>{
+    let actif=true, busy=false;
+    setResult(null);
+    const refresh=async()=>{
+      if(busy || !actif)return;
+      busy=true;
+      try {
+        const response=await api('/market/status?symbol='+encodeURIComponent(symbol));
+        const d=await response.json();
+        if(actif)setResult(response.ok && d.success && d.symbol===symbol ? d : null);
+      } catch { if(actif)setResult(null); }
+      finally {busy=false;}
     };
-    check();
-    const t = setInterval(check, 30000);
-    return () => clearInterval(t);
-  }, [symbol]);
-  const tone = !statut.ouvert ? 'bad' : statut.alerte ? 'info' : 'ok';
-  const color = tone === 'bad' ? '#ef4444' : tone === 'info' ? '#a78bfa' : '#10b981';
-  const bg = tone === 'bad' ? 'rgba(239,68,68,0.12)' : tone === 'info' ? 'rgba(167,139,250,0.12)' : 'rgba(16,185,129,0.12)';
-  const border = tone === 'bad' ? 'rgba(239,68,68,0.3)' : tone === 'info' ? 'rgba(167,139,250,0.3)' : 'rgba(16,185,129,0.3)';
-  return /*#__PURE__*/React.createElement("span", {
-    style: {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 5,
-      fontSize: 11,
-      color,
-      background: bg,
-      border: `1px solid ${border}`,
-      padding: '3px 8px',
-      borderRadius: 6,
-      fontWeight: 700
-    },
-    title: statut.alerte || statut.session
-  }, /*#__PURE__*/React.createElement("i", {
-    className: `fas ${!statut.ouvert ? 'fa-ban' : 'fa-sun'}`,
-    style: {
-      fontSize: 10
-    }
-  }), statut.session);
-}
-
-// ── Filtre Calendrier économique US (USD / Métaux) ─────────────────────────
-function CalendrierUSDStatus() {
-  return /*#__PURE__*/React.createElement("span", {
-    style: {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 5,
-      fontSize: 11,
-      color: '#fbbf24',
-      background: 'rgba(251,191,36,0.12)',
-      border: '1px solid rgba(251,191,36,0.3)',
-      padding: '3px 8px',
-      borderRadius: 6,
-      fontWeight: 700
-    },
-    title: "Filtre calendrier \xE9conomique actif : prudence pendant CPI, NFP, FOMC"
-  }, /*#__PURE__*/React.createElement("i", {
-    className: "fas fa-calendar-check",
-    style: {
-      fontSize: 10
-    }
-  }), "USD News : Surveillance active");
+    refresh();
+    const timer=setInterval(refresh,30000);
+    return()=>{actif=false;clearInterval(timer);};
+  },[symbol]);
+  const data=result?.symbol===symbol ? result : null;
+  const session=data?.session;
+  const news=data?.news;
+  const known=session?.horaireConnu===true;
+  const label=!known?'Session non vérifiée':session.statut==='pre_fermeture'?'Pré-fermeture théorique':session.ouvert?'Ouverture théorique':'Fermeture théorique';
+  const newsLabel=news?.applicable===false?'Macro : non applicable':news?.verifie!==true?'Macro : non vérifiée':news.bloque?'Macro : blocage':'Macro : vérifiée';
+  return React.createElement(React.Fragment,null,
+    React.createElement(TtPill,{tone:known?(session.ouvert?'info':'bad'):'warn',title:session?.raison || 'Horaires courtier non confirmés'},label),
+    React.createElement(TtPill,{tone:news?.applicable===false?'neu':news?.verifie!==true?'warn':news.bloque?'bad':'ok',title:news?.detail || 'Calendrier non vérifié'},newsLabel));
 }
 
 // ── NIVEAU 03 : Live Decision Center — l'état global, en un coup d'œil ────
@@ -8487,7 +8408,7 @@ function LiveMarket({
     live: live
   }), /*#__PURE__*/React.createElement(SessionMarcheMetaux, {
     symbol: symbol
-  }), /*#__PURE__*/React.createElement(CalendrierUSDStatus, null), /*#__PURE__*/React.createElement("span", {
+  }), /*#__PURE__*/React.createElement("span", {
     style: {
       flex: '1 1 auto'
     }
@@ -15347,7 +15268,7 @@ function Dashboard({
     }
   }, /*#__PURE__*/React.createElement("span", {
     className: "dot-live"
-  }), "en ligne"), /*#__PURE__*/React.createElement("span", {
+  }), "Espace de travail"), /*#__PURE__*/React.createElement("span", {
     className: "badge",
     style: {
       background: 'rgba(148,163,184,.1)',
@@ -15441,6 +15362,7 @@ function Dashboard({
     }
   }, NAV.map(n => /*#__PURE__*/React.createElement("button", {
     key: n.id,
+    "aria-current": tab===n.id ? "page" : undefined,
     className: `nav-item ${tab === n.id ? 'on' : ''}`,
     onClick: () => setTab(n.id)
   }, /*#__PURE__*/React.createElement("i", {
