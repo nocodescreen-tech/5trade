@@ -64,6 +64,7 @@ const binance = {
     return rows.map(k => ({
       t: k[0],                      // epoch ms d'ouverture
       o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5],
+      takerBuyBase: k[9] == null ? null : Number(k[9]), quoteVolume: k[7] == null ? null : Number(k[7]), volumeSource: 'binance_spot',
       closed: true
     }));
   },
@@ -77,7 +78,7 @@ const binance = {
     if (!k) return null;
     return {
       symbol: msg.data.s,
-      candle: { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, closed: !!k.x }
+      candle: { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, takerBuyBase: k.V == null ? null : Number(k.V), quoteVolume: k.q == null ? null : Number(k.q), volumeSource: 'binance_spot', closed: !!k.x }
     };
   },
 
@@ -94,7 +95,7 @@ const binance = {
       sock.on('message', raw => {
         let d; try { d = JSON.parse(raw); } catch { return; }
         if (d && d.e === 'aggTrade' && d.p) {
-          onTick({ t: d.T, prix: +d.p, symbole: symbol, source: 'binance', quantite: +d.q });
+          onTick({ t: d.T, prix: +d.p, symbole: symbol, source: 'binance', quantite: +d.q, tradeId: d.a, aggressor: typeof d.m === 'boolean' ? (d.m ? 'sell' : 'buy') : null });
         }
       });
       sock.on('error', () => {});
