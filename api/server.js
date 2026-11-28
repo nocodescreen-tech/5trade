@@ -5313,21 +5313,15 @@ async function start() {
           route: opts.route || 'chat'
         })
       });
-      // HISTORIQUE : on écrit la question ET la réponse. Sans cela, fermer
-      // l'onglet effaçait la conversation — le chat ne se souvenait de rien.
+      let historiquePersiste=false;
       try {
-        const H = require('./chat-crud/historique');
-        const texteReponse = (r && (r.texte || (r.resultat && r.resultat.texte))) || '';
-        await H.enregistrer({ utilisateur: req.session.username, role: 'user', texte: message,
-          verbe: r && r.action ? r.action.verbe : null,
-          sujet: r && r.action ? r.action.sujet : null });
-        if (texteReponse) {
-          await H.enregistrer({ utilisateur: req.session.username, role: 'assistant', texte: texteReponse,
-            verbe: r && r.action ? r.action.verbe : null,
-            action: r && r.action ? r.action : null });
-        }
-      } catch (e) { console.error('chat/historique :', e.message); }
-      res.json({ success: true, ...r });
+        const H=require('./chat-crud/historique');
+        const texteReponse=(r && (r.texte || r.resultat?.texte)) || '';
+        const u=await H.enregistrer({utilisateur:req.session.username,role:'user',texte:message,verbe:r?.action?.verbe || null,sujet:r?.action?.sujet || null});
+        const v=texteReponse ? await H.enregistrer({utilisateur:req.session.username,role:'assistant',texte:texteReponse,verbe:r?.action?.verbe || null,action:r?.action || null}) : {ok:false};
+        historiquePersiste=u.ok===true && v.ok===true;
+      } catch(e){console.error('chat/historique :',e.message);}
+      res.json({success:true,...r,historiquePersiste});
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
