@@ -29,7 +29,7 @@ const path = require('path');
 
 // Cache disque : permet d'analyser même sans réseau (le buffer mémoire seul
 // disparaît à chaque redémarrage du serveur).
-const CACHE_FILE = path.join(__dirname, '..', '..', 'data', 'market-cache.json');
+const CACHE_FILE = process.env.MARKET_CACHE_FICHIER || path.join(__dirname, '..', '..', 'data', 'market-cache.json');
 const CACHE_KEEP = 1500;   // de quoi servir une demande de 1000 bougies
 
 const TF_MS = {
@@ -558,8 +558,11 @@ async function chargerBougies(symbol, tf, count, providerId) {
     const latest = buffers.get(k) || [];
     const last = latest[latest.length - 1];
     // A slow REST response must not overwrite a more recent live candle.
-    const merged = (bufferMaj.get(k) || 0) > maj && last
-      ? assainirBougies([...a.bougies,...latest.filter(c=>c.t >= a.bougies[a.bougies.length-1].t)],tf) : a;
+    const firstRest = a.bougies[0].t;
+    const lastRest = a.bougies[a.bougies.length-1].t;
+    const oldPrefix = last && last.t >= firstRest - TF_MS[tf] ? latest.filter(c=>c.t < firstRest) : [];
+    const liveSuffix = (bufferMaj.get(k) || 0) > maj && last ? latest.filter(c=>c.t >= lastRest) : [];
+    const merged = assainirBougies([...oldPrefix,...a.bougies,...liveSuffix],tf);
     buffers.set(k, merged.bougies.slice(-3000));
     bufferMaj.set(k, Date.now());
     saveCacheSoon();
