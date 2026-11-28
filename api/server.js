@@ -1565,7 +1565,7 @@ app.post('/api/scan', requireAuth, async (req, res) => {
 
     const InstrumentsActifs = require('./core/instruments-actifs');
     const symbolesDemandes = req.body && req.body.symboles;
-    const symbolesAutorises = Array.isArray(symbolesDemandes) && symbolesDemandes.length
+    const symbolesAutorises = Array.isArray(symbolesDemandes)
       ? symbolesDemandes
       : InstrumentsActifs.obtenirActifs();
 
@@ -1584,7 +1584,8 @@ app.post('/api/scan', requireAuth, async (req, res) => {
       tf,
       strategies: profils,
       mode: Scan.MODES_SCAN.TRADING_AUTORISE,
-      symbolesAutorises
+      symbolesAutorises,
+      verifierCalendrier: symbol=>filtreCalendrier(symbol,{strict:true})
     });
     res.json({
       success: true, ...r,
@@ -3182,6 +3183,61 @@ app.put('/api/risk/instruments/:symbol', requireAuth, async (req, res) => {
         source = 'manuel', maj_le = now()`;
     res.json({ success: true, symbole, tickSize, tickValue });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/market/gold-context', requireAuth, async (req,res) => {
+  try {
+    const symbol='frxXAUUSD';
+    const tf=String(req.query.tf||'1h');
+    if(!Market.TF_MS[tf])return res.status(400).json({success:false,error:'Timeframe invalide'});
+    const [r,macro,goldMacro]=await Promise.all([
+      Market.getCandles(symbol,tf,300,'deriv'),
+      filtreCalendrier(symbol,{strict:true}),
+      require('./moteurs/gold').snapshot()
+    ]);
+    const candles=(r.candles||[]).filter(c=>c.closed!==false);
+    const result=require('./moteurs/gold').analyse(candles.map(c=>c.c),{symbol,provider:'deriv',timeframe:tf,candles,macro,goldMacro,now:Date.now(),live:true});
+    res.json({success:true,symbol,timeframe:tf,source:r.source,macro,goldMacro,diagnostic:result});
+  } catch {res.status(503).json({success:false,error:'Contexte or indisponible'});}
+});
+
+// Bounded, read-only educational replay. Snapshot kept server-side, so
+// advancing never reveals future candles or changes the historical dataset.
+const replaySessions = new Map();
+const replayOwner = req => String(req.session?.user?.id || req.session?.user || req.sessionID || '');
+const replayPrune = () => {
+  for(const [id,s] of replaySessions)if(s.expires<Date.now())replaySessions.delete(id);
+};
+app.post('/api/replay/start',requireAuth,async(req,res)=>{
+  try{
+    replayPrune();
+    const owner=replayOwner(req);
+    if(!owner)return res.status(403).json({success:false,error:'Session requise'});
+    const symbol=String(req.body?.symbol||'frxXAUUSD'),tf=String(req.body?.tf||'1h');
+    const provider=String(req.body?.provider||'deriv');
+    if(!Market.TF_MS[tf]||!Market.listSymbols().some(x=>x.symbol===symbol&&x.provider===provider))
+      return res.status(400).json({success:false,error:'Instrument ou unité invalide'});
+    if(replaySessions.size>=50)return res.status(429).json({success:false,error:'Capacité replay atteinte'});
+    const r=await Market.getCandles(symbol,tf,500,provider);
+    const candles=(r.candles||[]).filter(c=>c.closed!==false);
+    const frame=require('./engine/market-replay').frame(candles,tf,Math.min(119,candles.length-2));
+    const id=require('node:crypto').randomUUID();
+    replaySessions.set(id,{owner,symbol,tf,provider,candles,cursor:frame.cursor,expires:Date.now()+1800000});
+    res.json({success:true,id,symbol,tf,provider,...frame});
+  }catch{res.status(422).json({success:false,error:'Historique replay indisponible'});}
+});
+app.post('/api/replay/step',requireAuth,(req,res)=>{
+  replayPrune();
+  const s=replaySessions.get(String(req.body?.id||''));
+  if(!s||s.owner!==replayOwner(req))return res.status(404).json({success:false,error:'Session replay expirée'});
+  const delta=Number(req.body?.delta);
+  if(![-1,1,5,10].includes(delta))return res.status(400).json({success:false,error:'Pas invalide'});
+  const cursor=Math.max(30,Math.min(s.candles.length-1,s.cursor+delta));
+  try{
+    const frame=require('./engine/market-replay').frame(s.candles,s.tf,cursor);
+    s.cursor=cursor;s.expires=Date.now()+1800000;
+    res.json({success:true,id:req.body.id,symbol:s.symbol,tf:s.tf,provider:s.provider,...frame});
+  }catch{res.status(422).json({success:false,error:'Rejeu indisponible'});}
 });
 
 app.get('/api/market/profil', requireAuth, async (req, res) => {
