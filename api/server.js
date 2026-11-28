@@ -5332,7 +5332,10 @@ async function start() {
   // et données statistiques réelles (recap journal, positions, risque).
   const NotificationTracker = require('./delivery/notification-tracker');
 
-  setInterval(async () => {
+  let surveillanceTemporelleEnCours = false;
+  const surveillanceTemporelle = async () => {
+    if (surveillanceTemporelleEnCours) return;
+    surveillanceTemporelleEnCours = true;
     try {
       const d = new Date();
       const jourStr = d.toISOString().slice(0, 10);
@@ -5345,7 +5348,7 @@ async function start() {
 
       // 1. Briefing matinal quotidien (06:00 à 10:00 UTC)
       const cleBriefing = `briefing_matin_${jourStr}`;
-      if (heureUTC >= 6 && heureUTC <= 10 && !NotificationTracker.estDejaEnvoye(cleBriefing)) {
+      if (heureUTC >= 6 && heureUTC < 10 && !NotificationTracker.estDejaEnvoye(cleBriefing)) {
         try {
           const { genererBriefingTelegram } = require('./routes/alerts');
           const briefing = await genererBriefingTelegram(c, { DB });
@@ -5370,7 +5373,7 @@ async function start() {
       if (dayUTC === 5 && stForexVendredi.statut === 'pre_fermeture' && !NotificationTracker.estDejaEnvoye(cleVendredi)) {
         try {
           const Skills = require('./skills/registry');
-          const skillRes = await Skills.executer('forex-session-monitor', { action: 'alerte_telegram', type: 'pre_cloture' });
+          const skillRes = await Skills.executer('forex-session-monitor', { action: 'alerte_telegram', type: 'pre_cloture', date: d });
           if (skillRes.ok && skillRes.resultat?.texte) {
             const resEnvoi = await NotificationTracker.envoyerTelegramSecurise(
               c.telegramToken,
@@ -5392,7 +5395,7 @@ async function start() {
       if (dayUTC === 0 && stForexDimanche.ouvert && !NotificationTracker.estDejaEnvoye(cleDimanche)) {
         try {
           const Skills = require('./skills/registry');
-          const skillRes = await Skills.executer('forex-session-monitor', { action: 'alerte_telegram', type: 'reouverture' });
+          const skillRes = await Skills.executer('forex-session-monitor', { action: 'alerte_telegram', type: 'reouverture', date: d });
           if (skillRes.ok && skillRes.resultat?.texte) {
             const resEnvoi = await NotificationTracker.envoyerTelegramSecurise(
               c.telegramToken,
@@ -5407,8 +5410,12 @@ async function start() {
           console.warn(`[Scheduler] Erreur réouverture Forex : ${e.message}`);
         }
       }
-    } catch { /* surveillance temporelle non-bloquante */ }
-  }, 30000);
+    } catch (e) { console.warn('[Scheduler] Surveillance temporelle indisponible'); }
+    finally { surveillanceTemporelleEnCours = false; }
+  };
+  const minuterieTemporelle = setInterval(surveillanceTemporelle, 30000);
+  minuterieTemporelle.unref();
+  void surveillanceTemporelle();
 
   // Synchronisation initiale des alertes et du scan avec la sélection active
   try {
