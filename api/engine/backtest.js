@@ -134,6 +134,10 @@ function lancer(candles, meta = {}, options = {}) {
       r.signaux = (r.signaux || []).filter(s => gardes.has(s.source));
     }
 
+    // Même politique de sélection que l'arbitrage en direct : aucun repli générique.
+    const strategieStricte = options.strategieStricte !== false && profils.length > 0;
+    if (strategieStricte) r.signaux = (r.signaux || []).filter(s => s.source === 'strategie');
+
     const futurs = serie.slice(i + 1);
     // Plusieurs détecteurs peuvent décrire le MÊME trade sur cette bougie
     // (même entrée, même stop) : une seule prise, les concepts se cumulent.
