@@ -403,37 +403,11 @@ function messageTelegram(v, m, qualite = {}) {
 }
 
 async function envoyerTelegram(c, v, m, qualite = {}) {
-  const texte = messageTelegram(v, m, qualite);
-
-  // Boutons interactifs optimisés sous le message Telegram
-  const sigId = [m.symbol, v.direction, v.at || Date.now()].join(':').slice(0, 48);
-  const reply_markup = {
-    inline_keyboard: [
-      [
-        { text: '📝 Simuler au Journal (Paper)', callback_data: `trade:open:${sigId}` },
-        { text: '🛡️ Stop Breakeven', callback_data: `trade:be:${sigId}` }
-      ],
-      [
-        { text: '🎯 Sécuriser 50% (TP1)', callback_data: `trade:tp1:${sigId}` },
-        { text: '❌ Clôturer Position', callback_data: `trade:close:${sigId}` }
-      ],
-      [
-        { text: '📊 État du Compte & Risque', callback_data: 'account:status' }
-      ]
-    ]
-  };
-
-  const r = await fetchAvecReprise(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: c.telegramChat, text: texte, parse_mode: 'HTML',
-      disable_web_page_preview: true, reply_markup })
+  const result = await require('./telegram-outbox').sendOnce(c.telegramToken,c.telegramChat,messageTelegram(v,m,qualite),{
+    parse_mode:'HTML',reply_markup:{inline_keyboard:[[{text:'État du compte',callback_data:'account:status'}]]}
   });
-  if (!r.ok) {
-    const corps = await r.text().catch(() => '');
-    throw new Error(`Telegram ${r.status}${corps ? ' : ' + corps.slice(0, 120) : ''}`);
-  }
-  return true;
+  if (!result.ok) throw new Error(result.kind === 'uncertain' ? 'Réception Telegram non confirmée' : 'Envoi Telegram refusé');
+  return result;
 }
 
 function compose(v, m, prix, qualite = {}) {
@@ -616,9 +590,13 @@ async function verifierBrut(force = false) {
       // qu'il fallait supprimer.
       const profils = (typeof deps.profilsSurveillance === 'function')
         ? (await deps.profilsSurveillance().catch(() => [])) : [];
-      const profilsValides = (profils || []).filter(p => p && p.executable !== false);
-      const profilsInexecutables = (profils || []).filter(p => p && p.executable === false);
+      const profilsValides = (profils || []).filter(p => p && p.executable !== false && !p.partiel);
+      const profilsInexecutables = (profils || []).filter(p => p && (p.executable === false || p.partiel));
 
+      if (!profils.length && Array.isArray(c.strategies) && c.strategies.length) {
+        resultats.push({...m,verdict:'Stratégies sélectionnées indisponibles — aucune substitution générique'});
+        continue;
+      }
       if (!profils.length) {
         // Aucune stratégie : mode auto assumé, règles génériques, message honnête.
         // Aucune stratégie : mode auto assumé, règles génériques. On ne pousse
@@ -715,7 +693,7 @@ async function verifierBrut(force = false) {
       }
       if (deps.DecisionEngine && typeof deps.DecisionEngine.decider === 'function') {
         try {
-          decision = deps.DecisionEngine.decider(closes, { symbol: m.symbol, timeframe: m.tf }, {
+          decision = deps.DecisionEngine.decider(closes, { symbol: m.symbol, timeframe: m.tf, at:Date.now(), verifierSession:true }, {
             // UNE stratégie par passage. Avant, la boucle parcourait les fiches
             // mais transmettait la liste COMPLÈTE : avec trois stratégies, trois
             // passages réévaluaient les trois, et le signal retenu pouvait
@@ -1025,8 +1003,8 @@ async function verifierBrut(force = false) {
       const msg = compose(v, m, r.candles[r.candles.length - 1].c, { confluence: decision?.confluence, rr: rr, multi: decision ? { signaux: decision.signaux, synthese: decision.synthese, carte: decision.carte } : multi });
       let emailOk = false;
       if (c.email) {
-        await deps.sendMail({ to: c.email, subject: msg.subject, html: msg.html });
-        emailOk = true;
+        try { await deps.sendMail({ to: c.email, subject: msg.subject, html: msg.html }); emailOk = true; }
+        catch { dire({verdict:'Échec email — autres canaux poursuivis'}); }
       }
       // Push navigateur : un canal en panne ne bloque jamais l'autre.
       let pushOk = 0;
@@ -1038,15 +1016,29 @@ async function verifierBrut(force = false) {
           })) || 0;
         } catch { /* le mail déjà parti reste valide */ }
       }
-      const aUnCanal = !!c.email || pushOk > 0 || !!(c.telegramToken && c.telegramChat);
-      if (!aUnCanal) {
-        dire({ verdict: 'aucun canal disponible' });
-        continue;
-      }
-      // Telegram : priorité directe sur téléphone
+      let telegramState = 'disabled';
       if (c.telegramToken && c.telegramChat) {
-        try { await envoyerTelegram(c, v, m, { confluence, rr, multi }); }
-        catch (e) { dire({ verdict: 'alerte envoyée, Telegram en échec : ' + e.message }); }
+        if (typeof deps.enqueueTelegram === 'function') {
+          try {
+            const queued = await deps.enqueueTelegram(c, cle, messageTelegram(v,m,{confluence,rr,multi}));
+            telegramState = queued ? 'queued' : 'unavailable';
+          } catch { telegramState = 'unavailable'; }
+        } else {
+          try { await envoyerTelegram(c,v,m,{confluence,rr,multi}); telegramState = 'sent'; }
+          catch { telegramState = 'uncertain'; }
+        }
+      }
+      const acknowledged = emailOk || pushOk > 0 || telegramState === 'sent';
+      const queued = telegramState === 'queued';
+      if (!acknowledged && !queued) {
+        dire({verdict:'Aucun canal confirmé',telegramState});
+        // Do not automatically retry an ambiguous direct send.
+        if (telegramState === 'uncertain') {
+          c.deja.push(cle);
+          c.dejaAt = {...(c.dejaAt||{}),[cle]:Date.now()};
+          save();
+        }
+        continue;
       }
       c.deja.push(cle);
       c.dejaAt = { ...(c.dejaAt || {}), [cle]: Date.now() };
@@ -1077,9 +1069,10 @@ async function verifierBrut(force = false) {
         direction: v.direction, strength: v.strength, status: v.status,
         prix: v.price, entry: v.levels ? v.levels.entry : null,
         sl: v.levels ? v.levels.stop : null, tp: v.levels ? v.levels.target1 : null,
+        tp2: v.levels ? v.levels.target2 : null, telegramState,
         summary: v.summary, cle
       });
-      resultats.push({ ...m, verdict: 'ALERTE ENVOYÉE', force: v.strength, strategie: profil ? (profil.titre || profil.id) : null });
+      resultats.push({ ...m, verdict: acknowledged ? 'ALERTE ENVOYÉE' : 'ALERTE EN FILE', telegramState, force: v.strength, strategie: profil ? (profil.titre || profil.id) : null });
       }
     } catch (e) {
       // Un marché en échec ne doit jamais empêcher les autres d'être surveillés.
