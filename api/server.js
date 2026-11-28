@@ -3496,7 +3496,13 @@ async function strategiesForSignal(verdict) {
  */
 async function profilsStrategies() {
   const strategies = await loadAllStrategies();
-  return (strategies || []).map(x => Signals.profilDepuisStrategie(x));
+  return (strategies || []).map(x => {
+    const p=Signals.profilDepuisStrategie(x);
+    const actif=x.actif !== false;
+    const executabilite = !actif ? 'inactive' : x.type && x.type !== 'strategy' ? 'documentation'
+      : p.executable === false || p.partiel || p.reglesEcartees?.length || p.filtresEcartes?.length || p.timeframesRefusees?.length || !p.regles?.length ? 'incomplete' : 'executable';
+    return {...p,actif,executabilite,marches:x.supportedMarkets || x.marches || x.structured?.supportedMarkets || [],rentabiliteVerifiee:false};
+  });
 }
 
 // Registre des fiches : ce que le moteur sait réellement exécuter, avec la version
