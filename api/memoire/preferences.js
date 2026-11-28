@@ -17,18 +17,13 @@ const path = require('path');
 const DB = require('../core/db');
 
 const TABLE = 'preferences_agent';
-const FICHIER_REPLI = process.env.PREFERENCES_FICHIER || path.join(__dirname, '..', '..', 'data', 'preferences-agent.json');
+const FICHIER_REPLI = process.env.PREFERENCES_FICHIER || path.join(require('../core/dossiers').DATA_DIR, 'preferences-agent.json');
 
-const disponible = async () => {
-  const sql = DB.client();
-  if (!sql) return false;
-  try {
-    const r = await sql`
-      select count(*)::int as n from information_schema.tables
-      where table_schema = 'public' and table_name = ${TABLE}`;
-    return r[0] && r[0].n === 1;
-  } catch { return false; }
-};
+let snapshotPg = null;
+async function actualiserSnapshot(sql) {
+  snapshotPg = await sql`select * from ${sql(TABLE)} order by cree_at desc`;
+  return snapshotPg;
+}
 
 async function init() {
   const sql = DB.client();
@@ -45,9 +40,12 @@ async function init() {
           maj_at      timestamptz default now()
         )`;
       await sql`create index if not exists pref_agent_cat_idx on ${sql(TABLE)} (categorie)`;
+      await actualiserSnapshot(sql);
       return true;
     } catch (e) {
+      snapshotPg = null;
       console.error('memoire/preferences init :', e.message);
+      return false;
     }
   }
   // Repli fichier
@@ -63,16 +61,20 @@ async function init() {
 function lireRepli() {
   try {
     if (fs.existsSync(FICHIER_REPLI)) {
-      return JSON.parse(fs.readFileSync(FICHIER_REPLI, 'utf8'));
+      const data = JSON.parse(fs.readFileSync(FICHIER_REPLI, 'utf8'));
+      if (!Array.isArray(data)) throw new Error('Mémoire invalide');
+      return data;
     }
-  } catch {}
+  } catch (e) { throw new Error('Mémoire des préférences illisible'); }
   return [];
 }
 
 function ecrireRepli(liste) {
   try {
     fs.mkdirSync(path.dirname(FICHIER_REPLI), { recursive: true });
-    fs.writeFileSync(FICHIER_REPLI, JSON.stringify(liste, null, 2), 'utf8');
+    const tmp = FICHIER_REPLI + '.' + process.pid + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(liste, null, 2), 'utf8');
+    fs.renameSync(tmp, FICHIER_REPLI);
     return { ok: true };
   } catch (e) {
     return { ok: false, raison: e.message };
@@ -91,7 +93,7 @@ function ecrireRepli(liste) {
 async function enregistrer({ cle, contenu, categorie = 'consigne', source = 'utilisateur' }) {
   if (!cle || !contenu) return { ok: false, raison: 'cle et contenu requis' };
   const sql = DB.client();
-  if (sql && (await disponible())) {
+  if (sql) {
     try {
       await sql`
         insert into ${sql(TABLE)} (cle, categorie, contenu, source, active, maj_at)
@@ -102,9 +104,11 @@ async function enregistrer({ cle, contenu, categorie = 'consigne', source = 'uti
           source = excluded.source,
           active = true,
           maj_at = now()`;
+      await actualiserSnapshot(sql);
       return { ok: true, cle };
     } catch (e) {
-      return { ok: false, raison: e.message };
+      snapshotPg = null;
+      return { ok: false, raison: 'Persistance ou synchronisation PostgreSQL impossible' };
     }
   }
 
@@ -132,13 +136,13 @@ async function enregistrer({ cle, contenu, categorie = 'consigne', source = 'uti
  */
 async function lister({ categorie, activesSeulement = true } = {}) {
   const sql = DB.client();
-  if (sql && (await disponible())) {
+  if (sql) {
     try {
-      let r = await sql`select * from ${sql(TABLE)} order by cree_at desc`;
+      let r = await actualiserSnapshot(sql);
       if (activesSeulement) r = r.filter(x => x.active === true);
       if (categorie) r = r.filter(x => x.categorie === categorie);
       return r;
-    } catch { return []; }
+    } catch { snapshotPg = null; throw new Error('Lecture des préférences PostgreSQL impossible'); }
   }
 
   let liste = lireRepli();
@@ -152,14 +156,16 @@ async function lister({ categorie, activesSeulement = true } = {}) {
  */
 async function desactiver(cle) {
   const sql = DB.client();
-  if (sql && (await disponible())) {
+  if (sql) {
     try {
-      await sql`update ${sql(TABLE)} set active = false, maj_at = now() where cle = ${cle}`;
-      return { ok: true };
-    } catch (e) { return { ok: false, raison: e.message }; }
+      const rows = await sql`update ${sql(TABLE)} set active = false, maj_at = now() where cle = ${cle} returning cle`;
+      await actualiserSnapshot(sql);
+      return rows.length ? {ok:true} : {ok:false,raison:'Consigne introuvable'};
+    } catch (e) { snapshotPg = null; return { ok: false, raison: 'Persistance ou synchronisation PostgreSQL impossible' }; }
   }
   const liste = lireRepli();
   const item = liste.find(x => x.cle === cle);
+  if (!item) return {ok:false,raison:'Consigne introuvable'};
   if (item) {
     item.active = false;
     item.maj_at = new Date().toISOString();
@@ -231,8 +237,11 @@ function analyserContraintes(prefs) {
  * Analyse synchrone des contraintes (lecture repli local pour moteurs temps-réel).
  */
 function obtenirContraintesActivesSync() {
-  const prefs = lireRepli();
-  return analyserContraintes(prefs);
+  if (DB.client()) {
+    if (!snapshotPg) throw new Error('Préférences PostgreSQL non synchronisées');
+    return analyserContraintes(snapshotPg);
+  }
+  return analyserContraintes(lireRepli());
 }
 
 /**
