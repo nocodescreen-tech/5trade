@@ -6409,7 +6409,7 @@ function DerivModal({
       color: '#e2e8f0'
     }
   }, "2. Token API Deriv"), /*#__PURE__*/React.createElement("a", {
-    href: "https://app.deriv.com/account/api-token",
+    href: "https://developers.deriv.com/",
     target: "_blank",
     rel: "noopener noreferrer",
     style: {
@@ -6456,7 +6456,7 @@ function DerivModal({
       color: 'var(--dim)',
       marginTop: 4
     }
-  }, "Crée un token avec la seule autorisation ", React.createElement("b",null,"Lecture (Read)"), ". Ne donne pas la permission Trading.")), /*#__PURE__*/React.createElement("div", {
+  }, "Crée un PAT pour la nouvelle API avec la portée ", React.createElement("b",null,"trade"), ". Cette portée est requise par Deriv pour lister les comptes Options.")), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 6
     }
@@ -6494,7 +6494,7 @@ function DerivModal({
     }
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-shield-halved"
-  }), "S\xE9curit\xE9 & Confidentialit\xE9"), "Utilise uniquement un jeton de consultation. L’exécution des ordres réels est désactivée sur 5TRADE."))));
+  }), "S\xE9curit\xE9 & Confidentialit\xE9"), "Le PAT peut autoriser des transactions chez Deriv : conserve-le comme un secret. L’exécution des ordres réels est désactivée sur 5TRADE."))));
 }
 
 // ── Historique des signaux (confirmés / rejetés / expirés) ───────────────
