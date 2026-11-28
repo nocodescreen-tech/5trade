@@ -76,13 +76,13 @@ function seuilsParDefaut() {
  * Évalue un candidat d'ajustement.
  * @returns {Promise<{statut:string, raison?:string, valeur?:number, applicable_en?:number}>}
  */
-async function proposer(parametre, valeurCandidate) {
+async function proposer(parametre, valeurCandidate, preuve = {}) {
   const seuils = await charger();
   const valeurActuelle = seuils[parametre];
   if (valeurActuelle === undefined) {
     return { statut: 'rejete', raison: `paramètre inconnu : ${parametre}` };
   }
-  if (typeof valeurActuelle !== 'number' || typeof valeurCandidate !== 'number') {
+  if (!Number.isFinite(valeurActuelle) || !Number.isFinite(valeurCandidate) || valeurActuelle===0 || ['version'].includes(parametre)) {
     return { statut: 'rejete', raison: 'les deux valeurs doivent être numériques' };
   }
 
@@ -110,14 +110,14 @@ async function proposer(parametre, valeurCandidate) {
     }
   }
 
-  // 3. Trades minimums
-  // (en production : compter dans trade_outcome sur 14j)
-  // Ici on omet la vérification — appelant doit s'en assurer.
-
-  // Promotion : shadow run 3 jours par défaut
+  if(!Number.isSafeInteger(preuve.trades)||preuve.trades<LIMITES.tradesMinPourAjustement) return {statut:'reporte',raison:'Échantillon insuffisant'};
+  if(valeurActuelle===valeurCandidate)return {statut:'rejete',raison:'Valeur inchangée'};
+  const shadow=await enregistrerShadow(parametre,valeurCandidate,preuve);
+  // Candidate enregistré ; aucune modification en production.
   return {
     statut: 'shadow_3j',
     valeur: valeurCandidate,
+    shadow,
     applicable_en: LIMITES.joursShadowRunAvantPromotion * 24 * 3600 * 1000,
     raison: `delta ${(delta * 100).toFixed(1)}% valide, shadow run ${LIMITES.joursShadowRunAvantPromotion}j`
   };
@@ -190,7 +190,8 @@ async function enregistrerShadow(parametre, valeur, preuve = {}) {
   const doc = await lireShadow();
   const maintenant = Date.now();
   const entree = {
-    id: `sh_${parametre}_${maintenant}`,
+    id: require('node:crypto').randomUUID(),
+    baselineVersion:(await charger()).version,
     parametre,
     valeur,
     decide_at: new Date(maintenant).toISOString(),
@@ -198,6 +199,8 @@ async function enregistrerShadow(parametre, valeur, preuve = {}) {
     preuve,
     statut: 'shadow'
   };
+  const existing=doc.candidats.find(c=>['shadow','reporte_shadow','en_revue'].includes(c.statut)&&c.parametre===parametre&&c.valeur===valeur);
+  if(existing)return existing;
   doc.candidats.push(entree);
   await ecrireShadow(doc);
   return entree;
@@ -208,8 +211,7 @@ async function shadowEnCours() {
   const doc = await lireShadow();
   const maintenant = Date.now();
   return doc.candidats.filter(c =>
-    (c.statut === 'shadow' && Date.parse(c.applicable_at) > maintenant)
-    || c.statut === 'en_revue');
+    ['shadow','reporte_shadow','en_revue'].includes(c.statut));
 }
 
 /**
@@ -222,12 +224,14 @@ async function shadowEnCours() {
 async function promouvoirEchues(bilan = {}) {
   const doc = await lireShadow();
   const maintenant = Date.now();
-  const expectancy = Number(bilan.expectancyR);
-  const trades = Number(bilan.trades) || 0;
   const decisions = [];
 
   for (const c of doc.candidats) {
-    if (c.statut !== 'shadow' || Date.parse(c.applicable_at) > maintenant) continue;
+    if (!['shadow','reporte_shadow'].includes(c.statut) || Date.parse(c.applicable_at) > maintenant) continue;
+    const proof=Array.isArray(bilan.candidates)?bilan.candidates.find(p=>p.id===c.id&&p.baselineVersion===c.baselineVersion):null;
+    const valid=proof&&proof.outOfSample===true&&proof.costsKnown===true&&Number.isFinite(proof.expectancyR)&&Number.isFinite(proof.baselineExpectancyR)&&Number.isSafeInteger(proof.trades)&&proof.from>=Date.parse(c.decide_at)&&proof.to<=maintenant&&proof.to>proof.from;
+    const expectancy=valid?proof.expectancyR:null;
+    const trades=valid?proof.trades:0;
 
     if (trades < LIMITES.tradesMinPourAjustement) {
       c.statut = 'reporte_shadow';
@@ -235,16 +239,16 @@ async function promouvoirEchues(bilan = {}) {
       decisions.push({ parametre: c.parametre, decision: c.statut, raison: c.raison });
       continue;
     }
-    if (Number.isFinite(expectancy) && expectancy < LIMITES.expectancyMin14j) {
+    if (expectancy <= LIMITES.expectancyMin14j || expectancy <= proof.baselineExpectancyR) {
       c.statut = 'abandonnee';
-      c.raison = `espérance ${expectancy} R < ${LIMITES.expectancyMin14j} R : candidature abandonnée`;
+      c.raison = `espérance ${expectancy} R non supérieure au seuil ou à la référence : candidature abandonnée`;
       decisions.push({ parametre: c.parametre, decision: c.statut, raison: c.raison });
       continue;
     }
 
     c.statut = 'en_revue';
     c.revue_demandee_at = new Date().toISOString();
-    c.bilan = { expectancyR: Number.isFinite(expectancy) ? expectancy : null, trades };
+    c.bilan = { expectancyR: expectancy, trades, baselineExpectancyR:proof.baselineExpectancyR, from:proof.from,to:proof.to,costsKnown:true };
     c.raison = `preuves suffisantes (${Number.isFinite(expectancy) ? expectancy : 'n/a'} R sur ${trades} trades) — approbation humaine requise`;
     decisions.push({ id: c.id, parametre: c.parametre, valeur: c.valeur,
       decision: 'revue_requise', bilan: c.bilan, raison: c.raison });
@@ -299,6 +303,8 @@ async function revoirCandidatureSerialisee(id, revue = {}) {
     return { ok: true, id, decision: 'rejetee', reviewer, note, reviewedAt };
   }
 
+  const current=await charger();
+  if(current.version!==candidat.baselineVersion || !candidat.bilan?.costsKnown) return {ok:false,raison:'Référence modifiée ou preuve absente : nouvelle évaluation requise'};
   const applique = await appliquer(candidat.parametre, candidat.valeur);
   candidat.statut = 'approuvee';
   candidat.ancien = applique.ancien;
