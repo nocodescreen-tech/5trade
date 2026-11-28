@@ -9,25 +9,68 @@ test('Deriv refuses an empty token without network access', async () => {
   assert.match(result.error, /manquant/i);
 });
 
-test('Deriv distinguishes authorization rejection from network failure', async () => {
+test('Deriv REST authentication distinguishes rejection and network failure', async () => {
+  const original = global.fetch;
+  try {
+    global.fetch = async () => ({ ok: false, status: 401 });
+    const denied = await DerivClient.verifierEtAutoriser('app', 'test-token');
+    assert.equal(denied.ok, false);
+    assert.match(denied.error, /401/);
+    global.fetch = async () => { throw new Error('Network unavailable'); };
+    const unavailable = await DerivClient.verifierEtAutoriser('app', 'test-token');
+    assert.equal(unavailable.ok, false);
+    assert.match(unavailable.error, /réseau REST/);
+  } finally { global.fetch = original; }
+});
+
+test('PAT and OTP flow selects demo, validates headers and reads actual balance', async () => {
+  const original = global.fetch;
   const connect = DerivClient._connectCluster;
   const ask = DerivClient._ask;
+  const calls = [];
   let closed = false;
   try {
-    DerivClient._connectCluster = async () => ({ close() { closed = true; } });
-    DerivClient._ask = async () => { throw new Error('Invalid token'); };
-    const denied = await DerivClient.verifierEtAutoriser('1089', 'FAUX_TOKEN_XYZ_123');
-    assert.equal(denied.ok, false);
-    assert.match(denied.error, /invalid|token/i);
+    global.fetch = async (url, options) => {
+      calls.push({ url, options });
+      const data = calls.length === 1 ? [
+        { account_id: 'REAL1', account_type: 'real', status: 'active', currency: 'USD' },
+        { account_id: 'DEMO1', account_type: 'demo', status: 'active', currency: 'USD' }
+      ] : { url: 'wss://api.derivws.com/trading/v1/options/ws/demo?otp=test' };
+      return { ok: true, json: async () => ({ data }) };
+    };
+    DerivClient._connectCluster = async url => {
+      assert.match(url, /ws\/demo\?otp=/);
+      return { close() { closed = true; } };
+    };
+    DerivClient._ask = async (_ws, payload, kind) => {
+      assert.equal(payload.balance, 1);
+      assert.equal(kind, 'balance');
+      return { balance: { balance: '125.50', currency: 'USD' } };
+    };
+    const result = await DerivClient.verifierEtAutoriser('app', 'test-token');
+    assert.equal(result.ok, true);
+    assert.equal(result.account.loginid, 'DEMO1');
+    assert.equal(result.account.balance, 125.5);
+    assert.equal(calls[0].options.headers.Authorization, 'Bearer test-token');
+    assert.equal(calls[0].options.headers['Deriv-App-ID'], 'app');
+    assert.match(calls[1].url, /DEMO1\/otp$/);
+    assert.equal(calls[1].options.method, 'POST');
     assert.equal(closed, true);
-    DerivClient._connectCluster = async () => { throw new Error('Network unavailable'); };
-    const unavailable = await DerivClient.verifierEtAutoriser('1089', 'FAUX_TOKEN_XYZ_123');
-    assert.equal(unavailable.ok, false);
-    assert.match(unavailable.error, /network unavailable/i);
   } finally {
+    global.fetch = original;
     DerivClient._connectCluster = connect;
     DerivClient._ask = ask;
   }
+});
+
+test('real account is never automatically selected', async () => {
+  const rest = DerivClient._rest;
+  try {
+    DerivClient._rest = async () => ({ data: [{ account_id: 'REAL1', account_type: 'real', status: 'active' }] });
+    const result = await DerivClient.verifierEtAutoriser('app', 'test-token');
+    assert.equal(result.ok, false);
+    assert.match(result.error, /démo/);
+  } finally { DerivClient._rest = rest; }
 });
 
 test('Deriv masks stored tokens and disconnects without touching persistent accounts', async () => {
@@ -57,5 +100,5 @@ test('Deriv masks stored tokens and disconnects without touching persistent acco
 test('Deriv live authorization probe', { skip: process.env.DERIV_LIVE_TEST !== '1' }, async () => {
   const result = await DerivClient.verifierEtAutoriser(process.env.DERIV_APP_ID, 'FAUX_TOKEN_XYZ_123');
   assert.equal(result.ok, false);
-  assert.match(result.error, /invalid|token/i);
+  assert.match(result.error, /401|403/);
 });
