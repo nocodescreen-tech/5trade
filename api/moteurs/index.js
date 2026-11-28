@@ -16,6 +16,7 @@
 
 const Synthetique = require('./synthetique');
 const Context = require('./market-context');
+const Gold = require('./gold');
 
 const REGISTRE = {
   synthetique: {
@@ -51,11 +52,11 @@ const REGISTRE = {
     analyser: (closes, meta) => Context.analyse('crypto', closes, meta)
   },
   metaux: {
-    id: 'metaux', libelle: 'Métaux', version: '0.1.0', specialise: false,
+    id: 'metaux', libelle: 'Métaux', version: '0.2.0', specialise: false,
     niveau: 'contexte_partiel',
-    motif: 'Dollar, rendements et portage non intégrés',
-    apports: ['Sessions et contexte macro'], limites: ['Dollar, rendements et portage non intégrés'],
-    analyser: (closes, meta) => Context.analyse('metaux', closes, meta)
+    motif: 'Contexte macro quotidien XAUUSD ; portage non intégré',
+    apports: ['Sessions, dollar large, rendements nominaux et réels US'], limites: ['Séries macro quotidiennes, portage et liquidité non intégrés'],
+    analyser: Gold.analyse
   },
   energies: {
     id: 'energies', libelle: 'Énergies', version: '0.1.0', specialise: false,
