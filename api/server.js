@@ -2638,9 +2638,9 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
 // ─── Volume Profile ───
 app.get('/api/volume-profile', requireAuth, async (req, res) => {
   try {
-    const { symbol, tf, count } = req.query;
-    const { candles } = await Market.getCandles(symbol || 'BTCUSDT', tf || '1h', Number(count) || 200);
-    const vp = volumeProfile(candles);
+    const { symbol, tf, count, provider } = req.query;
+    const { candles } = await Market.getCandles(symbol || 'frxXAUUSD', tf || '1h', Math.min(1000,Math.max(2,Number(count)||200)), provider || undefined);
+    const vp = volumeProfile(candles.filter(c => c.closed !== false));
     const niveaux = niveauxVolume(vp);
     const gaps = gapsVolume(vp);
     res.json({ success: true, volumeProfile: vp, niveaux, gaps });
@@ -2789,9 +2789,9 @@ app.get('/api/signal-scoring', requireAuth, async (req, res) => {
 // ─── Order Flow ───
 app.get('/api/order-flow', requireAuth, async (req, res) => {
   try {
-    const { symbol, tf } = req.query;
-    const { candles } = await Market.getCandles(symbol || 'BTCUSDT', tf || '1h', 200);
-    const orderFlow = analyserOrderFlow(candles);
+    const { symbol, tf, provider } = req.query;
+    const { candles } = await Market.getCandles(symbol || 'frxXAUUSD', tf || '1h', 200, provider || undefined);
+    const orderFlow = analyserOrderFlow(candles.filter(c=>c.closed!==false));
     res.json({ success: true, orderFlow });
   } catch (e) {
     res.status(500).json({ error: e.message });
