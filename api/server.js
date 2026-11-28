@@ -119,16 +119,12 @@ const { DATA_DIR, KNOWLEDGE_BASE_DIR, DOCUMENTS_DIR, UPLOADS_DIR } = require('./
 // courant) redevenait ouvert à tout le web. C'est l'inverse qu'il faut : seules
 // les origines connues passent, et l'ouverture totale se DEMANDE explicitement
 // (CORS_LIBRE=1), pour une session de travail assumée.
-const ORIGINES_LOCALES = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+const BrowserGuard = require('./security/browser-guard');
+app.disable('x-powered-by');
+app.use(BrowserGuard.middleware({appOrigin:process.env.APP_ORIGIN,production:process.env.NODE_ENV==='production'}));
 app.use(cors({
-  credentials: true,
-  origin(origine, cb) {
-    if (!origine) return cb(null, true);                                  // même origine, curl
-    if (ORIGINES_LOCALES.test(origine)) return cb(null, true);            // l'appli elle-même
-    if (process.env.APP_ORIGIN && origine === process.env.APP_ORIGIN) return cb(null, true);
-    if (process.env.CORS_LIBRE === '1') return cb(null, true);            // demande explicite
-    cb(null, false);                                                      // tout le reste : non
-  }
+  credentials:true,
+  origin(origine,cb){cb(null,!origine||BrowserGuard.allowedOrigin(origine,process.env.APP_ORIGIN,process.env.NODE_ENV==='production'));}
 }));
 // Compression applicative retirée ; utiliser la compression du proxy après validation.
 
@@ -196,7 +192,7 @@ app.get('/healthz', async (req, res) => {
 // sans lancer une analyse complète. Fermée par défaut : sans le drapeau,
 // la route n'existe pas (404).
 if (process.env.IA_SELFTEST === '1') {
-  app.get('/api/ia-selftest', async (req, res) => {
+  app.get('/api/ia-selftest', requireAuth, async (req, res) => {
     const messages = [{
       role: 'user',
       content: 'Reponds uniquement un JSON: {"ok":true,"modele":"ton nom de modele"}'

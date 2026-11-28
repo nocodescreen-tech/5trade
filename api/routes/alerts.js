@@ -281,6 +281,7 @@ module.exports = function monterAlertes(app, deps) {
 /**
  * Génère le contenu complet du briefing matinal avec statistiques réelles du journal et du compte
  */
+function escapeTelegram(value) { return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 async function genererBriefingTelegram(c, depsRef = {}) {
   const Risque = require('../risk/risque');
   const JournalSignaux = require('../engine/journal-signaux');
@@ -321,7 +322,7 @@ async function genererBriefingTelegram(c, depsRef = {}) {
   const texte = `☀️ <b>Briefing Matinal & Récapitulatif 5trade</b>\n`
     + `📅 <i>${dateStr} (${heureStr})</i>\n\n`
     + `💼 <b>Positions en cours</b> : <b>${openTrades.length}</b> ouverte(s)\n`
-    + (openTrades.length ? openTrades.map(t => `   • <code>${t.pair || t.symbol}</code> (${t.direction}) — Entrée: ${t.entry} | SL: ${t.sl}`).join('\n') + '\n' : '   • Aucune position active — Capital 100% disponible\n')
+    + (openTrades.length ? openTrades.map(t => `   • <code>${escapeTelegram(t.pair || t.symbol)}</code> (${escapeTelegram(t.direction)}) — Entrée: ${escapeTelegram(t.entry)} | SL: ${escapeTelegram(t.sl)}`).join('\n') + '\n' : '   • Aucune position active — Capital 100% disponible\n')
     + `\n📊 <b>Bilan du Journal Récent</b> :\n`
     + `   • Prises clôturées : <b>${statsJournal.total}</b> (✅ ${statsJournal.gagnes} W / ❌ ${statsJournal.perdus} L)\n`
     + `   • Performance nette cumulée : ${pnlEmoji} <b>${rSigne} R</b>\n\n`
@@ -329,7 +330,7 @@ async function genererBriefingTelegram(c, depsRef = {}) {
     + `   • Capital de référence : <b>$${capital.toLocaleString('fr-FR')}</b>\n`
     + `   • Risque max/trade : <b>${risqueMax}%</b> ($${((capital * risqueMax) / 100).toFixed(2)})\n`
     + `   • Filtres Sentinelle & RR ≥ 1.5 : <b>Actifs</b>\n\n`
-    + `🎯 <b>Marchés Surveillés</b> : <code>${marches}</code>\n\n`
+    + `🎯 <b>Marchés Surveillés</b> : <code>${escapeTelegram(marches)}</code>\n\n`
     + `<i>Tapez /recap pour consulter le briefing. Modifications depuis le terminal authentifié.</i>`;
 
   const inline_keyboard = [
