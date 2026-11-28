@@ -228,13 +228,16 @@ function ecrireDisque(fichier, contenu) {
   }
 })();
 
+const COUNTRY_CURRENCY = Object.freeze({US:'USD',EU:'EUR',DE:'EUR',FR:'EUR',IT:'EUR',ES:'EUR',GB:'GBP',UK:'GBP',JP:'JPY',CA:'CAD',AU:'AUD',CH:'CHF',CN:'CNH',NZ:'NZD',MX:'MXN',ZA:'ZAR',TR:'TRY',SE:'SEK',NO:'NOK'});
 function normaliserEvenement(e, source = 'ForexFactory') {
-  const date = dateDe(e.date);
+  const date = typeof e.date === 'string' && /(?:Z|[+-]\d{2}:?\d{2})$/i.test(e.date) ? dateDe(e.date) : null;
+  const country = String(e.country || '').toUpperCase();
+  const currency = String(e.currency || COUNTRY_CURRENCY[country] || (/^[A-Z]{3}$/.test(country) ? country : '')).toUpperCase();
   const impact = String(e.impact || '').toLowerCase();
   return {
     titre: String(e.title || '').slice(0, 200),
     pays: String(e.country || '').toUpperCase(),
-    devise: String(e.currency || '').toUpperCase(),
+    devise: currency === 'CNY' ? 'CNH' : currency,
     date,
     impact: impact === 'high' ? 'élevé' : impact === 'medium' ? 'moyen' : impact === 'low' ? 'faible' : 'inconnu',
     impactNiveau: impact === 'high' ? 3 : impact === 'medium' ? 2 : impact === 'low' ? 1 : 0,
@@ -253,7 +256,7 @@ async function sourceTradingView() {
   const depuis = new Date(Date.now() - 12 * 3600 * 1000).toISOString();
   const jusqua = new Date(Date.now() + 8 * 86400 * 1000).toISOString();
   const url = `${URL_CALENDRIER_TV}?from=${encodeURIComponent(depuis)}&to=${encodeURIComponent(jusqua)}`
-    + '&countries=US,EU,GB,JP,CA,AU,CH,CN,DE,FR';
+    + '&countries=US,EU,GB,JP,CA,AU,CH,CN,DE,FR,NZ,MX,ZA,TR,SE,NO';
   const r = await fetchAvecReprise(url, {
     headers: {
       // Sans Origin/Referer, l'endpoint public répond une erreur : ce sont les
@@ -270,7 +273,7 @@ async function sourceTradingView() {
   const brut = Array.isArray(d.result) ? d.result : [];
   const unite = e => (e.unit && String(e.unit).trim() ? ' ' + String(e.unit).trim() : '');
   return brut.map(e => {
-    const niveau = e.importance === 1 ? 'high' : e.importance === 0 ? 'medium' : 'low';
+    const niveau = e.importance === 1 ? 'high' : e.importance === 0 ? 'medium' : e.importance === -1 ? 'low' : 'unknown';
     const fmt = v => (v == null || v === '' ? null : String(v) + unite(e));
     return normaliserEvenement({
       title: e.title || e.indicator,
@@ -282,7 +285,7 @@ async function sourceTradingView() {
       forecast: fmt(e.forecast),
       actual: fmt(e.actual)
     }, 'TradingView');
-  }).filter(e => Number.isFinite(e.date));
+  });
 }
 
 /** ForexFactory : le JSON hebdomadaire historique. */
@@ -293,8 +296,7 @@ async function sourceForexFactory() {
   if (!r.ok) throw new Error(`ForexFactory HTTP ${r.status}`);
   const brut = await r.json();
   return (Array.isArray(brut) ? brut : [])
-    .map(e => normaliserEvenement(e, 'ForexFactory'))
-    .filter(e => Number.isFinite(e.date));
+    .map(e => normaliserEvenement(e, 'ForexFactory'));
 }
 
 async function chargerCalendrier(force = false) {
@@ -396,6 +398,6 @@ async function panorama(options = {}) {
 }
 
 module.exports = {
-  panorama, chargerFlux, chargerCalendrier, lireFlux, etiqueter, parJour,
+  panorama, chargerFlux, chargerCalendrier, lireFlux, etiqueter, parJour, normaliserEvenement,
   FLUX_RSS, URL_CALENDRIER, MOTS, MOTS_IMPACT, sansBalises
 };
