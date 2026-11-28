@@ -34,3 +34,37 @@ jobs:
           name: dependency-audit
           path: dependency-audit.json
           retention-days: 14
+
+  remediation-preview:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Resolve patched versions in a disposable checkout
+        working-directory: api
+        shell: bash
+        run: |
+          set -e
+          for spec in multer@2.5.0 nodemailer@10.1.4 body-parser@2.4.0 qs@6.16.1 undici@6.29.1; do
+            printf '%s: ' "$spec"
+            npm view "$spec" version || true
+          done
+          npm pkg set 'dependencies.multer=2.5.0' 'dependencies.nodemailer=10.1.4' 'overrides.body-parser=2.4.0' 'overrides.qs=6.16.1' 'overrides.undici=6.29.1'
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --omit=dev
+          npm audit --omit=dev --audit-level=moderate
+      - name: Preserve candidate dependency manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: remediation-candidate
+          path: |
+            api/package.json
+            api/package-lock.json
+          retention-days: 7
