@@ -4523,6 +4523,21 @@ app.get('/api/signaux', requireAuth, async (req, res) => {
  * Coût : zéro (RSS publics + calendrier ForexFactory). Cache 5 min sur les
  * dépêches, 30 min sur le calendrier.
  */
+// Authoritative application status, not a broker-session guarantee.
+app.get('/api/market/status', requireAuth, async (req,res) => {
+  const symbol=String(req.query.symbol || '').trim();
+  if (!symbol || symbol.length>64 || !/^[a-z0-9_.:-]+$/i.test(symbol)) return res.status(400).json({success:false,error:'Instrument invalide'});
+  res.set('Cache-Control','no-store');
+  const at=Date.now();
+  const session=require('./temporal/sessions').statutMarche(symbol,at);
+  // Exchange hours for real indices and energy contracts are broker-specific.
+  const horaireConnu=!['indices','energies','inconnu'].includes(session.classe);
+  let news;
+  try { news=await require('./sources/fundamentals').filtreCalendrier(symbol,{strict:true}); }
+  catch { news={applicable:null,verifie:false,bloque:true,detail:'Calendrier indisponible'}; }
+  return res.json({success:true,symbol,at,session:{...session,horaireConnu,source:'modele_theorique_non_courtier'},news});
+});
+
 app.get('/api/news/panorama', requireAuth, async (req, res) => {
   try {
     const marche = req.query.marche ? String(req.query.marche) : undefined;
