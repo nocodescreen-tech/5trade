@@ -33,6 +33,8 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
 
   const trades = [];
   const etapes = [];
+  const decider = reglages.decider || DecisionEngine.decider;
+  const evaluer = reglages.evaluer || JournalSignaux.evaluer;
   let i = fenetre - 1;
   let n = 0;
 
@@ -75,6 +77,15 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
   let positionsMaxSimultanees = 0;
   let peakCapital = capitalDepart;
   let maxDrawdownPct = 0;
+  const settlement = new Set();
+  function settle(pos) {
+    if (settlement.has(pos.id) || !Number.isFinite(pos.evalue.r) || !Number.isFinite(pos.clotureAt)) return;
+    settlement.add(pos.id);
+    capitalHistorique = Math.max(0, +(capitalHistorique + pos.evalue.r * pos.montantRisque).toFixed(2));
+    peakCapital = Math.max(peakCapital, capitalHistorique);
+    const dd = peakCapital > 0 ? (peakCapital - capitalHistorique) / peakCapital * 100 : 0;
+    maxDrawdownPct = Math.max(maxDrawdownPct, +dd.toFixed(2));
+  }
 
   while (i < serie.length - 1 && n < maxEtapes) {
     n++;
@@ -83,12 +94,8 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
     // Dénouement au fil de l'eau des positions arrivées à terme avant ou à tempsActuel
     const encoreOuvertes = [];
     for (const pos of positionsActives) {
-      if (pos.clotureAt <= tempsActuel) {
-        const pnlMontant = (Number(pos.evalue.r) || 0) * pos.montantRisque;
-        capitalHistorique = Math.max(0, +(capitalHistorique + pnlMontant).toFixed(2));
-        if (capitalHistorique > peakCapital) peakCapital = capitalHistorique;
-        const dd = peakCapital > 0 ? ((peakCapital - capitalHistorique) / peakCapital) * 100 : 0;
-        if (dd > maxDrawdownPct) maxDrawdownPct = +dd.toFixed(2);
+      if (Number.isFinite(pos.clotureAt) && pos.clotureAt <= tempsActuel) {
+        settle(pos);
       } else {
         encoreOuvertes.push(pos);
       }
@@ -104,6 +111,7 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
 
     // Vérificateur de risque dynamique recalculé sur l'état HISTORIQUE exact à l'instant t
     const optionsPas = Object.assign({}, opts, reglages.optionsDecision);
+    if(Array.isArray(opts.profils)&&opts.profils.length){optionsPas.strategieStrict=true;}
     if (!optionsPas.verificateurRisque && !optionsPas.sansRisqueCompte) {
       optionsPas.verificateurRisque = (contrat) => {
         const montantRisqueTrade = (capitalHistorique * risquePct) / 100;
@@ -134,7 +142,7 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
     let erreur = null;
     try {
       const metaPas = Object.assign({}, meta, { at: tempsActuel, date: tempsActuel, time: tempsActuel });
-      verdict = DecisionEngine.decider(fen, metaPas, Object.assign({}, optionsPas, { date: tempsActuel }));
+      verdict = decider(fen, metaPas, Object.assign({}, optionsPas, { date: tempsActuel }));
     } catch (e) { erreur = e.message; }
 
     etapes.push({
@@ -148,7 +156,7 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
     // Un verdict ACHAT ou VENTE ne doit être rejoué QUE si le signal porte executable === true
     // ET que le risque a été formellement validé (ou simulation avec garde-fou simulé).
     const s = verdict && verdict.signal;
-    const estExecutable = s && (s.executable === true || (verdict.signauxRetenus || []).some(x => x.executable === true));
+    const estExecutable = s && (s.executable === true || (verdict.signauxRetenus || []).some(x => x.executable === true && x.id === s.id));
     const risqueValide = verdict && verdict.risque && verdict.risque.ok === true;
     const modeSansRisque = opts && opts.sansRisqueCompte === true;
     const autorise = estExecutable && (risqueValide || modeSansRisque);
@@ -168,10 +176,9 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
       };
       // La sortie est évaluée par la MÊME fonction que le suivi réel : pas de
       // second simulateur, donc pas de seconde vérité.
-      const evalue = JournalSignaux.evaluer(sig, serie);
-      const bougiesSuivies = Math.max(1, Number(evalue.bougiesSuivies) || 1);
-      const idxCloture = Math.min(serie.length - 1, i + bougiesSuivies);
-      const clotureAt = serie[idxCloture].t;
+      const evalue = evaluer(sig, serie, {frais: reglages.frais});
+      const resolved = ['tp1','tp2','be','sl','expire'].includes(evalue.resultat) && Number.isFinite(evalue.r) && Number.isFinite(evalue.leveLe) && evalue.leveLe > sig.at && evalue.leveLe <= serie.at(-1).t;
+      const clotureAt = resolved ? evalue.leveLe : null;
       const montantRisqueTrade = (capitalHistorique * risquePct) / 100;
 
       positionsActives.push({
@@ -193,19 +200,18 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
         objectifs: sig.objectifs,
         resultat: evalue.resultat,
         rBrut: evalue.rBrut,
-        rNet: evalue.r,
+        rNet: resolved ? evalue.r : null,
+        fraisConnus: evalue.cout?.connu === true,
         coutR: evalue.cout ? evalue.cout.enR : 0,
         bougiesSuivies: evalue.bougiesSuivies || 0,
         // Fidélité : ce trade vient du moteur, pas d'un détecteur parallèle.
         source: 'DecisionEngine.decider'
       });
 
-      // Mise à jour immédiate du capital historique pour la position
-      const pnlMontant = (Number(evalue.r) || 0) * montantRisqueTrade;
-      capitalHistorique = Math.max(0, +(capitalHistorique + pnlMontant).toFixed(2));
-      if (capitalHistorique > peakCapital) peakCapital = capitalHistorique;
-      const dd = peakCapital > 0 ? ((peakCapital - capitalHistorique) / peakCapital) * 100 : 0;
-      if (dd > maxDrawdownPct) maxDrawdownPct = +dd.toFixed(2);
+      // Capital changes only at the exit, never at the entry. Open outcomes
+      // remain unresolved and cannot be credited at the end of the sample.
+      expositionMaxPct = Math.max(expositionMaxPct, risqueCumuleOuvert + risquePct);
+      positionsMaxSimultanees = Math.max(positionsMaxSimultanees, positionsActives.length);
 
       // On avance après la sortie : le direct ne cumule pas deux positions sur
       // le même marché. Sans ce saut, un même mouvement produisait 10 trades.
@@ -215,11 +221,8 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
     i += pas;
   }
 
-  // Dénouement de toute position active restante au dernier cours
-  for (const pos of positionsActives) {
-    const pnlMontant = (Number(pos.evalue.r) || 0) * pos.montantRisque;
-    capitalHistorique = Math.max(0, +(capitalHistorique + pnlMontant).toFixed(2));
-  }
+  // Settle only exits observed in the sample, once, in chronological order.
+  for (const pos of positionsActives.filter(p => Number.isFinite(p.clotureAt)).sort((a,b)=>a.clotureAt-b.clotureAt)) settle(pos);
 
   const baseStats = statistiques(trades);
   const statsFinales = Object.assign(baseStats, {
@@ -243,7 +246,9 @@ function statistiques(trades) {
     avecR: avecR.length,
     gagnants,
     nbGagnants: gagnants,
-    nbPerdants: avecR.length - gagnants,
+    nbPerdants: avecR.filter(t=>t.rNet<0).length,
+    neutres: avecR.filter(t=>t.rNet===0).length,
+    nonTranches: trades.length-avecR.length,
     tauxReussite: avecR.length ? +(100 * gagnants / avecR.length).toFixed(1) : null,
     rBrut: brut.length ? somme(brut, 'rBrut') : null,
     rNet: avecR.length ? somme(avecR, 'rNet') : null,

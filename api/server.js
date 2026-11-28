@@ -20,7 +20,6 @@ const cors = require('cors');
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
-const compression = require('compression');
 const DB = require('./core/db');
 // UN SEUL chargement. Le second appel (fallback « .env dans api/ ») etait inutile
 // et risque : dotenv cherche alors dans le dossier courant et peut ecraser des
@@ -131,11 +130,6 @@ app.use(cors({
     cb(null, false);                                                      // tout le reste : non
   }
 }));
-// Compression : les reponses de bougies depassent souvent 100 Ko de JSON, qui se
-// compriment a ~10 %. Sans elle, chaque rafraichissement de graphique transporte
-// l'integralite du texte.
-app.use(compression());
-
 // En-tetes de securite, poses a la main plutot que via helmet : cinq lignes
 // suffisent ici, et ca evite une dependance de plus.
 app.use((req, res, next) => {
@@ -1565,7 +1559,7 @@ app.post('/api/scan', requireAuth, async (req, res) => {
 
     const InstrumentsActifs = require('./core/instruments-actifs');
     const symbolesDemandes = req.body && req.body.symboles;
-    const symbolesAutorises = Array.isArray(symbolesDemandes) && symbolesDemandes.length
+    const symbolesAutorises = Array.isArray(symbolesDemandes)
       ? symbolesDemandes
       : InstrumentsActifs.obtenirActifs();
 
@@ -1584,7 +1578,8 @@ app.post('/api/scan', requireAuth, async (req, res) => {
       tf,
       strategies: profils,
       mode: Scan.MODES_SCAN.TRADING_AUTORISE,
-      symbolesAutorises
+      symbolesAutorises,
+      verifierCalendrier: symbol=>filtreCalendrier(symbol,{strict:true})
     });
     res.json({
       success: true, ...r,
@@ -2235,7 +2230,7 @@ Réponds en texte structuré, dense et exploitable.`;
     }
 
     // 1b. Vérification du calendrier économique — bloquer si news à fort impact
-    const cal = await filtreCalendrier(pair);
+    const cal = await filtreCalendrier(pair, { strict: true });
     if (!cal.ok) {
       return res.json({
         success: true,
@@ -2592,32 +2587,13 @@ app.post('/api/deriv/disconnect', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/deriv/trade', requireAuth, async (req, res) => {
-  try {
-    const { symbol, direction, amount, type, duration, durationUnit } = req.body || {};
-    if (!symbol) return res.status(400).json({ success: false, error: 'Symbole requis' });
-    const r = await DerivBroker.executerTrade({ symbol, direction, amount, type, duration, durationUnit });
-    if (!r.success) {
-      return res.status(400).json(r);
-    }
-    // Enregistre aussi le trade dans le journal interne 5TRADE
-    try {
-      const tradeInterne = {
-        id: 'deriv-' + r.contractId,
-        pair: symbol,
-        direction: (direction === 'BUY' || direction === 'long') ? 'BUY' : 'SELL',
-        entry: r.buyPrice,
-        status: 'open',
-        notes: `Ordre direct Deriv (Contrat #${r.contractId})`,
-        openedAt: new Date().toISOString()
-      };
-      await DB.saveTradeRecord(tradeInterne);
-    } catch {}
-
-    res.json(r);
-  } catch (e) {
-    res.status(500).json({ success: false, error: e.message });
-  }
+// Options CALL/PUT are not CFD positions. Never forward an unapproved order.
+app.post('/api/deriv/trade', requireAuth, (req, res) => {
+  res.status(503).json({
+    success: false,
+    code: 'EXECUTION_DISABLED',
+    error: 'Exécution Deriv suspendue : aucun ordre ne sera envoyé avant validation du moteur de risque et de la réconciliation.'
+  });
 });
 
 // ─── Dashboard temps réel ───
@@ -2657,9 +2633,9 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
 // ─── Volume Profile ───
 app.get('/api/volume-profile', requireAuth, async (req, res) => {
   try {
-    const { symbol, tf, count } = req.query;
-    const { candles } = await Market.getCandles(symbol || 'BTCUSDT', tf || '1h', Number(count) || 200);
-    const vp = volumeProfile(candles);
+    const { symbol, tf, count, provider } = req.query;
+    const { candles } = await Market.getCandles(symbol || 'frxXAUUSD', tf || '1h', Math.min(1000,Math.max(2,Number(count)||200)), provider || undefined);
+    const vp = volumeProfile(candles.filter(c => c.closed !== false));
     const niveaux = niveauxVolume(vp);
     const gaps = gapsVolume(vp);
     res.json({ success: true, volumeProfile: vp, niveaux, gaps });
@@ -2808,9 +2784,9 @@ app.get('/api/signal-scoring', requireAuth, async (req, res) => {
 // ─── Order Flow ───
 app.get('/api/order-flow', requireAuth, async (req, res) => {
   try {
-    const { symbol, tf } = req.query;
-    const { candles } = await Market.getCandles(symbol || 'BTCUSDT', tf || '1h', 200);
-    const orderFlow = analyserOrderFlow(candles);
+    const { symbol, tf, provider } = req.query;
+    const { candles } = await Market.getCandles(symbol || 'frxXAUUSD', tf || '1h', 200, provider || undefined);
+    const orderFlow = analyserOrderFlow(candles.filter(c=>c.closed!==false));
     res.json({ success: true, orderFlow });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -3057,11 +3033,21 @@ app.get('/api/instruments/actifs', requireAuth, (req, res) => {
   }
 });
 
+// Canonicalize the selected identity from the provider catalog, never user metadata.
+function selectionInstrument(item){
+  if(!item||typeof item.symbol!=='string'||typeof item.provider!=='string')throw Error('Symbole et fournisseur requis');
+  const match=Market.listSymbols().find(x=>x.provider===item.provider&&x.symbol.toUpperCase()===item.symbol.trim().toUpperCase());
+  if(!match)throw Error('Instrument absent du catalogue fournisseur');
+  const tf=item.tf||'5m';
+  if(!Market.TF_MS[tf])throw Error('Unité de temps invalide');
+  return {...match,tf,famille:require('./market-intelligence/instrument-classifier').classifier(match.symbol,{provider:match.provider}).classe};
+}
 app.post('/api/instruments/actifs', requireAuth, (req, res) => {
   try {
     const InstrumentsActifs = require('./core/instruments-actifs');
     const liste = req.body && req.body.instruments;
-    const instruments = InstrumentsActifs.definirActifs(liste || []);
+    if (!Array.isArray(liste)) return res.status(400).json({ success:false,error:'instruments doit être un tableau explicite' });
+    const instruments = InstrumentsActifs.definirActifs(liste.map(selectionInstrument));
     res.json({ success: true, instruments });
   } catch (e) {
     res.status(400).json({ success: false, error: e.message });
@@ -3072,12 +3058,13 @@ app.post('/api/instruments/actifs/toggle', requireAuth, (req, res) => {
   try {
     const InstrumentsActifs = require('./core/instruments-actifs');
     const { symbol, provider, tf, label, tv, actif } = req.body || {};
-    if (!symbol) return res.status(400).json({ success: false, error: 'symbol requis' });
+    if (typeof symbol !== 'string' || !symbol.trim() || typeof actif !== 'boolean') return res.status(400).json({ success: false, error: 'symbol et actif booléen requis' });
     let instruments;
     if (actif === false) {
-      instruments = InstrumentsActifs.retirerInstrument(symbol);
+      if(typeof provider!=='string'||!provider.trim()) return res.status(400).json({success:false,error:'Fournisseur requis'});
+      instruments = InstrumentsActifs.retirerInstrument(symbol,provider);
     } else {
-      instruments = InstrumentsActifs.ajouterInstrument({ symbol, provider, tf, label, tv });
+      instruments = InstrumentsActifs.ajouterInstrument(selectionInstrument({symbol,provider,tf}));
     }
     res.json({ success: true, instruments });
   } catch (e) {
@@ -3200,6 +3187,61 @@ app.put('/api/risk/instruments/:symbol', requireAuth, async (req, res) => {
         source = 'manuel', maj_le = now()`;
     res.json({ success: true, symbole, tickSize, tickValue });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/market/gold-context', requireAuth, async (req,res) => {
+  try {
+    const symbol='frxXAUUSD';
+    const tf=String(req.query.tf||'1h');
+    if(!Market.TF_MS[tf])return res.status(400).json({success:false,error:'Timeframe invalide'});
+    const [r,macro,goldMacro]=await Promise.all([
+      Market.getCandles(symbol,tf,300,'deriv'),
+      filtreCalendrier(symbol,{strict:true}),
+      require('./moteurs/gold').snapshot()
+    ]);
+    const candles=(r.candles||[]).filter(c=>c.closed!==false);
+    const result=require('./moteurs/gold').analyse(candles.map(c=>c.c),{symbol,provider:'deriv',timeframe:tf,candles,macro,goldMacro,now:Date.now(),live:true});
+    res.json({success:true,symbol,timeframe:tf,source:r.source,macro,goldMacro,diagnostic:result});
+  } catch {res.status(503).json({success:false,error:'Contexte or indisponible'});}
+});
+
+// Bounded, read-only educational replay. Snapshot kept server-side, so
+// advancing never reveals future candles or changes the historical dataset.
+const replaySessions = new Map();
+const replayOwner = req => req.session?.token ? require('node:crypto').createHash('sha256').update(req.session.token).digest('hex') : '';
+const replayPrune = () => {
+  for(const [id,s] of replaySessions)if(s.expires<Date.now())replaySessions.delete(id);
+};
+app.post('/api/replay/start',requireAuth,async(req,res)=>{
+  try{
+    replayPrune();
+    const owner=replayOwner(req);
+    if(!owner)return res.status(403).json({success:false,error:'Session requise'});
+    const symbol=String(req.body?.symbol||'frxXAUUSD'),tf=String(req.body?.tf||'1h');
+    const provider=String(req.body?.provider||'deriv');
+    if(!Market.TF_MS[tf]||!Market.listSymbols().some(x=>x.symbol===symbol&&x.provider===provider))
+      return res.status(400).json({success:false,error:'Instrument ou unité invalide'});
+    if(replaySessions.size>=50)return res.status(429).json({success:false,error:'Capacité replay atteinte'});
+    const r=await Market.getCandles(symbol,tf,500,provider);
+    const candles=(r.candles||[]).filter(c=>c.closed!==false);
+    const frame=require('./engine/market-replay').frame(candles,tf,Math.min(119,candles.length-2));
+    const id=require('node:crypto').randomUUID();
+    replaySessions.set(id,{owner,symbol,tf,provider,candles,cursor:frame.cursor,expires:Date.now()+1800000});
+    res.json({success:true,id,symbol,tf,provider,...frame});
+  }catch{res.status(422).json({success:false,error:'Historique replay indisponible'});}
+});
+app.post('/api/replay/step',requireAuth,(req,res)=>{
+  replayPrune();
+  const s=replaySessions.get(String(req.body?.id||''));
+  if(!s||s.owner!==replayOwner(req))return res.status(404).json({success:false,error:'Session replay expirée'});
+  const delta=Number(req.body?.delta);
+  if(![-1,1,5,10].includes(delta))return res.status(400).json({success:false,error:'Pas invalide'});
+  const cursor=Math.max(30,Math.min(s.candles.length-1,s.cursor+delta));
+  try{
+    const frame=require('./engine/market-replay').frame(s.candles,s.tf,cursor);
+    s.cursor=cursor;s.expires=Date.now()+1800000;
+    res.json({success:true,id:req.body.id,symbol:s.symbol,tf:s.tf,provider:s.provider,...frame});
+  }catch{res.status(422).json({success:false,error:'Rejeu indisponible'});}
 });
 
 app.get('/api/market/profil', requireAuth, async (req, res) => {
@@ -3828,15 +3870,17 @@ async function optionsAnalyse(src) {
   else if (typeof brut === 'string' && brut.trim()) ids = brut.split(',').map(x => x.trim());
   ids = [...new Set(ids.filter(Boolean))];
 
-  if (mode !== 'manuel' || !ids.length) return { mode: 'auto' };
+  if (!ids.length) { if (mode==='manuel') throw Object.assign(new Error('Sélection manuelle vide'),{code:422}); return {mode:'auto'}; }
+  if(ids.length>8) throw Object.assign(new Error('Maximum huit stratégies'),{code:422});
 
   const strategies = await loadAllStrategies().catch(() => []);
   const profils = ids
     .map(id => (strategies || []).find(x => x.id === id))
-    .filter(Boolean)
+    .filter(doc=>doc&&doc.actif!==false)
     .map(doc => Signals.profilDepuisStrategie(doc));
 
-  if (!profils.length) return { mode: 'manuel', strategiesIntrouvables: ids };
+  const classe=require('./market-intelligence/instrument-classifier').classifier(src.symbol,{provider:src.provider}).classe;
+  if (profils.length!==ids.length||profils.some(p=>p.executable===false||p.partiel||!p.supportedMarkets?.includes(classe)||(p.executionTimeframes?.length&&!p.executionTimeframes.includes(src.tf||'5m')))) throw Object.assign(new Error('Sélection incomplète, stratégie incompatible ou non exécutable'),{code:422});
 
   // Union des règles : choisir deux stratégies ne doit pas en écarter une.
   const regles = [...new Set(profils.flatMap(p => p.regles))];
@@ -3916,7 +3960,7 @@ async function alignementMtf(symbol, tfBase, provider, options = {}) {
   const resultat = exploitables.length
     ? Signals.verdictAvecConfluence(exploitables, { seuilAlignes: options.seuilAlignes || undefined })
     : null;
-  return { tfs, exploitables, resultat, confluence: resultat ? resultat.confluence : null };
+  return { tfs, exploitables, parTF, resultat, confluence: resultat ? resultat.confluence : null };
 }
 
 /**
@@ -3931,12 +3975,15 @@ async function profilsSurveillance() {
   const docs = await loadAllStrategies();
   const parId = new Map((docs || []).map(d => [d.id, d]));
   const profils = [];
+  const versions = await Registry.carteVersions().catch(() => ({}));
   for (const id of ids) {
     const doc = parId.get(id);
-    if (!doc) continue;
+    if (!doc || doc.actif === false) { profils.push({id,executable:false,partiel:true,titre:id}); continue; }
     const p = Signals.profilDepuisStrategie(doc);
     // Une fiche non exécutable est ignorée ici : la surveillance la refuse aussi.
-    if (p.executable !== false) profils.push(p);
+    const version = versions[doc.id];
+    if (version) { p.version = version.version; p.versionEtat = version.etat; }
+    profils.push(p);
   }
   return profils;
 }
@@ -3965,7 +4012,7 @@ app.get('/api/signals/confluence', requireAuth, async (req, res) => {
     if (!symbol) return res.status(400).json({ error: 'Paramètre « symbol » requis' });
 
     const options = await optionsAnalyse(req.query);
-    const { tfs, exploitables, resultat } = await alignementMtf(symbol, tfBase, provider, options);
+    const { tfs, exploitables, resultat, parTF } = await alignementMtf(symbol, tfBase, provider, options);
     if (!resultat) {
       return res.json({
         success: true, symbol, timeframes: tfs, mode: options.mode,
@@ -4002,6 +4049,21 @@ app.get('/api/signals/confluence', requireAuth, async (req, res) => {
 
 // NOUVELLE ROUTE : Decision Engine — verdict global arbitré avec traçabilité complète
 // 5 niveaux : Détection → Validation → Confirmation → Exécution → Arbitrage
+function gateLiveDecision(decision,macro,quality){
+  if(!decision)return decision;
+  const refused=!quality?.ok||(macro?.applicable!==false&&(!macro?.verifie||!macro?.ok||macro?.bloque));
+  decision.macro=macro||null;
+  decision.qualite=quality||null;
+  if(refused){
+    decision.decision='ATTENTE';decision.direction='NEUTRAL';
+    decision.raison=!quality?.ok?'Données non fiables':macro?.detail||'Calendrier non vérifié';
+    decision.signal=null;
+    decision.signauxRetenus=[];decision.idsRetenus=[];
+    if(decision.arbitrage){decision.arbitrage.decision='ATTENTE';decision.arbitrage.signauxRetenus=[];}
+  }
+  return decision;
+}
+
 app.get('/api/decision', requireAuth, async (req, res) => {
   try {
     const symbol = String(req.query.symbol || '').trim();
@@ -4104,6 +4166,7 @@ app.get('/api/decision', requireAuth, async (req, res) => {
 
     const decision = DecisionEngine.decider(closed, { symbol, timeframe: tf }, {
       profils: options.profils || [],
+      strategieStrict: options.mode==='manuel'||!!options.profils?.length,
       // La confluence par stratégie prime : c'est celle de la fiche retenue.
       confluence: confluenceStrategie || confluence,
       // …et elle est aussi fournie par signal : le contrôle MTF de chaque
@@ -4122,6 +4185,7 @@ app.get('/api/decision', requireAuth, async (req, res) => {
       verifierModele: true
     });
 
+    gateLiveDecision(decision,await filtreCalendrier(symbol,{strict:true}),Qualite.analyser(closed,{timeframe:tf}));
     res.json({
       success: true,
       symbol,
@@ -4270,6 +4334,26 @@ app.get('/api/apprentissage/shadow', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Une candidature ne change les seuils qu'après une décision humaine explicite,
+// motivée et rattachée à la session authentifiée.
+app.post('/api/apprentissage/shadow/:id/review', requireAuth, async (req, res) => {
+  try {
+    const Ajusteur = require('./apprentissage/ajusteur-seuils');
+    const resultat = await Ajusteur.revoirCandidature(String(req.params.id || ''), {
+      decision: req.body && req.body.decision,
+      note: req.body && req.body.note,
+      reviewer: req.session.username
+    });
+    if (!resultat.ok) return res.status(409).json({ success: false, ...resultat });
+    Audit.enregistrer({
+      acteur: resultat.reviewer, action: 'learning_review', cible: resultat.id,
+      detail: { decision: resultat.decision, parametre: resultat.parametre || null },
+      ip: req.ip, succes: true
+    }).catch(() => {});
+    res.json({ success: true, ...resultat });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/signals', requireAuth, async (req, res) => {
   try {
     const symbol = String(req.query.symbol || '').trim();
@@ -4331,8 +4415,8 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
   let lastKey = null;
   let closed = true;
   // Résolu une seule fois : la stratégie choisie ne change pas pendant le flux.
-  let optionsFlux = { mode: 'auto' };
-  optionsAnalyse(req.query).then(o => { optionsFlux = o; evaluate(); }).catch(() => {});
+  let optionsFlux = null;
+  optionsAnalyse(req.query).then(o => { optionsFlux = o; evaluate(); }).catch(e => { if(closed)res.write('event: signal\ndata: '+JSON.stringify({status:'indisponible',direction:'NEUTRE',summary:e.message})+'\n\n'); });
 
   // Le flux se réévalue bien plus souvent qu'une route : l'alignement MTF et
   // l'état de compte n'ont pas à être recalculés à chaque tick. MTF = 60 s
@@ -4342,7 +4426,10 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
   const cacheMtf = { at: 0, cle: '', conf: null };
   const cacheRisque = { at: 0, verif: undefined };
 
+  let evaluating=false;
   let evaluate = async () => {
+    if(!optionsFlux||evaluating||!closed)return;
+    evaluating=true;
     try {
       const { candles } = await Market.getCandles(symbol, tf, 300, provider);
       // On n'analyse QUE des bougies terminées : sinon le verdict clignote
@@ -4387,6 +4474,7 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
       try {
         decision = DecisionEngine.decider(done, { symbol, timeframe: tf }, {
           profils: optionsFlux.profils || [],
+          strategieStrict: optionsFlux.mode==='manuel',
           confluence,
           verificateurRisque,
           exigerVerificateurRisque: true,
@@ -4402,15 +4490,9 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
         });
       } catch (e) { decision = null; }
 
-      // Journal : on persiste UNIQUEMENT les signaux RETENUS par l'arbitrage
-      if (decision && Array.isArray(decision.signauxRetenus) && decision.signauxRetenus.length) {
-        try {
-          JournalSignaux.enregistrer(
-            decision.signauxRetenus.filter(s => s.statusFinal === 'confirme' || s.status === 'confirme' || s.executable === true),
-            { symbol, timeframe: tf, provider, at: verdict.at }
-          );
-        } catch { /* le journal ne doit jamais casser le flux */ }
-      }
+      gateLiveDecision(decision,await filtreCalendrier(symbol,{strict:true}),Qualite.analyser(done,{timeframe:tf}));
+      // Le flux d'affichage est en lecture seule. Seul le cycle de surveillance
+      // explicitement configuré publie des observations ou écrit le journal.
 
       // Format pour le flux SSE : décision finale + traçabilité
       const payload = decision ? DecisionEngine.deciderStream(decision) : {
@@ -4429,6 +4511,7 @@ app.get('/api/signals/stream', requireAuth, (req, res) => {
         if (closed) res.write(`event: signal\ndata: ${JSON.stringify(payload)}\n\n`);
       }
     } catch { /* bougie incomplète ou réseau : on retentera */ }
+    finally { evaluating=false; }
   };
 
   evaluate();
@@ -4674,7 +4757,7 @@ async function executerBacktest(src = {}) {
       }
     });
     const st = rf.stats || {};
-    const rParTrade = (rf.trades || []).map(t => Number(t.rNet || t.r || 0));
+    const rParTrade = (rf.trades || []).filter(t => Number.isFinite(t.rNet)).map(t => t.rNet);
     let cumulR = 0;
     const courbeRCumulee = rParTrade.map(r => +(cumulR += r).toFixed(2));
     r = {
@@ -4684,9 +4767,9 @@ async function executerBacktest(src = {}) {
       total: (rf.trades || []).length,
       gagnants: st.nbGagnants ?? st.gagnants ?? 0,
       perdants: st.nbPerdants ?? (st.avecR ? st.avecR - (st.gagnants || 0) : 0),
-      winRate: st.tauxReussite ?? 0,
-      rTotal: st.rTotal ?? st.rNet ?? 0,
-      expectancy: st.esperance ?? st.esperanceNette ?? 0,
+      winRate: st.tauxReussite ?? null,
+      rTotal: st.rTotal ?? st.rNet ?? null,
+      expectancy: st.esperance ?? st.esperanceNette ?? null,
       stats: st,
       rParTrade,
       courbeR: courbeRCumulee,
@@ -4712,8 +4795,8 @@ async function executerBacktest(src = {}) {
     strategies: options.strategies || []
   };
   // Le compte n'a de sens que s'il y a des prises et un capital de départ.
-  if (initialCapital > 0 && riskPct > 0 && Array.isArray(r.rParTrade || r.courbeR)) {
-    resultat.compte = compteDepuisR(r.rParTrade || r.courbeR, initialCapital, riskPct);
+  if (initialCapital > 0 && riskPct > 0 && Array.isArray(r.rParTrade)) {
+    resultat.compte = compteDepuisR(r.rParTrade, initialCapital, riskPct);
   }
   return resultat;
 }
@@ -4909,10 +4992,11 @@ app.get('/api/performance', requireAuth, (req, res) => {
     const limite = Math.min(Number(req.query.limite) || 2000, 5000);
     const bruts = JournalSignaux.lister({ limite });
     const trades = (bruts || [])
-      .filter(s => Number.isFinite(Number(s.r)))
+      .filter(s => ['tp1','tp2','be','sl','expire'].includes(s.resultat) && Performance.rValide(s.r))
       .map(s => ({
         id: s.cle, r: Number(s.r),
-        at: typeof s.at === 'number' ? new Date(s.at).toISOString() : s.at,
+        at: Number.isFinite(Performance.instant(s.at)) ? new Date(Performance.instant(s.at)).toISOString() : null,
+        closAt: Number.isFinite(Performance.instant(s.leveLe)) ? new Date(Performance.instant(s.leveLe)).toISOString() : null,
         strategie: s.strategie || (s.source === 'strategie' ? s.nom : null),
         symbole: s.symbol, timeframe: s.timeframe
       }));
@@ -4932,6 +5016,8 @@ app.get('/api/performance', requireAuth, (req, res) => {
       // d'une stratégie. Sans cette précision, les chiffres se lisent de travers.
       couverture: { avecStrategie, sansStrategie: trades.length - avecStrategie },
       // Rappel explicite : ces chiffres décrivent le passé, pas une probabilité.
+      provenance: 'journal_signaux_simule',
+      ordresCourtier: false,
       avertissement: trades.length && avecStrategie === 0
         ? 'Aucun trade n\'est rattaché à une stratégie : ces chiffres décrivent les signaux GÉNÉRIQUES (motifs et structure), pas une stratégie nommée.'
         : 'Performance passée sur trades tranchés : ne garantit aucun résultat futur.'
@@ -5113,12 +5199,30 @@ async function start() {
   if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
     configurerVAPID(process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
   }
+  const Outbox = require('./delivery/telegram-outbox');
+  let outbox = null;
+  let outboxBusy = false;
+  let outboxError = null;
+  try {
+    outbox = Outbox.repository(DB.client());
+    await outbox.init();
+  } catch (error) {
+    outbox = null;
+    console.error('[Telegram outbox] PostgreSQL indisponible');
+  }
   Alerts.start({
+    enqueueTelegram: async (config, cle, texte) => {
+      if (!outbox) throw new Error('File persistante indisponible');
+      const chat=String(config.telegramChat);
+      const id='signal:'+require('node:crypto').createHash('sha256').update(chat+'|'+cle).digest('hex');
+      await outbox.enqueue(id,{chat,text:texte,opts:{parse_mode:'HTML',reply_markup:{inline_keyboard:[[{text:'État du compte',callback_data:'account:status'}]]}}},Date.now()+15*60000);
+      return true; // accepted or already present under the same immutable key
+    },
     market: Market,
     signals: Signals,
     // Filtre économique : branché dans la boucle d'alertes (il ne l'était que
     // sur le chemin IA). Un signal ne doit pas partir pendant une publication.
-    filtreNews: filtreCalendrier,
+    filtreNews: symbol => filtreCalendrier(symbol, { strict: true }),
     // Multi-signaux : permet à la surveillance de dire QUELLE stratégie s'est
     // déclenchée, et de lister les motifs, au lieu d'un verdict anonyme.
     signaux: Multi,
@@ -5126,7 +5230,7 @@ async function start() {
     DecisionEngine,
     // Alignement multi-unités : la décision l'exige, donc la surveillance reçoit
     // le MÊME calcul que l'écran et le direct — un seul chiffre, trois parcours.
-    alignementMtf: (symbole, unite, prov) => alignementMtf(symbole, unite, prov),
+    alignementMtf: (symbole, unite, prov, options) => alignementMtf(symbole, unite, prov, options),
     // Garde-fou de compte : la surveillance refuse ce que la décision refuse.
     verificateurRisque: verificateurRisqueCompte,
     // Traçabilité phase 2 : conditions nommées et preuves en base. Absent ou en
@@ -5140,26 +5244,7 @@ async function start() {
     // Les stratégies que l'utilisateur a choisi de surveiller. Sans ce câblage,
     // la surveillance tournait en mode « auto » (toutes les règles) et ignorait
     // complètement les stratégies configurées dans l'app.
-    profilsSurveillance: async () => {
-      try {
-        const c = Alerts.get();
-        const ids = Array.isArray(c.strategies) ? c.strategies.filter(Boolean) : [];
-        if (!ids.length) return [];
-        const strategies = await loadAllStrategies();
-        // Version réellement enregistrée de chaque fiche : c'est elle qui part
-        // dans la trace, pour prouver QUELLES règles ont produit le signal.
-        const carte = await Registry.carteVersions().catch(() => ({}));
-        return ids
-          .map(id => (strategies || []).find(x => x.id === id))
-          .filter(Boolean)
-          .map(doc => {
-            const p = Signals.profilDepuisStrategie(doc);
-            const enr = carte[doc.id];
-            if (enr) { p.version = enr.version; p.versionEtat = enr.etat; }
-            return p;
-          });
-      } catch { return []; }
-    },
+    profilsSurveillance,
     sendMail,
     sendPush,
     labelOf: id => {
@@ -5172,11 +5257,69 @@ async function start() {
   // actifs que l'écran, le scan manuel et les alertes (XAUUSD par défaut).
   // Si aucun instrument n'est actif, zéro nouveau scan n'est exécuté.
   const InstrumentsActifs = require('./core/instruments-actifs');
+  const Paper = require('./engine/paper-observations');
+  let paperRepo = null;
+  let paperError = null;
+  let paperBusy = false;
+  let paperLastRun = null;
+  try {
+    paperRepo = Paper.repository(DB.client());
+    await paperRepo.init();
+  } catch (error) {
+    paperRepo = null;
+    paperError = error.message;
+    console.error('[Paper observations]', paperError);
+  }
+  app.get('/api/paper-observations', requireAuth, async (req, res) => {
+    if (!paperRepo) return res.status(503).json({ success: false, error: 'Stockage prospectif indisponible' });
+    try {
+      const limit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit) || 50)));
+      res.json({ success: true, mode: 'observation_ohlc', ordersExecuted: false,
+        lastRun: paperLastRun, workerError: paperError,
+        summary: await paperRepo.summary(), observations: await paperRepo.history(limit) });
+    } catch (error) { res.status(503).json({ success: false, error: 'Lecture du suivi prospectif indisponible' }); }
+  });
+  async function updatePaperObservations() {
+    if (!paperRepo || paperBusy) return;
+    paperBusy = true;
+    try {
+      const pending = await paperRepo.pending();
+      const groups = new Map();
+      for (const obs of pending) {
+        const key = JSON.stringify([obs.symbol, obs.timeframe, obs.provider]);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(obs);
+      }
+      const errors = [];
+      for (const group of groups.values()) {
+        const obs = group[0];
+        try {
+          const data = await Market.getCandles(obs.symbol, obs.timeframe, 300, obs.provider || undefined);
+          for (const item of group) {
+            const outcome = Paper.evaluate(item, data.candles || []);
+            if (outcome) await paperRepo.resolve(item.id, outcome);
+          }
+        } catch (error) { errors.push(obs.symbol + ': ' + error.message); }
+      }
+      paperLastRun = new Date().toISOString();
+      paperError = errors.length ? 'Certaines sources de prix sont indisponibles' : null;
+    } catch (error) { paperError = 'Échec de mise à jour des observations'; console.error('[Paper observations]', error.message); }
+    finally { paperBusy = false; }
+  }
+  const paperTimer = setInterval(updatePaperObservations, 120000);
+  paperTimer.unref?.();
   Scan.start({
     market: Market,
     signals: Signals,
     tf: '15m',
     mode: Scan.MODES_SCAN.SURVEILLANCE,
+    verifierCalendrier: symbol => filtreCalendrier(symbol, { strict: true }),
+    observer: async (row, profile, candles) => {
+      if (!paperRepo) return;
+      const costs = Frais.fraisPour(row.symbole, row.contrat?.entree);
+      const obs = Paper.buildObservation(row, profile, candles, costs, Market.TF_MS[row.tf]);
+      if (obs) await paperRepo.insert(obs);
+    },
     symbolesAutorises: () => InstrumentsActifs.obtenirActifs(),
     // Les stratégies de la surveillance : le scan cesse d'être un radar anonyme.
     strategies: profilsSurveillance,
@@ -5284,6 +5427,10 @@ async function start() {
   });
 
   // GET /api/chat/aide — liste des commandes disponibles.
+  app.get('/api/chat/capabilities', requireAuth, async (req,res)=>{
+    try{res.json({success:true,...await require('./chat-crud/capabilities').inspect()});}
+    catch{res.status(503).json({success:false,error:'Inventaire indisponible'});}
+  });
   app.get('/api/chat/aide', requireAuth, (req, res) => {
     const Repondeur = require('./chat-crud/repondeur');
     res.json({ success: true, aide: Repondeur.aide() });
@@ -5314,87 +5461,68 @@ async function start() {
     }
   });
 
-  // Briefing matinal automatique Telegram avec fenêtre horaire tolérante (06:00 à 10:00 UTC)
-  // et données statistiques réelles (recap journal, positions, risque).
-  const NotificationTracker = require('./delivery/notification-tracker');
-
-  setInterval(async () => {
+  // Scheduled Telegram notifications persist independently of the process.
+  const Tracker = require('./delivery/notification-tracker');
+  app.get('/api/alerts/outbox', requireAuth, async (req,res) => {
+    if (!outbox) return res.status(503).json({success:false,error:'File persistante indisponible'});
+    try { res.json({success:true,workerError:outboxError,...await outbox.status()}); }
+    catch { res.status(503).json({success:false,error:'Lecture indisponible'}); }
+  });
+  const kinshasa = date => new Intl.DateTimeFormat('fr-FR',{
+    timeZone:'Africa/Kinshasa',dateStyle:'medium',timeStyle:'short'
+  }).format(date);
+  const scheduleTelegram = async () => {
+    if (!outbox || outboxBusy) return;
+    outboxBusy = true;
     try {
-      const d = new Date();
-      const jourStr = d.toISOString().slice(0, 10);
-      const heureUTC = d.getUTCHours();
-      const minuteUTC = d.getUTCMinutes();
-      const dayUTC = d.getUTCDay(); // 0 = Dimanche, 5 = Vendredi
-
-      const c = Alerts.get();
-      if (!c.telegramToken || !c.telegramChat) return;
-
-      // 1. Briefing matinal quotidien (06:00 à 10:00 UTC)
-      const cleBriefing = `briefing_matin_${jourStr}`;
-      if (heureUTC >= 6 && heureUTC <= 10 && !NotificationTracker.estDejaEnvoye(cleBriefing)) {
-        try {
-          const { genererBriefingTelegram } = require('./routes/alerts');
-          const briefing = await genererBriefingTelegram(c, { DB });
-          const resBriefing = await NotificationTracker.envoyerTelegramSecurise(
-            c.telegramToken,
-            c.telegramChat,
-            briefing.texte,
-            { parse_mode: 'HTML', reply_markup: { inline_keyboard: briefing.inline_keyboard } }
-          );
-          if (resBriefing.ok) {
-            NotificationTracker.marquerEnvoye(cleBriefing, { type: 'briefing_matinal' });
-          }
-        } catch (e) {
-          console.warn(`[Scheduler] Erreur briefing : ${e.message}`);
+      const config = Alerts.get();
+      if (!config.telegramToken || !config.telegramChat) return;
+      const now = Date.now(), d = new Date(now);
+      const local = new Date(now + 3600000);
+      const day = local.toISOString().slice(0,10);
+      const utcDay = d.toISOString().slice(0,10);
+      const clock = local.getUTCHours();
+      const chat = String(config.telegramChat);
+      const enqueue = async (key,text,expiresAt,opts={}) => {
+        if (!Tracker.estDejaEnvoye(key)) await outbox.enqueue(key+':'+chat,{chat,text,opts},expiresAt);
+      };
+      // Morning briefing: 07:00–11:00 Kinshasa, without inventing account data.
+      if (clock >= 7 && clock < 11) {
+        const key = 'briefing_matin_'+day;
+        const briefing = await require('./routes/alerts').genererBriefingTelegram(config,{DB});
+        await enqueue(key,briefing.texte,Date.parse(day+'T10:00:00Z'),
+          {parse_mode:'HTML',reply_markup:{inline_keyboard:briefing.inline_keyboard}});
+      }
+      const session = require('./temporal/sessions').statutMarche('EURUSD',d);
+      if (session.statut === 'pre_fermeture' && session.prochaineFermeture) {
+        const close = new Date(session.prochaineFermeture);
+        await enqueue('forex_pre_cloture_'+utcDay,'Forex — fermeture hebdomadaire estimée : '+kinshasa(close)+' (Kinshasa). Horaires exacts selon le courtier.',close.getTime());
+      }
+      if (d.getUTCDay() === 0 && session.ouvert) {
+        const closeHour = session.dst ? 21 : 22;
+        const opened = new Date(utcDay+'T00:00:00Z');
+        opened.setUTCHours(closeHour);
+        if (now >= opened.getTime() && now < opened.getTime()+3600000) {
+          await enqueue('forex_reouverture_'+utcDay,'Forex — réouverture hebdomadaire estimée : '+kinshasa(opened)+' (Kinshasa). Vérifier les cotations du courtier.',opened.getTime()+3600000);
         }
       }
-
-      // 2. Alerte pré-clôture Forex du vendredi (calculée dynamiquement selon la session réelle)
-      const cleVendredi = `forex_pre_cloture_${jourStr}`;
-      const Sessions = require('./temporal/sessions');
-      const stForexVendredi = Sessions.statutMarche('EURUSD', d);
-      if (dayUTC === 5 && stForexVendredi.statut === 'pre_fermeture' && !NotificationTracker.estDejaEnvoye(cleVendredi)) {
-        try {
-          const Skills = require('./skills/registry');
-          const skillRes = await Skills.executer('forex-session-monitor', { action: 'alerte_telegram', type: 'pre_cloture' });
-          if (skillRes.ok && skillRes.resultat?.texte) {
-            const resEnvoi = await NotificationTracker.envoyerTelegramSecurise(
-              c.telegramToken,
-              c.telegramChat,
-              skillRes.resultat.texte
-            );
-            if (resEnvoi.ok) {
-              NotificationTracker.marquerEnvoye(cleVendredi, { type: 'pre_cloture_forex' });
-            }
-          }
-        } catch (e) {
-          console.warn(`[Scheduler] Erreur pré-clôture Forex : ${e.message}`);
-        }
+      for (let i=0;i<3;i++) {
+        const job = await outbox.claim();
+        if (!job) break;
+        const result = String(config.telegramChat) === job.payload.chat
+          ? await Outbox.sendOnce(config.telegramToken,job.payload.chat,job.payload.text,job.payload.opts)
+          : {ok:false,kind:'rejected'};
+        await outbox.finish(job,result);
       }
-
-      // 3. Alerte réouverture Forex du dimanche (synchronisée sur le calendrier réel)
-      const cleDimanche = `forex_reouverture_${jourStr}`;
-      const stForexDimanche = Sessions.statutMarche('EURUSD', d);
-      if (dayUTC === 0 && stForexDimanche.ouvert && !NotificationTracker.estDejaEnvoye(cleDimanche)) {
-        try {
-          const Skills = require('./skills/registry');
-          const skillRes = await Skills.executer('forex-session-monitor', { action: 'alerte_telegram', type: 'reouverture' });
-          if (skillRes.ok && skillRes.resultat?.texte) {
-            const resEnvoi = await NotificationTracker.envoyerTelegramSecurise(
-              c.telegramToken,
-              c.telegramChat,
-              skillRes.resultat.texte
-            );
-            if (resEnvoi.ok) {
-              NotificationTracker.marquerEnvoye(cleDimanche, { type: 'reouverture_forex' });
-            }
-          }
-        } catch (e) {
-          console.warn(`[Scheduler] Erreur réouverture Forex : ${e.message}`);
-        }
-      }
-    } catch { /* surveillance temporelle non-bloquante */ }
-  }, 30000);
+      outboxError = null;
+    } catch (error) {
+      outboxError = 'Cycle de notification indisponible';
+      console.error('[Telegram outbox] cycle en échec');
+    } finally { outboxBusy=false; }
+  };
+  const telegramTimer = setInterval(scheduleTelegram,30000);
+  telegramTimer.unref?.();
+  scheduleTelegram();
 
   // Synchronisation initiale des alertes et du scan avec la sélection active
   try {

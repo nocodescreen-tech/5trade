@@ -272,6 +272,7 @@ function resetDedup() { config.deja = []; save(); return config; }
  * et la force. Les rejetés sont comptés, pas listés (le message resterait
  * illisible) — ils restent visibles dans l'app.
  */
+const escTelegram = value => String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 function blocSignaux(multi) {
   if (!multi || !Array.isArray(multi.signaux) || !multi.signaux.length) return '';
   const retenus = multi.signaux.filter(s => s.status === 'confirme' || s.status === 'surveiller');
@@ -282,7 +283,7 @@ function blocSignaux(multi) {
     const src = s.source === 'strategie' ? (s.strategie || s.nom) : s.nom;
     const sens = s.sens === 'long' ? 'achat' : s.sens === 'short' ? 'vente' : 'neutre';
     const etat = s.status === 'confirme' ? '' : ' (à surveiller)';
-    return `• <b>${src}</b> — ${sens}${etat} · force ${Math.round((s.force || 0) * 100)} %`;
+    return `• <b>${escTelegram(src)}</b> — ${sens}${etat} · force ${Math.round((s.force || 0) * 100)} %`;
   });
   const reste = retenus.length > 10 ? `\n… et ${retenus.length - 10} autre(s)` : '';
   return `\n\n<b>Signaux détectés (${retenus.length})</b>\n${lignes.join('\n')}${reste}`;
@@ -296,8 +297,8 @@ function blocContexte(multi) {
   const z = k.zoneLaPlusProche;
   const morceaux = [
     `tendance ${tend}`,
-    pos ? `prix en ${pos}` : null,
-    z ? `${z.type} à ${z.distanceAtr} ATR` : null,
+    pos ? `prix en ${escTelegram(pos)}` : null,
+    z ? `${escTelegram(z.type)} à ${escTelegram(z.distanceAtr)} ATR` : null,
     Number.isFinite(k.atr) ? `ATR ${k.atr}` : null
   ].filter(Boolean);
   return morceaux.length ? `\nContexte : ${morceaux.join(' · ')}` : '';
@@ -306,14 +307,14 @@ function blocContexte(multi) {
 function messageTelegram(v, m, qualite = {}) {
   const L = v.levels || {};
   const sens = v.direction === 'BUY' ? 'ACHAT' : 'VENTE';
-  const prix = Number.isFinite(Number(v.price)) ? Number(v.price) : null;
+  const prix = Number.isFinite(v.price) ? v.price : null;
   const pct = v.strength ? ` · force ${Math.round(v.strength * 100)} %` : '';
   const nbRegles = Number.isFinite(v.confirmations) ? v.confirmations : (v.rules || []).length;
 
   // Niveaux : on affiche le prix ET l'écart, en R, parce qu'un prix seul ne dit
   // pas si le stop est à 3 pips ou 30. Un niveau absent est dit absent — la
   // version précédente affichait « — » sans expliquer pourquoi.
-  const num = x => (Number.isFinite(Number(x)) ? Number(x) : null);
+  const num = x => (Number.isFinite(x) ? x : null);
   // Prix lisibles : « 3861.253698 » sur l'or n'aide personne. Les décimales
   // suivent l'ordre de grandeur (2 sur l'or, 5 sur EURUSD, 3 sur USDJPY).
   const prixTxt = x => {
@@ -323,46 +324,18 @@ function messageTelegram(v, m, qualite = {}) {
     const d = a >= 1000 ? 2 : a >= 100 ? 3 : a >= 10 ? 3 : 5;
     return v.toFixed(d);
   };
-  const entree = num(L.entry) ?? prix;
+  const entree = num(L.entry);
   const stop = num(L.stop);
   const tp1 = num(L.target1);
   const tp2 = num(L.target2);
   const risque = entree !== null && stop !== null ? Math.abs(entree - stop) : null;
   const enR = cible => (risque && cible !== null ? ` (${((Math.abs(cible - entree)) / risque).toFixed(2)} R)` : '');
 
-  // Dimensionnement dynamique du lot selon capital et risque réel configuré
-  let lotTexte = null;
-  try {
-    const Risque = require('../risk/risque');
-    const cfgRisque = Risque.charger();
-    const capital = cfgRisque.capital || 1000;
-    const risquePct = cfgRisque.risquePct || 1;
-    const montantRisque = (capital * risquePct) / 100;
-    if (risque && risque > 0) {
-      let tickVal = 1;
-      let tickTaille = 0.01;
-      const s = String(m.symbol || '').toUpperCase();
-      if (s.includes('XAU') || s.includes('GOLD')) {
-        tickVal = 10;
-        tickTaille = 0.1;
-      } else if (s.includes('BTC') || s.includes('CRY')) {
-        tickVal = 1;
-        tickTaille = 1;
-      } else if (s.includes('JPY')) {
-        tickVal = 1000;
-        tickTaille = 0.01;
-      } else if (s.startsWith('FRX') || s.includes('EUR') || s.includes('GBP')) {
-        tickVal = 100000;
-        tickTaille = 0.0001;
-      }
-      const distanceTicks = Math.max(1, risque / tickTaille);
-      const lotsEstimes = Math.max(0.01, Math.min(50, Number((montantRisque / (distanceTicks * (tickVal * tickTaille))).toFixed(2))));
-      lotTexte = `Taille conseillée : <b>${lotsEstimes} lot(s)</b> (risque ${risquePct}% = $${montantRisque.toFixed(1)} sur $${capital})`;
-    }
-  } catch { /* si indisponible on omet */ }
+  // Aucun lot estimé sans spécification de contrat vérifiée et devise du compte.
+  const lotTexte = 'Taille de position : à calculer avec les spécifications vérifiées du courtier.';
 
   const lignes = [
-    `<b>${sens} confirmé — ${m.symbol} ${m.tf}</b>${pct}`,
+    `<b>${sens} confirmé — ${escTelegram(m.symbol)} ${escTelegram(m.tf)}</b>${pct}`,
     '',
     entree !== null ? `Entrée : <b>${prixTxt(entree)}</b>` : 'Entrée : <b>non chiffrée</b>',
     stop !== null ? `Invalidation : <b>${prixTxt(stop)}</b>${risque ? ` (risque ${risque.toFixed(risque < 1 ? 5 : 2)})` : ''}`
@@ -371,26 +344,26 @@ function messageTelegram(v, m, qualite = {}) {
     tp2 !== null ? `Objectif 2 : <b>${prixTxt(tp2)}</b>${enR(tp2)}` : null,
     lotTexte,
     Number.isFinite(qualite.rr) ? `Gain/risque : ${qualite.rr.toFixed(2)} pour 1` : null,
-    nbRegles ? `Règles : ${(v.rules || []).map(r => r.name).filter(Boolean).join(' + ') || nbRegles + ' confirmée(s)'}` : null,
+    nbRegles ? `Règles : ${(v.rules || []) .map(r => escTelegram(r.name)).filter(Boolean).join(' + ') || nbRegles + ' confirmée(s)'}` : null,
     qualite.confluence
-      ? `Alignement : ${qualite.confluence.nbAlignes}/${qualite.confluence.detail.length} unités d'accord`
+      ? `Alignement : ${qualite.confluence.nbAlignes}/${(qualite.confluence.detail || []).length} unités d'accord`
       : null
   ].filter(x => x !== null);
 
   // Les conditions vérifiées : c'est ce qui permet de juger le signal, pas
   // seulement de le recevoir.
   if (Array.isArray(v.checklist) && v.checklist.length) {
-    const cochees = v.checklist.map(x => `${x.ok ? '✓' : '✗'} ${x.label || ''}`).join(' · ');
-    lignes.push('', `<b>Conditions</b>\n${cochees}`.slice(0, 900));
+    const cochees = v.checklist.map(x => `${x.ok ? '✓' : '✗'} ${escTelegram(String(x.label || '').slice(0,100))}`).join(' · ');
+    lignes.push('', `<b>Conditions</b>\n${cochees}`);
   }
   // Le détail des règles (2 lignes max, tronquées) : la raison du signal.
   const details = (v.rules || []).filter(r => r && r.detail).slice(0, 3)
-    .map(r => `• ${r.name} : ${String(r.detail).slice(0, 140)}`);
+    .map(r => `• ${escTelegram(r.name)} : ${escTelegram(String(r.detail).slice(0, 140))}`);
   if (details.length) lignes.push('', `<b>Pourquoi</b>\n${details.join('\n')}`);
   // Alignement, unité par unité.
   if (qualite.confluence && Array.isArray(qualite.confluence.detail)) {
     lignes.push('', qualite.confluence.detail
-      .map(t => `${t.tf} : ${t.tendance || '?'} · ${t.status || '?'}${t.direction && t.direction !== 'NEUTRE' ? ' ' + t.direction : ''}`)
+      .map(t => `${escTelegram(t.tf)} : ${escTelegram(t.tendance || '?')} · ${escTelegram(t.status || '?')}${t.direction && t.direction !== 'NEUTRE' ? ' ' + escTelegram(t.direction) : ''}`)
       .join('\n'));
   }
 
@@ -398,42 +371,16 @@ function messageTelegram(v, m, qualite = {}) {
   lignes.push('5trade — outil d\'analyse, pas un conseil en investissement.');
 
   let texte = lignes.join('\n') + blocContexte(qualite.multi) + blocSignaux(qualite.multi);
-  if (texte.length > 3900) texte = texte.slice(0, 3900) + '\n… (tronqué)';
+  if (texte.length > 3900) { const essential=lignes.slice(0,9).join('\n'); texte=essential.length<3700 ? essential+'\n… Détails disponibles dans 5trade.' : 'Signal confirmé. Consulter les niveaux et les détails dans 5trade.'; }
   return texte;
 }
 
 async function envoyerTelegram(c, v, m, qualite = {}) {
-  const texte = messageTelegram(v, m, qualite);
-
-  // Boutons interactifs optimisés sous le message Telegram
-  const sigId = [m.symbol, v.direction, v.at || Date.now()].join(':').slice(0, 48);
-  const reply_markup = {
-    inline_keyboard: [
-      [
-        { text: '📝 Simuler au Journal (Paper)', callback_data: `trade:open:${sigId}` },
-        { text: '🛡️ Stop Breakeven', callback_data: `trade:be:${sigId}` }
-      ],
-      [
-        { text: '🎯 Sécuriser 50% (TP1)', callback_data: `trade:tp1:${sigId}` },
-        { text: '❌ Clôturer Position', callback_data: `trade:close:${sigId}` }
-      ],
-      [
-        { text: '📊 État du Compte & Risque', callback_data: 'account:status' }
-      ]
-    ]
-  };
-
-  const r = await fetchAvecReprise(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: c.telegramChat, text: texte, parse_mode: 'HTML',
-      disable_web_page_preview: true, reply_markup })
+  const result = await require('./telegram-outbox').sendOnce(c.telegramToken,c.telegramChat,messageTelegram(v,m,qualite),{
+    parse_mode:'HTML',reply_markup:{inline_keyboard:[[{text:'État du compte',callback_data:'account:status'}]]}
   });
-  if (!r.ok) {
-    const corps = await r.text().catch(() => '');
-    throw new Error(`Telegram ${r.status}${corps ? ' : ' + corps.slice(0, 120) : ''}`);
-  }
-  return true;
+  if (!result.ok) throw new Error(result.kind === 'uncertain' ? 'Réception Telegram non confirmée' : 'Envoi Telegram refusé');
+  return result;
 }
 
 function compose(v, m, prix, qualite = {}) {
@@ -559,8 +506,7 @@ async function verifierBrut(force = false) {
   if (!actifsEnregistres || !actifsEnregistres.length) {
     return { controle: false, envoyes: 0, marches: [], raison: 'aucun instrument actif (surveillance suspendue)' };
   }
-  const actifsSet = new Set(actifsEnregistres.map(a => String(a.symbol || a).toUpperCase()));
-  const marchesAInspecter = (c.marches || []).filter(m => m && actifsSet.has(String(m.symbol).toUpperCase()));
+  const marchesAInspecter = (c.marches || []).filter(m => m && actifsEnregistres.some(a=>String(a.symbol).toUpperCase()===String(m.symbol).toUpperCase() && a.provider===m.provider));
 
   if (!marchesAInspecter.length) {
     return { controle: false, envoyes: 0, marches: [], raison: 'aucun marché surveillé dans la sélection active' };
@@ -616,9 +562,13 @@ async function verifierBrut(force = false) {
       // qu'il fallait supprimer.
       const profils = (typeof deps.profilsSurveillance === 'function')
         ? (await deps.profilsSurveillance().catch(() => [])) : [];
-      const profilsValides = (profils || []).filter(p => p && p.executable !== false);
-      const profilsInexecutables = (profils || []).filter(p => p && p.executable === false);
+      const profilsValides = (profils || []).filter(p => p && p.executable !== false && !p.partiel);
+      const profilsInexecutables = (profils || []).filter(p => p && (p.executable === false || p.partiel));
 
+      if (!profils.length && Array.isArray(c.strategies) && c.strategies.length) {
+        resultats.push({...m,verdict:'Stratégies sélectionnées indisponibles — aucune substitution générique'});
+        continue;
+      }
       if (!profils.length) {
         // Aucune stratégie : mode auto assumé, règles génériques, message honnête.
         // Aucune stratégie : mode auto assumé, règles génériques. On ne pousse
@@ -644,6 +594,8 @@ async function verifierBrut(force = false) {
         // pouvoir dire « c'est SMC/ICT qui a refusé », pas un « neutre » anonyme.
         const etiquette = profil ? (profil.titre || profil.id) : null;
         const dire = (obj) => resultats.push({ ...m, strategie: etiquette, ...obj });
+      const classe = require('../market-intelligence/instrument-classifier').classifier(m.symbol,{provider:m.provider}).classe;
+      if(classe==='inconnu' || (profil && (!profil.supportedMarkets?.includes(classe) || (profil.executionTimeframes?.length && !profil.executionTimeframes.includes(m.tf))))) {dire({verdict:'Marché ou unité non déclaré par la stratégie'});continue;}
       const optionsMoteur = profil ? {
         regles: profil.regles,
         obligatoires: profil.obligatoires || [],
@@ -702,7 +654,7 @@ async function verifierBrut(force = false) {
       let confluenceSurveillance = null;
       if (typeof deps.alignementMtf === 'function') {
         try {
-          const al = await deps.alignementMtf(m.symbol, m.tf, m.provider);
+          const al = await deps.alignementMtf(m.symbol, m.tf, m.provider, profil ? {...optionsMoteur,timeframes:profil.timeframes,seuilAlignes:profil.seuilAlignes} : {});
           confluenceSurveillance = (al && al.confluence) || null;
         } catch { /* une unité indisponible ne bloque pas la surveillance */ }
       }
@@ -715,12 +667,13 @@ async function verifierBrut(force = false) {
       }
       if (deps.DecisionEngine && typeof deps.DecisionEngine.decider === 'function') {
         try {
-          decision = deps.DecisionEngine.decider(closes, { symbol: m.symbol, timeframe: m.tf }, {
+          decision = deps.DecisionEngine.decider(closes, { symbol: m.symbol, timeframe: m.tf, at:Date.now(), verifierSession:true }, {
             // UNE stratégie par passage. Avant, la boucle parcourait les fiches
             // mais transmettait la liste COMPLÈTE : avec trois stratégies, trois
             // passages réévaluaient les trois, et le signal retenu pouvait
             // appartenir à une autre fiche que celle qui signait l'alerte.
             profils: profil ? [profil] : undefined,
+            strategieStrict: !!profil,
             rrMin: c.rrMin,
             exigerAlignement: c.exigerAlignement,
             refuserDesaccord: c.refuserDesaccord,
@@ -817,12 +770,13 @@ async function verifierBrut(force = false) {
         }
         // Par défaut, une vérification impossible BLOQUE : on ne prend pas une
         // position sur un marché macro sans savoir ce qui est publié.
-        if (fondamental && fondamental.statut === 'NEWS_UNKNOWN' && c.accepterNewsNonVerifiee !== true) {
-          dire({ verdict: `signal bloqué — ${fondamental.lecture} (accepterNewsNonVerifiee pour passer outre)`, fondamental });
+        if (classe !== 'synthetique' && (!fondamental || fondamental.verifie !== true || fondamental.ok !== true)) {
+          dire({ verdict: `signal bloqué — ${fondamental?.lecture || 'Calendrier non vérifié'}`, fondamental });
           continue;
         }
       }
-      if (v.strength < c.forceMin) {
+      if (classe !== 'synthetique' && (!fondamental || fondamental.verifie !== true || fondamental.ok !== true)) { dire({verdict:'signal bloqué — calendrier non vérifié'}); continue; }
+      if (!Number.isFinite(v.strength) || v.strength < c.forceMin) {
         dire({ verdict: `confirmé mais force ${Number(v.strength).toFixed(2)}/1 (${v.forceNiveau || '—'}) < seuil` });
         continue;
       }
@@ -1025,8 +979,8 @@ async function verifierBrut(force = false) {
       const msg = compose(v, m, r.candles[r.candles.length - 1].c, { confluence: decision?.confluence, rr: rr, multi: decision ? { signaux: decision.signaux, synthese: decision.synthese, carte: decision.carte } : multi });
       let emailOk = false;
       if (c.email) {
-        await deps.sendMail({ to: c.email, subject: msg.subject, html: msg.html });
-        emailOk = true;
+        try { await deps.sendMail({ to: c.email, subject: msg.subject, html: msg.html }); emailOk = true; }
+        catch { dire({verdict:'Échec email — autres canaux poursuivis'}); }
       }
       // Push navigateur : un canal en panne ne bloque jamais l'autre.
       let pushOk = 0;
@@ -1038,15 +992,29 @@ async function verifierBrut(force = false) {
           })) || 0;
         } catch { /* le mail déjà parti reste valide */ }
       }
-      const aUnCanal = !!c.email || pushOk > 0 || !!(c.telegramToken && c.telegramChat);
-      if (!aUnCanal) {
-        dire({ verdict: 'aucun canal disponible' });
-        continue;
-      }
-      // Telegram : priorité directe sur téléphone
+      let telegramState = 'disabled';
       if (c.telegramToken && c.telegramChat) {
-        try { await envoyerTelegram(c, v, m, { confluence, rr, multi }); }
-        catch (e) { dire({ verdict: 'alerte envoyée, Telegram en échec : ' + e.message }); }
+        if (typeof deps.enqueueTelegram === 'function') {
+          try {
+            const queued = await deps.enqueueTelegram(c, cle, messageTelegram(v,m,{confluence,rr,multi}));
+            telegramState = queued ? 'queued' : 'unavailable';
+          } catch { telegramState = 'unavailable'; }
+        } else {
+          try { await envoyerTelegram(c,v,m,{confluence,rr,multi}); telegramState = 'sent'; }
+          catch { telegramState = 'uncertain'; }
+        }
+      }
+      const acknowledged = emailOk || pushOk > 0 || telegramState === 'sent';
+      const queued = telegramState === 'queued';
+      if (!acknowledged && !queued) {
+        dire({verdict:'Aucun canal confirmé',telegramState});
+        // Do not automatically retry an ambiguous direct send.
+        if (telegramState === 'uncertain') {
+          c.deja.push(cle);
+          c.dejaAt = {...(c.dejaAt||{}),[cle]:Date.now()};
+          save();
+        }
+        continue;
       }
       c.deja.push(cle);
       c.dejaAt = { ...(c.dejaAt || {}), [cle]: Date.now() };
@@ -1077,9 +1045,10 @@ async function verifierBrut(force = false) {
         direction: v.direction, strength: v.strength, status: v.status,
         prix: v.price, entry: v.levels ? v.levels.entry : null,
         sl: v.levels ? v.levels.stop : null, tp: v.levels ? v.levels.target1 : null,
+        tp2: v.levels ? v.levels.target2 : null, telegramState,
         summary: v.summary, cle
       });
-      resultats.push({ ...m, verdict: 'ALERTE ENVOYÉE', force: v.strength, strategie: profil ? (profil.titre || profil.id) : null });
+      resultats.push({ ...m, verdict: acknowledged ? 'ALERTE ENVOYÉE' : 'ALERTE EN FILE', telegramState, force: v.strength, strategie: profil ? (profil.titre || profil.id) : null });
       }
     } catch (e) {
       // Un marché en échec ne doit jamais empêcher les autres d'être surveillés.

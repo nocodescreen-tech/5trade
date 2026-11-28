@@ -371,6 +371,13 @@ function niveauExecution(signaux, meta, options = {}) {
     // dialectes du dépôt (levels.entry, entree, symbole+target, cle+symbol) à la
     // forme du contrat. Ce bloc devinait auparavant lequel des deux il recevait.
     const c = Contrat.normaliser(s, { source: s.source });
+    const contrat = Contrat.validerSignal(c);
+    if (!contrat.ok || !['long', 'short'].includes(c.sens)) {
+      blocages.push('contrat non exécutable : ' + [...contrat.manquants, ...contrat.invalides, ...(!['long', 'short'].includes(c.sens) ? ['direction non exploitable'] : [])].join(', '));
+      details.push({ source, nom, ok: false, blocages, sens: c.sens });
+      nonExecutables++;
+      continue;
+    }
     const entry = c.entree;
     const stop = c.stop;
     const target1 = c.objectifs[0];
@@ -755,7 +762,7 @@ function decider(candles, meta, options = {}) {
 
   // 0. On récupère TOUS les signaux (stratégies + motifs + structure)
   const multi = require('./signaux').detecterTout(candles, meta, options);
-  const signaux = multi.signaux || [];
+  const signaux = options.strategieStrict === true ? (multi.signaux || []).filter(s => s.source==='strategie' && (options.profils||[]).some(p=>s.id==='strat:'+p.id && p.executable!==false && !p.partiel)) : (multi.signaux || []);
 
   // Enrichir chaque signal avec les infos nécessaires aux niveaux suivants
   const signauxEnrichis = signaux.map(s => ({

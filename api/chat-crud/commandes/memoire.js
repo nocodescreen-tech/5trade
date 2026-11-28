@@ -58,7 +58,7 @@ async function apprendre(sujet, ctx) {
     .replace(/[^a-z0-9]+/g, '_')
     .slice(0, 40)
     .replace(/^_+|_+$/g, '');
-  const cle = `${categorie}_${slug || Date.now()}`;
+  const cle = `${categorie}_${slug || 'consigne'}_${require('node:crypto').createHash('sha256').update(texte).digest('hex').slice(0,12)}`;
 
   const res = await Memoire.preferences.enregistrer({
     cle,
@@ -110,7 +110,7 @@ async function apprendre(sujet, ctx) {
       `• Consigne active : « ${texte} »\n` +
       `• Catégorie : ${categorie}\n` +
       `• Clé de référence : ${cle}.${impactMoteur}${detailException}\n` +
-      `Cette consigne ne sera pas oubliée et s'applique immédiatement à mes décisions et analyses.`
+      `La consigne est enregistrée ; seules les contraintes reconnues et validées sont appliquées automatiquement.`
   };
 }
 

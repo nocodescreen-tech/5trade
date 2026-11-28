@@ -15,6 +15,8 @@
  */
 
 const Synthetique = require('./synthetique');
+const Context = require('./market-context');
+const Gold = require('./gold');
 
 const REGISTRE = {
   synthetique: {
@@ -29,29 +31,39 @@ const REGISTRE = {
     analyser: Synthetique.analyser
   },
   forex: {
-    id: 'forex', libelle: 'Forex', version: null, specialise: false,
-    motif: "aucun moteur Forex dédié : sessions, corrélations de devises et calendrier ne sont pas encore assemblés dans un moteur propre",
-    apports: [], limites: [], analyser: null
+    id: 'forex', libelle: 'Forex', version: '0.1.0', specialise: false,
+    niveau: 'contexte_partiel',
+    motif: 'Force relative et données macro externes à intégrer',
+    apports: ['Sessions et devises'], limites: ['Force relative et données macro externes à intégrer'],
+    analyser: (closes, meta) => Context.analyse('forex', closes, meta)
   },
   indices: {
-    id: 'indices', libelle: 'Indices réels', version: null, specialise: false,
-    motif: "aucun moteur d'indice réel : horaires de séance, gaps d'ouverture et volume ne sont pas encore assemblés",
-    apports: [], limites: [], analyser: null
+    id: 'indices', libelle: 'Indices réels', version: '0.1.0', specialise: false,
+    niveau: 'contexte_partiel',
+    motif: 'Calendrier boursier officiel requis',
+    apports: ['Volume relatif et gap de bougie'], limites: ['Calendrier boursier officiel requis'],
+    analyser: (closes, meta) => Context.analyse('indices', closes, meta)
   },
   crypto: {
-    id: 'crypto', libelle: 'Crypto', version: null, specialise: false,
-    motif: 'aucun moteur crypto dédié : liquidité, funding et volatilité 24/7 ne sont pas encore assemblés',
-    apports: [], limites: [], analyser: null
+    id: 'crypto', libelle: 'Crypto', version: '0.1.0', specialise: false,
+    niveau: 'contexte_partiel',
+    motif: 'Funding et carnet non intégrés',
+    apports: ['Volume relatif et volatilité'], limites: ['Funding et carnet non intégrés'],
+    analyser: (closes, meta) => Context.analyse('crypto', closes, meta)
   },
   metaux: {
-    id: 'metaux', libelle: 'Métaux', version: null, specialise: false,
-    motif: 'aucun moteur métaux dédié : sensibilité au dollar et coûts de portage non assemblés',
-    apports: [], limites: [], analyser: null
+    id: 'metaux', libelle: 'Métaux', version: '0.2.0', specialise: false,
+    niveau: 'contexte_partiel',
+    motif: 'Contexte macro quotidien XAUUSD ; portage non intégré',
+    apports: ['Sessions, dollar large, rendements nominaux et réels US'], limites: ['Séries macro quotidiennes, portage et liquidité non intégrés'],
+    analyser: Gold.analyse
   },
   energies: {
-    id: 'energies', libelle: 'Énergies', version: null, specialise: false,
-    motif: 'aucun moteur énergies dédié : stocks, offre et événements non assemblés',
-    apports: [], limites: [], analyser: null
+    id: 'energies', libelle: 'Énergies', version: '0.1.0', specialise: false,
+    niveau: 'contexte_partiel',
+    motif: 'Stocks et offre non intégrés',
+    apports: ['Sessions et volatilité'], limites: ['Stocks et offre non intégrés'],
+    analyser: (closes, meta) => Context.analyse('energies', closes, meta)
   },
   inconnu: {
     id: 'inconnu', libelle: 'Inconnu', version: null, specialise: false,
@@ -76,7 +88,7 @@ function analyser(classe, closes, meta = {}) {
 function etat() {
   return Object.values(REGISTRE).map(m => ({
     classe: m.id, libelle: m.libelle, version: m.version,
-    specialise: !!m.specialise, motif: m.motif || null,
+    specialise: !!m.specialise, niveau: m.niveau || (m.specialise ? 'specialise' : 'absent'), motif: m.motif || null,
     apports: m.apports, limites: m.limites
   }));
 }

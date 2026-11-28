@@ -13,7 +13,10 @@
 const fs = require('fs');
 const path = require('path');
 const { validerSkill, verifierCodeSource } = require('./validator');
-const { chargerDansSandbox, executerMethodeSecurisee } = require('./sandbox');
+const { executerMethodeSecurisee } = require('./sandbox');
+const crypto = require('node:crypto');
+// Reviewed Git blob identities; runtime proposals must never enter this list.
+const APPROVED = Object.freeze({ 'forex-session-monitor': 'e92b9ffd8468130a9d22fd8649b7ee461ed3901e' });
 
 const DOSSIER_INSTALLES = path.join(__dirname, 'installed');
 const FICHIER_ETAT = path.join(__dirname, '..', '..', 'data', 'skills-registry.json');
@@ -64,40 +67,21 @@ function enregistrer(skill) {
  * Charge un skill depuis un dossier de manière sécurisée (analyse préalable).
  */
 function chargerDossierSkill(dossierSkill, nomDossier) {
+  if (!Object.prototype.hasOwnProperty.call(APPROVED, nomDossier)) return false;
   const indexPath = path.join(dossierSkill, 'index.js');
   if (!fs.existsSync(indexPath)) return false;
-
-  const codeSource = fs.readFileSync(indexPath, 'utf8');
-  // 1. Analyse statique obligatoire avant toute exécution
-  const verif = verifierCodeSource(codeSource);
-  if (!verif.securise) {
-    console.warn(`[Skills] Rejet du skill ${nomDossier} (code non sécurisé) : ${verif.violations.join(', ')}`);
+  const raw = fs.readFileSync(indexPath);
+  const normalized = Buffer.from(raw.toString('utf8').replace(/\r\n/g,'\n'),'utf8');
+  const sha = crypto.createHash('sha1').update('blob ' + normalized.length + '\0').update(normalized).digest('hex');
+  if (sha !== APPROVED[nomDossier]) {
+    console.warn('[Skills] Compétence modifiée hors revue : ' + nomDossier);
     return false;
   }
-
-  // 2. Chargement : si skill externe/généré, charger via sandbox
-  let skillObj = null;
-  // Si c'est un skill natif contenant des requires relatifs autorisés
-  if (codeSource.includes("require('../../") || codeSource.includes("require('../../../")) {
-    try {
-      const mod = require(indexPath);
-      skillObj = typeof mod === 'function' ? mod() : mod;
-    } catch (e) {
-      console.warn(`[Skills] Échec de chargement natif ${nomDossier} : ${e.message}`);
-      return false;
-    }
-  } else {
-    // Exécution hermétique dans la sandbox
-    const sb = chargerDansSandbox(codeSource);
-    if (!sb.ok) {
-      console.warn(`[Skills] Échec sandbox ${nomDossier} : ${sb.erreur}`);
-      return false;
-    }
-    skillObj = sb.exports;
-  }
-
-  if (skillObj && !skillObj.id) skillObj.id = nomDossier;
-  enregistrer(skillObj);
+  const verif = verifierCodeSource(raw.toString('utf8'));
+  if (!verif.securise) return false;
+  const skill = require(indexPath);
+  if (!skill || skill.id !== nomDossier) return false;
+  enregistrer(skill);
   return true;
 }
 
@@ -217,7 +201,6 @@ function supprimer(id) {
 
 module.exports = {
   charger,
-  enregistrer,
   supprimer,
   lister,
   obtenir,

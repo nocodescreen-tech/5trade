@@ -29,7 +29,7 @@ const FILES = {
 
 async function readJSON(file, fallback) {
   try { return JSON.parse(await fs.readFile(file, 'utf-8')); }
-  catch { return fallback; }
+  catch (e) { if(e.code==='ENOENT') return fallback; throw e; }
 }
 async function writeJSON(file, data) {
   await fs.mkdir(path.dirname(file), { recursive: true });
@@ -37,8 +37,8 @@ async function writeJSON(file, data) {
   // fs.writeFile direct expose a deux pannes : un process tue en cours
   // d'ecriture laisse un JSON tronque (donc illisible au redemarrage), et deux
   // ecritures simultanees s'ecrasent. Le rename, lui, est atomique.
-  const temporaire = `${file}.${process.pid}.tmp`;
-  await fs.writeFile(temporaire, JSON.stringify(data, null, 2));
+  const temporaire = `${file}.${process.pid}.${require('node:crypto').randomUUID()}.tmp`;
+  await fs.writeFile(temporaire, JSON.stringify(data, null, 2),{mode:0o600,flag:'wx'});
   await fs.rename(temporaire, file);
 }
 
@@ -79,9 +79,11 @@ async function init() {
       await migrateFromFiles();
       return true;
     } catch (e) {
-      console.error(`   Stockage   : PostgreSQL indisponible (${e.message}) → repli JSON`);
+      console.error('   Stockage : PostgreSQL indisponible');
+      if(sql) await sql.end({timeout:2}).catch(()=>{});
       sql = null;
       usePg = false;
+      if(process.env.NODE_ENV==='production') throw Error('PostgreSQL requis en production');
     }
   }
   console.log('   Stockage   : fichiers JSON locaux (data/)');

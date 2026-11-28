@@ -4,7 +4,7 @@
   "private": true,
   "description": "5trade — moteur de signaux, modele exporte et gestion du risque. Le code vit dans api/ ; cette racine expose les commandes canoniques pour qu'on n'ait pas a se souvenir du sous-dossier.",
   "scripts": {
-    "test": "npm --prefix api run verify",
+    "test": "node --test api/tests/production-hardening.test.js && npm --prefix api run verify",
     "verify": "npm --prefix api run verify",
     "start": "npm --prefix api start",
     "dev": "npm --prefix api run dev",
@@ -15,6 +15,8 @@
     "mesurer": "npm --prefix api run mesurer",
     "redondance": "npm --prefix api run redondance",
     "strategie": "npm --prefix api run strategie",
-    "restauration": "npm --prefix api run restauration"
+    "restauration": "npm --prefix api run restauration",
+    "test:hardening": "node --test api/tests/production-hardening.test.js",
+    "research:walk-forward": "node api/cli/walk-forward.js"
   }
 }

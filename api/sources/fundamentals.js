@@ -31,62 +31,36 @@ async function getCalendar() {
  */
 async function getCalendarAvecEtat() {
   const now = Date.now();
-  if (cache && (now - cacheTime) < CACHE_TTL_MS) return { events: cache, sourceDisponible: true };
-
+  if (cache && now - cacheTime < CACHE_TTL_MS) return { events: cache, sourceDisponible: true, fetchedAt: cacheTime };
   try {
-    const events = await scrapeForexFactory();
-    if (events && events.length) {
+    if (process.env.CALENDRIER_URL) {
+      const events = await scrapeForexFactory();
+      if (!events.length || process.env.CALENDRIER_HTML_UTC !== '1') throw new Error('Source HTML non vérifiée ou fuseau inconnu');
       cache = events;
       cacheTime = now;
-      return { events, sourceDisponible: true };
+    } else {
+      const flux = await require('./news').chargerCalendrier();
+      if (!flux || flux.degrade || !Number.isFinite(flux.at) || now - flux.at > CACHE_TTL_MS ||
+          !Array.isArray(flux.evenements) || !flux.evenements.length) {
+        throw new Error('Calendrier structuré indisponible ou périmé');
+      }
+      const events = flux.evenements.map(e => ({
+        timestamp: Number.isFinite(e.date) ? e.date : null,
+        date: Number.isFinite(e.date) ? new Date(e.date).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }) : null,
+        heure: Number.isFinite(e.date) ? new Date(e.date).toLocaleTimeString('en-US', { timeZone: 'UTC', hour: 'numeric', minute: '2-digit', hour12: true }) : null,
+        devise: String(e.devise || '').toUpperCase(),
+        impact: e.impactNiveau >= 3 ? 'high' : e.impactNiveau === 2 ? 'medium' : e.impactNiveau === 1 ? 'low' : 'unknown',
+        titre: e.titre || '',
+        precedent: e.precedent ?? null, consigne: e.prevision ?? null, reel: e.reel ?? null,
+        source: e.source || flux.source || null
+      }));
+      if (!events.some(e=>Number.isFinite(e.timestamp))) throw new Error('Aucun événement horodaté');
+      cache = events;
+      cacheTime = flux.at;
     }
-    // Si process.env.CALENDRIER_URL est défini (ex. test d'indisponibilité), on ne bascule pas
-    if (process.env.CALENDRIER_URL) {
-      return { events: cache || [], sourceDisponible: Boolean(cache) };
-    }
-    // Repli automatique sur le calendrier JSON (TradingView / ForexFactory API)
-    // quand le scraping HTML échoue ou renvoie 0 événement.
-    const News = require('./news');
-    const flux = await News.chargerCalendrier();
-    const evts = (flux && flux.evenements ? flux.evenements : []).map(e => ({
-      date: new Date(e.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      heure: new Date(e.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
-      devise: String(e.devise || '').toUpperCase(),
-      impact: (e.impactNiveau >= 3 || e.impact === 'élevé' || /high/i.test(e.impact)) ? 'high'
-        : (e.impactNiveau === 2 || e.impact === 'moyen' || /medium/i.test(e.impact)) ? 'medium' : 'low',
-      titre: e.titre || '',
-      precedent: e.precedent || '',
-      consigne: e.prevision || ''
-    }));
-    cache = evts;
-    cacheTime = now;
-    return { events: evts, sourceDisponible: evts.length > 0 };
-  } catch (e) {
-    console.error('   Calendrier  : échec —', e.message);
-    if (!process.env.CALENDRIER_URL) {
-      try {
-        const News = require('./news');
-        const flux = await News.chargerCalendrier();
-        const evts = (flux && flux.evenements ? flux.evenements : []).map(e => ({
-          date: new Date(e.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          heure: new Date(e.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
-          devise: String(e.devise || '').toUpperCase(),
-          impact: (e.impactNiveau >= 3 || e.impact === 'élevé' || /high/i.test(e.impact)) ? 'high'
-            : (e.impactNiveau === 2 || e.impact === 'moyen' || /medium/i.test(e.impact)) ? 'medium' : 'low',
-          titre: e.titre || '',
-          precedent: e.precedent || '',
-          consigne: e.prevision || ''
-        }));
-        if (evts.length) {
-          cache = evts;
-          cacheTime = now;
-          return { events: evts, sourceDisponible: true };
-        }
-      } catch {}
-    }
-    // Un cache existant reste utilisable (donnée datée mais réelle) ; sans cache,
-    // on assume l'ignorance au lieu de faire passer un tableau vide pour un avis.
-    return { events: cache || [], sourceDisponible: Boolean(cache) };
+    return { events: cache, sourceDisponible: true, fetchedAt: cacheTime };
+  } catch (error) {
+    return { events: cache || [], sourceDisponible: false, fetchedAt: cacheTime || null, erreur: error.message };
   }
 }
 
@@ -102,6 +76,7 @@ async function scrapeForexFactory() {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
   });
+  if (!res.ok) throw new Error('Calendrier HTTP ' + res.status);
   const html = await res.text();
 
   // Parsing simplifié du HTML de Forex Factory
@@ -149,7 +124,7 @@ function devisesDuSymbole(symbol) {
   if (!brut) return { devises: [], applicable: false, raison: 'symbole vide' };
 
   // Indices synthétiques Deriv : R_10..R_100, BOOM/CRASH/STEP, 1HZ…
-  if (/^(R|BOOM|CRASH|STEP|JD|STPRNG)\d*\d*$/.test(brut) || /^(BOOM|CRASH|STEP)\d+$/.test(brut)) {
+  if (require('../market-intelligence/instrument-classifier').classifier(symbol).classe === 'synthetique' || /^(R|BOOM|CRASH|STEP|JD|STPRNG)\d*\d*$/.test(brut) || /^(BOOM|CRASH|STEP)\d+$/.test(brut)) {
     return { devises: [], applicable: false, raison: 'indice synthétique : aucune devise, calendrier non applicable' };
   }
 
@@ -172,13 +147,16 @@ function devisesDuSymbole(symbol) {
   // Métaux précieux : XAU/XAG ne sont pas des devises du calendrier, mais leur
   // cotation (USD le plus souvent) l'est — et c'est elle qui porte le risque news.
   const metal = sansPrefixe.match(/^(XAU|XAG)([A-Z]{3})$/);
-  if (metal) return { devises: [metal[1], metal[2] === 'USDT' ? 'USD' : metal[2]], applicable: true, raison: 'métal coté en devises' };
+  if (metal) return { devises: [metal[2]], applicable: true, raison: 'métal coté en devises' };
 
   // Crypto / actions / matières premières sans paire de devises explicite.
-  if (/^(BTC|ETH|XAU|XAG|US30|NAS|SPX|GER|UK100|JP225)/.test(sansPrefixe)) {
+  if (/^(GER|DE40|DAX|EU50|FRA|FR40)/.test(sansPrefixe)) return {devises:['EUR'],applicable:true,raison:'indice européen'};
+  if (/^(UK100|FTSE)/.test(sansPrefixe)) return {devises:['GBP'],applicable:true,raison:'indice britannique'};
+  if (/^(JP225|NIKKEI)/.test(sansPrefixe)) return {devises:['JPY'],applicable:true,raison:'indice japonais'};
+  if (/^(BTC|ETH|SOL|XRP|XAU|XAG|PAXG|XAUT|US30|NAS|SPX|US500|US100|WTI|BRENT|XTI|XBR|NGAS|NATGAS)/.test(sansPrefixe)) {
     return { devises: ['USD'], applicable: true, raison: 'instrument coté en dollars' };
   }
-  return { devises: [], applicable: false, raison: `devises non identifiables pour « ${symbol} »` };
+  return { devises: [], applicable: true, raison: `devises non identifiables pour « ${symbol} »` };
 }
 
 /**
@@ -203,6 +181,7 @@ const MOIS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, s
  * au hasard.
  */
 function instantEvenement(ev, reference = new Date()) {
+  if (ev && Number.isFinite(ev.timestamp)) return ev.timestamp;
   const d = String((ev && ev.date) || '').trim().toLowerCase();
   const h = String((ev && ev.heure) || '').trim().toLowerCase();
   const md = d.match(/^([a-z]{3})[a-z]*\s+(\d{1,2})$/);
@@ -237,23 +216,28 @@ function verdictDevise(events, devise, { maintenant = new Date(), fenetreMin = 3
   if (!code) return { bloque: false, verifie: true, raison: 'devise inconnue' };
   const now = maintenant.getTime();
 
+  let horaireInconnu = false;
   for (const ev of events || []) {
-    if (ev.impact !== 'high') continue;
+    if (!['high', 'unknown'].includes(ev.impact)) continue;
     const concernes = String(ev.devise || '').toUpperCase().split(/[^A-Z]+/).filter(Boolean);
-    if (!concernes.includes(code)) continue;
+    if (!concernes.includes(code) && concernes.length) continue;
 
     const t = instantEvenement(ev, maintenant);
-    if (t === null) continue;            // heure inconnue : on ne conclut pas
+    if (t === null) { horaireInconnu = true; continue; }
+    if (ev.impact === 'unknown' || !concernes.length) {
+      if (t-now >= -fenetreApresMin*60000 && t-now <= fenetreMin*60000) horaireInconnu = true;
+      continue;
+    }
 
-    const diff = Math.round((t - now) / 60000);
+    const diff = (t - now) / 60000;
     // Fenêtre de blocage élargie : de fenetreMin avant l'annonce à fenetreApresMin après
     if (diff >= -fenetreApresMin && diff <= fenetreMin) {
       const dateSourceISO = new Date(t).toISOString();
       const heureKinshasa = new Date(t + 3600000).toISOString().slice(11, 16) + ' (Kinshasa WAT)';
       let phase = '';
-      if (diff > 0) phase = `Avant l'annonce (T - ${diff} min)`;
+      if (diff > 0) phase = `Avant l'annonce (T - ${Math.ceil(diff)} min)`;
       else if (diff === 0) phase = `Pendant la publication (T 0)`;
-      else phase = `Après l'annonce (T + ${-diff} min)`;
+      else phase = `Après l'annonce (T + ${Math.ceil(-diff)} min)`;
 
       const newsEnrichie = {
         ...ev,
@@ -274,6 +258,7 @@ function verdictDevise(events, devise, { maintenant = new Date(), fenetreMin = 3
       };
     }
   }
+  if (horaireInconnu) return { bloque: false, verifie: false, raison: 'impact ou horaire d’une annonce non vérifié' };
   return { bloque: false, verifie: true, raison: 'aucune annonce à fort impact dans la fenêtre' };
 }
 
@@ -305,8 +290,12 @@ async function filtreCalendrier(symbol, { strict = false } = {}) {
     };
   }
 
-  for (const devise of devises) {
-    const r = await newsImminente(devise, 30);
+  if (!devises.length) return {ok:!strict,bloque:strict,verifie:false,applicable:true,devises,detail:raison,lecture:raison};
+  const calendar = await getCalendarAvecEtat();
+  const results = devises.map(devise=>({devise,r:calendar.sourceDisponible ? verdictDevise(calendar.events,devise) : {verifie:false,bloque:false,raison:'calendrier indisponible'}}));
+  // Known high-impact events take precedence over unknown results.
+  results.sort((a,b)=>Number(b.r.bloque)-Number(a.r.bloque));
+  for (const {devise,r} of results) {
     if (!r.verifie) {
       if (strict) {
         return {

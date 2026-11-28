@@ -2567,53 +2567,21 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
                 })).json();
                 if (res.success) {
                   SoundEngine.playTrade();
-                  setDemoStatus('✅ Pris en démo !');
+                  setDemoStatus('Simulation enregistrée');
                 } else setDemoStatus('⚠️ Erreur');
               } catch {
                 setDemoStatus('❌ Erreur');
               } finally {
                 setTimeout(() => setDemoStatus(''), 3000);
               }
-            }} title="Prendre immédiatement ce trade en compte démo">
+            }} title="Créer une entrée de journal simulée, sans ordre courtier">
             <i className="fas fa-play" style={{ marginRight: 5 }}></i>
-            {demoStatus || 'Exécuter Démo'}
+            {demoStatus || 'Journal simulé'}
           </button>
 
-          <button className="btn sm" style={{ padding: '5px 10px', fontSize: 11, background: '#ef4444', color: '#fff', border: '1px solid #dc2626' }}
-            onClick={async () => {
-              try {
-                setDerivTradeMsg('Envoi Deriv…');
-                const res = await (await api('/deriv/trade', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    symbol: symbol,
-                    direction: achat ? 'BUY' : 'SELL',
-                    amount: stake,
-                    duration: durationVal,
-                    durationUnit: 'm'
-                  })
-                })).json();
-                if (res.success) {
-                  SoundEngine.playTrade();
-                  setDerivTradeMsg(`✅ Contrat #${res.contractId} acheté !`);
-                } else {
-                  setDerivTradeMsg('⚠️ ' + (res.error || 'Erreur Deriv'));
-                }
-              } catch (e) {
-                setDerivTradeMsg('❌ ' + e.message);
-              } finally {
-                setTimeout(() => setDerivTradeMsg(''), 4500);
-              }
-            }} title="Passer cet ordre sur Deriv (Websocket officiel)">
-            <i className="fas fa-bolt" style={{ marginRight: 5 }}></i>
-            {derivTradeMsg || `Trader Deriv ($${stake})`}
-          </button>
-
-          <button className="btn sm ghost" style={{ padding: '5px 8px', fontSize: 11 }}
-            onClick={() => setOptionsDeriv(!optionsDeriv)} title="Réglages de mise et durée Deriv">
-            <i className="fas fa-gear"></i>
-          </button>
+          <span className="btn sm ghost" role="status" title="Exécution réelle indisponible : contrôles courtier en cours de validation">
+            <i className="fas fa-lock" style={{ marginRight: 5 }} aria-hidden="true"></i>Deriv · Lecture seule
+          </span>
 
           {onToJournal && (
             <button className="btn sm ghost" style={{ padding: '5px 10px', fontSize: 11 }}
@@ -2631,47 +2599,18 @@ function TradeSetupCard({ signal, decision, sens, onToJournal, symbol, tf, provi
         </div>
       </div>
 
-      {/* Barre de réglage rapide Deriv (Mise & Durée) */}
-      {optionsDeriv && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', background: 'rgba(0,0,0,0.3)', borderBottom: '1px solid rgba(148,163,184,.1)', fontSize: 11, flexWrap: 'wrap' }}>
-          <span style={{ color: '#38bdf8', fontWeight: 700 }}><i className="fas fa-sliders" style={{ marginRight: 5 }}></i>Options Deriv :</span>
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <span style={{ color: '#94a3b8' }}>Mise :</span>
-            {[5, 10, 25, 50, 100].map(val => (
-              <button key={val} type="button"
-                className={`btn sm ${stake === val ? '' : 'ghost'}`}
-                style={{ padding: '2px 7px', fontSize: 10.5, borderColor: stake === val ? '#38bdf8' : 'rgba(148,163,184,.2)', background: stake === val ? '#38bdf8' : 'transparent', color: stake === val ? '#0f172a' : '#cbd5e1' }}
-                onClick={() => setStake(val)}>
-                ${val}
-              </button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 8 }}>
-            <span style={{ color: '#94a3b8' }}>Durée :</span>
-            {[1, 2, 5, 15].map(d => (
-              <button key={d} type="button"
-                className={`btn sm ${durationVal === d ? '' : 'ghost'}`}
-                style={{ padding: '2px 7px', fontSize: 10.5, borderColor: durationVal === d ? '#38bdf8' : 'rgba(148,163,184,.2)', background: durationVal === d ? '#38bdf8' : 'transparent', color: durationVal === d ? '#0f172a' : '#cbd5e1' }}
-                onClick={() => setDurationVal(d)}>
-                {d}m
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Grille des 4 Niveaux Chiffrés Clairs */}
       <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
         {cardNiveau('1. Entrée', ttFmt(lv.entry), 'Déclenchement précis', '#38bdf8', 'ORDRE')}
         {cardNiveau('2. Stop Loss', ttFmt(lv.stop), `Risque : -${distSL.toFixed(2)} pts`, '#f43f5e', 'INVALIDATION')}
-        {cardNiveau('3. Objectif 1', ttFmt(lv.target1), distTP1 ? `Gain : +${distTP1.toFixed(2)} pts` : 'Objectif direct', '#10b981', 'TP1 (50%)')}
-        {lv.target2 ? cardNiveau('4. Objectif 2', ttFmt(lv.target2), distTP2 ? `Gain : +${distTP2.toFixed(2)} pts` : 'Extension de tendance', '#059669', 'TP2 (50%)') : null}
+        {cardNiveau('3. Objectif 1', ttFmt(lv.target1), distTP1 ? `Gain : +${distTP1.toFixed(2)} pts` : 'Objectif direct', '#10b981', 'TP1')}
+        {lv.target2 ? cardNiveau('4. Objectif 2', ttFmt(lv.target2), distTP2 ? `Gain : +${distTP2.toFixed(2)} pts` : 'Extension de tendance', '#059669', 'TP2') : null}
       </div>
 
       {/* Barre de synthèse & Rendu */}
       <div style={{ padding: '8px 16px', background: 'rgba(15,23,42,.4)', borderTop: '1px solid rgba(148,163,184,.1)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, fontSize: 11, color: '#94a3b8' }}>
-        <span>Sécurisation : passage du stop à <b>Break-Even (BE)</b> dès l'atteinte du TP1.</span>
+        <span>Gestion du stop et sorties partielles : non automatisées.</span>
         <span>Visualisation : niveaux tracés en direct sur le graphique ci-contre.</span>
       </div>
     </div>
@@ -3629,7 +3568,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
                   </button>
                 </div>
                 <div style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4 }}>
-                  Crée ton token avec les autorisations <b>Lecture (Read)</b> et <b>Trading (Trade)</b> sur ton tableau de bord Deriv.
+                  Crée un token avec la seule autorisation <b>Lecture (Read)</b>. Ne donne pas la permission Trading.
                 </div>
               </div>
 
@@ -3648,7 +3587,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
             <b style={{ color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <i className="fas fa-shield-halved"></i>Sécurité & Confidentialité
             </b>
-            Ton token est chiffré et stocké localement sur ton instance 5TRADE. Les ordres sont passés directement entre ton serveur et l'API WebSocket sécurisée de Deriv sans intermédiaire.
+            Utilise uniquement un jeton de consultation. L’exécution des ordres réels est désactivée sur 5TRADE.
           </div>
         </div>
       </div>
@@ -3777,7 +3716,7 @@ function PlansAttente({ symbol }) {
         )}
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--dim)' }}>
           seuils v{seuils.version || '?'} · TP1 {seuils.tp1_r ?? 1.27} R / TP2 {seuils.tp2_r ?? 2} R
-          {shadow.length ? ` · ${shadow.length} shadow` : ''}
+          {shadow.length ? ` · ${shadow.length} candidature(s)` : ''}
           {' · '}<i className={`fas fa-chevron-${ouvert ? 'up' : 'down'}`}></i>
         </span>
       </div>
@@ -3842,13 +3781,15 @@ function shadowsListe(shadow) {
     <div style={{ marginTop: 9, borderTop: '1px solid ' + TT.line, paddingTop: 8 }}>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
         <i className="fas fa-flask" style={{ marginRight: 6, color: TT.info }}></i>
-        Réglages en shadow run (testés 3 jours avant promotion)
+        Candidatures d'apprentissage — aucune application automatique
       </div>
       {shadow.map(c => (
         <div key={c.id} style={{ display: 'flex', gap: 8, fontSize: 11, color: 'var(--dim)' }}>
           <span style={{ color: '#93c5fd', minWidth: 210 }}>{c.parametre}</span>
           <span>→ {String(c.valeur)}</span>
-          <span>· promotion possible le {String(c.applicable_at).slice(0, 10)}</span>
+          <span>· {c.statut === 'en_revue'
+            ? 'preuves suffisantes, revue humaine requise'
+            : `shadow jusqu'au ${String(c.applicable_at).slice(0, 10)}`}</span>
         </div>
       ))}
     </div>
@@ -4315,6 +4256,12 @@ function LiveMarket({ onToJournal }) {
 
   const [etroi, setEtroit] = useState(() => typeof window !== 'undefined' && window.innerWidth < 820);
   const [actifs, setActifs] = useState([]);
+  const [selectionEtat,setSelectionEtat]=useState('loading');
+  const marketEnabled=selectionEtat==='ready'&&actifs.some(a=>a.symbol===symbol&&a.provider===provider);
+  const marketKey=marketEnabled?JSON.stringify([provider,symbol,tf,profondeur,mode,strategiesChoisies]):'inactive';
+  const keyRef=useRef(marketKey);
+  keyRef.current=marketKey;
+  const pendingMarket=useRef(new Set());
   const [catalogueOuvert, setCatalogueOuvert] = useState(false);
   const [filtreCatalogue, setFiltreCatalogue] = useState('');
   const [derivModalOuvert, setDerivModalOuvert] = useState(false);
@@ -4326,16 +4273,17 @@ function LiveMarket({ onToJournal }) {
 
   const dernierSignalSonoreRef = useRef(null);
   useEffect(() => {
-    if (decision && decision.decision && decision.decision !== 'HOLD' && decision.decision !== 'NEUTRE') {
+    if (marketEnabled && decision && ['ACHAT','VENTE'].includes(decision.decision)) {
       const cle = `${symbol}-${decision.decision}-${(decision.levels && decision.levels.entry) || ''}`;
       if (dernierSignalSonoreRef.current !== cle) {
         dernierSignalSonoreRef.current = cle;
         SoundEngine.playSignal();
       }
     }
-  }, [decision, symbol]);
+  }, [decision, symbol, marketEnabled]);
 
   const changerTf = (nouveauTf) => {
+    if(!marketEnabled)return;
     setTf(nouveauTf);
     api('/instruments/actifs/toggle', {
       method: 'POST',
@@ -4365,14 +4313,16 @@ function LiveMarket({ onToJournal }) {
       try {
         const res = await (await api('/instruments/actifs')).json();
         if (res.success && Array.isArray(res.instruments)) {
+          setSelectionEtat('ready');
           setActifs(res.instruments);
-          if (res.instruments.length > 0 && !res.instruments.some(a => a.symbol === symbol)) {
+          if (res.instruments.length > 0 && !res.instruments.some(a => a.symbol === symbol && a.provider === provider)) {
             setSymbol(res.instruments[0].symbol);
             setProvider(res.instruments[0].provider);
             if (res.instruments[0].tf) setTf(res.instruments[0].tf);
           }
         }
-      } catch (e) { /* hors-ligne : garde la sélection par défaut */ }
+        else setSelectionEtat('error');
+      } catch (e) { setSelectionEtat('error'); }
     })();
   }, []);
 
@@ -4384,28 +4334,29 @@ function LiveMarket({ onToJournal }) {
         body: JSON.stringify({
           symbol: sym,
           actif: !!actif,
-          provider: details.provider || (sym.startsWith('frx') || sym.startsWith('R_') ? 'deriv' : 'binance'),
+          provider: details.provider || provider,
           label: details.label || sym,
           tv: details.tv || sym,
           tf: details.tf || '5m'
         })
       })).json();
       if (res.success && Array.isArray(res.instruments)) {
+        setSelectionEtat('ready');
         setActifs(res.instruments);
         if (actif) {
           setSymbol(sym);
           if (details.provider) setProvider(details.provider);
           if (details.tf) setTf(details.tf);
-        } else if (sym === symbol) {
+        } else if (sym === symbol && (details.provider||provider)===provider) {
           if (res.instruments.length > 0) {
             setSymbol(res.instruments[0].symbol);
             setProvider(res.instruments[0].provider);
             setTf(res.instruments[0].tf || '5m');
           }
         }
-      }
+      } else { setErr(res.error||'Sélection refusée'); }
     } catch (e) {
-      console.error('Erreur toggle instrument :', e);
+      setErr('Sélection non enregistrée : '+String(e.message||e));
     }
   };
 
@@ -4441,10 +4392,13 @@ function LiveMarket({ onToJournal }) {
     setCandles([]); setReport(null); setVocabulaire(null);
     setDecision(null); setSse(null); setConfluence(null); setTicks(0);
     window.__debutAnalyse = Date.now();   // point de départ du compteur d'attente
-  }, [symbol, tf, provider]);
+      setTick(null); setLastUpdate(null); setOffline(false); setResult(null);
+  }, [symbol, tf, provider, marketEnabled]);
 
   // Bougies + structure (playbooks, vocabulaire) — rafraîchi régulièrement.
   const load = useCallback(async () => {
+    if(!marketEnabled || pendingMarket.current.has(marketKey))return;
+    pendingMarket.current.add(marketKey);
     setErr('');
     try {
       const [cb, st] = await Promise.all([
@@ -4453,8 +4407,9 @@ function LiveMarket({ onToJournal }) {
         api(`/market/structure?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`)
           .then(r => r.json()).catch(() => null)
       ]);
+      if(keyRef.current!==marketKey)return;
       if (cb && cb.success && Array.isArray(cb.candles) && cb.candles.length) setCandles(cb.candles);
-      if (cb && cb.offline) setOffline(true);
+      setOffline(!cb||!cb.success||!!cb.offline);
       if (st && st.success && st.report) {
         setReport(st.report);
         if (st.vocabulaire) setVocabulaire(st.vocabulaire);
@@ -4463,14 +4418,14 @@ function LiveMarket({ onToJournal }) {
       if (!cb || !cb.success) {
         setErr((cb && cb.error) || 'chargement des bougies impossible');
       }
-    } catch (e) { setErr(String(e.message || e)); }
-  }, [symbol, tf, provider, profondeur]);
+    } catch(e){if(keyRef.current===marketKey){setOffline(true);setErr(String(e.message||e));}} finally {pendingMarket.current.delete(marketKey);}
+  }, [symbol, tf, provider, profondeur, marketEnabled, marketKey]);
 
   useEffect(() => {
     let vivant = true;
     const recharger = () => { if (vivant) load(); };
     recharger();
-    const it = setInterval(recharger, 5000);
+    const it = setInterval(recharger, 15000);
     return () => { vivant = false; clearInterval(it); };
   }, [load]);
 
@@ -4490,16 +4445,17 @@ function LiveMarket({ onToJournal }) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [load, symbol, provider]);
+  }, [load, symbol, provider, marketEnabled]);
 
   // Décision complète du moteur (arbitrage 5 niveaux) — et alignement MTF.
   useEffect(() => {
     let vivant = true;
+    if(!marketEnabled)return;
     const chargerDecision = async () => {
       try {
         const d = await (await api(`/decision?${paramsCommuns()}`)).json();
-        if (vivant && d.success && d.decision) { setDecision(d.decision); }
-      } catch (e) { /* repli : le flux SSE garde le dernier verdict */ }
+        if(vivant)setDecision(d.success&&d.decision?d.decision:null);
+      } catch (e) { if(vivant)setDecision(null); }
     };
     const chargerVerdict = async () => {
       try {
@@ -4537,11 +4493,12 @@ function LiveMarket({ onToJournal }) {
       clearInterval(iDec); clearInterval(iVer); clearInterval(iConf);
       clearInterval(iStat); clearInterval(iJour);
     };
-  }, [paramsCommuns]);
+  }, [paramsCommuns,marketEnabled]);
 
   // Bougies en direct (SSE).
   useEffect(() => {
     setLive(false);
+    if(!marketEnabled)return;
     const es = new EventSource(`/api/market/stream?symbol=${encodeURIComponent(symbol)}&tf=${tf}&provider=${provider}`);
     es.addEventListener('hello', () => setLive(true));
     es.addEventListener('candle', ev => {
@@ -4560,11 +4517,11 @@ function LiveMarket({ onToJournal }) {
     });
     es.addEventListener('error', () => setLive(false));
     return () => es.close();
-  }, [symbol, tf, provider]);
+  }, [symbol, tf, provider,marketEnabled]);
 
   // Ticks bruts (prix réel).
   useEffect(() => {
-    if (!symbol) return;
+    if (!marketEnabled) return;
     setTick(null); setTickRate(0); tickPrec.current = null;
     const es = new EventSource(`/api/market/ticks?symbol=${encodeURIComponent(symbol)}&provider=${provider}`);
     let recus = 0;
@@ -4579,19 +4536,21 @@ function LiveMarket({ onToJournal }) {
     es.addEventListener('error', () => {});
     const compteur = setInterval(() => { setTickRate(recus); recus = 0; }, 1000);
     return () => { clearInterval(compteur); es.close(); };
-  }, [symbol, provider]);
+  }, [symbol, provider,marketEnabled]);
 
   // Verdict en direct (SSE) : repli immédiat du Decision Center.
   useEffect(() => {
     setSse(null);
+    if(!marketEnabled)return;
     const es = new EventSource(`/api/signals/stream?${paramsCommuns()}`);
     es.addEventListener('signal', ev => {
       try { setSse(JSON.parse(ev.data)); } catch (e) { /* trame illisible */ }
     });
     return () => es.close();
-  }, [paramsCommuns]);
+  }, [paramsCommuns,marketEnabled]);
 
   const analyser = async () => {
+    if(!marketEnabled||busy)return;
     setBusy(true); setErr('');
     try {
       const r = await (await api('/market/analyze', {
@@ -4599,7 +4558,7 @@ function LiveMarket({ onToJournal }) {
         body: JSON.stringify({ symbol, tf, provider, maxStrategies: 3 })
       })).json();
       if (!r.success) throw new Error(r.error || 'analyse impossible');
-      setResult(r);
+      if(keyRef.current===marketKey)setResult(r);
     } catch (e) { setErr(String(e.message || e)); }
     finally { setBusy(false); }
   };
@@ -4629,18 +4588,9 @@ function LiveMarket({ onToJournal }) {
 
   return (
     <>
-      <AgentBriefingCard />
-
-      {/* ── Ruban Screener Multi-Marchés en direct ── */}
-      <MarketScreenerBar actifs={actifs} currentSymbol={symbol}
-        onSelect={(sym, prov, timeframe) => {
-          setSymbol(sym);
-          if (prov) setProvider(prov);
-          if (timeframe) setTf(timeframe);
-        }} />
-
+      <div className="terminal-title"><div><span>ESPACE DE MARCHÉ</span><h1>Terminal de trading</h1></div><div className="terminal-readonly"><i className="fas fa-shield-halved"/> Analyse · Ordres réels désactivés</div></div>
       {/* ── Barre des instruments actifs (XAUUSD + sélection personnalisée) ── */}
-      <div className="panel" style={{ padding: '8px 12px', marginBottom: 12, background: 'rgba(15,23,42,.75)',
+      <div className="panel terminal-watchlist" style={{ padding: '8px 12px', marginBottom: 12, background: 'rgba(15,23,42,.75)',
         border: '1px solid rgba(56,189,248,.25)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 6 }}>
           <i className="fas fa-layer-group" style={{ color: '#38bdf8', fontSize: 13 }}></i>
@@ -4649,9 +4599,9 @@ function LiveMarket({ onToJournal }) {
           </span>
         </div>
         {actifs.map(act => {
-          const estSelectionne = act.symbol === symbol;
+          const estSelectionne = act.symbol === symbol && act.provider===provider;
           return (
-            <div key={act.symbol} style={{
+            <div key={`${act.provider}|${act.symbol}`} style={{
               display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 9px', borderRadius: 6,
               background: estSelectionne ? 'rgba(56,189,248,0.18)' : 'rgba(148,163,184,0.08)',
               border: `1px solid ${estSelectionne ? '#38bdf8' : 'rgba(148,163,184,0.2)'}`,
@@ -4662,7 +4612,7 @@ function LiveMarket({ onToJournal }) {
               </span>
               <button className="btn ghost sm" style={{ padding: '0 4px', fontSize: 9.5, color: 'var(--dim)', height: 18 }}
                 title={`Retirer ${act.label || act.symbol} de l'écran live et du scan`}
-                onClick={(e) => { e.stopPropagation(); toggleInstrument(act.symbol, false); }}>
+                onClick={(e) => { e.stopPropagation(); toggleInstrument(act.symbol, false,act); }}>
                 <i className="fas fa-xmark"></i>
               </button>
             </div>
@@ -4680,7 +4630,7 @@ function LiveMarket({ onToJournal }) {
           border: `1px solid ${derivStatut && derivStatut.connecte ? 'rgba(34,211,138,0.4)' : 'rgba(239,68,68,0.4)'}`
         }}
           onClick={() => setDerivModalOuvert(true)}
-          title="Connecter mon Token et App ID Deriv pour exécuter des ordres en direct">
+          title="Connexion Deriv en consultation ; ordres réels désactivés">
           <i className="fas fa-plug" style={{ marginRight: 5 }}></i>
           {derivStatut && derivStatut.connecte
             ? `Deriv : ${derivStatut.account ? derivStatut.account.loginid : 'Connecté'} ($${Number(derivStatut.account ? derivStatut.account.balance : 0).toFixed(0)})`
@@ -4690,7 +4640,9 @@ function LiveMarket({ onToJournal }) {
 
       <DerivModal ouvert={derivModalOuvert} onClose={() => setDerivModalOuvert(false)} onRefresh={st => setDerivStatut(st)} />
 
-      {actifs.length === 0 && (
+      {selectionEtat==='loading' && <div className="panel terminal-placeholder" role="status">Chargement des instruments…</div>}
+      {selectionEtat==='error' && <div className="panel terminal-placeholder" role="alert">Sélection indisponible. Rechargez la page ou ouvrez le catalogue.</div>}
+      {selectionEtat==='ready' && actifs.length === 0 && (
         <div className="panel" style={{ padding: 24, textAlign: 'center', marginBottom: 12, borderColor: 'rgba(245,158,11,0.4)', background: 'rgba(245,158,11,0.06)' }}>
           <i className="fas fa-ban" style={{ fontSize: 36, color: '#f59e0b', marginBottom: 10 }}></i>
           <div style={{ fontSize: 17, fontWeight: 800, color: '#f59e0b' }}>Aucun instrument actif sélectionné</div>
@@ -4747,9 +4699,9 @@ function LiveMarket({ onToJournal }) {
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
                       {filtres.map(s => {
-                        const estActif = actifs.some(a => a.symbol.toUpperCase() === s.symbol.toUpperCase());
+                        const estActif = actifs.some(a => a.symbol.toUpperCase() === s.symbol.toUpperCase() && a.provider===s.provider);
                         return (
-                          <div key={s.symbol} style={{
+                          <div key={`${s.provider}|${s.symbol}`} style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px',
                             borderRadius: 6, background: estActif ? 'rgba(56,189,248,0.08)' : 'rgba(0,0,0,0.25)',
                             border: `1px solid ${estActif ? '#38bdf8' : 'rgba(148,163,184,0.15)'}`
@@ -4782,9 +4734,10 @@ function LiveMarket({ onToJournal }) {
         </div>
       )}
 
+      {marketEnabled && <>
       {/* ── En-tête instrument (collant) ── */}
       <div className="panel" style={{ padding: '11px 14px', marginBottom: 12,
-        position: 'sticky', top: 0, zIndex: 40, background: 'var(--panel)',
+        position: 'relative', zIndex: 20, background: 'var(--panel)',
         boxShadow: '0 6px 18px -12px rgba(0,0,0,.9)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{ minWidth: 0 }}>
@@ -4837,7 +4790,7 @@ function LiveMarket({ onToJournal }) {
             <select className="fld" aria-label="Marché analysé" style={{ width: 220 }}
               value={`${provider}|${symbol}`}
               onChange={e => { const [pv, sy] = e.target.value.split('|'); setProvider(pv); setSymbol(sy); }}>
-              {Object.entries((meta.symbols || []).reduce((acc, s) => {
+              {Object.entries((actifs || []).reduce((acc, s) => {
                 const k = s.providerLabel || 'Marchés';
                 (acc[k] = acc[k] || []).push(s);
                 return acc;
@@ -4963,7 +4916,7 @@ function LiveMarket({ onToJournal }) {
                 onClick={() => setCalqueStructure(!calqueStructure)}
                 title="BOS (Break of Structure) & CHoCH (Change of Character)"
               >
-                <i className="fas fa-draw-polygon"></i> 📐 Structure BOS/CHoCH
+                <i className="fas fa-draw-polygon"></i> Structure BOS/CHoCH
               </button>
               <button
                 type="button"
@@ -4971,7 +4924,7 @@ function LiveMarket({ onToJournal }) {
                 onClick={() => setCalqueSweeps(!calqueSweeps)}
                 title="Prises de liquidités (High/Low sweeps & BSL/SSL)"
               >
-                <i className="fas fa-water"></i> 🌊 Sweeps Liquidité
+                <i className="fas fa-water"></i> Sweeps Liquidité
               </button>
               <button
                 type="button"
@@ -4979,7 +4932,7 @@ function LiveMarket({ onToJournal }) {
                 onClick={() => setCalqueZones(!calqueZones)}
                 title="Order Blocks (OB) & Imbalances Fair Value Gaps (FVG)"
               >
-                <i className="fas fa-cube"></i> 📦 Order Blocks & FVG
+                <i className="fas fa-cube"></i> Order Blocks & FVG
               </button>
               <button
                 type="button"
@@ -4987,7 +4940,7 @@ function LiveMarket({ onToJournal }) {
                 onClick={() => setCalqueNiveaux(!calqueNiveaux)}
                 title="Niveaux clés d'exécution (Entrée, SL, TP1, TP2)"
               >
-                <i className="fas fa-crosshairs"></i> 🎯 Niveaux Signal
+                <i className="fas fa-crosshairs"></i> Niveaux Signal
               </button>
               <button
                 type="button"
@@ -4995,7 +4948,7 @@ function LiveMarket({ onToJournal }) {
                 onClick={() => setCalqueOrderFlow(!calqueOrderFlow)}
                 title="Flux d'ordres institutionnel : POC (Point of Control) & Value Area VAH/VAL"
               >
-                <i className="fas fa-chart-simple"></i> 📊 Order Flow & POC
+                <i className="fas fa-chart-simple"></i> Order Flow & POC
               </button>
             </div>
 
@@ -5108,6 +5061,8 @@ function LiveMarket({ onToJournal }) {
       )}
 
       {result && <Result result={result} />}
+      <details className="panel terminal-research"><summary>Briefing IA et contexte de recherche</summary><AgentBriefingCard /></details>
+      </>}
     </>
   );
 }
@@ -5268,6 +5223,91 @@ function StatutDirectPanel() {
       )}
     </div>
   );
+}
+
+function ResearchTerminalPanel() {
+  const h=React.createElement;
+  const [gold,setGold]=useState(null),[replay,setReplay]=useState(null),[busy,setBusy]=useState(''),[error,setError]=useState('');
+  const [tf,setTf]=useState('1h');
+  async function request(path,body,kind){
+    setBusy(kind);setError('');
+    try{
+      const r=await api(path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{});
+      const d=await r.json();
+      if(!r.ok||!d.success)throw Error(d.error||'Service indisponible');
+      if(kind==='gold')setGold(d);else setReplay(d);
+    }catch(e){setError(e.message);}finally{setBusy('');}
+  }
+  const rows=replay?.visible||[];
+  const low=rows.length?Math.min(...rows.map(c=>c.l)):0;
+  const high=rows.length?Math.max(...rows.map(c=>c.h)):1;
+  const y=p=>10+(high-p)/Math.max(high-low,1e-8)*180;
+  const fmt=v=>Number.isFinite(v)?v.toLocaleString('fr-FR',{maximumFractionDigits:4}):'—';
+  const btn=(label,fn,disabled=false)=>h('button',{type:'button',className:'btn sm ghost',onClick:fn,disabled:!!busy||disabled},label);
+  return h('section',{className:'panel',style:{padding:18,marginBottom:18}},
+    h('header',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap'}},
+      h('div',null,h('h3',{style:{margin:0,fontSize:17}},'Terminal de recherche'),h('p',{style:{fontSize:12,color:'var(--muted)',margin:'4px 0'}},'XAUUSD · données macro et rejeu éducatif · aucun ordre')),
+      btn(busy==='gold'?'Chargement…':'Actualiser le contexte or',()=>request('/market/gold-context?tf='+tf,null,'gold'))),
+    error&&h('p',{role:'alert',style:{color:'#eab308'}},error),
+    gold&&h('div',{style:{padding:'12px 0',borderBottom:'1px solid var(--border,#333)'}},
+      h('p',null,'Calendrier : '+(gold.macro?.verifie?(gold.macro.bloque?'Bloqué':'Vérifié'):'Non vérifié')),
+      h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(145px,1fr))',gap:12}},(gold.goldMacro?.series||[]).map(s=>h('div',{key:s.id,style:{border:'1px solid var(--border,#333)',padding:12,borderRadius:8}},
+        h('div',{style:{fontSize:11,color:'var(--muted)'}},s.label),h('strong',{style:{fontSize:21}},s.available?fmt(s.latest):'Indisponible'),h('div',{style:{fontSize:11}},s.date||'Date inconnue'),h('div',{style:{fontSize:12}},'Variation 5 observations : '+fmt(s.change5))))),
+      h('p',{style:{fontSize:11,color:'var(--muted)'}},gold.goldMacro?.note)),
+    h('div',{style:{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',margin:'16px 0'}},
+      h('label',null,'Unité : ',h('select',{value:tf,disabled:!!busy,onChange:e=>{setTf(e.target.value);setReplay(null);setGold(null);}},['5m','15m','1h','4h','1d'].map(t=>h('option',{key:t,value:t},t)))),
+      btn('Nouveau rejeu',()=>request('/replay/start',{symbol:'frxXAUUSD',provider:'deriv',tf},'replay')),
+      replay&&btn('−1',()=>request('/replay/step',{id:replay.id,delta:-1},'replay'),replay.cursor<=30),
+      replay&&btn('+1 bougie',()=>request('/replay/step',{id:replay.id,delta:1},'replay'),replay.done),
+      replay&&btn('+5',()=>request('/replay/step',{id:replay.id,delta:5},'replay'),replay.done)),
+    replay&&h('div',null,
+      h('p',{style:{fontSize:12}},new Date(replay.asOf).toLocaleString('fr-FR',{timeZone:'Africa/Kinshasa'})+' Kinshasa · '+(replay.cursor+1)+' / '+replay.total),
+      h('svg',{viewBox:'0 0 720 210',width:'100%',role:'img','aria-label':'Bougies historiques révélées progressivement'},
+        rows.map((c,i)=>{const w=690/rows.length,x=10+(i+.5)*w,color=c.c>=c.o?'#16a34a':'#dc2626';return h('g',{key:c.t},h('line',{x1:x,x2:x,y1:y(c.h),y2:y(c.l),stroke:color,strokeWidth:1}),h('rect',{x:x-w*.3,y:Math.min(y(c.o),y(c.c)),width:Math.max(1,w*.6),height:Math.max(1,Math.abs(y(c.o)-y(c.c))),fill:color}));}),
+        h('text',{x:715,y:10,textAnchor:'end',fill:'currentColor',fontSize:10},fmt(high)),h('text',{x:715,y:207,textAnchor:'end',fill:'currentColor',fontSize:10},fmt(low))),
+      h('p',{style:{fontSize:12,color:'var(--muted)'}},'Dernière clôture : '+fmt(rows.at(-1)?.c)+' · Les bougies futures ne sont pas transmises.')),
+    busy&&h('p',{role:'status',style:{fontSize:12}},'Chargement…'));
+}
+
+function PaperObservationsPanel() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const h = React.createElement;
+  async function refresh() {
+    setBusy(true); setError('');
+    try {
+      const response = await api('/paper-observations?limit=50');
+      const body = await response.json();
+      if (!response.ok || !body.success) throw new Error(body.error || 'Suivi indisponible');
+      setData(body);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  useEffect(() => { refresh(); }, []);
+  const labels = {pending:'En cours', tp1_touched:'TP1 touché', tp2_touched:'TP2 touché', stop_touched:'Stop touché',
+    ambiguous_entry_bar:'Entrée ambiguë', ambiguous_exit_bar:'Sortie ambiguë', data_gap:'Données manquantes',
+    invalid_data:'Données invalides', expired_after_entry:'Expiré après entrée', expired_untriggered:'Expiré sans entrée'};
+  const statusLabel = k => labels[k] || k;
+  const fmt = v => Number.isFinite(v) ? Number(v).toLocaleString('fr-FR', {maximumFractionDigits: 6}) : '—';
+  const cells = (tag, values) => values.map((v,i)=>h(tag,{key:i,style:{padding:'10px 12px',textAlign:i>3?'right':'left',whiteSpace:'nowrap',borderBottom:'1px solid var(--border, #293241)'}},v));
+  return h('section',{className:'panel',style:{marginBottom:16,padding:16}},
+    h('header',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}},
+      h('div',null,h('h3',{style:{margin:'0 0 4px',fontSize:16}},'Recherche prospective'),
+        h('p',{style:{margin:0,fontSize:12,color:'var(--muted)'}},'Observations OHLC horodatées. Aucun ordre courtier, aucun P&L simulé.')),
+      h('button',{type:'button',className:'btn sm ghost',disabled:busy,onClick:refresh},busy?'Chargement…':'Actualiser')),
+    error && h('p',{role:'alert',style:{color:'#f59e0b',fontSize:12}},error),
+    data?.workerError && h('p',{role:'status',style:{color:'#f59e0b',fontSize:12}},data.workerError),
+    data && h('div',null,
+      h('p',{style:{fontSize:12,color:'var(--muted)'}},'Dernière mise à jour : '+(data.lastRun?new Date(data.lastRun).toLocaleString('fr-FR'):'pas encore exécutée')),
+      h('div',{style:{display:'flex',flexWrap:'wrap',gap:12,margin:'12px 0'}},(data.summary||[]).map(r=>h('div',{key:r.status,style:{borderLeft:'2px solid var(--border, #475569)',padding:'4px 10px'}},h('strong',{style:{display:'block',fontSize:18,fontVariantNumeric:'tabular-nums'}},r.count),h('span',{style:{fontSize:12,color:'var(--muted)'}},statusLabel(r.status))))),
+      (data.observations||[]).length ? h('div',{style:{overflowX:'auto'}},h('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},h('thead',null,h('tr',null,cells('th',['Date','Instrument','Stratégie','Issue','Entrée','SL','TP1','TP2']))),
+        h('tbody',null,data.observations.map(r=>{const o=r.snapshot||{};return h('tr',{key:o.id},cells('td',[
+          o.observedAt?new Date(o.observedAt).toLocaleString('fr-FR'):'—',
+          [o.symbol,o.timeframe].filter(Boolean).join(' · '),[o.strategyId,o.strategyVersion].filter(v=>v!==null&&v!==undefined).join(' · '),
+          statusLabel(r.outcome?.status||'pending'),fmt(o.entry),fmt(o.stop),fmt(o.targets?.[0]),fmt(o.targets?.[1])
+        ]));})))) : h('p',{style:{fontSize:13,color:'var(--muted)'}},'Aucune observation enregistrée. Une stratégie versionnée, des coûts connus et un signal confirmé sont requis.')),
+    !data&&!error&&h('p',{role:'status',style:{fontSize:12,color:'var(--muted)'}},'Chargement du suivi…'));
 }
 
 function JournalSignauxPanel() {
@@ -6197,6 +6237,8 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
       {/* Le devenir des signaux du moteur, en tête du journal : c'est la seule
           partie qui ne dépend pas d'une saisie manuelle. */}
       <StatutDirectPanel />
+      <ResearchTerminalPanel />
+      <PaperObservationsPanel />
       <JournalSignauxPanel />
       <BacktestPanel />
 
@@ -8621,7 +8663,7 @@ function Dashboard({ user, onLogout }) {
               </div>
             </header>
 
-      <main className="wrap">
+      <main className={`wrap ${tab==='live'?'terminal-wrap':''}`}>
               <div className="nav" style={{ marginBottom:20 }}>
                 {NAV.map(n => (
                   <button key={n.id}

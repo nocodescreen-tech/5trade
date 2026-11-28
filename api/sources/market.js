@@ -64,7 +64,8 @@ const binance = {
     return rows.map(k => ({
       t: k[0],                      // epoch ms d'ouverture
       o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5],
-      closed: true
+      takerBuyBase: k[9] == null ? null : Number(k[9]), quoteVolume: k[7] == null ? null : Number(k[7]), volumeSource: 'binance_spot',
+      closed: Number(k[6]) < Date.now()
     }));
   },
   streamUrl(symbols, tf) {
@@ -77,7 +78,7 @@ const binance = {
     if (!k) return null;
     return {
       symbol: msg.data.s,
-      candle: { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, closed: !!k.x }
+      candle: { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, takerBuyBase: k.V == null ? null : Number(k.V), quoteVolume: k.q == null ? null : Number(k.q), volumeSource: 'binance_spot', closed: !!k.x }
     };
   },
 
@@ -94,7 +95,7 @@ const binance = {
       sock.on('message', raw => {
         let d; try { d = JSON.parse(raw); } catch { return; }
         if (d && d.e === 'aggTrade' && d.p) {
-          onTick({ t: d.T, prix: +d.p, symbole: symbol, source: 'binance', quantite: +d.q });
+          onTick({ t: d.T, prix: +d.p, symbole: symbol, source: 'binance', quantite: +d.q, tradeId: d.a, aggressor: typeof d.m === 'boolean' ? (d.m ? 'sell' : 'buy') : null });
         }
       });
       sock.on('error', () => {});
@@ -452,9 +453,10 @@ function cacheInfo() {
  * pendant que le prix, lui, bougeait. On corrige une fois pour tous les
  * fournisseurs plutôt que dans chacun.
  */
-function marquerEnCours(liste) {
-  if (Array.isArray(liste) && liste.length) liste[liste.length - 1].closed = false;
-  return liste;
+function marquerEnCours(liste,tf,now=Date.now()) {
+  const pas=TF_MS[tf];
+  if (!Array.isArray(liste)||!pas) return liste;
+  return liste.map(c=>({...c,closed:c.closed!==false&&Number.isFinite(c.t)&&c.t+pas<=now}));
 }
 
 /**
@@ -518,7 +520,7 @@ async function getCandles(symbol, tf, count = 300, providerId) {
       fournies: a.bougies.length, demandees: count, trous: a.trous };
   }
   try {
-    const a = assainirBougies(marquerEnCours(await p.candles(symbol, tf, count)), tf);
+    const a = assainirBougies(marquerEnCours(await p.candles(symbol, tf, count),tf), tf);
     buffers.set(k, a.bougies);
     bufferMaj.set(k, Date.now());
     saveCacheSoon();
@@ -725,5 +727,5 @@ module.exports = {
   loadCache, cacheInfo,
   // Exposé pour le canonique : l'ordre et la continuité des bougies sont ce que
   // tout le moteur suppose, ils doivent être testables.
-  assainirBougies
+  assainirBougies, marquerEnCours
 };

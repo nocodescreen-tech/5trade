@@ -555,6 +555,28 @@
   @media (prefers-reduced-motion:reduce){
     *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
   }
+  /* Workstation: chart-first, quiet hierarchy, compact navigation and honest status. */
+  .terminal-wrap{max-width:1700px;padding-top:16px}
+  .terminal-title{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:8px 0 16px}
+  .terminal-title span{font-size:10px;font-weight:600;letter-spacing:.13em;color:var(--muted)}
+  .terminal-title h1{font-size:clamp(22px,2.1vw,30px);font-weight:650;letter-spacing:-.045em;margin:2px 0}
+  .terminal-readonly{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);border:1px solid var(--border);padding:8px 12px;border-radius:6px}
+  .terminal-readonly i{color:var(--warn)}
+  .terminal-watchlist{background:var(--panel)!important;border-color:var(--border)!important;box-shadow:none}
+  .terminal-placeholder,.terminal-research{padding:18px;margin:12px 0;color:var(--muted)}
+  .terminal-research summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--txt)}
+  .terminal-research[open] summary{margin-bottom:16px}
+  .terminal-wrap .workstation-grid{grid-template-columns:minmax(0,1fr) minmax(300px,360px);gap:12px}
+  .terminal-wrap .workstation-right{position:static}
+  .terminal-wrap .chart-pro-panel{border-radius:8px;box-shadow:none;background:var(--panel)}
+  .terminal-wrap .smc-layers-bar{background:var(--panel);padding:8px 10px;gap:5px}
+  .terminal-wrap .layer-btn{border-radius:5px;box-shadow:none;font-size:10.5px;font-weight:600}
+  .terminal-wrap .layer-btn.active{box-shadow:none}
+  .terminal-wrap .nav-item{font-size:12px}
+  .terminal-wrap .panel{animation:none;box-shadow:none}
+  .terminal-wrap button:focus-visible,.terminal-wrap summary:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+  @media(max-width:1040px){.terminal-wrap .workstation-grid{grid-template-columns:minmax(0,1fr)}}
+  @media(max-width:600px){.terminal-title{gap:8px}.terminal-readonly{font-size:11px}.terminal-wrap .smc-layers-bar{padding:6px}.terminal-wrap .layer-btn{font-size:10px}}
 </style>
 </head>
 <body>
@@ -565,6 +587,6 @@
 
 <!-- ── Application 5trade ── -->
 <script src="api-response.js?v=1"></script>
-<script src="build/app.js?v=3"></script>
+<script src="build/app.js?v=8"></script>
 </body>
 </html>

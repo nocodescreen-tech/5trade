@@ -67,7 +67,7 @@ function unitesPour(symbole, tf, tfsPour, TF_MS) {
   return [...new Set([tf, ...sup])];
 }
 
-async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERVALLE_MIN, strategies = null, tfsPour = null, mode = MODES_SCAN.EXPLORATION, symbolesAutorises = null } = {}) {
+async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERVALLE_MIN, strategies = null, tfsPour = null, mode = MODES_SCAN.EXPLORATION, symbolesAutorises = null, observer = null, verifierCalendrier = null, maintenant = () => Date.now() } = {}) {
   if (!market || !signals) throw new Error('scan complet : market et signals sont requis');
   const debut = Date.now();
   let symboles = market.listSymbols() || [];
@@ -78,15 +78,14 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
 
   if (mode === MODES_SCAN.TRADING_AUTORISE || mode === MODES_SCAN.SURVEILLANCE) {
     const bruts = typeof symbolesAutorises === 'function' ? symbolesAutorises() : symbolesAutorises;
-    const cibles = Array.isArray(bruts) && bruts.length ? bruts : actifs;
+    const cibles = Array.isArray(bruts) ? bruts : actifs;
     if (!cibles || !cibles.length) {
-      return {
-        at: new Date().toISOString(), tf, marches: 0, signaux: [],
-        erreurs: ['Aucun instrument actif : scan automatique suspendu'], dureeMs: 0
-      };
+      etat.dernier = {at:new Date().toISOString(),tf,marches:0,signaux:0,resultats:[],erreurs:['Aucun instrument actif : scan automatique suspendu'],dureeMs:0};
+      etat.erreurs=etat.dernier.erreurs;
+      return etat.dernier;
     }
-    const autorisesSet = new Set(cibles.map(s => String(s.symbol || s).toUpperCase()));
-    symboles = symboles.filter(s => autorisesSet.has(String(s.symbol || s).toUpperCase()));
+    const sameSymbol=(a,b)=>String(a.symbol||a).toUpperCase()===String(b.symbol||b).toUpperCase();
+    symboles=symboles.filter(s=>actifs.some(a=>sameSymbol(a,s)&&a.provider===s.provider)&&cibles.some(a=>sameSymbol(a,s)&&(!a.provider||a.provider===s.provider)));
   }
   const signaux = [];
   const erreurs = [];
@@ -108,7 +107,9 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
     seuilForce: p.seuilForce,
     seuilRegles: p.seuilRegles,
     parametres: p.parametres,
-    strategie: { id: p.id, titre: p.titre }
+    filtres:p.filtres, timeframes:p.timeframes, seuilAlignes:p.seuilAlignes,
+    profils: [p], strategieStrict:true,
+    strategie: { id: p.id, titre: p.titre, version: p.version || null }
   } : {});
   const passes = profils.length
     ? profils.map(p => ({ profil: p, options: optionsDe(p) }))
@@ -132,7 +133,8 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
       try {
         const r = await market.getCandles(symbole, unite, BOUGIES, provider);
         const closes = (r.candles || []).filter(c => c.closed !== false);
-        const q = Qualite.analyser(r.candles || [], { timeframe: unite });
+        const instant = maintenant();
+        const q = Qualite.analyser(r.candles || [], { timeframe: unite, maintenant: instant });
         if (!q.ok) {
           erreurs.push(`${symbole} ${unite} : données non fiables — `
             + q.problemes.filter(p => p.gravite === 'critique').map(p => p.detail).join(', '));
@@ -152,14 +154,17 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
         const { classifier } = require('../market-intelligence/instrument-classifier');
         const classe = classifier(symbole, { provider }).classe;
         const moteur = Moteurs.pour(classe);
+        if (mode !== MODES_SCAN.EXPLORATION && (classe==='inconnu' || (r.provider && provider && r.provider!==provider))) { erreurs.push(`${symbole} ${unite} : classe ou fournisseur non vérifié`); continue; }
         // Paramètres réellement appliqués : instrument, famille ou classe. Un
         // signal issu d'un simple profil de classe ne doit pas se lire comme
         // une analyse calibrée sur cet instrument.
         const Calibration = require('../market-intelligence/calibration');
         const calib = Calibration.pour(symbole, { timeframe: unite, classe });
+        const macro = typeof verifierCalendrier === 'function' ? await verifierCalendrier(symbole) : null;
+        const goldMacro = /^(frx)?XAUUSD$/i.test(symbole) && mode !== MODES_SCAN.EXPLORATION ? await require('../moteurs/gold').snapshot() : null;
         let diagnostic = null;
         if (moteur.analyser) {
-          diagnostic = Moteurs.analyser(classe, closes.map(c => c.c), { symbol: symbole, classe, timeframe: unite });
+          diagnostic = Moteurs.analyser(classe, closes.map(c => c.c), { symbol: symbole, classe, timeframe: unite, provider, candles: closes, macro, goldMacro, now: instant, live: mode !== MODES_SCAN.EXPLORATION });
           if (diagnostic && diagnostic.convient === false) {
             erreurs.push(`${symbole} ${unite} : lecture refusée par le moteur ${moteur.id} — `
               + (diagnostic.refus || []).join(' · '));
@@ -171,11 +176,16 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
         // seuils — sinon le scan annoncerait des signaux que la stratégie refuse.
         // Les bougies, elles, ont été chargées une seule fois.
         for (const passe of passes) {
+          if (mode !== MODES_SCAN.EXPLORATION && passe.profil && (passe.profil.executable === false || passe.profil.partiel)) {
+            erreurs.push(`${symbole} ${unite} : stratégie incomplète ou non exécutable (${passe.profil.id})`);
+            continue;
+          }
+          if (mode!==MODES_SCAN.EXPLORATION && passe.profil && (!passe.profil.supportedMarkets?.includes(classe) || (passe.profil.executionTimeframes?.length && !passe.profil.executionTimeframes.includes(unite)))) { erreurs.push(`${symbole} ${unite} : marché ou unité non déclaré dans ${passe.profil.id}`); continue; }
           let v = null;
           let refusMoteur = null;
           // Unification du moteur : le scan et le rejeu fidèle partagent le même cerveau décisionnel
           if (typeof signals.decider === 'function' && passe.options.moteurBrut !== true) {
-            const dec = signals.decider(closes, { symbol: symbole, timeframe: unite, verifierSession: true }, passe.options);
+            const dec = signals.decider(closes, { symbol: symbole, timeframe: unite, verifierSession: mode !== MODES_SCAN.EXPLORATION, at: instant }, passe.options);
             if (dec) {
               if (dec.decision === 'ACHAT' || dec.decision === 'VENTE' || dec.decision === 'ATTENTE') {
                 const sig = dec.signal || (dec.arbitrage && dec.arbitrage.signauxRetenus && dec.arbitrage.signauxRetenus[0]);
@@ -183,7 +193,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
                 v = {
                   direction: dec.decision === 'ACHAT' ? 'BUY' : (dec.decision === 'VENTE' ? 'SELL' : 'NEUTRAL'),
                   status: sig ? (sig.status || 'confirme') : (dec.decision === 'ACHAT' || dec.decision === 'VENTE' ? 'confirme' : 'surveiller'),
-                  force: sig && typeof sig.force === 'number' ? sig.force : 0.6,
+                  force: sig && Number.isFinite(sig.force) ? sig.force : 0,
                   trend: sig ? sig.trend : null,
                   confirmations: (dec.confirmation && dec.confirmation.details) ? dec.confirmation.details.length : 1,
                   raison: dec.raison,
@@ -223,6 +233,11 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
             tf: unite,
             direction: v.direction,
             status: v.status || null,
+            decision: v.decision || null,
+            macro: macro || null,
+            strategyId: passe.profil?.id || null,
+            strategyVersion: passe.profil?.version || null,
+            candleAt: closes[closes.length - 1]?.t ?? null,
             force: typeof v.force === 'number' ? v.force : (v.strength || 0),
             trend: v.trend || null,
             confirmations: v.confirmations || 0,
@@ -243,11 +258,26 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
             // Le diagnostic du moteur quand il en produit un (synthétiques).
             diagnostic: diagnostic ? {
               famille: diagnostic.famille, regime: diagnostic.regime,
-              faits: diagnostic.faits, statistiques: diagnostic.statistiques
+              faits: diagnostic.faits, statistiques: diagnostic.statistiques, contexte: diagnostic.contexte || null, manquants: diagnostic.manquants || []
             } : null
           };
           ligne.contrat = Contrat.normaliser(ligne, { source: 'scan' });
+          if (mode !== MODES_SCAN.EXPLORATION && classe!=='synthetique' && (!macro || !macro.ok || !macro.verifie)) {
+            ligne.decision = 'ATTENTE';
+            ligne.status = 'surveiller';
+            ligne.raison = macro?.detail || 'Calendrier non vérifié';
+            ligne.direction='NEUTRAL';
+            ligne.contrat.direction='NEUTRAL';
+            ligne.contrat.sens='neutre';
+            ligne.contrat.entree=null; ligne.contrat.stop=null; ligne.contrat.objectifs=[]; ligne.contrat.rr=null;
+            ligne.levels=null;
+            ligne.contrat.status = 'surveiller';
+          }
           signaux.push(ligne);
+          if (typeof observer === 'function' && mode === MODES_SCAN.SURVEILLANCE && ['ACHAT', 'VENTE'].includes(ligne.decision)) {
+            try { await observer(ligne, passe.profil, closes); }
+            catch (error) { erreurs.push(`${symbole} ${unite} : observation non enregistrée — ${error.message}`); }
+          }
         }
       } catch (e) {
         erreurs.push(`${symbole} ${unite} : ${e.message}`);

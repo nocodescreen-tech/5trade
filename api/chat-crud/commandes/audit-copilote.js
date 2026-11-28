@@ -28,7 +28,7 @@ async function marchesSurveilles() {
   const dernier = ds && ds.dernier ? ds.dernier : null;
 
   const lignes = ['📊 **Surveillance des marchés :**'];
-  lignes.push(`- **Sélection enregistrée persistante :** ${enregistres.length ? enregistres.join(', ') : 'Aucun instrument actif (scan suspendu)'}`);
+  lignes.push(`- **Sélection enregistrée persistante :** ${enregistres.length ? enregistres.map(x=>x.symbol+'@'+x.provider).join(', ') : 'Aucun instrument actif (scan suspendu)'}`);
   
   if (dernier) {
     lignes.push(`- **Dernier scan exécuté :** ${dernier.at} (${dernier.marches} marchés traités, durée ${dernier.dureeMs || 0} ms)`);
@@ -42,7 +42,7 @@ async function marchesSurveilles() {
       if (dernier.marches > enregistres.length) {
         lignes.push(`⚠️ *Écart constaté :* Le dernier scan a évalué plus d'instruments que la sélection active stricte.`);
       } else {
-        lignes.push(`✅ *Parfaite conformité :* Le scan automatique respecte rigoureusement ta sélection.`);
+        lignes.push(`Nombre de marchés compatible avec la sélection ; la seule cardinalité ne prouve pas la conformité.`);
       }
     }
   } else {
@@ -103,22 +103,8 @@ async function pourquoiPasSignal(sujet = '') {
  * Consulte le calendrier et le résultat du filtre en heure de Kinshasa (WAT).
  */
 async function blocageCpi() {
-  const cal = await Fundamentals.getCalendar();
-  const verdictUSD = Fundamentals.verdictDevise(cal, 'USD', { fenetreMin: 30 });
-
-  const lignes = ['📅 **Impact Macroéconomique (USD / CPI) sur XAUUSD :**'];
-  lignes.push(`- **État du filtre :** ${verdictUSD.bloque ? '🚫 **TRADING SUSPENDU (Événement majeur)**' : '✅ **TRADING AUTORISÉ (Zone sécurisée)**'}`);
-  lignes.push(`- **Phase temporelle :** \`${verdictUSD.phase || 'Neutre'}\``);
-  lignes.push(`- **Heure de Kinshasa (WAT · UTC+1) :** ${verdictUSD.heureKinshasa || 'Aucune annonce imminente'}`);
-  lignes.push(`- **Délai :** ${verdictUSD.delaiMin !== null && verdictUSD.delaiMin !== undefined ? `${verdictUSD.delaiMin} minute(s)` : 'N/A'}`);
-  if (verdictUSD.evenement) {
-    lignes.push(`- **Événement cible :** ${verdictUSD.evenement.titre} (Impact : ${verdictUSD.evenement.impact.toUpperCase()})`);
-  }
-  if (verdictUSD.sourcePerimee) {
-    lignes.push(`- ⚠️ *Note :* La source de données du calendrier est indisponible ou non synchronisée.`);
-  }
-
-  return { texte: lignes.join('\n') };
+  const v=await Fundamentals.filtreCalendrier('frxXAUUSD',{strict:true});
+  return {texte:['Filtre macro USD / XAUUSD',v.verifie?(v.bloque?'Annonce bloquante':'Aucune annonce majeure dans la fenêtre vérifiée'):'Calendrier non vérifié : signal suspendu',v.detail||'',v.news?.titre||'',v.news?.heureKinshasa||''].filter(Boolean).join('\n')};
 }
 
 /**
@@ -126,38 +112,12 @@ async function blocageCpi() {
  * Vérifie l'état de notification et de livraison des alertes.
  */
 async function statutTelegram() {
-  const lignes = ['📱 **État de livraison des notifications Telegram :**'];
-  
-  // Vérification de la configuration d'envoi
-  const hasToken = !!process.env.TELEGRAM_BOT_TOKEN;
-  const hasChat = !!process.env.TELEGRAM_CHAT_ID;
-  if (!hasToken || !hasChat) {
-    lignes.push(`- ⚠️ **Configuration incomplète :** ${!hasToken ? 'TELEGRAM_BOT_TOKEN manquant' : ''} ${!hasChat ? 'TELEGRAM_CHAT_ID manquant' : ''}.`);
-    lignes.push(`- *Conséquence :* Les alertes sont générées dans le journal mais ne peuvent pas être transmises au bot.`);
-    return { texte: lignes.join('\n') };
-  }
-
-  lignes.push(`- ✅ **Configuration :** Bot configuré et actif.`);
-
-  // Dernier scan et décisions
-  const ds = Scan.dernierScan();
-  if (!ds || !ds.dernier) {
-    lignes.push(`- ℹ️ Aucun scan automatique n'a encore été complété.`);
-    return { texte: lignes.join('\n') };
-  }
-
-  const dernier = ds.dernier;
-  if (dernier.signaux === 0) {
-    lignes.push(`- ℹ️ **Aucune opportunité confirmée :** Le dernier cycle sur [${(dernier.strategies || []).join(', ')}] n'a trouvé aucun setup remplissant tous les critères.`);
-    if (dernier.erreurs && dernier.erreurs.length) {
-      lignes.push(`- **Motifs de refus constatés :** ${dernier.erreurs.slice(0, 3).join(' · ')}`);
-    }
-  } else {
-    lignes.push(`- **${dernier.signaux} signal(aux) détecté(s) lors du dernier cycle.**`);
-    lignes.push(`- Si tu n'as rien reçu, vérifie le mode du scan (seule la SURVEILLANCE avec statut 'confirme' envoie une alerte avec anti-doublon).`);
-  }
-
-  return { texte: lignes.join('\n') };
+  const c=require('../../delivery/alerts').get();
+  if(!c.telegramToken||!c.telegramChat)return {texte:'Telegram non configuré (jeton ou chat manquant).'};
+  try{
+    const s=await require('../../delivery/telegram-outbox').repository(require('../../core/db').client()).status();
+    return {texte:'Telegram configuré. États réellement enregistrés : '+(s.summary.map(x=>x.state+': '+x.count).join(' · ')||'aucun envoi')+'\nUn envoi en file ne garantit pas sa réception.'};
+  }catch{return {texte:'Telegram configuré, mais la file persistante est indisponible. Aucune livraison ne peut être confirmée.'};}
 }
 
 /**
@@ -169,11 +129,11 @@ async function preferencesMemorisees() {
   const actifs = InstrumentsActifs.obtenirActifs();
   const lignes = ['🧠 **Mémoire et Préférences Persistées du Copilote :**'];
 
-  lignes.push(`- **Instruments surveillés par défaut :** ${actifs.length ? actifs.join(', ') : 'Aucun'}`);
+  lignes.push(`- **Instruments surveillés par défaut :** ${actifs.length ? actifs.map(x=>x.symbol+'@'+x.provider).join(', ') : 'Aucun'}`);
   if (prefs && prefs.length) {
     lignes.push(`- **Consignes et règles permanentes enregistrées :**`);
     for (const p of prefs) {
-      lignes.push(`  * **[${p.categorie || 'général'}]** : ${p.consigne}`);
+      lignes.push(`  * **[${p.categorie || 'général'}]** : ${p.contenu||p.consigne||'indisponible'}`);
     }
   } else {
     lignes.push(`- **Autres consignes :** Aucune préférence additionnelle personnalisée.`);
