@@ -58,7 +58,7 @@ const MOTS_IMPACT = [
 ];
 
 const CACHE_MS = 5 * 60 * 1000;        // les flux bougent vite, mais pas à la seconde
-const CACHE_CALENDRIER_MS = 30 * 60 * 1000;
+const CACHE_CALENDRIER_MS = 15 * 60 * 1000;
 const MAX_ITEMS = 120;
 
 let cacheFlux = { at: 0, items: [], sources: {} };
@@ -229,7 +229,7 @@ function ecrireDisque(fichier, contenu) {
 })();
 
 function normaliserEvenement(e, source = 'ForexFactory') {
-  const date = dateDe(e.date);
+  const date = typeof e.date === 'string' && /(?:Z|[+-]\d{2}:?\d{2})$/i.test(e.date.trim()) ? dateDe(e.date) : null;
   const impact = String(e.impact || '').toLowerCase();
   return {
     titre: String(e.title || '').slice(0, 200),
