@@ -3348,6 +3348,8 @@ function OrderFlowPanel({ report }) {
 function DerivModal({ ouvert, onClose, onRefresh }) {
   const [appId, setAppId] = useState('353nKCVSd1Td4BoDbtjvr');
   const [token, setToken] = useState('');
+  const [accounts, setAccounts] = useState([]);
+  const [accountId, setAccountId] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [chargement, setChargement] = useState(false);
   const [statut, setStatut] = useState(null);
@@ -3366,6 +3368,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
   }, [onRefresh]);
 
   useEffect(() => {
+    if (!ouvert) { setToken(''); setShowToken(false); setAccounts([]); setAccountId(''); }
     if (ouvert) {
       rafraichirStatut();
       setMessage('');
@@ -3388,14 +3391,17 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
       const res = await (await api('/deriv/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appId: appId.trim() || '353nKCVSd1Td4BoDbtjvr', apiToken: token.trim() })
+        body: JSON.stringify({ appId: appId.trim() || '353nKCVSd1Td4BoDbtjvr', apiToken: token.trim(), accountId: accountId || null })
       })).json();
 
       if (res.success) {
         setMessage(res.message || 'Compte Deriv connecté avec succès !');
         setToken('');
+        setAccounts([]);
+        setAccountId('');
         await rafraichirStatut();
       } else {
+        setAccounts(res.code === 'ACCOUNT_SELECTION_REQUIRED' && Array.isArray(res.accounts) ? res.accounts : []);
         setErreur(res.error || 'Échec de connexion à Deriv.');
       }
     } catch (err) {
@@ -3540,7 +3546,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
                 </label>
                 <input className="fld" style={{ width: '100%', fontFamily: 'monospace' }}
                   placeholder="353nKCVSd1Td4BoDbtjvr"
-                  value={appId} onChange={e => setAppId(e.target.value)} />
+                  value={appId} onChange={e => { setAppId(e.target.value); setAccounts([]); setAccountId(''); }} />
                 <div style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4 }}>
                   L'identifiant par défaut <code>353nKCVSd1Td4BoDbtjvr</code> est celui de votre application 5trade.
                 </div>
@@ -3560,7 +3566,7 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
                   <input className="fld" style={{ width: '100%', paddingRight: 38, fontFamily: 'monospace' }}
                     type={showToken ? 'text' : 'password'}
                     placeholder="Colle ton token API Deriv ici (ex: a1b2c3d4e5f6)"
-                    value={token} onChange={e => setToken(e.target.value)} />
+                    value={token} onChange={e => { setToken(e.target.value); setAccounts([]); setAccountId(''); }} />
                   <button type="button" className="btn ghost sm"
                     style={{ position: 'absolute', right: 4, top: 4, padding: '4px 8px', color: 'var(--dim)' }}
                     onClick={() => setShowToken(!showToken)}>
@@ -3572,6 +3578,13 @@ function DerivModal({ ouvert, onClose, onRefresh }) {
                 </div>
               </div>
 
+              <div>
+                <label htmlFor="deriv-account-id">Compte Options (facultatif)</label>
+                {accounts.length ? <select id="deriv-account-id" className="fld" value={accountId} onChange={e => setAccountId(e.target.value)}>
+                  <option value="">Sélectionner un compte</option>
+                  {accounts.map(a => <option key={a.loginid} value={a.loginid}>{a.loginid} — {a.isVirtual ? 'Démo' : 'Réel'} / {a.currency}</option>)}
+                </select> : <input id="deriv-account-id" className="fld" value={accountId} onChange={e => setAccountId(e.target.value)} placeholder="Identifiant du compte si souhaité" />}
+              </div>
               <div style={{ marginTop: 6 }}>
                 <button type="submit" className="btn primary" style={{ width: '100%', padding: '10px 16px', fontSize: 13, justifyContent: 'center' }}
                   disabled={chargement}>
