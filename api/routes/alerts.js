@@ -9,6 +9,8 @@
  */
 module.exports = function monterAlertes(app, deps) {
   const { requireAuth, Alerts, sendMail, DB, Audit, ia } = deps;
+  const MASK='••••••••';
+  const safeConfig=c=>({...c,telegramToken:c.telegramToken?MASK:null,telegramConfigured:!!c.telegramToken});
 
   /**
    * Alertes : prévenir HORS de la page quand un signal se confirme.
@@ -17,7 +19,7 @@ module.exports = function monterAlertes(app, deps) {
    */
   app.get('/api/alerts', requireAuth, (req, res) => {
     const c = Alerts.get();
-    res.json({ success: true, config: c, historique: c.derniers || [] });
+    res.json({ success: true, config: safeConfig(c), historique: c.derniers || [] });
   });
 
   /**
@@ -31,7 +33,9 @@ module.exports = function monterAlertes(app, deps) {
 
   app.put('/api/alerts', requireAuth, (req, res) => {
     try {
-      const c = Alerts.update(req.body || {});
+      const patch={...(req.body||{})};
+      if(patch.telegramToken===MASK)delete patch.telegramToken;
+      const c = Alerts.update(patch);
       Alerts.start();                    // applique tout de suite le nouvel intervalle
       // Changement de configuration = action sensible : elle décide de ce qui sera
       // envoyé et à qui. On trace QUI l'a fait et ce qui a changé, sans jamais
@@ -50,7 +54,7 @@ module.exports = function monterAlertes(app, deps) {
           }
         }).catch(() => {});
       }
-      res.json({ success: true, config: c });
+      res.json({ success: true, config: safeConfig(c) });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
@@ -71,8 +75,9 @@ module.exports = function monterAlertes(app, deps) {
    */
   app.post('/api/alerts/telegram/trouver', requireAuth, async (req, res) => {
     try {
-      const jeton = String((req.body && req.body.token) || Alerts.get().telegramToken || '').trim();
-      if (!jeton) return res.status(400).json({ error: 'Donne d\'abord le jeton du bot (donné par BotFather).' });
+      const supplied=req.body?.token;
+      const jeton=String(supplied && supplied!==MASK ? supplied : Alerts.get().telegramToken || '').trim();
+      if (!/^\d{5,}:[A-Za-z0-9_-]{20,}$/.test(jeton)) return res.status(400).json({ error: 'Donne d\'abord le jeton du bot (donné par BotFather).' });
 
       const r = await fetch(`https://api.telegram.org/bot${jeton}/getUpdates?timeout=0`, {
         signal: AbortSignal.timeout(10000) // 10s max
@@ -80,7 +85,7 @@ module.exports = function monterAlertes(app, deps) {
       const d = await r.json().catch(() => ({}));
       if (!d.ok) {
         return res.status(400).json({
-          error: `Telegram refuse ce jeton (${d.description || 'HTTP ' + r.status}). Vérifie qu'il est complet et sans espace.`
+          error: 'Telegram refuse ce jeton. Vérifie qu’il est complet et sans espace.'
         });
       }
 
@@ -103,7 +108,7 @@ module.exports = function monterAlertes(app, deps) {
       }
       res.json({ success: true, trouve: true, chats });
     } catch (e) {
-      res.status(500).json({ error: `Impossible de joindre Telegram : ${e.message}` });
+      res.status(500).json({ error: 'Impossible de joindre Telegram' });
     }
   });
 
