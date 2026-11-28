@@ -465,14 +465,14 @@
     h2{font-size:19px!important}
     h3{font-size:15.5px!important}
     /* Le graphique garde une part raisonnable de l'écran. */
-    .chart-mobile{height:300px!important}
+    /* Chart height is controlled by the chart component. */
     /* Boutons et champs : hauteur confortable au doigt, sans être énormes. */
     .btn{padding:10px 14px}
   }
   @media (max-width:430px){
     /* iPhone SE et similaires : encore un cran plus compact. */
     .panel{padding:12px!important}
-    .chart-mobile{height:250px!important}
+    /* Preserve the expanded chart height on small devices. */
     .wrap{padding:10px 10px 92px}
   }
   /* Sur téléphone, la barre du bas peut recouvrir le dernier élément : on réserve
@@ -556,6 +556,7 @@
     *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
   }
 </style>
+<link rel="stylesheet" href="terminal.css?v=1">
 </head>
 <body>
 <div id="root" class="shell"></div>
