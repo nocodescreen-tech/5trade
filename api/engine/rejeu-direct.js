@@ -111,6 +111,7 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
 
     // Vérificateur de risque dynamique recalculé sur l'état HISTORIQUE exact à l'instant t
     const optionsPas = Object.assign({}, opts, reglages.optionsDecision);
+    if(Array.isArray(opts.profils)&&opts.profils.length){optionsPas.strategieStrict=true;optionsPas.motifs=false;optionsPas.structure=false;}
     if (!optionsPas.verificateurRisque && !optionsPas.sansRisqueCompte) {
       optionsPas.verificateurRisque = (contrat) => {
         const montantRisqueTrade = (capitalHistorique * risquePct) / 100;
