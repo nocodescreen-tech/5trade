@@ -113,16 +113,17 @@ function rejouer({ instrument, h1, m5, seuils = {}, options = {} } = {}) {
 
       // Fenêtre de validité du plan : TTL du scénario, borné par l'horizon.
       const ttl = Number(scenario.ttlMs) > 0 ? Number(scenario.ttlMs) : 3 * 3600 * 1000;
-      const finValidite = bougie.t + Math.min(ttl, horizonMs);
+      const decisionAt = bougie.t + 3600000; // H1 OHLC is known only at close
+      const finValidite = decisionAt + Math.min(ttl, horizonMs);
 
       // Curseur monotone : les bougies M5 antérieures à cette H1 sont derrière nous.
-      while (curseurM5 < serieM5.length && serieM5[curseurM5].t <= bougie.t) curseurM5++;
+      while (curseurM5 < serieM5.length && serieM5[curseurM5].t < decisionAt) curseurM5++;
       let finFenetre = curseurM5;
       while (finFenetre < serieM5.length && serieM5[finFenetre].t <= finValidite) finFenetre++;
 
       let idx = -1;
       for (let k = curseurM5; k < finFenetre; k++) {
-        if (long ? serieM5[k].l <= entree : serieM5[k].h >= entree) { idx = k; break; }
+        if (serieM5[k].l <= entree && serieM5[k].h >= entree) { idx = k; break; }
       }
       if (idx < 0) { rejets.non_declenche++; continue; }
       const tEntree = serieM5[idx].t;
@@ -169,7 +170,8 @@ function rejouer({ instrument, h1, m5, seuils = {}, options = {} } = {}) {
         r_brut: +rBrut.toFixed(4),
         r_net: rNet,
         frais_r: fraisEnR,
-        frais_connus: cout.applique === true,
+        frais_connus: cout.connu === true && Number.isFinite(fraisEnR),
+        decision_at:new Date(decisionAt).toISOString(),
         duree_min: Math.round((sim.sortieT - tEntree) / 60000),
         atr: arrondi(atr),
         preuves: scenario.preuves || []
