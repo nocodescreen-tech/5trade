@@ -1534,8 +1534,8 @@ app.post('/api/scan', requireAuth, async (req, res) => {
         const doc = parId.get(id);
         if (!doc) { inconnues.push(id); continue; }
         const profil = Signals.profilDepuisStrategie(doc);
-        if (profil.executable === false) { nonExecutables.push(id); continue; }
-        profils.push(profil);
+        if (doc.actif === false || profil.executable === false || profil.partiel || profil.reglesEcartees?.length || profil.filtresEcartes?.length) { nonExecutables.push(id); continue; }
+        profils.push({...profil,marches:doc.supportedMarkets || doc.marches || doc.structured?.supportedMarkets || []});
       }
       // En mode manuel strict (ou par défaut quand l'utilisateur demande explicitement des stratégies),
       // refuser la sélection incomplète avec le motif de chaque exclusion pour ne jamais masquer un échec.
@@ -1565,7 +1565,7 @@ app.post('/api/scan', requireAuth, async (req, res) => {
 
     const InstrumentsActifs = require('./core/instruments-actifs');
     const symbolesDemandes = req.body && req.body.symboles;
-    const symbolesAutorises = Array.isArray(symbolesDemandes) && symbolesDemandes.length
+    const symbolesAutorises = Array.isArray(symbolesDemandes)
       ? symbolesDemandes
       : InstrumentsActifs.obtenirActifs();
 
@@ -3943,7 +3943,7 @@ async function profilsSurveillance() {
     if (!doc) continue;
     const p = Signals.profilDepuisStrategie(doc);
     // Une fiche non exécutable est ignorée ici : la surveillance la refuse aussi.
-    if (p.executable !== false) profils.push(p);
+    if (doc.actif !== false && p.executable !== false && !p.partiel && !p.reglesEcartees?.length && !p.filtresEcartes?.length) profils.push({...p,marches:doc.supportedMarkets || doc.marches || doc.structured?.supportedMarkets || []});
   }
   return profils;
 }
