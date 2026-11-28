@@ -256,7 +256,25 @@ function verifierPrise(trade, etatCourant, options = {}) {
     return { ok: false, refus: ['état du compte absent ou invalide'], taille: null, risqueMontant: null, exposition: null, raison: 'état du compte absent ou invalide' };
   }
 
-  const d = dimensionner(trade.entree, trade.stop, e.capital, options.risquePct);
+  // Preferences may only tighten the configured risk, never loosen it.
+  const contraintes = options.contraintes || {};
+  const plafondMemoire = contraintes.risqueMaxPct;
+  const plafondDD = contraintes.drawdownMaxPct;
+  if (plafondMemoire != null && (!Number.isFinite(plafondMemoire) || plafondMemoire <= 0)) {
+    return {ok:false,refus:['plafond de risque mémorisé invalide'],taille:null,risqueMontant:null,exposition:null,raison:'plafond de risque mémorisé invalide'};
+  }
+  if (plafondDD != null) {
+    if (!Number.isFinite(plafondDD) || plafondDD <= 0 || !Number.isFinite(e.pic) || e.pic <= 0) {
+      return {ok:false,refus:['drawdown courant non vérifiable'],taille:null,risqueMontant:null,exposition:null,raison:'drawdown courant non vérifiable'};
+    }
+    const dd = Math.max(0, 100 * (e.pic - e.capital) / e.pic);
+    if (dd >= plafondDD - 1e-9) {
+      return {ok:false,refus:[`drawdown courant ${dd.toFixed(2)} % atteint le plafond mémorisé ${plafondDD} %`],taille:null,risqueMontant:null,exposition:null,raison:'plafond de drawdown mémorisé atteint'};
+    }
+  }
+  const demandePct = options.risquePct ?? cfg.risquePct;
+  const risqueEffectif = plafondMemoire == null ? demandePct : Math.min(demandePct, plafondMemoire);
+  const d = dimensionner(trade.entree, trade.stop, e.capital, risqueEffectif);
   if (d.taille === null) refus.push(d.raison);
 
   if (e.perteJourPct >= cfg.maxPerteJourPct) {
@@ -288,6 +306,8 @@ function verifierPrise(trade, etatCourant, options = {}) {
     ok: refus.length === 0,
     refus,
     taille: d.taille,
+    risquePct: d.risquePct,
+    plafondMemoire: plafondMemoire ?? null,
     risqueMontant: d.risqueMontant,
     exposition: d.exposition,
     raison: refus.length ? refus.join(' · ') : null
