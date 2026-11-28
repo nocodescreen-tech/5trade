@@ -38,7 +38,8 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
 
   // Validation stricte de la stratégie demandée
   const optionsGlobales = Object.assign({}, opts, reglages.optionsDecision);
-  let strategieExecutee = { id: 'SMC_Institutionnel', titre: 'SMC Institutionnel', version: '1.2.0' };
+  const profils = Array.isArray(optionsGlobales.profils) ? optionsGlobales.profils.filter(Boolean) : [];
+  let strategieExecutee = profils.length === 1 ? {id:profils[0].id,titre:profils[0].titre,version:profils[0].version || null} : null;
   if (optionsGlobales.strategie) {
     const nomStrat = typeof optionsGlobales.strategie === 'string'
       ? optionsGlobales.strategie
@@ -56,7 +57,9 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
         strategieExecutee: null
       };
     }
-    strategieExecutee = { id: nomStrat, titre: nomStrat, version: '1.0.0' };
+    const choisi = profils.find(p=>p.id === nomStrat || p.titre === nomStrat);
+    strategieExecutee = choisi ? {id:choisi.id,titre:choisi.titre,version:choisi.version || null} : null;
+    if (choisi) optionsGlobales.profils = [choisi];
   }
 
   // SIMULATION HISTORIQUE STRICTE DU RISQUE & DU CAPITAL
@@ -64,11 +67,13 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
   // l'exposition cumulée et les positions ouvertes au fil de l'eau pour chaque pas historique.
   const Risque = require('../risk/risque');
   const cfgRisque = Risque.configuration();
-  const capitalDepart = Number(reglages.initialCapital || opts.capital || cfgRisque.capital) || 1000;
+  const capitalDepart = Number(reglages.initialCapital ?? opts.capital ?? cfgRisque.capital);
+  if (!Number.isFinite(capitalDepart) || capitalDepart <= 0) throw new Error('Capital initial invalide');
   let capitalHistorique = capitalDepart;
-  const risquePct = Number(reglages.riskPct || opts.risquePct || cfgRisque.risquePct) || 1;
-  const plafondRisquePct = Number(reglages.plafondRisquePct || cfgRisque.plafondRisquePct || 6);
-  const maxPositionsSimultanees = Number(reglages.maxPositions || cfgRisque.positionsMax || 3);
+  const risquePct = Math.min(Number(reglages.riskPct ?? opts.risquePct ?? cfgRisque.risquePct),cfgRisque.maxRisqueTradePct);
+  if (!Number.isFinite(risquePct) || risquePct <= 0) throw new Error('Risque de simulation invalide');
+  const plafondRisquePct = Number(reglages.plafondRisquePct || cfgRisque.maxRisqueTotalPct);
+  const maxPositionsSimultanees = Number(reglages.maxPositions || cfgRisque.maxSimultanes);
 
   let positionsActives = []; // { id, symbol, sens, risquePct, montantRisque, clotureAt, evalue }
   let expositionMaxPct = 0;
@@ -83,7 +88,7 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
     // Dénouement au fil de l'eau des positions arrivées à terme avant ou à tempsActuel
     const encoreOuvertes = [];
     for (const pos of positionsActives) {
-      if (pos.clotureAt <= tempsActuel) {
+      if (pos.clotureAt !== null && pos.clotureAt <= tempsActuel) {
         const pnlMontant = (Number(pos.evalue.r) || 0) * pos.montantRisque;
         capitalHistorique = Math.max(0, +(capitalHistorique + pnlMontant).toFixed(2));
         if (capitalHistorique > peakCapital) peakCapital = capitalHistorique;
@@ -103,7 +108,7 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
     const fen = serie.slice(Math.max(0, i - fenetre + 1), i + 1);
 
     // Vérificateur de risque dynamique recalculé sur l'état HISTORIQUE exact à l'instant t
-    const optionsPas = Object.assign({}, opts, reglages.optionsDecision);
+    const optionsPas = {...optionsGlobales};
     if (!optionsPas.verificateurRisque && !optionsPas.sansRisqueCompte) {
       optionsPas.verificateurRisque = (contrat) => {
         const montantRisqueTrade = (capitalHistorique * risquePct) / 100;
@@ -148,9 +153,9 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
     // Un verdict ACHAT ou VENTE ne doit être rejoué QUE si le signal porte executable === true
     // ET que le risque a été formellement validé (ou simulation avec garde-fou simulé).
     const s = verdict && verdict.signal;
-    const estExecutable = s && (s.executable === true || (verdict.signauxRetenus || []).some(x => x.executable === true));
+    const estExecutable = s && (s.executable === true || (verdict.signauxRetenus || []).some(x => x.id === s.id && x.executable === true));
     const risqueValide = verdict && verdict.risque && verdict.risque.ok === true;
-    const modeSansRisque = opts && opts.sansRisqueCompte === true;
+    const modeSansRisque = optionsPas.sansRisqueCompte === true;
     const autorise = estExecutable && (risqueValide || modeSansRisque);
 
     if (verdict && s && (verdict.decision === 'ACHAT' || verdict.decision === 'VENTE') && autorise) {
@@ -171,7 +176,7 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
       const evalue = JournalSignaux.evaluer(sig, serie);
       const bougiesSuivies = Math.max(1, Number(evalue.bougiesSuivies) || 1);
       const idxCloture = Math.min(serie.length - 1, i + bougiesSuivies);
-      const clotureAt = serie[idxCloture].t;
+      const clotureAt = evalue.resultat !== 'ouvert' && Number.isFinite(evalue.leveLe) ? evalue.leveLe : null;
       const montantRisqueTrade = (capitalHistorique * risquePct) / 100;
 
       positionsActives.push({
@@ -184,6 +189,8 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
         evalue
       });
 
+      expositionMaxPct = Math.max(expositionMaxPct,risqueCumuleOuvert + risquePct);
+      positionsMaxSimultanees = Math.max(positionsMaxSimultanees,positionsActives.length);
       trades.push({
         at: sig.at,
         clotureAt,
@@ -200,13 +207,6 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
         source: 'DecisionEngine.decider'
       });
 
-      // Mise à jour immédiate du capital historique pour la position
-      const pnlMontant = (Number(evalue.r) || 0) * montantRisqueTrade;
-      capitalHistorique = Math.max(0, +(capitalHistorique + pnlMontant).toFixed(2));
-      if (capitalHistorique > peakCapital) peakCapital = capitalHistorique;
-      const dd = peakCapital > 0 ? ((peakCapital - capitalHistorique) / peakCapital) * 100 : 0;
-      if (dd > maxDrawdownPct) maxDrawdownPct = +dd.toFixed(2);
-
       // On avance après la sortie : le direct ne cumule pas deux positions sur
       // le même marché. Sans ce saut, un même mouvement produisait 10 trades.
       i += Math.max(pas, Number(evalue.bougiesSuivies) || pas);
@@ -215,10 +215,13 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
     i += pas;
   }
 
-  // Dénouement de toute position active restante au dernier cours
+  // Book each closed position exactly once; unresolved positions remain open.
   for (const pos of positionsActives) {
+    if (pos.clotureAt === null) continue;
     const pnlMontant = (Number(pos.evalue.r) || 0) * pos.montantRisque;
     capitalHistorique = Math.max(0, +(capitalHistorique + pnlMontant).toFixed(2));
+    peakCapital = Math.max(peakCapital,capitalHistorique);
+    maxDrawdownPct = Math.max(maxDrawdownPct,peakCapital > 0 ? +((peakCapital-capitalHistorique)/peakCapital*100).toFixed(2) : 0);
   }
 
   const baseStats = statistiques(trades);
@@ -227,15 +230,16 @@ function rejouer(candles, meta, opts = {}, reglages = {}) {
     capitalFinal: capitalHistorique,
     maxDrawdownPct,
     expositionMaxPct,
-    positionsMaxSimultanees
+    positionsMaxSimultanees,
+    positionsNonCloturees:positionsActives.filter(p=>p.clotureAt === null).length
   });
 
   return { trades, etapes, stats: statsFinales, strategieExecutee };
 }
 
 function statistiques(trades) {
-  const avecR = trades.filter(t => Number.isFinite(t.rNet));
-  const brut = trades.filter(t => Number.isFinite(t.rBrut));
+  const avecR = trades.filter(t => t.resultat !== 'ouvert' && Number.isFinite(t.rNet));
+  const brut = trades.filter(t => t.resultat !== 'ouvert' && Number.isFinite(t.rBrut));
   const somme = (l, k) => +l.reduce((a, b) => a + Number(b[k] || 0), 0).toFixed(2);
   const gagnants = avecR.filter(t => t.rNet > 0).length;
   return {
