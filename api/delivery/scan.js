@@ -108,7 +108,7 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
     seuilRegles: p.seuilRegles,
     parametres: p.parametres,
     filtres:p.filtres, timeframes:p.timeframes, seuilAlignes:p.seuilAlignes,
-    profils: [p],
+    profils: [p], motifs:false, structure:false, strategieStrict:true,
     strategie: { id: p.id, titre: p.titre, version: p.version || null }
   } : {});
   const passes = profils.length
@@ -161,9 +161,10 @@ async function scanComplet({ market, signals, tf = '15m', intervalleMin = INTERV
         const Calibration = require('../market-intelligence/calibration');
         const calib = Calibration.pour(symbole, { timeframe: unite, classe });
         const macro = typeof verifierCalendrier === 'function' ? await verifierCalendrier(symbole) : null;
+        const goldMacro = /^(frx)?XAUUSD$/i.test(symbole) && mode !== MODES_SCAN.EXPLORATION ? await require('../moteurs/gold').snapshot() : null;
         let diagnostic = null;
         if (moteur.analyser) {
-          diagnostic = Moteurs.analyser(classe, closes.map(c => c.c), { symbol: symbole, classe, timeframe: unite, provider, candles: closes, macro, now: instant, live: mode !== MODES_SCAN.EXPLORATION });
+          diagnostic = Moteurs.analyser(classe, closes.map(c => c.c), { symbol: symbole, classe, timeframe: unite, provider, candles: closes, macro, goldMacro, now: instant, live: mode !== MODES_SCAN.EXPLORATION });
           if (diagnostic && diagnostic.convient === false) {
             erreurs.push(`${symbole} ${unite} : lecture refusée par le moteur ${moteur.id} — `
               + (diagnostic.refus || []).join(' · '));
