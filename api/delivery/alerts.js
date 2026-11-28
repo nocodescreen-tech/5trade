@@ -700,6 +700,7 @@ async function verifierBrut(force = false) {
             // passages réévaluaient les trois, et le signal retenu pouvait
             // appartenir à une autre fiche que celle qui signait l'alerte.
             profils: profil ? [profil] : undefined,
+            strategieStrict: !!profil, motifs: !profil, structure: !profil,
             rrMin: c.rrMin,
             exigerAlignement: c.exigerAlignement,
             refuserDesaccord: c.refuserDesaccord,
