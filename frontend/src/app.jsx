@@ -2270,7 +2270,7 @@ function SessionMarcheMetaux({symbol}) {
       if(busy || !actif)return;
       busy=true;
       try {
-        const response=await api('/market/status?symbol='+encodeURIComponent(symbol));
+        const response=await api('/market/session-status?symbol='+encodeURIComponent(symbol));
         const d=await response.json();
         if(actif)setResult(response.ok && d.success && d.symbol===symbol ? d : null);
       } catch { if(actif)setResult(null); }
@@ -6087,6 +6087,16 @@ function NewsPage() {
 
 function Journal({ prefill, onPrefillUsed, strategies = [] }) {
   const [trades, setTrades] = useState([]);
+  const [vueJournal,setVueJournal]=useState('registre');
+  const ongletsJournal=[['registre','Journal manuel'],['signaux','Signaux du moteur'],['backtest','Backtests']];
+  const navigationJournal=()=>React.createElement('section',{className:'journal-navigation'},
+    React.createElement('h2',null,'Journal & recherche'),
+    React.createElement('p',null,'Les saisies manuelles, le suivi automatique et les simulations historiques sont des registres distincts. Aucun ordre courtier n’est exécuté ici.'),
+    React.createElement('div',{className:'strategy-filter-row'},...ongletsJournal.map(([k,label])=>React.createElement('button',{key:k,type:'button',className:'strategy-filter'+(vueJournal===k?' selected':''),'aria-pressed':vueJournal===k,onClick:()=>setVueJournal(k)},label))));
+  const vueRecherche=()=>React.createElement(React.Fragment,null,navigationJournal(),vueJournal==='signaux'?
+    React.createElement(React.Fragment,null,React.createElement(StatutDirectPanel),React.createElement(JournalSignauxPanel)):
+    React.createElement(BacktestPanel));
+
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -6120,6 +6130,7 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
   // Report d'un plan vers le journal (bouton « Enregistrer ce trade » / « ce signal »)
   useEffect(() => {
     if (!prefill) return;
+    setVueJournal('registre');
     setForm(f => ({
       ...f,
       pair: prefill.pair || f.pair,
@@ -6212,21 +6223,20 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
 
   const stratTitle = id => (strategies.find(s => s.id === id) || {}).title || id;
 
+  if (vueJournal !== 'registre') return vueRecherche();
   if (loading) return <div className="panel" style={{ padding:22 }}><Skeleton h={120} /></div>;
 
   return (
     <>
       {/* Le devenir des signaux du moteur, en tête du journal : c'est la seule
           partie qui ne dépend pas d'une saisie manuelle. */}
-      <StatutDirectPanel />
-      <JournalSignauxPanel />
-      <BacktestPanel />
+      {navigationJournal()}
 
       <div className="stat-grid" style={{ marginBottom:18 }}>
         <StatTile icon="fa-receipt" label="Trades enregistrés" value={stats?.total || 0} color="#60a5fa" delay={0} />
-        <StatTile icon="fa-bullseye" label="Taux de réussite" value={stats?.winRate ?? 0} decimals={1} suffix=" %" color="#34d399" delay={70} />
-        <StatTile icon="fa-scale-balanced" label="PnL cumulé" value={stats?.pnlTotal ?? 0} decimals={2} color="#f59e0b" delay={140} />
-        <StatTile icon="fa-wave-square" label="RR moyen" value={stats?.rrAvg ?? 0} decimals={2} color="var(--accent2)" delay={210} />
+        <StatTile icon="fa-bullseye" label="Taux de réussite" value={stats?.winRate ?? '—'} decimals={1} suffix=" %" color="#34d399" delay={70} />
+        <StatTile icon="fa-scale-balanced" label="PnL déclaré" value={stats?.pnlTotal ?? '—'} decimals={2} color="#f59e0b" delay={140} />
+        <StatTile icon="fa-wave-square" label="RR moyen" value={stats?.rrAvg ?? '—'} decimals={2} color="var(--accent2)" delay={210} />
       </div>
 
       {stats && (stats.wins > 0 || stats.losses > 0) && (
@@ -6282,7 +6292,7 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
       <div className="panel" style={{ padding:20, marginBottom:16 }}>
         <h3 style={{ margin:'0 0 4px', fontSize:15 }}>Nouveau trade</h3>
         <p style={{ margin:'0 0 14px', color:'var(--muted)', fontSize:12.5 }}>
-          Enregistre ce que tu prends réellement. Le résultat est déduit du prix de sortie.
+          Saisie manuelle ou simulation locale. Aucun ordre n’est envoyé au courtier.
         </p>
         <form onSubmit={create} style={{ display:'grid', gap:12,
           gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))' }}>
@@ -6352,7 +6362,7 @@ function Journal({ prefill, onPrefillUsed, strategies = [] }) {
           const t0 = parseFloat(String(form.tp).replace(',','.'));
           if (!isFinite(e0) || !isFinite(s0)) return null;
           const risk = Math.abs(e0 - s0);
-          const rr = isFinite(t0) ? (Math.abs(t0 - e0) / risk) : null;
+          const rr = isFinite(t0) && risk>0 ? (Math.abs(t0 - e0) / risk) : null;
           return <p style={{ margin:'12px 0 0', fontSize:12.5, color:'var(--muted)' }}>
             Risque par unité : <b style={{color:'#fff'}}>{risk.toFixed(4)}</b>
             {rr !== null && <> · Ratio prévu : <b style={{color:'#fff'}}>{rr.toFixed(2)}R</b></>}
