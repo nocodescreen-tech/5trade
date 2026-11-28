@@ -9,6 +9,37 @@
 const path = require('path');
 const WebSocket = require(require.resolve('ws', { paths: [path.join(__dirname, '..')] }));
 const DB = require('../core/db');
+const crypto = require('node:crypto');
+
+function encryptionKey() {
+  const raw = process.env.DERIV_TOKEN_KEY || '';
+  if (!/^[a-fA-F0-9]{64}$/.test(raw)) throw new Error('DERIV_TOKEN_KEY absent ou invalide : configurez une clé hexadécimale de 32 octets côté serveur');
+  return Buffer.from(raw, 'hex');
+}
+function protectConfig(cfg) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey(), iv);
+  cipher.setAAD(Buffer.from('5trade:deriv:v1'));
+  const encrypted = Buffer.concat([cipher.update(cfg.apiToken, 'utf8'), cipher.final()]);
+  const { apiToken, ...publicFields } = cfg;
+  return { ...publicFields, tokenEncrypted: { v: 1, iv: iv.toString('hex'), tag: cipher.getAuthTag().toString('hex'), data: encrypted.toString('hex') } };
+}
+function unprotectConfig(cfg) {
+  if (!cfg?.tokenEncrypted) return cfg;
+  const t = cfg.tokenEncrypted;
+  try {
+    if (t.v !== 1) throw new Error('version');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', encryptionKey(), Buffer.from(t.iv, 'hex'));
+    decipher.setAAD(Buffer.from('5trade:deriv:v1'));
+    decipher.setAuthTag(Buffer.from(t.tag, 'hex'));
+    const apiToken = Buffer.concat([decipher.update(Buffer.from(t.data, 'hex')), decipher.final()]).toString('utf8');
+    const { tokenEncrypted, ...fields } = cfg;
+    return { ...fields, apiToken };
+  } catch {
+    throw new Error('Deriv : token illisible ou clé de chiffrement incorrecte. Vérifiez DERIV_TOKEN_KEY.');
+  }
+}
+
 
 const DEFAULT_APP_ID = process.env.DERIV_APP_ID || '';
 const BASE = 'https://api.derivws.com';
@@ -148,6 +179,7 @@ class DerivClient {
    * Enregistre la configuration Deriv dans la couche de persistance
    */
   async enregistrer(appId, apiToken, accountId = null) {
+    try { encryptionKey(); } catch (err) { return { success: false, error: err.message }; }
     const test = await this.verifierEtAutoriser(appId, apiToken, accountId);
     if (!test.ok) {
       return { success: false, error: test.error, accounts: test.accounts || [] };
@@ -159,7 +191,7 @@ class DerivClient {
       updatedAt: new Date().toISOString(),
       actif: true
     };
-    await DB.kvEcrire('deriv_config', config);
+    await DB.kvEcrire('deriv_config', protectConfig(config));
     this._cachedConfig = config;
     return {
       success: true,
@@ -173,7 +205,11 @@ class DerivClient {
    */
   async lireConfig() {
     if (this._cachedConfig) return this._cachedConfig;
-    const cfg = await DB.kvLire('deriv_config', null);
+    const stored = await DB.kvLire('deriv_config', null);
+    const cfg = unprotectConfig(stored);
+    if (cfg?.apiToken && !stored.tokenEncrypted) {
+      await DB.kvEcrire('deriv_config', protectConfig(cfg));
+    }
     this._cachedConfig = cfg;
     return cfg;
   }
@@ -191,9 +227,7 @@ class DerivClient {
       };
     }
     // Token masqué pour la sécurité (ex: a1b2••••••••w9z0)
-    const tokenMasque = cfg.apiToken.length > 8
-      ? `${cfg.apiToken.slice(0, 4)}••••••••${cfg.apiToken.slice(-4)}`
-      : '••••••••';
+    const tokenMasque = '••••••••';
 
     return {
       connecte: true,
@@ -216,7 +250,7 @@ class DerivClient {
     if (test.ok && test.account) {
       cfg.account = test.account;
       cfg.updatedAt = new Date().toISOString();
-      await DB.kvEcrire('deriv_config', cfg);
+      await DB.kvEcrire('deriv_config', protectConfig(cfg));
       this._cachedConfig = cfg;
       return test.account;
     }
