@@ -28,7 +28,9 @@ const Diff = require('./diff-versionne');
 const Narrateur = require('./narrateur');
 const Journal = require('../engine/journal-signaux');
 
-const INSTRUMENTS = ['frxEURUSD', 'frxGBPUSD', 'frxUSDJPY', 'frxXAUUSD'];
+const { obtenirActifs } = require('../core/instruments-actifs');
+const instant = value=>Number.isFinite(value)?value:typeof value==='string'?Date.parse(value):NaN;
+const resultatNetConnu = s=>s.cout?.connu===true&&Number.isFinite(s.r);
 const CLOS = new Set(['tp1', 'tp2', 'be', 'sl', 'expire']);
 const JOUR_MS = 24 * 3600 * 1000;
 
@@ -54,8 +56,8 @@ function signauxClos(limite = 5000) {
 function metricsDepuisJournal(jours = 14) {
   const depuis = Date.now() - jours * JOUR_MS;
   const clos = signauxClos().filter(s => {
-    const t = Date.parse(s.cloture_at || s.at || s.entree_at || '');
-    return Number.isFinite(t) && t >= depuis && Number.isFinite(Number(s.r));
+    const t = instant(s.leveLe ?? s.cloture_at);
+    return Number.isFinite(t) && t >= depuis && t<=Date.now() && resultatNetConnu(s);
   });
   if (!clos.length) return { expectancy: null, winRate: null, trades: 0, source: 'journal (0 signal clos)' };
 
@@ -76,20 +78,20 @@ function tradesDeLaJournee(jour) {
   const debut = new Date(jour); debut.setUTCHours(0, 0, 0, 0);
   const fin = new Date(debut.getTime() + JOUR_MS);
   return signauxClos().filter(s => {
-    const t = Date.parse(s.cloture_at || s.at || '');
-    return Number.isFinite(t) && t >= debut.getTime() && t < fin.getTime();
+    const t = instant(s.leveLe ?? s.cloture_at);
+    return Number.isFinite(t) && t >= debut.getTime() && t < fin.getTime() && resultatNetConnu(s);
   }).map(s => ({
-    id: s.id,
+    id: s.cle || s.id,
     instrument: s.symbol,
     direction: s.sens || s.direction,
     entree_at: s.entree_at || (s.at ? new Date(s.at).toISOString() : null),
-    cloture_at: s.cloture_at || null,
+    cloture_at: Number.isFinite(instant(s.leveLe ?? s.cloture_at)) ? new Date(instant(s.leveLe ?? s.cloture_at)).toISOString() : null,
     entree_prix: s.entree,
     stop_prix: s.stop,
     tp1_prix: s.objectifs && s.objectifs[0],
     tp2_prix: s.objectifs && s.objectifs[1],
     issue: s.resultat,
-    r_realise: Number(s.r),
+    r_realise: s.r, source:'journal_simule', frais_connus:true,
     duree_minutes: Number(s.duree_minutes) || null,
     regime_entree: s.regime || null,
     killzone_entree: s.killzone || null,
@@ -99,15 +101,16 @@ function tradesDeLaJournee(jour) {
 
 /** Agrège plusieurs rejeux en un bilan unique. */
 function bilanRejeux(rejeux) {
-  const trades = (rejeux || []).flatMap(r => (r && Array.isArray(r.trades) ? r.trades : []));
-  if (!trades.length) return { n: 0, expectancyR: null, winRate: null, fraisConnus: false };
+  const tous = (rejeux || []).flatMap(r => (r && Array.isArray(r.trades) ? r.trades : []));
+  const trades=tous.filter(t=>t.frais_connus===true&&Number.isFinite(t.r_net));
+  if (!trades.length) return { n: 0, expectancyR: null, winRate: null, fraisConnus: false, exclus:tous.length };
   const r = trades.reduce((a, t) => a + (Number(t.r_net) || 0), 0);
   const g = trades.filter(t => Number(t.r_net) > 0).length;
   return {
     n: trades.length,
     expectancyR: +(r / trades.length).toFixed(4),
     winRate: +((g / trades.length) * 100).toFixed(1),
-    fraisConnus: trades.every(t => t.frais_connus === true)
+    fraisConnus: trades.length===tous.length, exclus:tous.length-trades.length
   };
 }
 
@@ -124,7 +127,7 @@ async function boucleQuotidienne({ market, tradesVeille, metrics14j, jour } = {}
   const hier = jour ? new Date(jour) : new Date(Date.now() - JOUR_MS);
 
   // 1. Post-mortems des trades réels (fournis, sinon lus dans le journal).
-  const trades = Array.isArray(tradesVeille) && tradesVeille.length ? tradesVeille : tradesDeLaJournee(hier);
+  const trades = (Array.isArray(tradesVeille) ? tradesVeille : tradesDeLaJournee(hier)).filter(t=>t.frais_connus===true&&Number.isFinite(t.r_realise));
   const candidats = [];
   for (const t of trades) {
     let pm;
@@ -148,17 +151,21 @@ async function boucleQuotidienne({ market, tradesVeille, metrics14j, jour } = {}
   // 2. Rejeu des 4 instruments PAR LE CERVEAU RÉEL (mêmes modules que le direct).
   const seuils = await Ajusteur.charger();
   const rejeux = [];
-  for (const instrument of INSTRUMENTS) {
+  let actifs=[];
+  try { actifs=obtenirActifs().filter(a=>a.famille==='forex'||a.famille==='metaux'); } catch { /* aucune sélection utilisable */ }
+  for (const actif of actifs) {
+    const instrument=actif.symbol;
     if (!market || typeof market.getCandles !== 'function') {
       rejeux.push({ instrument, trades: [], erreur: 'source de marché indisponible', motifs: ['pas de bougies : rejeu impossible'] });
       continue;
     }
     try {
-      const h1 = await market.getCandles(instrument, '1h', 400);
-      const m5 = await market.getCandles(instrument, '5m', 1500);
-      const r = Cerveau.rejouer({ instrument, h1, m5, seuils });
+      const h1 = await market.getCandles(instrument, '1h', 400, actif.provider);
+      const m5 = await market.getCandles(instrument, '5m', 1000, actif.provider);
+      if(h1.offline||m5.offline||h1.provider!==actif.provider||m5.provider!==actif.provider)throw Error('Source non vérifiée');
+      const r = Cerveau.rejouer({ instrument, h1:h1.candles, m5:m5.candles, seuils });
       rejeux.push({ instrument, ...r });
-      candidats.push(...Cerveau.candidatsDepuisMetrics(r.metrics, {
+      if(r.metrics.fraisConnus===true) candidats.push(...Cerveau.candidatsDepuisMetrics(r.metrics, {
         minTrades: Ajusteur.LIMITES.tradesMinPourAjustement
       }));
     } catch (e) {
@@ -176,15 +183,13 @@ async function boucleQuotidienne({ market, tradesVeille, metrics14j, jour } = {}
     const preuve = c.preuve || { trades: Number(c.preuve && c.preuve.n) || 0 };
     const d = c.type === 'bascule'
       ? await Ajusteur.proposerBascule(c.parametre, c.valeurCandidate, { trades: Number(preuve.n) || 0, ...preuve })
-      : await Ajusteur.proposer(c.parametre, Number(c.nouveau !== undefined ? c.nouveau : c.valeurCandidate));
+      : await Ajusteur.proposer(c.parametre, Number(c.nouveau !== undefined ? c.nouveau : c.valeurCandidate), {trades: Number(preuve.n)||0,...preuve});
     decisions.push({ ...c, ...d });
   }
 
   // 5. Shadow runs arrivés à échéance : revue humaine ou abandon, jamais oubli.
-  const promotions = await Ajusteur.promouvoirEchues({
-    expectancyR: Number.isFinite(Number(bilan.expectancyR)) ? Number(bilan.expectancyR) : Number(mesures.expectancy),
-    trades: bilan.n || Number(mesures.trades) || 0
-  });
+  // A global historical replay is not candidate-specific out-of-sample evidence.
+  const promotions = await Ajusteur.promouvoirEchues({});
   const shadow = await Ajusteur.shadowEnCours();
 
   // 6. Rétrograde les croyances anciennes.
@@ -213,7 +218,7 @@ async function boucleQuotidienne({ market, tradesVeille, metrics14j, jour } = {}
   });
 
   // 8. Garde-fou d'arrêt : espérance réelle négative → retour arrière recommandé.
-  const expectancyReelle = Number(mesures.expectancy);
+  const expectancyReelle = mesures.expectancy;
   if (Number.isFinite(expectancyReelle) && mesures.trades >= Ajusteur.LIMITES.tradesMinPourAjustement
       && expectancyReelle < Ajusteur.LIMITES.expectancyMin14j) {
     console.warn(`[apprentissage] espérance ${expectancyReelle} R sur ${mesures.trades} trades — retour arrière requis`);
