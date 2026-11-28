@@ -4700,16 +4700,23 @@ function TradeSetupCard({
         setTimeout(() => setDemoStatus(''), 3000);
       }
     },
-    title: "Créer une entrée de journal simulée, sans ordre courtier"
+    title: "Cr\xE9er une entr\xE9e de journal simul\xE9e, sans ordre courtier"
   }, /*#__PURE__*/React.createElement("i", {
     className: "fas fa-play",
     style: {
       marginRight: 5
     }
   }), demoStatus || 'Journal simulé'), /*#__PURE__*/React.createElement("span", {
-    className: "btn sm ghost", role: "status",
-    title: "Exécution réelle indisponible : contrôles courtier en cours de validation"
-  }, /*#__PURE__*/React.createElement("i", {className: "fas fa-lock", style: {marginRight: 5}, "aria-hidden": "true"}), "Deriv · Lecture seule"), onToJournal && /*#__PURE__*/React.createElement("button", {
+    className: "btn sm ghost",
+    role: "status",
+    title: "Ex\xE9cution r\xE9elle indisponible : contr\xF4les courtier en cours de validation"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fas fa-lock",
+    style: {
+      marginRight: 5
+    },
+    "aria-hidden": "true"
+  }), "Deriv \xB7 Lecture seule"), onToJournal && /*#__PURE__*/React.createElement("button", {
     className: "btn sm ghost",
     style: {
       padding: '5px 10px',
@@ -4754,7 +4761,7 @@ function TradeSetupCard({
       fontSize: 11,
       color: '#94a3b8'
     }
-  }, /*#__PURE__*/React.createElement("span", null, "Gestion du stop et sorties partielles : non automatisées."), /*#__PURE__*/React.createElement("span", null, "Visualisation : niveaux trac\xE9s en direct sur le graphique ci-contre.")));
+  }, /*#__PURE__*/React.createElement("span", null, "Gestion du stop et sorties partielles : non automatis\xE9es."), /*#__PURE__*/React.createElement("span", null, "Visualisation : niveaux trac\xE9s en direct sur le graphique ci-contre.")));
 }
 
 // ── Poste d'Analyse de Structure de Marché & Flux Universel ──────────────
@@ -6696,7 +6703,7 @@ function PlansAttente({
       fontSize: 11,
       color: 'var(--dim)'
     }
-  }, "seuils v", seuils.version || '?', " \xB7 TP1 ", seuils.tp1_r ?? 1.27, " R / TP2 ", seuils.tp2_r ?? 2, " R", shadow.length ? ` · ${shadow.length} shadow` : '', ' · ', /*#__PURE__*/React.createElement("i", {
+  }, "seuils v", seuils.version || '?', " \xB7 TP1 ", seuils.tp1_r ?? 1.27, " R / TP2 ", seuils.tp2_r ?? 2, " R", shadow.length ? ` · ${shadow.length} candidature(s)` : '', ' · ', /*#__PURE__*/React.createElement("i", {
     className: `fas fa-chevron-${ouvert ? 'up' : 'down'}`
   }))), ouvert && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6810,7 +6817,7 @@ function shadowsListe(shadow) {
       marginRight: 6,
       color: TT.info
     }
-  }), "R\xE9glages en shadow run (test\xE9s 3 jours avant promotion)"), shadow.map(c => /*#__PURE__*/React.createElement("div", {
+  }), "Candidatures d'apprentissage \u2014 aucune application automatique"), shadow.map(c => /*#__PURE__*/React.createElement("div", {
     key: c.id,
     style: {
       display: 'flex',
@@ -6823,7 +6830,7 @@ function shadowsListe(shadow) {
       color: '#93c5fd',
       minWidth: 210
     }
-  }, c.parametre), /*#__PURE__*/React.createElement("span", null, "\u2192 ", String(c.valeur)), /*#__PURE__*/React.createElement("span", null, "\xB7 promotion possible le ", String(c.applicable_at).slice(0, 10)))));
+  }, c.parametre), /*#__PURE__*/React.createElement("span", null, "\u2192 ", String(c.valeur)), /*#__PURE__*/React.createElement("span", null, "\xB7 ", c.statut === 'en_revue' ? 'preuves suffisantes, revue humaine requise' : `shadow jusqu'au ${String(c.applicable_at).slice(0, 10)}`))));
 }
 
 /* ══════════════════════════ ÉCRAN DIRECT ══════════════════════════ */
@@ -9093,90 +9100,348 @@ function StatutDirectPanel() {
   }, age(s.ageMs), s.frais ? '' : ' (figé)')))))));
 }
 function ResearchTerminalPanel() {
-  const h=React.createElement;
-  const [gold,setGold]=useState(null),[replay,setReplay]=useState(null),[busy,setBusy]=useState(''),[error,setError]=useState('');
-  const [tf,setTf]=useState('1h');
-  async function request(path,body,kind){
-    setBusy(kind);setError('');
-    try{
-      const r=await api(path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{});
-      const d=await r.json();
-      if(!r.ok||!d.success)throw Error(d.error||'Service indisponible');
-      if(kind==='gold')setGold(d);else setReplay(d);
-    }catch(e){setError(e.message);}finally{setBusy('');}
+  const h = React.createElement;
+  const [gold, setGold] = useState(null),
+    [replay, setReplay] = useState(null),
+    [busy, setBusy] = useState(''),
+    [error, setError] = useState('');
+  const [tf, setTf] = useState('1h');
+  async function request(path, body, kind) {
+    setBusy(kind);
+    setError('');
+    try {
+      const r = await api(path, body ? {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      } : {});
+      const d = await r.json();
+      if (!r.ok || !d.success) throw Error(d.error || 'Service indisponible');
+      if (kind === 'gold') setGold(d);else setReplay(d);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy('');
+    }
   }
-  const rows=replay?.visible||[];
-  const low=rows.length?Math.min(...rows.map(c=>c.l)):0;
-  const high=rows.length?Math.max(...rows.map(c=>c.h)):1;
-  const y=p=>10+(high-p)/Math.max(high-low,1e-8)*180;
-  const fmt=v=>Number.isFinite(v)?v.toLocaleString('fr-FR',{maximumFractionDigits:4}):'—';
-  const btn=(label,fn,disabled=false)=>h('button',{type:'button',className:'btn sm ghost',onClick:fn,disabled:!!busy||disabled},label);
-  return h('section',{className:'panel',style:{padding:18,marginBottom:18}},
-    h('header',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap'}},
-      h('div',null,h('h3',{style:{margin:0,fontSize:17}},'Terminal de recherche'),h('p',{style:{fontSize:12,color:'var(--muted)',margin:'4px 0'}},'XAUUSD · données macro et rejeu éducatif · aucun ordre')),
-      btn(busy==='gold'?'Chargement…':'Actualiser le contexte or',()=>request('/market/gold-context?tf='+tf,null,'gold'))),
-    error&&h('p',{role:'alert',style:{color:'#eab308'}},error),
-    gold&&h('div',{style:{padding:'12px 0',borderBottom:'1px solid var(--border,#333)'}},
-      h('p',null,'Calendrier : '+(gold.macro?.verifie?(gold.macro.bloque?'Bloqué':'Vérifié'):'Non vérifié')),
-      h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(145px,1fr))',gap:12}},(gold.goldMacro?.series||[]).map(s=>h('div',{key:s.id,style:{border:'1px solid var(--border,#333)',padding:12,borderRadius:8}},
-        h('div',{style:{fontSize:11,color:'var(--muted)'}},s.label),h('strong',{style:{fontSize:21}},s.available?fmt(s.latest):'Indisponible'),h('div',{style:{fontSize:11}},s.date||'Date inconnue'),h('div',{style:{fontSize:12}},'Variation 5 observations : '+fmt(s.change5))))),
-      h('p',{style:{fontSize:11,color:'var(--muted)'}},gold.goldMacro?.note)),
-    h('div',{style:{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',margin:'16px 0'}},
-      h('label',null,'Unité : ',h('select',{value:tf,disabled:!!busy,onChange:e=>{setTf(e.target.value);setReplay(null);setGold(null);}},['5m','15m','1h','4h','1d'].map(t=>h('option',{key:t,value:t},t)))),
-      btn('Nouveau rejeu',()=>request('/replay/start',{symbol:'frxXAUUSD',provider:'deriv',tf},'replay')),
-      replay&&btn('−1',()=>request('/replay/step',{id:replay.id,delta:-1},'replay'),replay.cursor<=30),
-      replay&&btn('+1 bougie',()=>request('/replay/step',{id:replay.id,delta:1},'replay'),replay.done),
-      replay&&btn('+5',()=>request('/replay/step',{id:replay.id,delta:5},'replay'),replay.done)),
-    replay&&h('div',null,
-      h('p',{style:{fontSize:12}},new Date(replay.asOf).toLocaleString('fr-FR',{timeZone:'Africa/Kinshasa'})+' Kinshasa · '+(replay.cursor+1)+' / '+replay.total),
-      h('svg',{viewBox:'0 0 720 210',width:'100%',role:'img','aria-label':'Bougies historiques révélées progressivement'},
-        rows.map((c,i)=>{const w=690/rows.length,x=10+(i+.5)*w,color=c.c>=c.o?'#16a34a':'#dc2626';return h('g',{key:c.t},h('line',{x1:x,x2:x,y1:y(c.h),y2:y(c.l),stroke:color,strokeWidth:1}),h('rect',{x:x-w*.3,y:Math.min(y(c.o),y(c.c)),width:Math.max(1,w*.6),height:Math.max(1,Math.abs(y(c.o)-y(c.c))),fill:color}));}),
-        h('text',{x:715,y:10,textAnchor:'end',fill:'currentColor',fontSize:10},fmt(high)),h('text',{x:715,y:207,textAnchor:'end',fill:'currentColor',fontSize:10},fmt(low))),
-      h('p',{style:{fontSize:12,color:'var(--muted)'}},'Dernière clôture : '+fmt(rows.at(-1)?.c)+' · Les bougies futures ne sont pas transmises.')),
-    busy&&h('p',{role:'status',style:{fontSize:12}},'Chargement…'));
+  const rows = replay?.visible || [];
+  const low = rows.length ? Math.min(...rows.map(c => c.l)) : 0;
+  const high = rows.length ? Math.max(...rows.map(c => c.h)) : 1;
+  const y = p => 10 + (high - p) / Math.max(high - low, 1e-8) * 180;
+  const fmt = v => Number.isFinite(v) ? v.toLocaleString('fr-FR', {
+    maximumFractionDigits: 4
+  }) : '—';
+  const btn = (label, fn, disabled = false) => h('button', {
+    type: 'button',
+    className: 'btn sm ghost',
+    onClick: fn,
+    disabled: !!busy || disabled
+  }, label);
+  return h('section', {
+    className: 'panel',
+    style: {
+      padding: 18,
+      marginBottom: 18
+    }
+  }, h('header', {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 12,
+      flexWrap: 'wrap'
+    }
+  }, h('div', null, h('h3', {
+    style: {
+      margin: 0,
+      fontSize: 17
+    }
+  }, 'Terminal de recherche'), h('p', {
+    style: {
+      fontSize: 12,
+      color: 'var(--muted)',
+      margin: '4px 0'
+    }
+  }, 'XAUUSD · données macro et rejeu éducatif · aucun ordre')), btn(busy === 'gold' ? 'Chargement…' : 'Actualiser le contexte or', () => request('/market/gold-context?tf=' + tf, null, 'gold'))), error && h('p', {
+    role: 'alert',
+    style: {
+      color: '#eab308'
+    }
+  }, error), gold && h('div', {
+    style: {
+      padding: '12px 0',
+      borderBottom: '1px solid var(--border,#333)'
+    }
+  }, h('p', null, 'Calendrier : ' + (gold.macro?.verifie ? gold.macro.bloque ? 'Bloqué' : 'Vérifié' : 'Non vérifié')), h('div', {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit,minmax(145px,1fr))',
+      gap: 12
+    }
+  }, (gold.goldMacro?.series || []).map(s => h('div', {
+    key: s.id,
+    style: {
+      border: '1px solid var(--border,#333)',
+      padding: 12,
+      borderRadius: 8
+    }
+  }, h('div', {
+    style: {
+      fontSize: 11,
+      color: 'var(--muted)'
+    }
+  }, s.label), h('strong', {
+    style: {
+      fontSize: 21
+    }
+  }, s.available ? fmt(s.latest) : 'Indisponible'), h('div', {
+    style: {
+      fontSize: 11
+    }
+  }, s.date || 'Date inconnue'), h('div', {
+    style: {
+      fontSize: 12
+    }
+  }, 'Variation 5 observations : ' + fmt(s.change5))))), h('p', {
+    style: {
+      fontSize: 11,
+      color: 'var(--muted)'
+    }
+  }, gold.goldMacro?.note)), h('div', {
+    style: {
+      display: 'flex',
+      gap: 8,
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      margin: '16px 0'
+    }
+  }, h('label', null, 'Unité : ', h('select', {
+    value: tf,
+    disabled: !!busy,
+    onChange: e => {
+      setTf(e.target.value);
+      setReplay(null);
+      setGold(null);
+    }
+  }, ['5m', '15m', '1h', '4h', '1d'].map(t => h('option', {
+    key: t,
+    value: t
+  }, t)))), btn('Nouveau rejeu', () => request('/replay/start', {
+    symbol: 'frxXAUUSD',
+    provider: 'deriv',
+    tf
+  }, 'replay')), replay && btn('−1', () => request('/replay/step', {
+    id: replay.id,
+    delta: -1
+  }, 'replay'), replay.cursor <= 30), replay && btn('+1 bougie', () => request('/replay/step', {
+    id: replay.id,
+    delta: 1
+  }, 'replay'), replay.done), replay && btn('+5', () => request('/replay/step', {
+    id: replay.id,
+    delta: 5
+  }, 'replay'), replay.done)), replay && h('div', null, h('p', {
+    style: {
+      fontSize: 12
+    }
+  }, new Date(replay.asOf).toLocaleString('fr-FR', {
+    timeZone: 'Africa/Kinshasa'
+  }) + ' Kinshasa · ' + (replay.cursor + 1) + ' / ' + replay.total), h('svg', {
+    viewBox: '0 0 720 210',
+    width: '100%',
+    role: 'img',
+    'aria-label': 'Bougies historiques révélées progressivement'
+  }, rows.map((c, i) => {
+    const w = 690 / rows.length,
+      x = 10 + (i + .5) * w,
+      color = c.c >= c.o ? '#16a34a' : '#dc2626';
+    return h('g', {
+      key: c.t
+    }, h('line', {
+      x1: x,
+      x2: x,
+      y1: y(c.h),
+      y2: y(c.l),
+      stroke: color,
+      strokeWidth: 1
+    }), h('rect', {
+      x: x - w * .3,
+      y: Math.min(y(c.o), y(c.c)),
+      width: Math.max(1, w * .6),
+      height: Math.max(1, Math.abs(y(c.o) - y(c.c))),
+      fill: color
+    }));
+  }), h('text', {
+    x: 715,
+    y: 10,
+    textAnchor: 'end',
+    fill: 'currentColor',
+    fontSize: 10
+  }, fmt(high)), h('text', {
+    x: 715,
+    y: 207,
+    textAnchor: 'end',
+    fill: 'currentColor',
+    fontSize: 10
+  }, fmt(low))), h('p', {
+    style: {
+      fontSize: 12,
+      color: 'var(--muted)'
+    }
+  }, 'Dernière clôture : ' + fmt(rows.at(-1)?.c) + ' · Les bougies futures ne sont pas transmises.')), busy && h('p', {
+    role: 'status',
+    style: {
+      fontSize: 12
+    }
+  }, 'Chargement…'));
 }
-
 function PaperObservationsPanel() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const h = React.createElement;
   async function refresh() {
-    setBusy(true); setError('');
+    setBusy(true);
+    setError('');
     try {
       const response = await api('/paper-observations?limit=50');
       const body = await response.json();
       if (!response.ok || !body.success) throw new Error(body.error || 'Suivi indisponible');
       setData(body);
-    } catch (e) { setError(e.message); }
-    finally { setBusy(false); }
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
   }
-  useEffect(() => { refresh(); }, []);
-  const labels = {pending:'En cours', tp1_touched:'TP1 touché', tp2_touched:'TP2 touché', stop_touched:'Stop touché',
-    ambiguous_entry_bar:'Entrée ambiguë', ambiguous_exit_bar:'Sortie ambiguë', data_gap:'Données manquantes',
-    invalid_data:'Données invalides', expired_after_entry:'Expiré après entrée', expired_untriggered:'Expiré sans entrée'};
+  useEffect(() => {
+    refresh();
+  }, []);
+  const labels = {
+    pending: 'En cours',
+    tp1_touched: 'TP1 touché',
+    tp2_touched: 'TP2 touché',
+    stop_touched: 'Stop touché',
+    ambiguous_entry_bar: 'Entrée ambiguë',
+    ambiguous_exit_bar: 'Sortie ambiguë',
+    data_gap: 'Données manquantes',
+    invalid_data: 'Données invalides',
+    expired_after_entry: 'Expiré après entrée',
+    expired_untriggered: 'Expiré sans entrée'
+  };
   const statusLabel = k => labels[k] || k;
-  const fmt = v => Number.isFinite(v) ? Number(v).toLocaleString('fr-FR', {maximumFractionDigits: 6}) : '—';
-  const cells = (tag, values) => values.map((v,i)=>h(tag,{key:i,style:{padding:'10px 12px',textAlign:i>3?'right':'left',whiteSpace:'nowrap',borderBottom:'1px solid var(--border, #293241)'}},v));
-  return h('section',{className:'panel',style:{marginBottom:16,padding:16}},
-    h('header',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}},
-      h('div',null,h('h3',{style:{margin:'0 0 4px',fontSize:16}},'Recherche prospective'),
-        h('p',{style:{margin:0,fontSize:12,color:'var(--muted)'}},'Observations OHLC horodatées. Aucun ordre courtier, aucun P&L simulé.')),
-      h('button',{type:'button',className:'btn sm ghost',disabled:busy,onClick:refresh},busy?'Chargement…':'Actualiser')),
-    error && h('p',{role:'alert',style:{color:'#f59e0b',fontSize:12}},error),
-    data?.workerError && h('p',{role:'status',style:{color:'#f59e0b',fontSize:12}},data.workerError),
-    data && h('div',null,
-      h('p',{style:{fontSize:12,color:'var(--muted)'}},'Dernière mise à jour : '+(data.lastRun?new Date(data.lastRun).toLocaleString('fr-FR'):'pas encore exécutée')),
-      h('div',{style:{display:'flex',flexWrap:'wrap',gap:12,margin:'12px 0'}},(data.summary||[]).map(r=>h('div',{key:r.status,style:{borderLeft:'2px solid var(--border, #475569)',padding:'4px 10px'}},h('strong',{style:{display:'block',fontSize:18,fontVariantNumeric:'tabular-nums'}},r.count),h('span',{style:{fontSize:12,color:'var(--muted)'}},statusLabel(r.status))))),
-      (data.observations||[]).length ? h('div',{style:{overflowX:'auto'}},h('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},h('thead',null,h('tr',null,cells('th',['Date','Instrument','Stratégie','Issue','Entrée','SL','TP1','TP2']))),
-        h('tbody',null,data.observations.map(r=>{const o=r.snapshot||{};return h('tr',{key:o.id},cells('td',[
-          o.observedAt?new Date(o.observedAt).toLocaleString('fr-FR'):'—',
-          [o.symbol,o.timeframe].filter(Boolean).join(' · '),[o.strategyId,o.strategyVersion].filter(v=>v!==null&&v!==undefined).join(' · '),
-          statusLabel(r.outcome?.status||'pending'),fmt(o.entry),fmt(o.stop),fmt(o.targets?.[0]),fmt(o.targets?.[1])
-        ]));})))) : h('p',{style:{fontSize:13,color:'var(--muted)'}},'Aucune observation enregistrée. Une stratégie versionnée, des coûts connus et un signal confirmé sont requis.')),
-    !data&&!error&&h('p',{role:'status',style:{fontSize:12,color:'var(--muted)'}},'Chargement du suivi…'));
+  const fmt = v => Number.isFinite(v) ? Number(v).toLocaleString('fr-FR', {
+    maximumFractionDigits: 6
+  }) : '—';
+  const cells = (tag, values) => values.map((v, i) => h(tag, {
+    key: i,
+    style: {
+      padding: '10px 12px',
+      textAlign: i > 3 ? 'right' : 'left',
+      whiteSpace: 'nowrap',
+      borderBottom: '1px solid var(--border, #293241)'
+    }
+  }, v));
+  return h('section', {
+    className: 'panel',
+    style: {
+      marginBottom: 16,
+      padding: 16
+    }
+  }, h('header', {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      flexWrap: 'wrap'
+    }
+  }, h('div', null, h('h3', {
+    style: {
+      margin: '0 0 4px',
+      fontSize: 16
+    }
+  }, 'Recherche prospective'), h('p', {
+    style: {
+      margin: 0,
+      fontSize: 12,
+      color: 'var(--muted)'
+    }
+  }, 'Observations OHLC horodatées. Aucun ordre courtier, aucun P&L simulé.')), h('button', {
+    type: 'button',
+    className: 'btn sm ghost',
+    disabled: busy,
+    onClick: refresh
+  }, busy ? 'Chargement…' : 'Actualiser')), error && h('p', {
+    role: 'alert',
+    style: {
+      color: '#f59e0b',
+      fontSize: 12
+    }
+  }, error), data?.workerError && h('p', {
+    role: 'status',
+    style: {
+      color: '#f59e0b',
+      fontSize: 12
+    }
+  }, data.workerError), data && h('div', null, h('p', {
+    style: {
+      fontSize: 12,
+      color: 'var(--muted)'
+    }
+  }, 'Dernière mise à jour : ' + (data.lastRun ? new Date(data.lastRun).toLocaleString('fr-FR') : 'pas encore exécutée')), h('div', {
+    style: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 12,
+      margin: '12px 0'
+    }
+  }, (data.summary || []).map(r => h('div', {
+    key: r.status,
+    style: {
+      borderLeft: '2px solid var(--border, #475569)',
+      padding: '4px 10px'
+    }
+  }, h('strong', {
+    style: {
+      display: 'block',
+      fontSize: 18,
+      fontVariantNumeric: 'tabular-nums'
+    }
+  }, r.count), h('span', {
+    style: {
+      fontSize: 12,
+      color: 'var(--muted)'
+    }
+  }, statusLabel(r.status))))), (data.observations || []).length ? h('div', {
+    style: {
+      overflowX: 'auto'
+    }
+  }, h('table', {
+    style: {
+      width: '100%',
+      borderCollapse: 'collapse',
+      fontSize: 12
+    }
+  }, h('thead', null, h('tr', null, cells('th', ['Date', 'Instrument', 'Stratégie', 'Issue', 'Entrée', 'SL', 'TP1', 'TP2']))), h('tbody', null, data.observations.map(r => {
+    const o = r.snapshot || {};
+    return h('tr', {
+      key: o.id
+    }, cells('td', [o.observedAt ? new Date(o.observedAt).toLocaleString('fr-FR') : '—', [o.symbol, o.timeframe].filter(Boolean).join(' · '), [o.strategyId, o.strategyVersion].filter(v => v !== null && v !== undefined).join(' · '), statusLabel(r.outcome?.status || 'pending'), fmt(o.entry), fmt(o.stop), fmt(o.targets?.[0]), fmt(o.targets?.[1])]));
+  })))) : h('p', {
+    style: {
+      fontSize: 13,
+      color: 'var(--muted)'
+    }
+  }, 'Aucune observation enregistrée. Une stratégie versionnée, des coûts connus et un signal confirmé sont requis.')), !data && !error && h('p', {
+    role: 'status',
+    style: {
+      fontSize: 12,
+      color: 'var(--muted)'
+    }
+  }, 'Chargement du suivi…'));
 }
-
 function JournalSignauxPanel() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');

@@ -3716,7 +3716,7 @@ function PlansAttente({ symbol }) {
         )}
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--dim)' }}>
           seuils v{seuils.version || '?'} · TP1 {seuils.tp1_r ?? 1.27} R / TP2 {seuils.tp2_r ?? 2} R
-          {shadow.length ? ` · ${shadow.length} shadow` : ''}
+          {shadow.length ? ` · ${shadow.length} candidature(s)` : ''}
           {' · '}<i className={`fas fa-chevron-${ouvert ? 'up' : 'down'}`}></i>
         </span>
       </div>
@@ -3781,13 +3781,15 @@ function shadowsListe(shadow) {
     <div style={{ marginTop: 9, borderTop: '1px solid ' + TT.line, paddingTop: 8 }}>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
         <i className="fas fa-flask" style={{ marginRight: 6, color: TT.info }}></i>
-        Réglages en shadow run (testés 3 jours avant promotion)
+        Candidatures d'apprentissage — aucune application automatique
       </div>
       {shadow.map(c => (
         <div key={c.id} style={{ display: 'flex', gap: 8, fontSize: 11, color: 'var(--dim)' }}>
           <span style={{ color: '#93c5fd', minWidth: 210 }}>{c.parametre}</span>
           <span>→ {String(c.valeur)}</span>
-          <span>· promotion possible le {String(c.applicable_at).slice(0, 10)}</span>
+          <span>· {c.statut === 'en_revue'
+            ? 'preuves suffisantes, revue humaine requise'
+            : `shadow jusqu'au ${String(c.applicable_at).slice(0, 10)}`}</span>
         </div>
       ))}
     </div>

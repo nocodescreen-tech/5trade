@@ -16,7 +16,7 @@
  *   - les métriques 14 j ne sont plus `{}` : elles se calculent sur les signaux
  *     clos du journal, avec la même définition du gain que l'écran ;
  *   - les candidats passent réellement par l'ajusteur (numérique OU bascule), et
- *     les shadow runs arrivés à échéance sont promus ou abandonnés.
+ *     les shadow runs arrivés à échéance sont soumis à revue ou abandonnés.
  */
 
 const Memoire = require('../memoire');
@@ -180,7 +180,7 @@ async function boucleQuotidienne({ market, tradesVeille, metrics14j, jour } = {}
     decisions.push({ ...c, ...d });
   }
 
-  // 5. Shadow runs arrivés à échéance : promotion ou abandon, jamais oubli.
+  // 5. Shadow runs arrivés à échéance : revue humaine ou abandon, jamais oubli.
   const promotions = await Ajusteur.promouvoirEchues({
     expectancyR: Number.isFinite(Number(bilan.expectancyR)) ? Number(bilan.expectancyR) : Number(mesures.expectancy),
     trades: bilan.n || Number(mesures.trades) || 0

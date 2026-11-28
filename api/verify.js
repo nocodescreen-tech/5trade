@@ -43,6 +43,9 @@ process.env.ALERTS_FICHIER = path.join(os.tmpdir(), `alertes-test-${process.pid}
 // L'historique long et le jeu de données écrivent aussi hors des données réelles.
 process.env.HISTORIQUE_DOSSIER = path.join(os.tmpdir(), `histo-test-${process.pid}`);
 process.env.DATASET_DOSSIER = path.join(os.tmpdir(), `dataset-test-${process.pid}`);
+// Le calendrier se rafraîchit pendant plusieurs tests : le cache versionné ne
+// doit pas devenir sale à chaque vérification locale ou CI.
+process.env.NEWS_CALENDRIER_FICHIER = path.join(os.tmpdir(), `news-calendrier-test-${process.pid}.json`);
 // Le risque aussi : le canonique ne doit pas modifier les plafonds réels.
 process.env.RISQUE_FICHIER = path.join(os.tmpdir(), `risque-test-${process.pid}.json`);
 
@@ -637,8 +640,8 @@ function tinyPng(W = 64, H = 40) {
       memoSerie = out;
       return out;
     };
-    const faux = { getCandles: async () => ({ candles: serie(), provider: 'test' }),
-      listSymbols: () => [{ provider: 'test', providerLabel: 'test' }] };
+    const faux = { getCandles: async () => ({ candles: serie(), provider: 'deriv' }),
+      listSymbols: () => [{ provider: 'deriv', providerLabel: 'Deriv' }] };
 
     // Le chemin de repli ne peut plus alerter (il contournait le risque) : la
     // fixture fournit donc un moteur de décision, comme en production.
@@ -649,7 +652,9 @@ function tinyPng(W = 64, H = 40) {
         return {
           decision: 'ACHAT', raison: 'test', at: dernier.t, price: dernier.c,
           signal: { sens: 'long', force: 0.8, id: 'test',
-            levels: { entry: dernier.c, stop: dernier.c - 2, objectifs: [dernier.c + 2, dernier.c + 4] } },
+            levels: { entry: dernier.c, stop: dernier.c - 2,
+              target1: dernier.c + 4, target2: dernier.c + 6,
+              objectifs: [dernier.c + 4, dernier.c + 6] } },
           signauxRetenus: [{ id: 'test', statut: 'confirme', executable: true }],
           risque: { ok: true, motif: 'test ok' },
           confluence: null
@@ -671,13 +676,13 @@ function tinyPng(W = 64, H = 40) {
     // Symbole RÉEL dans la fixture : les indices synthétiques sont désormais
     // refusés par la surveillance (RNG sans avantage possible), et le test doit
     // prouver l'envoi d'un signal, pas la tolérance aux synthétiques.
-    Al.update({ actif: false, email: 'a@b.co', marches: [{ symbol: 'frxXAUUSD', tf: '15m', provider: 'test' }] });
+    Al.update({ actif: false, email: 'a@b.co', marches: [{ symbol: 'frxXAUUSD', tf: '15m', provider: 'deriv' }] });
     Al.start({ market: faux, signals: Sig, sendMail: async m => envois.push(m), labelOf: () => 'test',
       DecisionEngine: fauxDE });
     let rr = await Al.verifier(false);
     ok('alertes : désactivées → aucun contrôle', rr.controle === false && envois.length === 0);
 
-    Al.update({ actif: true, email: 'a@b.co', forceMin: 0.3 });
+    Al.update({ actif: true, email: 'a@b.co', forceMin: 0.3, strategies: [] });
     Al.resetDedup();
     rr = await Al.verifier(true);
     ok('alertes : un signal confirmé part par email', rr.envoyes === 1 && envois.length === 1,
@@ -1390,8 +1395,9 @@ function tinyPng(W = 64, H = 40) {
       /'telegramToken' in patch/.test(aSrc) && /'telegramChat' in patch/.test(aSrc));
     ok('l\'envoi Telegram est branché dans la surveillance',
       /if \(c\.telegramToken && c\.telegramChat\)/.test(aSrc) && /envoyerTelegram/.test(aSrc));
+    const outboxSrc = fs.readFileSync(path.join(__dirname, 'delivery/telegram-outbox.js'), 'utf8');
     ok('le message Telegram part en HTML (gras lisible)',
-      /parse_mode: 'HTML'/.test(aSrc) && /disable_web_page_preview: true/.test(aSrc));
+      /parse_mode:'HTML'/.test(aSrc) && /parse_mode:opts\.parse_mode\|\|'HTML'/.test(outboxSrc));
 
     ok('une route retrouve la conversation automatiquement',
       /app\.post\('\/api\/alerts\/telegram\/trouver'/.test(srvTg)
@@ -4321,15 +4327,33 @@ function tinyPng(W = 64, H = 40) {
       ok('ajusteur : la candidature est réellement enregistrée (un statut n’est pas un état)',
         enCours.some(c => c.parametre === 'killzones.ny.actif'));
 
-      // Échéance forcée dans le passé → promotion si le bilan est positif.
+      // Échéance forcée dans le passé : un bon bilan ouvre une revue humaine,
+      // mais ne modifie jamais les seuils de lui-même.
       const shadowDoc = JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR, 'apprentissage', 'shadow.json'), 'utf8'));
       for (const c of shadowDoc.candidats) c.applicable_at = new Date(Date.now() - 1000).toISOString();
       fs.writeFileSync(path.join(process.env.DATA_DIR, 'apprentissage', 'shadow.json'), JSON.stringify(shadowDoc, null, 2));
-      const promues = await Aj.promouvoirEchues({ expectancyR: 0.35, trades: 25 });
+      const aRevoir = await Aj.promouvoirEchues({ expectancyR: 0.35, trades: 25 });
+      const seuilsAvantRevue = await Aj.charger();
+      ok('ajusteur : un shadow positif attend une revue humaine sans modifier les seuils',
+        aRevoir.some(p => p.decision === 'revue_requise')
+        && seuilsAvantRevue['killzones.ny.actif'] === true,
+        JSON.stringify(aRevoir));
+      const candidatARevoir = aRevoir.find(p => p.decision === 'revue_requise');
+      const revues = await Promise.all([
+        Aj.revoirCandidature(candidatARevoir.id, {
+          decision: 'approuver', reviewer: 'test-suite', note: 'validation humaine explicite'
+        }),
+        Aj.revoirCandidature(candidatARevoir.id, {
+          decision: 'approuver', reviewer: 'test-suite-2', note: 'deuxième décision concurrente'
+        })
+      ]);
+      const revue = revues.find(r => r.ok);
       const seuilsApres = await Aj.charger();
-      ok('ajusteur : un shadow échu et positif est promu dans les seuils',
-        promues.some(p => p.decision === 'promue') && seuilsApres['killzones.ny.actif'] === false,
-        JSON.stringify(promues));
+      ok('ajusteur : une seule approbation humaine concurrente applique le seuil',
+        revue.ok === true && revue.decision === 'approuvee'
+        && revues.filter(r => r.ok).length === 1
+        && seuilsApres['killzones.ny.actif'] === false,
+        JSON.stringify(revues));
 
       // Bilan négatif → abandon, jamais promotion.
       await Aj.proposerBascule('killzones.london.actif', false, { trades: 25, n: 25 });
@@ -6014,7 +6038,9 @@ function tinyPng(W = 64, H = 40) {
     const srvR = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
     ok('le registre est synchronisé au démarrage', /Registry\.synchroniser\(await loadAllStrategies\(\)\)/.test(srvR));
     ok('la surveillance reçoit la version enregistrée',
-      /carteVersions\(\)/.test(srvR) && /p\.version = enr\.version/.test(srvR));
+      /Registry\.carteVersions\(\)/.test(srvR)
+      && /const version = versions\[doc\.id\]/.test(srvR)
+      && /p\.version = version\.version/.test(srvR));
     ok('le registre est consultable par une route protégée',
       /app\.get\('\/api\/strategies\/registre', requireAuth/.test(srvR));
   }
@@ -6404,6 +6430,7 @@ function tinyPng(W = 64, H = 40) {
   // ── Un seul cycle de surveillance à la fois ──
   {
     const Al = require('./delivery/alerts');
+    const InstActifsCycle = require('./core/instruments-actifs');
     let appels = 0;
     const lent = {
       getCandles: async () => {
@@ -6411,11 +6438,13 @@ function tinyPng(W = 64, H = 40) {
         await new Promise(r => setTimeout(r, 150));
         return { candles: [], provider: 'test' };
       },
-      listSymbols: () => [{ provider: 'test', providerLabel: 'test' }]
+      listSymbols: () => [{ provider: 'deriv', providerLabel: 'Deriv' }]
     };
+    InstActifsCycle.definirActifs(InstActifsCycle.DEFAUT_INITIAL);
     Al.load();
     Al.update({ actif: true, email: 'cycle@test.local',
-      marches: [{ symbol: 'frxXAUUSD', tf: '15m', provider: 'test' }] });
+      strategies: [],
+      marches: [{ symbol: 'frxXAUUSD', tf: '15m', provider: 'deriv' }] });
     Al.start({ market: lent, signals: Sig, sendMail: async () => {}, labelOf: () => 'test' });
 
     const [premier, second] = await Promise.all([Al.verifier(true), Al.verifier(true)]);
@@ -6996,7 +7025,8 @@ function tinyPng(W = 64, H = 40) {
     ok('le verdict d\'envoi nomme la stratégie qui a déclenché',
       // Le nom vient de la fiche ; en mode générique (aucune stratégie cochée)
       // il vaut null — c'est ce que vérifie l'assertion « scan sans stratégie ».
-      /ALERTE ENVOYÉE', force: v\.strength, strategie: profil \?/.test(srcAlerts));
+      /verdict: acknowledged \? 'ALERTE ENVOYÉE' : 'ALERTE EN FILE'/.test(srcAlerts)
+      && /strategie: profil \? \(profil\.titre \|\| profil\.id\) : null/.test(srcAlerts));
 
     // L'ordre de démarrage compte : load() lit le fichier, hydrater() met la base
     // par-dessus. Inversé, la config de la base était écrasée par la graine du
@@ -7546,16 +7576,18 @@ function tinyPng(W = 64, H = 40) {
   // ── Moteur : mesures justes (la fonction est déclarée plus bas, hissée ici) ──
   await testsMoteurAudit(ok, section);
 
-  // ── Réseau lent : ne pas perdre une alerte sur une lenteur passagère ──
-  // Mesure réelle : 8,7 s pour joindre Telegram depuis cette connexion. Sans
-  // reprise, l'alerte échouait sur un appel pourtant valide.
+  // ── Réseau lent : reprise bornée quand l'opération est rejouable ──
+  // Telegram n'offre pas de clé d'idempotence pour sendMessage : une coupure
+  // après réception est ambiguë et ne doit jamais déclencher un doublon aveugle.
   {
     const rSrc = fs.readFileSync(path.join(__dirname, 'core/reseau.js'), 'utf8');
     ok('un utilitaire de reprise réseau existe',
       /async function fetchAvecReprise/.test(rSrc) && /module\.exports = \{ fetchAvecReprise/.test(rSrc));
     ok('le délai d\'un essai est généreux', /DELAI_MS = \d{4,}/.test(rSrc));
-    ok('Telegram passe par la reprise', /fetchAvecReprise\(`https:\/\/api\.telegram\.org/.test(
-      fs.readFileSync(path.join(__dirname, 'delivery/alerts.js'), 'utf8')));
+    const tgOutboxSrc = fs.readFileSync(path.join(__dirname, 'delivery/telegram-outbox.js'), 'utf8');
+    ok('Telegram évite la reprise aveugle et trace les livraisons ambiguës',
+      /state='uncertain'/.test(tgOutboxSrc) && /kind:'uncertain'/.test(tgOutboxSrc)
+      && !/fetchAvecReprise/.test(tgOutboxSrc));
     ok('Gemini passe par la reprise', /fetchAvecReprise\(`\$\{GEMINI_API\}/.test(
       fs.readFileSync(path.join(__dirname, 'delivery/vision.js'), 'utf8')));
 
@@ -8397,6 +8429,7 @@ function tinyPng(W = 64, H = 40) {
         market: mockMarketRefus,
         signals: mockSignalsTP1TP2,
         maintenant: () => scanClock,
+        verifierCalendrier: async () => ({ applicable: true, verifie: true, ok: true, bloque: false }),
         tf: '15m',
         mode: ScanMod.MODES_SCAN.TRADING_AUTORISE,
         symbolesAutorises: ['EURUSD']
@@ -8425,8 +8458,10 @@ function tinyPng(W = 64, H = 40) {
 
       // 2. « Est-ce que le CPI bloque l'or ? »
       const rCPI = await ChatExec.executer('est-ce que le cpi bloque');
-      ok('chat copilote : analyse l\'impact macroéconomique CPI avec l\'heure de Kinshasa',
-        rCPI && /Impact Macroéconomique/i.test(rCPI.texte) && /Kinshasa/i.test(rCPI.texte));
+      ok('chat copilote : expose honnêtement l\'état du filtre CPI',
+        rCPI && /Filtre macro USD \/ XAUUSD/i.test(rCPI.texte)
+        && (/Kinshasa/i.test(rCPI.texte) || /Aucune annonce majeure/i.test(rCPI.texte)
+          || /Calendrier non vérifié : signal suspendu/i.test(rCPI.texte)));
 
       // 3. « Qu'est-ce que tu as mémorisé ? »
       const rMem = await ChatExec.executer('qu\'est-ce que tu as mémorisé');

@@ -28,3 +28,6 @@ Use a fresh Git worktree on the hardening branch with no production .env or data
 - `/api/chat/capabilities`: observed capability inventory; generated skills remain proposals requiring human review.
 - Live display SSE is read-only and no longer writes positions. Strict calendar and quality gates override live decisions.
 - `npm test` now executes the focused hardening suite before the legacy verification. The checked-in frontend bundle was patched and syntax checked, not rebuilt or browser-tested.
+- Learning candidates never promote themselves: positive shadow evidence moves to `en_revue`; only an authenticated, motivated review can apply a threshold change, and the decision is audited.
+- CI runs the additive phase-2 schema, prospective paper repository and Telegram outbox against the disposable `5trade_test` PostgreSQL service. Local runs skip this test unless `TEST_DATABASE_URL` explicitly names a test/CI/tmp database.
+- The dependency audit currently reports advisories whose fixed versions are not yet published by the configured npm registry (notably Multer, Nodemailer and transitive parser packages). Compression middleware was removed and Express/Multer were moved to their current major lines, but this branch must not be described as audit-clean until the remaining patched releases are installable and retested.

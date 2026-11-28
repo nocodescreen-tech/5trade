@@ -3,8 +3,8 @@
  *
  * Prend les candidats d'ajustement produits par les post-mortems et les
  * rejeux, applique les garde-fous anti-overfitting, propose une décision :
- *   - 'applique'        : promotion immédiate (rare)
  *   - 'shadow_3j'       : test en shadow run pendant 3 jours
+ *   - 'en_revue'        : preuves suffisantes, décision humaine requise
  *   - 'reporte'         : pas assez de données
  *   - 'gele'            : dérive cumulée > 30% — revue humaine requise
  *   - 'rejete'          : delta trop grand ou incohérent
@@ -203,17 +203,19 @@ async function enregistrerShadow(parametre, valeur, preuve = {}) {
   return entree;
 }
 
-/** Liste des shadow runs (pour l'écran et le journal). */
+/** Liste des candidatures encore actives (shadow ou en attente de revue). */
 async function shadowEnCours() {
   const doc = await lireShadow();
   const maintenant = Date.now();
-  return doc.candidats.filter(c => c.statut === 'shadow' && Date.parse(c.applicable_at) > maintenant);
+  return doc.candidats.filter(c =>
+    (c.statut === 'shadow' && Date.parse(c.applicable_at) > maintenant)
+    || c.statut === 'en_revue');
 }
 
 /**
- * Promeut les candidatures arrivées à échéance SI la période a été positive.
- * Sinon, elle est abandonnée avec son motif — un shadow run qui échoue doit
- * laisser une trace, pas disparaître.
+ * Évalue les candidatures arrivées à échéance. Une période positive ouvre une
+ * revue humaine ; elle ne modifie jamais les seuils automatiquement. Un shadow
+ * déficitaire est abandonné avec son motif et reste traçable.
  *
  * @param {{expectancyR:number, trades:number}} bilan bilan de la période écoulée
  */
@@ -240,15 +242,71 @@ async function promouvoirEchues(bilan = {}) {
       continue;
     }
 
-    const r = await appliquer(c.parametre, c.valeur);
-    c.statut = 'promue';
-    c.promue_at = new Date().toISOString();
-    c.raison = `promue (espérance ${Number.isFinite(expectancy) ? expectancy : 'n/a'} R sur ${trades} trades)`;
-    decisions.push({ parametre: c.parametre, decision: 'promue', ancien: r.ancien, nouveau: r.nouveau, raison: c.raison });
+    c.statut = 'en_revue';
+    c.revue_demandee_at = new Date().toISOString();
+    c.bilan = { expectancyR: Number.isFinite(expectancy) ? expectancy : null, trades };
+    c.raison = `preuves suffisantes (${Number.isFinite(expectancy) ? expectancy : 'n/a'} R sur ${trades} trades) — approbation humaine requise`;
+    decisions.push({ id: c.id, parametre: c.parametre, valeur: c.valeur,
+      decision: 'revue_requise', bilan: c.bilan, raison: c.raison });
   }
 
   await ecrireShadow(doc);
   return decisions;
+}
+
+/**
+ * Décision humaine explicite sur une candidature arrivée en revue.
+ * La note et l'identité sont conservées avec la décision. Aucun autre statut
+ * ne peut être appliqué, ce qui empêche de court-circuiter le shadow run.
+ */
+let fileRevue = Promise.resolve();
+
+function revoirCandidature(id, revue = {}) {
+  const operation = () => revoirCandidatureSerialisee(id, revue);
+  const resultat = fileRevue.then(operation, operation);
+  // La file doit continuer même si une écriture inattendue échoue.
+  fileRevue = resultat.catch(() => {});
+  return resultat;
+}
+
+async function revoirCandidatureSerialisee(id, revue = {}) {
+  const decision = String(revue.decision || '').trim().toLowerCase();
+  const reviewer = String(revue.reviewer || '').trim().slice(0, 120);
+  const note = String(revue.note || '').trim().slice(0, 1000);
+  if (!id || !['approuver', 'rejeter'].includes(decision)) {
+    return { ok: false, raison: 'décision attendue : approuver ou rejeter' };
+  }
+  if (!reviewer || note.length < 8) {
+    return { ok: false, raison: 'identité du relecteur et note motivée requises' };
+  }
+
+  const doc = await lireShadow();
+  const candidat = doc.candidats.find(c => c.id === id);
+  if (!candidat) return { ok: false, raison: 'candidature introuvable' };
+  if (candidat.statut !== 'en_revue') {
+    return { ok: false, raison: `candidature non révisable (statut ${candidat.statut})` };
+  }
+
+  const reviewedAt = new Date().toISOString();
+  candidat.reviewer = reviewer;
+  candidat.note_revue = note;
+  candidat.reviewed_at = reviewedAt;
+
+  if (decision === 'rejeter') {
+    candidat.statut = 'rejetee_humain';
+    candidat.raison = `rejetée par ${reviewer} : ${note}`;
+    await ecrireShadow(doc);
+    return { ok: true, id, decision: 'rejetee', reviewer, note, reviewedAt };
+  }
+
+  const applique = await appliquer(candidat.parametre, candidat.valeur);
+  candidat.statut = 'approuvee';
+  candidat.ancien = applique.ancien;
+  candidat.nouveau = applique.nouveau;
+  candidat.raison = `approuvée par ${reviewer} : ${note}`;
+  await ecrireShadow(doc);
+  return { ok: true, id, decision: 'approuvee', reviewer, note, reviewedAt,
+    parametre: candidat.parametre, ancien: applique.ancien, nouveau: applique.nouveau };
 }
 
 
@@ -273,6 +331,6 @@ async function retourArriere14j(snapshot14j) {
 
 module.exports = {
   charger, proposer, proposerBascule, appliquer, retourArriere14j,
-  promouvoirEchues, shadowEnCours, enregistrerShadow,
+  promouvoirEchues, shadowEnCours, enregistrerShadow, revoirCandidature,
   LIMITES, seuilsParDefaut
 };

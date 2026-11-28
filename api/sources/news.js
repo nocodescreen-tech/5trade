@@ -208,7 +208,8 @@ const REPOS_APRES_ECHEC_MS = 10 * 60 * 1000;
 
 // Le dernier calendrier valide est aussi écrit sur disque : un redémarrage ne
 // doit pas repartir de zéro et re-solliciter une source qui vient de refuser.
-const FICHIER_CALENDRIER = path.join(__dirname, '..', '..', 'data', 'news-calendrier.json');
+const FICHIER_CALENDRIER = process.env.NEWS_CALENDRIER_FICHIER
+  || path.join(__dirname, '..', '..', 'data', 'news-calendrier.json');
 
 function lireDisque(fichier) {
   try { return JSON.parse(fs.readFileSync(fichier, 'utf8')); } catch { return null; }

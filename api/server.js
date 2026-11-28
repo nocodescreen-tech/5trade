@@ -20,7 +20,6 @@ const cors = require('cors');
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
-const compression = require('compression');
 const DB = require('./core/db');
 // UN SEUL chargement. Le second appel (fallback « .env dans api/ ») etait inutile
 // et risque : dotenv cherche alors dans le dossier courant et peut ecraser des
@@ -131,11 +130,6 @@ app.use(cors({
     cb(null, false);                                                      // tout le reste : non
   }
 }));
-// Compression : les reponses de bougies depassent souvent 100 Ko de JSON, qui se
-// compriment a ~10 %. Sans elle, chaque rafraichissement de graphique transporte
-// l'integralite du texte.
-app.use(compression());
-
 // En-tetes de securite, poses a la main plutot que via helmet : cinq lignes
 // suffisent ici, et ca evite une dependance de plus.
 app.use((req, res, next) => {
@@ -4327,6 +4321,26 @@ app.get('/api/apprentissage/shadow', requireAuth, async (req, res) => {
     const Ajusteur = require('./apprentissage/ajusteur-seuils');
     const [seuils, shadow] = await Promise.all([Ajusteur.charger(), Ajusteur.shadowEnCours()]);
     res.json({ success: true, seuils, shadow, limites: Ajusteur.LIMITES });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Une candidature ne change les seuils qu'après une décision humaine explicite,
+// motivée et rattachée à la session authentifiée.
+app.post('/api/apprentissage/shadow/:id/review', requireAuth, async (req, res) => {
+  try {
+    const Ajusteur = require('./apprentissage/ajusteur-seuils');
+    const resultat = await Ajusteur.revoirCandidature(String(req.params.id || ''), {
+      decision: req.body && req.body.decision,
+      note: req.body && req.body.note,
+      reviewer: req.session.username
+    });
+    if (!resultat.ok) return res.status(409).json({ success: false, ...resultat });
+    Audit.enregistrer({
+      acteur: resultat.reviewer, action: 'learning_review', cible: resultat.id,
+      detail: { decision: resultat.decision, parametre: resultat.parametre || null },
+      ip: req.ip, succes: true
+    }).catch(() => {});
+    res.json({ success: true, ...resultat });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

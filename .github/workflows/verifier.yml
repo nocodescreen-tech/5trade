@@ -12,6 +12,20 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: 5trade_ci
+          POSTGRES_DB: 5trade_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U 5trade_ci -d 5trade_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +40,11 @@ jobs:
 
       - name: Porte de vérification (racine du dépôt)
         run: npm test
+
+      - name: Intégration PostgreSQL jetable
+        env:
+          TEST_DATABASE_URL: postgres://5trade_ci@127.0.0.1:5432/5trade_test
+        run: npm --prefix api run test:postgres
 
       # Les tests qui dépendent du réseau (R2, Gemini, SMTP) se marquent
       # « non testés » quand les clés sont absentes : c'est voulu, un CI sans
