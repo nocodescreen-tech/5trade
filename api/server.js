@@ -3042,7 +3042,8 @@ app.post('/api/instruments/actifs', requireAuth, (req, res) => {
   try {
     const InstrumentsActifs = require('./core/instruments-actifs');
     const liste = req.body && req.body.instruments;
-    const instruments = InstrumentsActifs.definirActifs(liste || []);
+    if (!Array.isArray(liste)) return res.status(400).json({ success:false,error:'instruments doit être un tableau explicite' });
+    const instruments = InstrumentsActifs.definirActifs(liste);
     res.json({ success: true, instruments });
   } catch (e) {
     res.status(400).json({ success: false, error: e.message });
@@ -3053,7 +3054,7 @@ app.post('/api/instruments/actifs/toggle', requireAuth, (req, res) => {
   try {
     const InstrumentsActifs = require('./core/instruments-actifs');
     const { symbol, provider, tf, label, tv, actif } = req.body || {};
-    if (!symbol) return res.status(400).json({ success: false, error: 'symbol requis' });
+    if (typeof symbol !== 'string' || !symbol.trim() || typeof actif !== 'boolean') return res.status(400).json({ success: false, error: 'symbol et actif booléen requis' });
     let instruments;
     if (actif === false) {
       instruments = InstrumentsActifs.retirerInstrument(symbol);
