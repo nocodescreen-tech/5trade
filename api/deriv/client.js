@@ -40,6 +40,7 @@ async function verifyAccounts(appId, token, preferredId = null, fetchImpl = glob
   if (typeof appId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(appId.trim())) {
     return { ok: false, error: 'App ID Deriv PAT invalide ou manquant' };
   }
+  if (preferredId !== null && (typeof preferredId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(preferredId))) return { ok: false, error: 'Identifiant de compte Deriv invalide.' };
   if (typeof token !== 'string' || !token.trim() || /\s/.test(token.trim()) || token.length > 4096) {
     return { ok: false, error: 'Token API Deriv manquant ou invalide' };
   }
@@ -67,12 +68,13 @@ async function verifyAccounts(appId, token, preferredId = null, fetchImpl = glob
       ['demo', 'real'].includes(a.account_type) && typeof a.currency === 'string' &&
       /^[A-Z0-9]{2,12}$/.test(a.currency) && Number.isFinite(a.balance));
     const demos = active.filter(a => a.account_type === 'demo');
+    const accounts = active.map(a => ({ loginid: a.account_id, currency: a.currency, isVirtual: a.account_type === 'demo' }));
     // Never silently switch accounts on refresh. Prefer the single demo on
     // first connection; otherwise require an unambiguous account.
     const selected = preferredId
       ? active.find(a => a.account_id === preferredId)
       : demos.length === 1 ? demos[0] : active.length === 1 ? active[0] : null;
-    if (!selected) return { ok: false, error: preferredId
+    if (!selected) return { ok: false, code: active.length && !preferredId ? 'ACCOUNT_SELECTION_REQUIRED' : 'ACCOUNT_UNAVAILABLE', accounts, error: preferredId
       ? 'Compte Deriv précédemment associé absent ou inactif. Reconnectez le compte.'
       : active.length ? 'Plusieurs comptes Deriv possibles : sélection explicite nécessaire.' : 'Aucun compte Options actif valide.' };
     return { ok: true, account: {
@@ -96,7 +98,7 @@ class DerivClient {
     try { key = encryptionKey(); }
     catch (e) { return { success: false, error: e.message }; }
     const test = await this.verifierEtAutoriser(appId, apiToken, accountId);
-    if (!test.ok) return { success: false, error: test.error };
+    if (!test.ok) return { success: false, error: test.error, code: test.code, accounts: test.accounts };
     const config = {
       appId: appId.trim(), account: test.account,
       tokenBox: sealToken(apiToken.trim(), appId.trim(), test.account.loginid, key),
