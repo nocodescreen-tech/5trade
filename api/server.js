@@ -5346,6 +5346,10 @@ async function start() {
       const c = Alerts.get();
       if (!c.telegramToken || !c.telegramChat) return;
 
+      // Macro warnings share the scheduler's single-flight and durable dedup.
+      try { await require('./delivery/macro-alerts').notifier(c); }
+      catch { console.warn('[Scheduler] Notifications macro indisponibles'); }
+
       // 1. Briefing matinal quotidien (06:00 à 10:00 UTC)
       const cleBriefing = `briefing_matin_${jourStr}`;
       if (heureUTC >= 6 && heureUTC < 10 && !NotificationTracker.estDejaEnvoye(cleBriefing)) {
