@@ -2148,9 +2148,9 @@ function TtPill({ tone = 'neu', children, title, style }) {
 function LiveStatusIndicator({ live, offline, ticks, lastUpdate, onRefresh, busy }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-      <TtPill tone={live ? 'ok' : 'warn'}>
-        <span className="dot-live" style={{ width: 6, height: 6 }}></span>
-        {live ? 'EN DIRECT' : 'CONNEXION…'}
+      <TtPill tone={live && !offline ? 'ok' : 'warn'}>
+        {live && !offline && <span className="dot-live" style={{ width: 6, height: 6 }}></span>}
+        {offline ? 'HORS LIGNE' : live ? 'FLUX CONNECTÉ' : 'FLUX NON CONNECTÉ'}
       </TtPill>
       {offline && <TtPill tone="warn" title="Réseau absent : bougies servies du cache local.">CACHE</TtPill>}
       {lastUpdate && (
@@ -2226,63 +2226,34 @@ function LatenceCotation({ lastUpdate, live }) {
 }
 
 // ── Statut de la session métaux (XAUUSD / spot gold) ───────────────────────
-function SessionMarcheMetaux({ symbol }) {
-  const [statut, setStatut] = React.useState({ session: 'Londres', ouvert: true, alerte: null });
-  React.useEffect(() => {
-    const check = () => {
-      const d = new Date();
-      const jour = d.getUTCDay();
-      const h = d.getUTCHours();
-      if (jour === 6 || (jour === 5 && h >= 22) || (jour === 0 && h < 22)) {
-        setStatut({ session: 'Fermé (Weekend)', ouvert: false, alerte: 'Marché fermé jusqu\'à dimanche 22h UTC' });
-        return;
-      }
-      if (h === 21) {
-        setStatut({ session: 'Pause CME Métaux (21h-22h UTC)', ouvert: false, alerte: 'Cotation suspendue — réouverture à 22h00 UTC' });
-        return;
-      }
-      if (h >= 8 && h < 13) {
-        setStatut({ session: 'Londres (Fixing AM 10:30 UTC)', ouvert: true, alerte: null });
-      } else if (h >= 13 && h < 17) {
-        setStatut({ session: 'Londres-NY (Fixing PM 15:00 UTC)', ouvert: true, alerte: 'Liquidité & volatilité maximales' });
-      } else if (h >= 17 && h < 21) {
-        setStatut({ session: 'New York (Session US)', ouvert: true, alerte: null });
-      } else {
-        setStatut({ session: 'Asie / Pacifique', ouvert: true, alerte: 'Liquidité modérée sur l\'or' });
-      }
+function SessionMarcheMetaux({symbol}) {
+  const [result,setResult]=React.useState(null);
+  React.useEffect(()=>{
+    let actif=true, busy=false;
+    setResult(null);
+    const refresh=async()=>{
+      if(busy || !actif)return;
+      busy=true;
+      try {
+        const response=await api('/market/status?symbol='+encodeURIComponent(symbol));
+        const d=await response.json();
+        if(actif)setResult(response.ok && d.success && d.symbol===symbol ? d : null);
+      } catch { if(actif)setResult(null); }
+      finally {busy=false;}
     };
-    check();
-    const t = setInterval(check, 30000);
-    return () => clearInterval(t);
-  }, [symbol]);
-
-  const tone = !statut.ouvert ? 'bad' : statut.alerte ? 'info' : 'ok';
-  const color = tone === 'bad' ? '#ef4444' : tone === 'info' ? '#a78bfa' : '#10b981';
-  const bg = tone === 'bad' ? 'rgba(239,68,68,0.12)' : tone === 'info' ? 'rgba(167,139,250,0.12)' : 'rgba(16,185,129,0.12)';
-  const border = tone === 'bad' ? 'rgba(239,68,68,0.3)' : tone === 'info' ? 'rgba(167,139,250,0.3)' : 'rgba(16,185,129,0.3)';
-
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11,
-      color, background: bg, border: `1px solid ${border}`,
-      padding: '3px 8px', borderRadius: 6, fontWeight: 700 }}
-      title={statut.alerte || statut.session}>
-      <i className={`fas ${!statut.ouvert ? 'fa-ban' : 'fa-sun'}`} style={{ fontSize: 10 }}></i>
-      {statut.session}
-    </span>
-  );
-}
-
-// ── Filtre Calendrier économique US (USD / Métaux) ─────────────────────────
-function CalendrierUSDStatus() {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11,
-      color: '#fbbf24', background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)',
-      padding: '3px 8px', borderRadius: 6, fontWeight: 700 }}
-      title="Filtre calendrier économique actif : prudence pendant CPI, NFP, FOMC">
-      <i className="fas fa-calendar-check" style={{ fontSize: 10 }}></i>
-      USD News : Surveillance active
-    </span>
-  );
+    refresh();
+    const timer=setInterval(refresh,30000);
+    return()=>{actif=false;clearInterval(timer);};
+  },[symbol]);
+  const data=result?.symbol===symbol ? result : null;
+  const session=data?.session;
+  const news=data?.news;
+  const known=session?.horaireConnu===true;
+  const label=!known?'Session non vérifiée':session.statut==='pre_fermeture'?'Pré-fermeture théorique':session.ouvert?'Ouverture théorique':'Fermeture théorique';
+  const newsLabel=news?.applicable===false?'Macro : non applicable':news?.verifie!==true?'Macro : non vérifiée':news.bloque?'Macro : blocage':'Macro : vérifiée';
+  return React.createElement(React.Fragment,null,
+    React.createElement(TtPill,{tone:known?(session.ouvert?'info':'bad'):'warn',title:session?.raison || 'Horaires courtier non confirmés'},label),
+    React.createElement(TtPill,{tone:news?.applicable===false?'neu':news?.verifie!==true?'warn':news.bloque?'bad':'ok',title:news?.detail || 'Calendrier non vérifié'},newsLabel));
 }
 
 // ── NIVEAU 03 : Live Decision Center — l'état global, en un coup d'œil ────
@@ -4824,7 +4795,7 @@ function LiveMarket({ onToJournal }) {
           <HorlogeKinshasa />
           <LatenceCotation lastUpdate={lastUpdate} live={live} />
           <SessionMarcheMetaux symbol={symbol} />
-          <CalendrierUSDStatus />
+          
 
           <span style={{ flex: '1 1 auto' }}></span>
           <div style={{ textAlign: 'right' }}>
@@ -8592,7 +8563,7 @@ function Dashboard({ user, onLogout }) {
                     <span>5trade</span>
                   </a>
                   <span className="badge" style={{ background:'rgba(16,185,129,.12)', color:'#34d399' }}>
-                    <span className="dot-live"></span>en ligne
+                    Espace de travail
                   </span>
                   <span className="badge" style={{ background:'rgba(148,163,184,.1)', color:'var(--dim)' }}
                     title="Version de l'interface. Si elle ne correspond pas à la dernière livrée, rechargez avec Ctrl+Maj+R.">
@@ -8641,7 +8612,7 @@ function Dashboard({ user, onLogout }) {
               <div className="nav" style={{ marginBottom:20 }}>
                 {NAV.map(n => (
                   <button key={n.id}
-                    className={`nav-item ${tab===n.id?'on':''}`} onClick={()=>setTab(n.id)}>
+                    aria-current={tab===n.id ? 'page' : undefined} className={`nav-item ${tab===n.id?'on':''}`} onClick={()=>setTab(n.id)}>
                     <i className={`fas ${n.icon}`}></i>{n.label}
                   </button>
                 ))}
