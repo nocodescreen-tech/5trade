@@ -244,7 +244,7 @@ function StatTile({ icon, label, value, decimals = 0, suffix = '', color = '#60a
               <i className={`fas ${icon}`} style={{ color }}></i>{label}
             </div>
             <div style={{ marginTop:6, color:'#fff', fontWeight:800, fontSize:30, letterSpacing:'-1px' }}>
-              {Counter ? <Counter value={value} decimals={decimals} suffix={suffix} fontSize={30} /> : `${value}${suffix}`}
+              {typeof value !== 'number' || !Number.isFinite(value) ? '—' : `${value.toFixed(decimals)}${suffix}`}
             </div>
           </div>
         </SpotlightCard>
