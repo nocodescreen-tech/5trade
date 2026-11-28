@@ -29,7 +29,7 @@ function repository(sql) {
         where state='sending' and claimed_at<now()-interval '2 minutes'`;
       const rows=await sql`update telegram_outbox set state='sending',attempts=attempts+1,claimed_at=now()
         where id=(select id from telegram_outbox where state='pending' and next_at<=now()
-          and expires_at>now() order by next_at for update skip locked limit 1)
+          and expires_at>now() order by next_at, id limit 1 for update skip locked)
         returning id,payload,attempts,expires_at`;
       return rows[0]||null;
     },
