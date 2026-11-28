@@ -3166,7 +3166,10 @@ app.get('/api/risk/position', requireAuth, async (req, res) => {
     const cout = frais && typeof frais.fraisPour === 'function' ? frais.fraisPour(symbole) : null;
     const instrument = { ...(specs || {}), spread: cout && Number.isFinite(cout.spread) ? cout.spread : null };
 
-    const r = PositionSizing.dimensionner({ capital, risquePct, entree, stop, instrument });
+    const contraintes = require('./memoire/preferences').obtenirContraintesActivesSync();
+    const cfgRisque = require('./risk/risque').configuration();
+    const plafond = Math.min(cfgRisque.maxRisqueTradePct, PositionSizing.DEFAUT.risqueMaxPct, contraintes.risqueMaxPct ?? Infinity);
+    const r = PositionSizing.dimensionner({ capital, risquePct, entree, stop, instrument }, { risqueMaxPct: plafond });
     res.json({
       success: true, symbole,
       specifie: Boolean(specs),
@@ -3955,7 +3958,10 @@ function verificateurRisqueCompte() {
     const Risque = require('./risk/risque');
     const journal = JournalSignaux.charger();
     const etat = Risque.etat(journal.signaux || [], { depuis: journal.reinitialiseLe });
-    return c => Risque.verifierPrise({ entree: c.entree, stop: c.stop, symbol: c.symbol }, etat);
+    return c => {
+      const contraintes = require('./memoire/preferences').obtenirContraintesActivesSync();
+      return Risque.verifierPrise({ entree: c.entree, stop: c.stop, symbol: c.symbol }, etat, { contraintes });
+    };
   } catch {
     return undefined;
   }
