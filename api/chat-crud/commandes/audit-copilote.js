@@ -28,7 +28,7 @@ async function marchesSurveilles() {
   const dernier = ds && ds.dernier ? ds.dernier : null;
 
   const lignes = ['📊 **Surveillance des marchés :**'];
-  lignes.push(`- **Sélection enregistrée persistante :** ${enregistres.length ? enregistres.join(', ') : 'Aucun instrument actif (scan suspendu)'}`);
+  lignes.push(`- **Sélection enregistrée persistante :** ${enregistres.length ? enregistres.map(a => typeof a === 'string' ? a : `${a.symbol} (${a.provider}, ${a.tf})`).join(', ') : 'Aucun instrument actif (scan suspendu)'}`);
   
   if (dernier) {
     lignes.push(`- **Dernier scan exécuté :** ${dernier.at} (${dernier.marches} marchés traités, durée ${dernier.dureeMs || 0} ms)`);
@@ -38,11 +38,10 @@ async function marchesSurveilles() {
 
     // Détection d'un écart éventuel
     if (enregistres.length > 0 && dernier.marches > 0) {
-      const attendusSet = new Set(enregistres.map(s => String(s).toUpperCase()));
       if (dernier.marches > enregistres.length) {
         lignes.push(`⚠️ *Écart constaté :* Le dernier scan a évalué plus d'instruments que la sélection active stricte.`);
       } else {
-        lignes.push(`✅ *Parfaite conformité :* Le scan automatique respecte rigoureusement ta sélection.`);
+        lignes.push(`Le nombre de marchés traités ne dépasse pas la sélection ; les identités exactes restent à comparer.`);
       }
     }
   } else {
@@ -103,18 +102,17 @@ async function pourquoiPasSignal(sujet = '') {
  * Consulte le calendrier et le résultat du filtre en heure de Kinshasa (WAT).
  */
 async function blocageCpi() {
-  const cal = await Fundamentals.getCalendar();
-  const verdictUSD = Fundamentals.verdictDevise(cal, 'USD', { fenetreMin: 30 });
+  const verdictUSD = await Fundamentals.newsImminente('USD', 30);
 
-  const lignes = ['📅 **Impact Macroéconomique (USD / CPI) sur XAUUSD :**'];
-  lignes.push(`- **État du filtre :** ${verdictUSD.bloque ? '🚫 **TRADING SUSPENDU (Événement majeur)**' : '✅ **TRADING AUTORISÉ (Zone sécurisée)**'}`);
+  const lignes = ['📅 **Impact macroéconomique (annonces USD majeures) sur XAUUSD :**'];
+  lignes.push(`- **État du filtre :** ${!verdictUSD.verifie ? '**NON VÉRIFIÉ — calendrier indisponible**' : verdictUSD.bloque ? '🚫 **FILTRE MACRO BLOQUANT (Événement majeur)**' : 'Aucune annonce majeure dans la fenêtre (autres filtres nécessaires)'}`);
   lignes.push(`- **Phase temporelle :** \`${verdictUSD.phase || 'Neutre'}\``);
-  lignes.push(`- **Heure de Kinshasa (WAT · UTC+1) :** ${verdictUSD.heureKinshasa || 'Aucune annonce imminente'}`);
+  lignes.push(`- **Heure de Kinshasa (WAT · UTC+1) :** ${verdictUSD.heureKinshasa || (verdictUSD.verifie ? 'Aucune annonce imminente' : 'Inconnue')}`);
   lignes.push(`- **Délai :** ${verdictUSD.delaiMin !== null && verdictUSD.delaiMin !== undefined ? `${verdictUSD.delaiMin} minute(s)` : 'N/A'}`);
-  if (verdictUSD.evenement) {
-    lignes.push(`- **Événement cible :** ${verdictUSD.evenement.titre} (Impact : ${verdictUSD.evenement.impact.toUpperCase()})`);
+  if (verdictUSD.news) {
+    lignes.push(`- **Événement cible :** ${verdictUSD.news.titre} (Impact : ${verdictUSD.news.impact.toUpperCase()})`);
   }
-  if (verdictUSD.sourcePerimee) {
+  if (!verdictUSD.verifie) {
     lignes.push(`- ⚠️ *Note :* La source de données du calendrier est indisponible ou non synchronisée.`);
   }
 
@@ -137,7 +135,7 @@ async function statutTelegram() {
     return { texte: lignes.join('\n') };
   }
 
-  lignes.push(`- ✅ **Configuration :** Bot configuré et actif.`);
+  lignes.push(`- ✅ **Configuration :** Identifiants configurés ; activité et livraison non confirmées.`);
 
   // Dernier scan et décisions
   const ds = Scan.dernierScan();
@@ -169,7 +167,7 @@ async function preferencesMemorisees() {
   const actifs = InstrumentsActifs.obtenirActifs();
   const lignes = ['🧠 **Mémoire et Préférences Persistées du Copilote :**'];
 
-  lignes.push(`- **Instruments surveillés par défaut :** ${actifs.length ? actifs.join(', ') : 'Aucun'}`);
+  lignes.push(`- **Instruments surveillés par défaut :** ${actifs.length ? actifs.map(a => typeof a === 'string' ? a : `${a.symbol} (${a.provider}, ${a.tf})`).join(', ') : 'Aucun'}`);
   if (prefs && prefs.length) {
     lignes.push(`- **Consignes et règles permanentes enregistrées :**`);
     for (const p of prefs) {
