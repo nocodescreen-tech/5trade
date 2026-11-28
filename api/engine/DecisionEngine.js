@@ -477,7 +477,7 @@ function niveauArbitrage(signaux, meta, options = {}) {
   // absolus sur les simples figures géométriques génériques (motifs, structure).
   // Une simple Pin bar ou un BOS générique ne doit JAMAIS écraser ou contredire une stratégie choisie par l'utilisateur.
   const stratsExecutables = executables.filter(s => s.source === 'strategie');
-  const strategieStricte = options.strategieStricte !== false && Array.isArray(options.profils) && options.profils.some(Boolean);
+  const strategieStricte = options.strategieStricte === true || (options.strategieStricte !== false && Array.isArray(options.profils) && options.profils.some(Boolean));
   const pool = strategieStricte || stratsExecutables.length > 0 ? stratsExecutables : executables;
 
   const longs = pool.filter(s => s.sens === 'long' || s.direction === 'BUY');
