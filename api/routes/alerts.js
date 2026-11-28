@@ -9,6 +9,8 @@
  */
 module.exports = function monterAlertes(app, deps) {
   const { requireAuth, Alerts, sendMail, DB, Audit, ia } = deps;
+  const MASK='••••••••';
+  const safeConfig=c=>({...c,telegramToken:c.telegramToken?MASK:null,telegramConfigured:!!c.telegramToken});
 
   /**
    * Alertes : prévenir HORS de la page quand un signal se confirme.
@@ -17,7 +19,7 @@ module.exports = function monterAlertes(app, deps) {
    */
   app.get('/api/alerts', requireAuth, (req, res) => {
     const c = Alerts.get();
-    res.json({ success: true, config: c, historique: c.derniers || [] });
+    res.json({ success: true, config: safeConfig(c), historique: c.derniers || [] });
   });
 
   /**
@@ -31,7 +33,9 @@ module.exports = function monterAlertes(app, deps) {
 
   app.put('/api/alerts', requireAuth, (req, res) => {
     try {
-      const c = Alerts.update(req.body || {});
+      const patch={...(req.body||{})};
+      if(patch.telegramToken===MASK)delete patch.telegramToken;
+      const c = Alerts.update(patch);
       Alerts.start();                    // applique tout de suite le nouvel intervalle
       // Changement de configuration = action sensible : elle décide de ce qui sera
       // envoyé et à qui. On trace QUI l'a fait et ce qui a changé, sans jamais
@@ -50,7 +54,7 @@ module.exports = function monterAlertes(app, deps) {
           }
         }).catch(() => {});
       }
-      res.json({ success: true, config: c });
+      res.json({ success: true, config: safeConfig(c) });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
@@ -71,8 +75,9 @@ module.exports = function monterAlertes(app, deps) {
    */
   app.post('/api/alerts/telegram/trouver', requireAuth, async (req, res) => {
     try {
-      const jeton = String((req.body && req.body.token) || Alerts.get().telegramToken || '').trim();
-      if (!jeton) return res.status(400).json({ error: 'Donne d\'abord le jeton du bot (donné par BotFather).' });
+      const supplied=req.body?.token;
+      const jeton=String(supplied && supplied!==MASK ? supplied : Alerts.get().telegramToken || '').trim();
+      if (!/^\d{5,}:[A-Za-z0-9_-]{20,}$/.test(jeton)) return res.status(400).json({ error: 'Donne d\'abord le jeton du bot (donné par BotFather).' });
 
       const r = await fetch(`https://api.telegram.org/bot${jeton}/getUpdates?timeout=0`, {
         signal: AbortSignal.timeout(10000) // 10s max
@@ -80,7 +85,7 @@ module.exports = function monterAlertes(app, deps) {
       const d = await r.json().catch(() => ({}));
       if (!d.ok) {
         return res.status(400).json({
-          error: `Telegram refuse ce jeton (${d.description || 'HTTP ' + r.status}). Vérifie qu'il est complet et sans espace.`
+          error: 'Telegram refuse ce jeton. Vérifie qu’il est complet et sans espace.'
         });
       }
 
@@ -103,7 +108,7 @@ module.exports = function monterAlertes(app, deps) {
       }
       res.json({ success: true, trouve: true, chats });
     } catch (e) {
-      res.status(500).json({ error: `Impossible de joindre Telegram : ${e.message}` });
+      res.status(500).json({ error: 'Impossible de joindre Telegram' });
     }
   });
 
@@ -162,238 +167,57 @@ module.exports = function monterAlertes(app, deps) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  /** Webhook Telegram pour actions interactives (boutons Prendre trade / Breakeven / Clôturer). */
+  // The secret is set when registering the webhook with Telegram. Private
+  // chat ownership is required in addition to the shared webhook secret.
   app.post('/api/alerts/telegram/webhook', async (req, res) => {
+    const { authorizeUpdate } = require('../delivery/telegram-auth');
+    const { sendOnce } = require('../delivery/telegram-outbox');
+    const c = Alerts.get();
+    const update = req.body || {};
+    const authorization = authorizeUpdate(update, req.get('X-Telegram-Bot-Api-Secret-Token'), process.env.TELEGRAM_WEBHOOK_SECRET, c.telegramChat);
+    if (!authorization.ok) return res.status(authorization.status).json({ ok: false });
+    if (!c.telegramToken) return res.status(503).json({ ok: false });
+    const chat = authorization.chatId;
     try {
-      const update = req.body || {};
-      const c = Alerts.get();
-      if (update.callback_query) {
-        const cb = update.callback_query;
-        const data = String(cb.data || '');
-        const chatId = cb.message && cb.message.chat && cb.message.chat.id;
-        const msgId = cb.message && cb.message.message_id;
-
-        let reponseText = 'Action enregistrée';
-        const Trades = require('../delivery/trades');
-        const Risque = require('../risk/risque');
-        const cfgRisque = Risque.configuration();
-        const capitalCompte = cfgRisque.capital || 1000;
-        const risqueMaxPct = cfgRisque.risquePct || 1;
-
-        if (data.startsWith('trade:open:')) {
-          // Extraire symbole et direction depuis callback_data (ex: trade:open:frxXAUUSD:BUY:1732145600000)
-          const parts = data.replace('trade:open:', '').split(':');
-          const sym = parts[0] || 'INCONNU';
-          const dir = parts[1] === 'SELL' ? 'SELL' : 'BUY';
-
-          // Retrouver le signal depuis les derniers signaux alertés
-          const dernierSignal = (c.derniers || []).find(d => d.symbol === sym && (d.direction === dir || !d.direction)) || (c.derniers || [])[0];
-
-          let entry = dernierSignal ? Number(dernierSignal.entry || dernierSignal.prix) : 0;
-          let sl = dernierSignal ? Number(dernierSignal.sl) : 0;
-          let tp = dernierSignal ? Number(dernierSignal.tp) : 0;
-
-          if (!entry || entry <= 0) entry = 100;
-          if (!sl || sl <= 0) sl = dir === 'BUY' ? +(entry * 0.99).toFixed(5) : +(entry * 1.01).toFixed(5);
-          if (!tp || tp <= 0) tp = dir === 'BUY' ? +(entry * 1.02).toFixed(5) : +(entry * 0.98).toFixed(5);
-
-          const distanceRisque = Math.abs(entry - sl);
-          const montantRisque = (capitalCompte * risqueMaxPct) / 100;
-          const taille = distanceRisque > 0 ? +(montantRisque / distanceRisque).toFixed(2) : 1;
-
-          const tradeId = 'trd_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-          const nouveauTrade = {
-            id: tradeId,
-            pair: sym,
-            symbol: sym,
-            direction: dir,
-            entry,
-            sl,
-            tp,
-            size: taille,
-            status: 'open',
-            openTime: new Date().toISOString(),
-            risk: distanceRisque,
-            reward: Math.abs(tp - entry),
-            plannedRR: distanceRisque > 0 ? +(Math.abs(tp - entry) / distanceRisque).toFixed(2) : 2,
-            notes: `Ouvert via Telegram Bot (${dernierSignal?.summary || 'Signal direct'})`
-          };
-
-          try {
-            await DB.saveTradeRecord(nouveauTrade);
-            reponseText = `📝 SIMULATION AU JOURNAL ENREGISTRÉE (Paper Trading)\n` +
-                          `• Paire : ${sym}\n` +
-                          `• Sens : ${dir}\n` +
-                          `• Entrée : ${entry} | Stop : ${sl} | TP : ${tp}\n` +
-                          `• Nature : Simulation interne (aucun courtier réel connecté)\n` +
-                          `• ID : #${tradeId}`;
-          } catch (eTrd) {
-            reponseText = `❌ Erreur enregistrement : ${eTrd.message}`;
-          }
-        } else if (data.startsWith('trade:be:')) {
-          const parts = data.replace('trade:be:', '').split(':');
-          const sym = parts[0];
-          try {
-            const openTrades = (await DB.listTrades()).filter(t => t.status === 'open');
-            const cible = sym ? openTrades.find(t => t.pair === sym || t.symbol === sym) : openTrades[0];
-            if (cible) {
-              cible.sl = cible.entry;
-              cible.notes = (cible.notes || '') + ' [Breakeven appliqué via Telegram]';
-              await DB.saveTradeRecord(cible);
-              reponseText = `🛡️ Breakeven ACTIVÉ sur #${cible.id} (${cible.pair || cible.symbol}) : SL déplacé à ${cible.entry}`;
-            } else {
-              reponseText = `ℹ️ Aucune position ouverte trouvée à passer en Breakeven.`;
-            }
-          } catch (eBe) {
-            reponseText = `❌ Erreur Breakeven : ${eBe.message}`;
-          }
-        } else if (data.startsWith('trade:tp1:')) {
-          const parts = data.replace('trade:tp1:', '').split(':');
-          const sym = parts[0];
-          try {
-            const openTrades = (await DB.listTrades()).filter(t => t.status === 'open');
-            const cible = sym ? openTrades.find(t => t.pair === sym || t.symbol === sym) : openTrades[0];
-            if (cible) {
-              cible.size = +(cible.size * 0.5).toFixed(2);
-              cible.notes = (cible.notes || '') + ' [TP1 50% sécurisé via Telegram]';
-              await DB.saveTradeRecord(cible);
-              reponseText = `🎯 TP1 sécurisé sur #${cible.id} : 50% des lots clôturés, reste ${cible.size} lot(s).`;
-            } else {
-              reponseText = `ℹ️ Aucune position ouverte trouvée pour TP1.`;
-            }
-          } catch (eTp) {
-            reponseText = `❌ Erreur TP1 : ${eTp.message}`;
-          }
-        } else if (data.startsWith('trade:close:')) {
-          const parts = data.replace('trade:close:', '').split(':');
-          const sym = parts[0];
-          try {
-            const openTrades = (await DB.listTrades()).filter(t => t.status === 'open');
-            const cible = sym ? openTrades.find(t => t.pair === sym || t.symbol === sym) : openTrades[0];
-            if (cible) {
-              const cloture = Trades.close(cible, { exitPrice: cible.entry, exitReason: 'Telegram Bot Clôture Manuelle' });
-              await DB.saveTradeRecord(cloture);
-              reponseText = `❌ Position #${cible.id} (${cible.pair || cible.symbol}) CLÔTURÉE au journal !`;
-            } else {
-              reponseText = `ℹ️ Aucune position ouverte trouvée à clôturer.`;
-            }
-          } catch (eCl) {
-            reponseText = `❌ Erreur clôture : ${eCl.message}`;
-          }
-        } else if (data === 'account:status') {
-          try {
-            const openTrades = (await DB.listTrades()).filter(t => t.status === 'open');
-            const capital = cfgRisque.capital || 1000;
-            const risque = cfgRisque.risquePct || 1;
-            reponseText = `📊 <b>État du Compte & Risque</b> :\n` +
-                          `• Capital : $${capital}\n` +
-                          `• Risque max/trade : ${risque}% ($${((capital * risque) / 100).toFixed(2)})\n` +
-                          `• Positions ouvertes : ${openTrades.length}\n` +
-                          `• Statut : Sécurisé`;
-          } catch (eAcc) {
-            reponseText = `📊 Compte: $1,000 | Risque max: 1% ($10) | Statut: Sécurisé`;
-          }
-        } else if (data === 'recap:refresh') {
+      const cb = update.callback_query;
+      if (cb) {
+        let message = 'Action indisponible. Le journal et les ordres restent distincts.';
+        if (cb.data === 'recap:refresh' || cb.data === 'account:status') {
           const briefing = await genererBriefingTelegram(c, { DB });
-          if (c.telegramToken && chatId) {
-            const fetchRef = globalThis.fetch || require('node-fetch');
-            await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                chat_id: chatId,
-                text: briefing.texte,
-                parse_mode: 'HTML',
-                reply_markup: { inline_keyboard: briefing.inline_keyboard }
-              })
-            }).catch(() => {});
-          }
-          reponseText = 'Récapitulatif actualisé';
+          const result = await sendOnce(c.telegramToken, chat, briefing.texte,
+            { parse_mode: 'HTML', reply_markup: { inline_keyboard: briefing.inline_keyboard } });
+          message = result.ok ? 'Récapitulatif transmis' : 'Envoi non confirmé';
         }
-
-        // Répondre à Telegram pour effacer le spinner du bouton
-        if (c.telegramToken) {
-          const fetchRef = globalThis.fetch || require('node-fetch');
-          await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/answerCallbackQuery`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ callback_query_id: cb.id, text: reponseText })
-          }).catch(() => {});
-
-          if (chatId) {
-            await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ chat_id: chatId, text: `👉 <i>Action Telegram</i> : <b>${reponseText}</b>`, parse_mode: 'HTML' })
-            }).catch(() => {});
-          }
-        }
-      } else if (update.message && update.message.text) {
-        // Dialogue en langage naturel direct avec l'IA copilote depuis Telegram
-        const msg = update.message;
-        const chatId = msg.chat && msg.chat.id;
-        const texteUtilisateur = String(msg.text || '').trim();
-
-        if (chatId && texteUtilisateur && c.telegramToken) {
-          const fetchRef = globalThis.fetch || require('node-fetch');
-
-          // Commande de récapitulatif / briefing matinal demandée par l'utilisateur
-          const cmd = texteUtilisateur.toLowerCase();
-          if (/^\/(recap|briefing|matin|journal|resume|start)|^(recap|briefing|matin|résumé|bilan)/i.test(cmd)) {
-            const briefing = await genererBriefingTelegram(c, { DB });
-            await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                chat_id: chatId,
-                text: briefing.texte,
-                parse_mode: 'HTML',
-                reply_markup: { inline_keyboard: briefing.inline_keyboard }
-              })
-            }).catch(() => {});
-            return res.json({ ok: true });
-          }
-
-          try {
-            const ChatCRUD = require('../chat-crud');
-            const rIA = await ChatCRUD.executer(texteUtilisateur, {
-              utilisateur: msg.from && (msg.from.username || msg.from.first_name) || 'telegram_user',
-              ia: typeof ia === 'function' ? ia : null
-            });
-
-            const reponseChat = (rIA && (rIA.texte || (rIA.ia && rIA.ia.texte))) || 'Je suis votre copilote 5trade. Comment puis-je vous aider sur vos positions et analyses ?';
-
-            await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                chat_id: chatId,
-                text: `🤖 <b>5trade Copilote</b> :\n\n${reponseChat}`,
-                parse_mode: 'HTML'
-              })
-            }).catch(() => {});
-          } catch (eChat) {
-            await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                chat_id: chatId,
-                text: `⚠️ Copilote momentanément indisponible : ${eChat.message}`
-              })
-            }).catch(() => {});
-          }
+        await fetch('https://api.telegram.org/bot' + c.telegramToken + '/answerCallbackQuery', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({callback_query_id: cb.id, text: message}),
+          signal: AbortSignal.timeout(8000)
+        }).catch(() => {});
+      } else if (typeof update.message?.text === 'string') {
+        const text = update.message.text.trim();
+        // No mutating chat commands until persistent replay protection and
+        // channel-bound authorization exist.
+        if (/^\/(recap|briefing|matin|journal|resume|start)(?:@\w+)?(?:\s|$)/i.test(text)) {
+          const briefing = await genererBriefingTelegram(c, { DB });
+          await sendOnce(c.telegramToken, chat, briefing.texte,
+            { parse_mode: 'HTML', reply_markup: { inline_keyboard: briefing.inline_keyboard } });
+        } else {
+          await sendOnce(c.telegramToken, chat,
+            'Commandes disponibles : /recap, /briefing. Les modifications de compte et de journal passent par le terminal authentifié.',
+            {parse_mode: 'HTML'});
         }
       }
-      res.json({ ok: true });
-    } catch (e) {
-      res.status(200).json({ ok: false, error: e.message });
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('[Telegram webhook] traitement indisponible');
+      return res.status(503).json({ ok: false });
     }
   });
 
   /**
    * Consultation du récapitulatif / briefing du jour pour l'affichage écran
    */
-  app.get('/api/recap/du-jour', async (req, res) => {
+  app.get('/api/recap/du-jour', requireAuth, async (req, res) => {
     try {
       const c = Alerts.get();
       const briefing = await genererBriefingTelegram(c, { DB });
@@ -411,7 +235,7 @@ module.exports = function monterAlertes(app, deps) {
   /**
    * Envoi immédiat du récapitulatif sur Telegram depuis l'interface
    */
-  app.post('/api/recap/envoyer-telegram', async (req, res) => {
+  app.post('/api/recap/envoyer-telegram', requireAuth, async (req, res) => {
     try {
       const c = Alerts.get();
       if (!c.telegramToken || !c.telegramChat) {
@@ -419,7 +243,7 @@ module.exports = function monterAlertes(app, deps) {
       }
       const briefing = await genererBriefingTelegram(c, { DB });
       const NotificationTracker = require('../delivery/notification-tracker');
-      const envoi = await NotificationTracker.envoyerTelegramSecurise(
+      const envoi = await NotificationsendOnce(
         c.telegramToken,
         c.telegramChat,
         briefing.texte,
@@ -437,26 +261,17 @@ module.exports = function monterAlertes(app, deps) {
   /**
    * Déclenchement manuel ou planifié du briefing matinal Telegram
    */
-  app.all('/api/alerts/telegram/briefing', async (req, res) => {
+  app.post('/api/alerts/telegram/briefing', requireAuth, async (req, res) => {
     try {
       const c = Alerts.get();
       if (!c.telegramToken || !c.telegramChat) {
         return res.status(400).json({ success: false, error: 'Telegram non configuré (jeton ou chat_id manquant)' });
       }
       const briefing = await genererBriefingTelegram(c, { DB });
-      const fetchRef = globalThis.fetch || require('node-fetch');
-      const r = await fetchRef(`https://api.telegram.org/bot${c.telegramToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: c.telegramChat,
-          text: briefing.texte,
-          parse_mode: 'HTML',
-          reply_markup: { inline_keyboard: briefing.inline_keyboard }
-        })
-      });
-      const data = await r.json().catch(() => ({}));
-      res.json({ success: true, envoye: r.ok, telegram: data });
+      const result = await require('../delivery/notification-tracker').envoyerTelegramSecurise(
+        c.telegramToken, c.telegramChat, briefing.texte,
+        {parse_mode:'HTML', reply_markup:{inline_keyboard:briefing.inline_keyboard}});
+      return res.status(result.ok ? 200 : 502).json({success:result.ok, envoye:result.ok, messageId:result.messageId || null});
     } catch (e) {
       res.status(500).json({ success: false, error: e.message });
     }
@@ -494,8 +309,8 @@ async function genererBriefingTelegram(c, depsRef = {}) {
   } catch {}
 
   const d = new Date();
-  const dateStr = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const heureStr = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const dateStr = d.toLocaleDateString('fr-FR', { timeZone:'Africa/Kinshasa', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const heureStr = d.toLocaleTimeString('fr-FR', { timeZone:'Africa/Kinshasa', hour: '2-digit', minute: '2-digit' });
   const marches = Array.isArray(c.marches) && c.marches.length
     ? c.marches.map(m => typeof m === 'object' ? (m.symbol || m.symbole) : m).join(', ')
     : 'Forex, Synthétiques, Métaux';
@@ -515,7 +330,7 @@ async function genererBriefingTelegram(c, depsRef = {}) {
     + `   • Risque max/trade : <b>${risqueMax}%</b> ($${((capital * risqueMax) / 100).toFixed(2)})\n`
     + `   • Filtres Sentinelle & RR ≥ 1.5 : <b>Actifs</b>\n\n`
     + `🎯 <b>Marchés Surveillés</b> : <code>${marches}</code>\n\n`
-    + `<i>Tapez /recap à tout moment ou posez une question au copilote !</i>`;
+    + `<i>Tapez /recap pour consulter le briefing. Modifications depuis le terminal authentifié.</i>`;
 
   const inline_keyboard = [
     [
