@@ -115,7 +115,15 @@ async function confluenceStrategie(fiche, deps = {}) {
     parTF.push({ tf: u.tf, role: u.role, verdict, erreur });
   }
 
-  const exploitables = parTF.filter(x => x.verdict);
+  const requises = parTF.filter(x => x.role !== 'surveillance');
+  const detailComplet = parTF.map(x => ({tf:x.tf,role:x.role,direction:x.verdict?.direction || null,status:x.verdict?.status || null,erreur:x.erreur}));
+  const manquantes = requises.filter(x => !x.verdict || !['BUY','SELL'].includes(x.verdict.direction));
+  if (!roles.execution.length || !requises.some(x=>x.role==='execution') || manquantes.length) {
+    return {aligne:false,score:0,direction:'NEUTRE',detail:detailComplet,parRole:{},source:roles.source,
+      unites:unites.map(u=>u.tf),manquantes:manquantes.map(x=>x.tf),
+      motif:!roles.execution.length?'unité d’exécution non déclarée':'unités requises absentes ou sans direction : '+manquantes.map(x=>x.tf).join(', ')};
+  }
+  const exploitables = requises.filter(x => x.verdict);
   if (!exploitables.length) {
     return { aligne: false, score: 0, direction: 'NEUTRE', detail: parTF, parRole: {},
       motif: 'aucune unité exploitable (données absentes)', source: roles.source };
@@ -157,17 +165,23 @@ async function confluenceStrategie(fiche, deps = {}) {
       parRole,
       source: roles.source,
       unites: unites.map(u => u.tf),
-      detail: exploitables.map(x => ({ tf: x.tf, role: x.role, direction: x.verdict.direction, status: x.verdict.status }))
+      detail: detailComplet
     };
   }
 
+  const contradictoires = exploitables.filter(x => x.verdict.direction !== dExec);
+  if (contradictoires.length) {
+    return {...conf,aligne:false,score:0,conflit:'unités requises contre exécution '+dExec,
+      motif:'conflit de timeframes : '+contradictoires.map(x=>x.tf).join(', '),
+      parRole,source:roles.source,unites:unites.map(u=>u.tf),detail:detailComplet};
+  }
   return {
     ...conf,
     conflit,
     parRole,
     source: roles.source,
     unites: unites.map(u => u.tf),
-    detail: exploitables.map(x => ({ tf: x.tf, role: x.role, direction: x.verdict.direction, status: x.verdict.status }))
+    detail: detailComplet
   };
 }
 
