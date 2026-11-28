@@ -29,65 +29,40 @@ async function getCalendar() {
  * « aucune news à fort impact » et « je n'ai pas pu savoir » étaient
  * indiscernables — et le signal partait avec l'apparence de la sécurité.
  */
+let enCours = null;
 async function getCalendarAvecEtat() {
   const now = Date.now();
-  if (cache && (now - cacheTime) < CACHE_TTL_MS) return { events: cache, sourceDisponible: true };
-
-  try {
-    const events = await scrapeForexFactory();
-    if (events && events.length) {
-      cache = events;
-      cacheTime = now;
-      return { events, sourceDisponible: true };
-    }
-    // Si process.env.CALENDRIER_URL est défini (ex. test d'indisponibilité), on ne bascule pas
-    if (process.env.CALENDRIER_URL) {
-      return { events: cache || [], sourceDisponible: Boolean(cache) };
-    }
-    // Repli automatique sur le calendrier JSON (TradingView / ForexFactory API)
-    // quand le scraping HTML échoue ou renvoie 0 événement.
-    const News = require('./news');
-    const flux = await News.chargerCalendrier();
-    const evts = (flux && flux.evenements ? flux.evenements : []).map(e => ({
-      date: new Date(e.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      heure: new Date(e.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
-      devise: String(e.devise || '').toUpperCase(),
-      impact: (e.impactNiveau >= 3 || e.impact === 'élevé' || /high/i.test(e.impact)) ? 'high'
-        : (e.impactNiveau === 2 || e.impact === 'moyen' || /medium/i.test(e.impact)) ? 'medium' : 'low',
-      titre: e.titre || '',
-      precedent: e.precedent || '',
-      consigne: e.prevision || ''
-    }));
-    cache = evts;
-    cacheTime = now;
-    return { events: evts, sourceDisponible: evts.length > 0 };
-  } catch (e) {
-    console.error('   Calendrier  : échec —', e.message);
-    if (!process.env.CALENDRIER_URL) {
-      try {
-        const News = require('./news');
-        const flux = await News.chargerCalendrier();
-        const evts = (flux && flux.evenements ? flux.evenements : []).map(e => ({
-          date: new Date(e.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          heure: new Date(e.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
-          devise: String(e.devise || '').toUpperCase(),
-          impact: (e.impactNiveau >= 3 || e.impact === 'élevé' || /high/i.test(e.impact)) ? 'high'
-            : (e.impactNiveau === 2 || e.impact === 'moyen' || /medium/i.test(e.impact)) ? 'medium' : 'low',
-          titre: e.titre || '',
-          precedent: e.precedent || '',
-          consigne: e.prevision || ''
+  if (cache && now - cacheTime < CACHE_TTL_MS) return {events:cache,sourceDisponible:true,at:cacheTime};
+  if (enCours) return enCours;
+  enCours = (async () => {
+    try {
+      // The legacy HTML source lacks an authoritative timezone. Only allow a
+      // deliberately configured UTC fixture/source; never infer UTC from HTML.
+      if (process.env.CALENDRIER_URL) {
+        if (process.env.CALENDRIER_HTML_UTC !== '1') return {events:cache || [],sourceDisponible:false,at:cacheTime};
+        const events = await scrapeForexFactory();
+        if (!events.length) return {events:cache || [],sourceDisponible:false,at:cacheTime};
+        cache = events; cacheTime = Date.now();
+      } else {
+        const flux = await require('./news').chargerCalendrier();
+        if (!flux || flux.degrade || !Number.isFinite(flux.at) || flux.at > now + 60000 || now - flux.at >= CACHE_TTL_MS) return {events:cache || [],sourceDisponible:false,at:cacheTime};
+        const events = (flux.evenements || []).filter(e => Number.isFinite(e.date) && e.date > 0).map(e => ({
+          date:new Date(e.date).toISOString().slice(0,10),
+          heure:new Date(e.date).toISOString().slice(11,16),
+          horodatageSource:e.date,
+          devise:String(e.devise || '').toUpperCase(),
+          impact:e.impactNiveau >= 3 ? 'high' : e.impactNiveau === 2 ? 'medium' : e.impactNiveau === 1 ? 'low' : 'unknown',
+          titre:e.titre || '', precedent:e.precedent || '', consigne:e.prevision || '', reel:e.reel, source:e.source || flux.source
         }));
-        if (evts.length) {
-          cache = evts;
-          cacheTime = now;
-          return { events: evts, sourceDisponible: true };
-        }
-      } catch {}
+        if (!events.length) return {events:cache || [],sourceDisponible:false,at:cacheTime};
+        cache = events; cacheTime = flux.at;
+      }
+      return {events:cache,sourceDisponible:true,at:cacheTime};
+    } catch {
+      return {events:cache || [],sourceDisponible:false,at:cacheTime};
     }
-    // Un cache existant reste utilisable (donnée datée mais réelle) ; sans cache,
-    // on assume l'ignorance au lieu de faire passer un tableau vide pour un avis.
-    return { events: cache || [], sourceDisponible: Boolean(cache) };
-  }
+  })();
+  try { return await enCours; } finally { enCours = null; }
 }
 
 /**
@@ -102,6 +77,7 @@ async function scrapeForexFactory() {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
   });
+  if (!res.ok) throw new Error('Calendrier HTTP '+res.status);
   const html = await res.text();
 
   // Parsing simplifié du HTML de Forex Factory
@@ -203,6 +179,7 @@ const MOIS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, s
  * au hasard.
  */
 function instantEvenement(ev, reference = new Date()) {
+  if (ev?.horodatageSource != null) return Number.isFinite(ev.horodatageSource) && ev.horodatageSource > 0 ? ev.horodatageSource : null;
   const d = String((ev && ev.date) || '').trim().toLowerCase();
   const h = String((ev && ev.heure) || '').trim().toLowerCase();
   const md = d.match(/^([a-z]{3})[a-z]*\s+(\d{1,2})$/);
@@ -214,6 +191,7 @@ function instantEvenement(ev, reference = new Date()) {
   let heures = Number(mh[1]);
   const minutes = Number(mh[2]);
   const suffixe = mh[3];
+  if (suffixe && (heures < 1 || heures > 12)) return null;
   if (suffixe === 'pm' && heures < 12) heures += 12;
   if (suffixe === 'am' && heures === 12) heures = 0;
   if (heures > 23 || minutes > 59) return null;
@@ -225,6 +203,7 @@ function instantEvenement(ev, reference = new Date()) {
   const ecart = t - reference.getTime();
   if (ecart < -180 * 86400000) t = Date.UTC(annee + 1, mois, Number(md[2]), heures, minutes);
   else if (ecart > 180 * 86400000) t = Date.UTC(annee - 1, mois, Number(md[2]), heures, minutes);
+  if (new Date(t).getUTCMonth() !== mois || new Date(t).getUTCDate() !== Number(md[2])) return null;
   return t;
 }
 
@@ -237,17 +216,19 @@ function verdictDevise(events, devise, { maintenant = new Date(), fenetreMin = 3
   if (!code) return { bloque: false, verifie: true, raison: 'devise inconnue' };
   const now = maintenant.getTime();
 
+  let horaireInconnu = false;
   for (const ev of events || []) {
-    if (ev.impact !== 'high') continue;
+    if (ev.impact !== 'high' && ev.impact !== 'unknown') continue;
     const concernes = String(ev.devise || '').toUpperCase().split(/[^A-Z]+/).filter(Boolean);
     if (!concernes.includes(code)) continue;
 
     const t = instantEvenement(ev, maintenant);
-    if (t === null) continue;            // heure inconnue : on ne conclut pas
+    if (t === null || ev.impact === 'unknown') { horaireInconnu = true; continue; }
 
-    const diff = Math.round((t - now) / 60000);
+    const delta = (t - now) / 60000;
+    const diff = Math.round(delta);
     // Fenêtre de blocage élargie : de fenetreMin avant l'annonce à fenetreApresMin après
-    if (diff >= -fenetreApresMin && diff <= fenetreMin) {
+    if (delta >= -fenetreApresMin && delta <= fenetreMin) {
       const dateSourceISO = new Date(t).toISOString();
       const heureKinshasa = new Date(t + 3600000).toISOString().slice(11, 16) + ' (Kinshasa WAT)';
       let phase = '';
@@ -270,10 +251,12 @@ function verdictDevise(events, devise, { maintenant = new Date(), fenetreMin = 3
         horodatageSource: t,
         heureKinshasa,
         phase,
+        delaiMin: diff,
         raison: `${phase} : ${ev.titre} à ${heureKinshasa} [source: ${dateSourceISO}]`
       };
     }
   }
+  if (horaireInconnu) return {bloque:false,verifie:false,raison:'horaire ou impact majeur non vérifiable'};
   return { bloque: false, verifie: true, raison: 'aucune annonce à fort impact dans la fenêtre' };
 }
 
@@ -284,7 +267,6 @@ async function newsImminente(devise, fenetreMin = 30) {
   }
   return verdictDevise(events, devise, { maintenant: new Date(), fenetreMin });
 
-  return { bloque: false, raison: '', news: null, verifie: true };
 }
 
 /**
