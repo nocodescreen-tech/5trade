@@ -43,41 +43,44 @@ function bilanGlobal(dateOuTs = Date.now()) {
     ouverts,
     fermes,
     recommandation: !statutForex.ouvert
-      ? 'Les marchés conventionnels (Forex/Métaux) sont fermés. Privilégiez les indices synthétiques Deriv ou les cryptos pour vos analyses du week-end.'
-      : 'Tous les marchés majeurs sont actuellement ouverts aux cotations.'
+      ? 'Le Forex est fermé selon le calendrier théorique. Respecter la sélection active.'
+      : 'Le Forex est ouvert selon le calendrier théorique ; vérifier chaque instrument.'
   };
 }
 
+const wat = d => d.toLocaleString('fr-FR',{timeZone:'Africa/Kinshasa',weekday:'long',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}) + ' (Kinshasa, UTC+1)';
 function messageTelegramPreCloture(dateOuTs = Date.now()) {
   const d = dateOuTs instanceof Date ? dateOuTs : new Date(Number(dateOuTs));
+  const session = Sessions.statutMarche('EURUSD',d);
+  if (!session.prochaineFermeture || session.statut !== 'pre_fermeture') return null;
+  const fermeture = session.prochaineFermeture;
+  const ouverture = Sessions.statutMarche('EURUSD',fermeture).prochaineOuverture;
   return [
-    '🔔 <b>AVERTISSEMENT DE CLÔTURE HEBDOMADAIRE — FOREX</b>',
-    '',
-    `🕒 Heure actuelle : ${d.toISOString().slice(11, 16)} UTC`,
-    '⚠️ Les marchés Forex et Métaux fermeront ce soir à <b>22:00 UTC</b>.',
-    '',
-    '• Risques accrus de <b>slippage</b> et d\'élargissement des <b>spreads</b> interbancaires.',
-    '• Recommandation : clôturer ou sécuriser au breakeven vos positions swing/intraday pour éviter les gaps de week-end.',
-    '• Réouverture : dimanche à 22:00 UTC.',
-    '',
-    '<i>Les indices synthétiques Deriv et les cryptos restent ouverts 24/7.</i>'
+    '<b>PRÉ-CLÔTURE HEBDOMADAIRE — FOREX</b>',
+    'Clôture théorique : '+wat(fermeture)+' / '+fermeture.toISOString().slice(11,16)+' UTC.',
+    'Réouverture théorique : '+wat(ouverture)+' / '+ouverture.toISOString().slice(11,16)+' UTC.',
+    'Risque de spreads élargis, glissement et gaps. Vérifier les horaires du courtier.',
+    'Indices synthétiques et cryptos : horaires distincts, généralement continus.'
   ].join('\n');
 }
-
 function messageTelegramReouverture(dateOuTs = Date.now()) {
+  const d = dateOuTs instanceof Date ? dateOuTs : new Date(Number(dateOuTs));
+  const session = Sessions.statutMarche('EURUSD',d);
+  if (!session.ouvert || d.getUTCDay() !== 0) return null;
+  const debut = new Date(d);
+  debut.setUTCHours(Sessions.estHeureEteUS(d)?21:22,0,0,0);
   return [
-    '🌅 <b>RÉOUVERTURE DES MARCHÉS FOREX & MÉTAUX</b>',
-    '',
-    '✅ Les cotations interbancaires ont repris (dimanche 22:00 UTC).',
-    '🔍 Surveillez les éventuels gaps de prix et la normalisation des spreads de session asiatique.',
-    '🚀 Prêt pour une nouvelle semaine de trading avec 5TRADE !'
+    '<b>RÉOUVERTURE HEBDOMADAIRE — FOREX</b>',
+    'Réouverture théorique : '+wat(debut)+' / '+debut.toISOString().slice(11,16)+' UTC.',
+    'La reprise effective des cotations et les horaires propres au courtier restent à vérifier.',
+    'Attention aux gaps et aux spreads de début de semaine.'
   ].join('\n');
 }
 
 const skill = {
   id: 'forex-session-monitor',
   nom: 'Surveillance des Sessions Forex & Marchés',
-  version: '1.0.0',
+  version: '1.1.0',
   description: 'Contrôle des horaires de cotation des marchés, alertes de pré-clôture le vendredi et suivi de réouverture du dimanche.',
   actions: ['verifier_session', 'bilan_marches', 'alerte_telegram'],
 
