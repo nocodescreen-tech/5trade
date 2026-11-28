@@ -55,12 +55,16 @@ async function assurer() { if (!pret && dispo()) await init(); return pret; }
 
 /** Repli fichier : lecture tolérante (un fichier absent n'est pas une erreur). */
 function lireFichier() {
-  try { return JSON.parse(fs.readFileSync(FICHIER, 'utf8')); } catch { return []; }
+  try {
+    const liste=JSON.parse(fs.readFileSync(FICHIER,'utf8'));
+    if(!Array.isArray(liste))throw Error('Format invalide');
+    return liste;
+  } catch(e){if(e.code==='ENOENT')return [];throw Error('Historique fichier indisponible ou corrompu');}
 }
 function ecrireFichier(liste) {
   try {
     fs.mkdirSync(path.dirname(FICHIER), { recursive: true });
-    const tmp = `${FICHIER}.tmp`;
+    const tmp = `${FICHIER}.${process.pid}.${require('node:crypto').randomUUID()}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(liste, null, 1));
     fs.renameSync(tmp, FICHIER);          // écriture atomique
     return true;
@@ -87,7 +91,7 @@ async function enregistrer({ role, texte, verbe = null, sujet = null, action = n
   if (dispo()) return {ok:false,raison:'Initialisation historique indisponible'};
   const liste = lireFichier();
   liste.push({
-    utilisateur, role, texte: String(texte).slice(0, 8000), verbe, sujet, action,
+    id:require('node:crypto').randomUUID(), utilisateur, role, texte: String(texte).slice(0, 8000), verbe, sujet, action,
     cree_at: new Date().toISOString()
   });
   const propres = liste.filter(m => (m.utilisateur ?? null) === utilisateur);
@@ -110,7 +114,7 @@ async function lister({ limite = 60, utilisateur = null } = {}) {
     } catch (e) { throw new Error('Lecture historique PostgreSQL impossible'); }
   }
   if (dispo()) throw new Error('Initialisation historique indisponible');
-  return lireFichier().filter(m => (m.utilisateur ?? null) === utilisateur).slice(-max);
+  return lireFichier().filter(m => (m.utilisateur ?? null) === utilisateur).slice(-max).map((m,i)=>({...m,id:m.id || 'legacy:'+require('node:crypto').createHash('sha256').update(JSON.stringify(m)).digest('hex')+':'+i,creeAt:m.cree_at}));
 }
 
 /** Effacer la conversation (action explicite de l'utilisateur). */
