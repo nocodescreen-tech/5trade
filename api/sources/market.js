@@ -198,23 +198,30 @@ const deriv = {
       }
     }
   },
-  _toCandles(list) {
-    return (list || []).map(c => ({
-      // Temps d'OUVERTURE de la bougie — le seul repère cohérent avec le flux
-      // temps réel, qui envoie « open_time ». Utiliser « epoch » ici produisait
-      // des bougies décalées d'une période : le direct arrivait avec un
-      // horodatage antérieur au dernier point affiché, le graphique l'ignorait
-      // et semblait donc FIGÉ (alors que les données arrivaient bien).
-      t: (c.open_time !== undefined ? c.open_time : c.epoch) * 1000,
-      o: +c.open, h: +c.high, l: +c.low, c: +c.close, v: 0, closed: true
-    }));
+  // The new Deriv schema makes several price fields optional. Never turn
+  // null/empty prices into zero or feed an invalid candle to the engine.
+  _normalizeCandle(c, tf, now = Date.now(), live = false) {
+    if (!c || typeof c !== 'object') return null;
+    const number = v => (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) ? Number(v) : NaN;
+    const t = number(c.open_time ?? c.epoch) * 1000;
+    const o = number(c.open), h = number(c.high), l = number(c.low), close = number(c.close);
+    if (![t,o,h,l,close].every(Number.isFinite) || t <= 0 || t > now ||
+        ![o,h,l,close].every(v => v > 0) || h < Math.max(o,l,close) || l > Math.min(o,close)) return null;
+    const pas = TF_MS[tf];
+    return { t, o, h, l, c: close, v: 0, closed: !live && !!pas && t + pas <= now };
+  },
+  _toCandles(list, tf, now = Date.now()) {
+    if (!Array.isArray(list) || !list.length) throw new Error('Deriv : historique vide ou invalide');
+    const candles = list.map(c => this._normalizeCandle(c, tf, now));
+    if (candles.some(c => c === null)) throw new Error('Deriv : historique contenant une bougie invalide');
+    return candles;
   },
   async candles(symbol, tf, count) {
     const d = await this._ask({
       ticks_history: symbol, adjust_start_time: 1, count,
       end: 'latest', style: 'candles', granularity: this.granularity(tf), req_id: 1
     }, 'candles');
-    return this._toCandles(d.candles);
+    return this._toCandles(d.candles, tf);
   },
   streamUrl() { return this.ws; },
   onOpen(ws, symbols, tf) {
@@ -227,10 +234,9 @@ const deriv = {
   parse(msg) {
     if (msg.msg_type !== 'ohlc' || !msg.ohlc) return null;
     const o = msg.ohlc;
-    return {
-      symbol: o.symbol,
-      candle: { t: o.open_time * 1000, o: +o.open, h: +o.high, l: +o.low, c: +o.close, v: 0, closed: false }
-    };
+    const candle = this._normalizeCandle(o, null, Date.now(), true);
+    if (!candle || typeof o.symbol !== 'string' || !o.symbol) return null;
+    return { symbol: o.symbol, candle };
   },
 
   /**
@@ -249,7 +255,10 @@ const deriv = {
       sock.on('message', raw => {
         let d; try { d = JSON.parse(raw); } catch { return; }
         if (d && d.msg_type === 'tick' && d.tick) {
-          onTick({ t: d.tick.epoch * 1000, prix: +d.tick.quote, symbole: d.tick.symbol, source: 'deriv' });
+          const tick = d.tick;
+          if (tick.symbol !== symbol || !Number.isFinite(tick.epoch) || tick.epoch <= 0 ||
+              !Number.isFinite(tick.quote) || tick.quote <= 0) return;
+          onTick({ t: tick.epoch * 1000, prix: tick.quote, symbole: symbol, source: 'deriv' });
         }
       });
       sock.on('error', () => {});
