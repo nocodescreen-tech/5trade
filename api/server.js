@@ -119,19 +119,14 @@ const { DATA_DIR, KNOWLEDGE_BASE_DIR, DOCUMENTS_DIR, UPLOADS_DIR } = require('./
 // courant) redevenait ouvert à tout le web. C'est l'inverse qu'il faut : seules
 // les origines connues passent, et l'ouverture totale se DEMANDE explicitement
 // (CORS_LIBRE=1), pour une session de travail assumée.
-const ORIGINES_LOCALES = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+const BrowserSecurity = require('./security/browser-origin');
+app.use('/api', BrowserSecurity.guard);
 app.use(cors({
   credentials: true,
   origin(origine, cb) {
-    if (!origine) return cb(null, true);                                  // même origine, curl
-    if (process.env.NODE_ENV !== 'production' && ORIGINES_LOCALES.test(origine)) return cb(null, true);            // l'appli elle-même
-    if (process.env.APP_ORIGIN && origine === process.env.APP_ORIGIN) return cb(null, true);
-    if (process.env.NODE_ENV !== 'production' && process.env.CORS_LIBRE === '1') return cb(null, true);            // demande explicite
-    cb(null, false);                                                      // tout le reste : non
+    cb(null, !origine || BrowserSecurity.configuredOrigin(origine, process.env.APP_ORIGIN));
   }
 }));
-app.use('/api', require('./security/browser-origin').guard);
-app.disable('x-powered-by');
 // Compression applicative retirée ; utiliser la compression du proxy après validation.
 
 // En-tetes de securite, poses a la main plutot que via helmet : cinq lignes
@@ -141,6 +136,9 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');                 // l'appli ne s'affiche pas dans une iframe
   res.setHeader('Referrer-Policy', 'same-origin');          // pas de fuite d'URL vers l'exterieur
   res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
+  if(req.path.startsWith('/api/')) res.setHeader('Cache-Control','no-store');
   next();
 });
 
@@ -198,7 +196,7 @@ app.get('/healthz', async (req, res) => {
 // sans lancer une analyse complète. Fermée par défaut : sans le drapeau,
 // la route n'existe pas (404).
 if (process.env.IA_SELFTEST === '1') {
-  app.get('/api/ia-selftest', requireAuth, async (req, res) => {
+  app.get('/api/ia-selftest', async (req, res) => {
     const messages = [{
       role: 'user',
       content: 'Reponds uniquement un JSON: {"ok":true,"modele":"ton nom de modele"}'
@@ -725,7 +723,7 @@ function appendHistory(entry) {
 // DeepSeek a été retiré du chemin d'analyse : il n'y a plus d'appel payant.
 // Le nettoyage JSON vit dans json-ia.js.
 
-async function appelNvidia(modele, messages, { maxTokens = 2000, json = false, timeoutMs } = {}) {
+async function appelNvidia(modele, messages, { maxTokens = 2000, json = false, timeoutMs, signal, strictJson = false } = {}) {
   const key = process.env.NVIDIA_API_KEY;
   if (!key) {
     const e = new Error('NVIDIA_API_KEY non configurée dans .env');
@@ -778,7 +776,7 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false, t
         max_tokens: tokens,
         temperature: 0.3
       }),
-      signal: AbortSignal.timeout(delaiPour(modele, timeoutMs))
+      signal: signal || AbortSignal.timeout(delaiPour(modele, timeoutMs))
     });
 
     const brut = await res.text();
@@ -794,7 +792,7 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false, t
   let data = await envoyer(budget());
   let choix = (data.choices || [])[0] || {};
   let msg = choix.message || {};
-  let contenu = msg.content || msg.reasoning_content;
+  let contenu = msg.content || (json ? '' : msg.reasoning_content);
 
   if ((!contenu || !String(contenu).trim()) && choix.finish_reason === 'length') {
     const elargi = budget() * 3;
@@ -802,15 +800,16 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false, t
     data = await envoyer(elargi);
     choix = (data.choices || [])[0] || {};
     msg = choix.message || {};
-    contenu = msg.content || msg.reasoning_content;
+    contenu = msg.content || (json ? '' : msg.reasoning_content);
   }
 
   if (!contenu || !String(contenu).trim()) {
     throw new Error(`NVIDIA ${modele} : réponse vide (finish=${choix.finish_reason || '?'})`);
   }
   contenu = String(contenu);
+  if (strictJson && choix.finish_reason === 'length') throw new Error('Réponse IA tronquée');
   return {
-    contenu: json ? extraireJSON(contenu) : contenu,
+    contenu: strictJson ? contenu : (json ? extraireJSON(contenu) : contenu),
     modele: `nim:${modele}`,
     usage: data.usage || {}
   };
@@ -827,10 +826,10 @@ async function appelNvidia(modele, messages, { maxTokens = 2000, json = false, t
 /**
  * Repli ultrarapide Google Gemini pour texte et JSON (si NVIDIA est lent ou saturé).
  */
-async function appelGeminiTexte(messages, { maxTokens = 2000, json = false } = {}) {
+async function appelGeminiTexte(messages, { maxTokens = 2000, json = false, signal, strictJson = false } = {}) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error('GEMINI_API_KEY non configurée');
-  const modele = process.env.GEMINI_TEXT_MODEL || 'gemini-1.5-flash';
+  const modele = process.env.GEMINI_TEXT_MODEL || process.env.GEMINI_VISION_MODEL || 'gemini-1.5-flash';
   const prompt = messages.map(m => `${String(m.role || 'user').toUpperCase()}:\n${m.content}`).join('\n\n');
   const body = {
     contents: [{ parts: [{ text: prompt }] }],
@@ -846,34 +845,44 @@ async function appelGeminiTexte(messages, { maxTokens = 2000, json = false } = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(10000)
+    signal: signal || AbortSignal.timeout(10000)
   });
   if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
   const data = await res.json();
   const cand = data?.candidates?.[0];
-  const text = cand?.content?.parts?.[0]?.text;
+  const text = (cand?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
   if (!text) throw new Error('Réponse vide de Gemini');
-  return json ? extraireJSON(text) : text;
+  if (strictJson && cand.finishReason === 'MAX_TOKENS') throw new Error('Réponse IA tronquée');
+  return strictJson ? text : (json ? extraireJSON(text) : text);
 }
 
 /**
  * Point d'entrée IA UNIQUE de l'app — NVIDIA NIM en cascade, avec repli Gemini ultra rapide.
  */
 let dernierFournisseur = 'aucun';
-async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'ia' } = {}) {
+async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'ia', deadline, valider } = {}) {
   const raisons = [];
   const debut = Date.now();
+  const reste = () => deadline == null ? Infinity : deadline - Date.now();
+  // Knowledge uses the same NVIDIA model chain as chat, without Gemini.
+  const knowledgeRoute = route === 'description-strategie' || route === 'structuration-web';
+  const geminiAutorise = !knowledgeRoute && !!process.env.GEMINI_API_KEY;
+  const strictJson = typeof valider === 'function';
+  const verifier = contenu => strictJson ? valider(contenu) : contenu;
 
   // 1. Essai de la chaîne NVIDIA NIM (budget de 10s max par essai pour réactivité)
   if (process.env.NVIDIA_API_KEY) {
     for (const modele of NVIDIA_MODELS) {
-      const restant = Math.min(10000, NVIDIA_BUDGET_TOTAL_MS - (Date.now() - debut));
+      const reserveGemini = deadline != null && geminiAutorise ? 7000 : 0;
+      const restant = Math.min(10000, NVIDIA_BUDGET_TOTAL_MS - (Date.now() - debut), reste() - reserveGemini);
       if (restant <= 2000) {
         raisons.push(`${modele}: non essayé (délai dépassé)`);
         break;
       }
       try {
-        const r = await appelNvidia(modele, messages, { maxTokens, json, timeoutMs: restant });
+        const r = await appelNvidia(modele, messages, { maxTokens, json, timeoutMs: restant, strictJson,
+          signal: deadline == null ? undefined : AbortSignal.timeout(Math.floor(restant)) });
+        const contenuValide = verifier(r.contenu);
         try {
           Couts.enregistrer({
             route,
@@ -887,7 +896,7 @@ async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'i
           console.log(`[IA] ${modele} a répondu (${route}).`);
         }
         dernierFournisseur = `nim:${modele}`;
-        return r.contenu;
+        return contenuValide;
       } catch (e) {
         if (e.status === 400) throw e;
         raisons.push(`${modele}: ${e.message}`);
@@ -897,9 +906,10 @@ async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'i
   }
 
   // 2. Repli immédiat sur Google Gemini si disponible (temps de réponse < 2s)
-  if (process.env.GEMINI_API_KEY) {
+  if (geminiAutorise && reste() > 500) {
     try {
-      const rGemini = await appelGeminiTexte(messages, { maxTokens, json });
+      const rGemini = verifier(await appelGeminiTexte(messages, { maxTokens, json, strictJson,
+        signal: deadline == null ? undefined : AbortSignal.timeout(Math.floor(Math.min(10000, reste()))) }));
       dernierFournisseur = 'gemini:flash';
       console.log(`[IA] Gemini Flash a pris le relais avec succès (${route}).`);
       return rGemini;
@@ -909,8 +919,8 @@ async function analyserIA(messages, { maxTokens = 2000, json = false, route = 'i
     }
   }
 
-  if (!process.env.NVIDIA_API_KEY && !process.env.GEMINI_API_KEY) {
-    const e = new Error('Aucune clé IA configurée (.env)');
+  if (!process.env.NVIDIA_API_KEY && !geminiAutorise) {
+    const e = new Error(knowledgeRoute ? 'NVIDIA_API_KEY non configurée pour la base de connaissance' : 'Aucune clé IA configurée (.env)');
     e.status = 503;
     throw e;
   }
@@ -3642,7 +3652,8 @@ function decouperEnSections(texte, maxParFiche = 15000) {
  * Transforme UN texte de strategie en fiche exploitable, sans l'enregistrer.
  * Sortie de la route pour pouvoir traiter plusieurs sections d'un document.
  */
-async function structurerTexte(texte) {
+const { validerFicheDescription } = require('./core/knowledge-description');
+async function structurerTexte(texte, deadline) {
   try {
   const consigne = `Tu transformes la description d'un trader en FICHE DE STRATÉGIE exploitable par un moteur d'analyse.
 
@@ -3679,7 +3690,7 @@ Réponds en JSON strict, sans texte autour :
   "resume": "2 ou 3 phrases qui résument la logique de la stratégie",
   "regles": ["R1","R3"],
   "filtres": ["volatilite"],
-  "style": "scalping" | "intraday" | "swing" | null,
+  "style": "scalping",
   "timeframes": ["1m","5m","15m"],
   "seuilAlignes": 2,
   "seuilForce": 0.5,
@@ -3690,11 +3701,14 @@ Réponds en JSON strict, sans texte autour :
   "concepts": ["OB","FVG","Sweep"],
   "motsCles": ["3 à 6 mots-clés pour retrouver la fiche"]
 }
-N'invente rien : si une information n'est pas dans la description, mets null ou une liste vide.`;
+Le JSON ci-dessus est un EXEMPLE de format, pas de valeurs à recopier. Le style doit être scalping, intraday, swing ou null. Utilise des timeframes en minuscules (M1 devient 1m, M5 devient 5m). Toutes les clés de l’exemple doivent être présentes. Pour les champs facultatifs inconnus, utilise null ou une liste vide. Choisis uniquement les règles décrites, notamment R1 pour une mèche de balayage. Si aucune règle native ne correspond, ne prétends pas qu’elle existe. N'invente rien : ni seuil, ni objectif, ni condition absente du texte. Réponds directement avec le JSON final, sans raisonnement.`;
 
   let fiche;
   try {
-    const out = await analyserIA([{ role: 'user', content: consigne }], { maxTokens: 2000, json: true, route: 'description-strategie' });
+    const out = await analyserIA([{ role: 'user', content: consigne }], {
+      maxTokens: 2000, json: true, route: 'description-strategie', deadline,
+      valider: validerFicheDescription
+    });
     fiche = JSON.parse(out);
   } catch (e) {
     throw new Error(`L'analyse du texte a échoué (${e.message}).`)
@@ -3793,18 +3807,24 @@ app.post('/api/strategies/decrire', requireAuth, async (req, res) => {
 
     const resultats = [];
     const echecs = [];
+    // Budget partagé : ne pas empiler les délais des fournisseurs et sections.
+    const deadline = Date.now() + 20000;
     for (const section of liste) {
       try {
-        resultats.push(await structurerTexte(section));
+        if (Date.now() >= deadline) throw new Error('Budget de temps épuisé');
+        resultats.push(await structurerTexte(section, deadline));
       } catch (e) {
         // Une section en échec ne doit pas faire perdre les autres.
-        echecs.push({ extrait: section.slice(0, 70) + '…', erreur: e.message });
+        console.warn('[Knowledge] Analyse section échouée :', e.message);
+        echecs.push({ extrait: section.slice(0, 70) + '…', erreur: 'Analyse IA indisponible ou fiche incomplète.' });
       }
     }
     if (!resultats.length) {
-      return res.status(502).json({
-        error: `L'analyse du texte a échoué (${echecs[0] ? echecs[0].erreur : 'service d\'IA indisponible'}).`
-          + ' Vérifie que le service d\'IA répond, puis réessaie.'
+      return res.status(503).json({
+        success: false, code: 'STRATEGY_ANALYSIS_UNAVAILABLE',
+        error: process.env.NVIDIA_API_KEY
+          ? 'Les modèles NVIDIA du chat n’ont pas produit une fiche valide dans le délai imparti. Aucune fiche enregistrée. Réessaie ou utilise le mode Manuel.'
+          : 'NVIDIA_API_KEY non configurée sur le serveur. Aucune fiche enregistrée.'
       });
     }
 

@@ -1244,8 +1244,10 @@ function tinyPng(W = 64, H = 40) {
     ok('l app decoupe elle-meme un document long',
       /function decouperEnSections/.test(srv2)
       && /decouperEnSections\(texte\)/.test(srv2));
-    ok('chaque section devient une fiche (boucle sur les sections)',
-      /for \(const section of liste\)/.test(srv2) && /structurerTexte\(section\)/.test(srv2));
+    ok('chaque section est traitée avec une échéance commune (boucle sur les sections)',
+      /for \(const section of liste\)/.test(srv2) && /structurerTexte\(section, deadline\)/.test(srv2)
+      && /const deadline = Date\.now\(\) \+ 20000/.test(srv2)
+      && /Date\.now\(\) >= deadline/.test(srv2));
     ok('une section en echec ne fait pas perdre les autres',
       /echecs\.push\(/.test(srv2) && /if \(!resultats\.length\)/.test(srv2));
     ok('la structure du texte est sortie de la route (req/res interdits)',

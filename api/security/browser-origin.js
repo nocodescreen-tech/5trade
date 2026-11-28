@@ -1,21 +1,19 @@
 'use strict';
-function allowed(req,configured=process.env.APP_ORIGIN){
- const method=String(req.method||'GET').toUpperCase();
- if(['GET','HEAD','OPTIONS'].includes(method))return true;
- // Telegram has independent secret and sender checks.
- if(method==='POST'&&req.path==='/alerts/telegram/webhook')return true;
- const origin=req.get('Origin');
- const site=req.get('Sec-Fetch-Site');
- if(site==='cross-site')return false;
- if(!origin)return true; // Non-browser clients; session/auth checks still apply.
- let parsed;try{parsed=new URL(origin);}catch{return false;}
- if(!['http:','https:'].includes(parsed.protocol)||parsed.origin!==origin)return false;
- if(configured&&origin===configured)return true;
- const host=String(req.get('Host')||'').toLowerCase();
- return parsed.host.toLowerCase()===host;
+function configuredOrigin(origin,configured=process.env.APP_ORIGIN,env=process.env){
+ if(typeof origin!=='string'||origin==='null')return false;
+ let u;try{u=new URL(origin);}catch{return false;}
+ if(!['http:','https:'].includes(u.protocol)||u.origin!==origin)return false;
+ if(configured===origin)return true;
+ return env.NODE_ENV!=='production'&&['localhost','127.0.0.1','[::1]'].includes(u.hostname);
 }
-function guard(req,res,next){
- if(!allowed(req))return res.status(403).json({success:false,error:'Origine de requête non autorisée'});
- next();
+function allowed(req,configured=process.env.APP_ORIGIN,env=process.env){
+ if(['GET','HEAD','OPTIONS'].includes(req.method))return true;
+ const origin=req.get('Origin'),site=req.get('Sec-Fetch-Site');
+ if(origin){
+  if(configuredOrigin(origin,configured,env))return true;
+  try{return origin===new URL(req.protocol+'://'+req.get('Host')).origin&&origin!=='null';}catch{return false;}
+ }
+ return site!=='cross-site'&&site!=='same-site';
 }
-module.exports={allowed,guard};
+function guard(req,res,next){if(!allowed(req))return res.status(403).json({success:false,error:'Origine de requête non autorisée'});next();}
+module.exports={configuredOrigin,allowed,guard};

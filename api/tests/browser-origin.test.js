@@ -1,25 +1,21 @@
 'use strict';
-const test=require('node:test');const assert=require('node:assert/strict');const {allowed}=require('../security/browser-origin');
-const r=(method,headers={},path='/strategies')=>({method,path,get:name=>headers[name]});
-test('browser mutation rejects cross-site and malformed origins',()=>{
- assert.equal(allowed(r('POST',{Origin:'https://evil.example',Host:'trade.example','Sec-Fetch-Site':'cross-site'})),false);
- assert.equal(allowed(r('POST',{Origin:'null',Host:'trade.example'})),false);
- assert.equal(allowed(r('POST',{Origin:'https://other.example',Host:'trade.example'})),false);
- assert.equal(allowed(r('DELETE',{Origin:'https://trade.example',Host:'trade.example','Sec-Fetch-Site':'same-origin'})),true);
- assert.equal(allowed(r('POST',{Origin:'https://app.example',Host:'api.example'}),'https://app.example'),true);
- assert.equal(allowed(r('POST',{Host:'trade.example','Sec-Fetch-Site':'cross-site'})),false);
+const test=require('node:test'),assert=require('node:assert/strict');
+const {allowed,configuredOrigin}=require('../security/browser-origin');
+const env={NODE_ENV:'production'},origin='https://terminal.example';
+const r=(method,headers={})=>({method,protocol:'https',get:k=>headers[k]??(k==='Host'?'terminal.example':undefined)});
+test('browser mutation rejects untrusted origins and supports authorized same origin and CLI',()=>{
+ for(const h of [{Origin:'https://evil.example','Sec-Fetch-Site':'cross-site'},{Origin:'null'},{Origin:'http://terminal.example'},{Origin:'http://localhost:3000'},{'Sec-Fetch-Site':'cross-site'},{'Sec-Fetch-Site':'same-site'}])assert.equal(allowed(r('POST',h),origin,env),false);
+ assert.equal(allowed(r('POST',{Origin:origin}),origin,env),true);
+ assert.equal(allowed(r('POST'),origin,env),true);
+ assert.equal(allowed(r('GET',{Origin:'https://evil.example'}),origin,env),true);
+ assert.equal(configuredOrigin('http://localhost:3000',null,{NODE_ENV:'development'}),true);
+ assert.equal(configuredOrigin('https://evil.example',null,{NODE_ENV:'production',CORS_LIBRE:'1'}),false);
 });
-test('reads, CLI requests and exact Telegram webhook remain compatible',()=>{
- assert.equal(allowed(r('GET',{Origin:'https://other.example'})),true);
- assert.equal(allowed(r('POST')),true);
- assert.equal(allowed(r('POST',{'Sec-Fetch-Site':'cross-site'},'/alerts/telegram/webhook')),true);
- assert.equal(allowed(r('POST',{'Sec-Fetch-Site':'cross-site'},'/alerts/telegram/webhook/extra')),false);
-});
-test('frontend briefing renders React text, not injected HTML',()=>{
+test('frontend briefing is escaped React text and Telegram values are escaped',()=>{
  const fs=require('node:fs'),path=require('node:path');
- for(const file of ['src/app.jsx','build/app.js']){
-  const source=fs.readFileSync(path.join(__dirname,'../../frontend',file),'utf8');
-  assert.ok(!source.includes('dangerouslySetInnerHTML'));
-  assert.ok(source.includes("whiteSpace: 'pre-wrap'"));
- }
+ for(const name of ['src/app.jsx','build/app.js']){
+ const source=fs.readFileSync(path.join(__dirname,'../../frontend',name),'utf8');
+ assert.ok(!source.includes('dangerouslySetInnerHTML'));assert.ok(source.includes("whiteSpace: 'pre-wrap'"));}
+ const {escapeHtml}=require('../routes/alerts');
+ assert.equal(escapeHtml('<b>test & "x"</b>'),'&lt;b&gt;test &amp; &quot;x&quot;&lt;/b&gt;');
 });
